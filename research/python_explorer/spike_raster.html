@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Connectome Spike Raster</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #ccc; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; padding: 10px; }
+  h1 { font-size: 16px; margin: 8px 0; color: #8f8; letter-spacing: 1px; }
+  #info { font-size: 12px; color: #888; margin-bottom: 6px; text-align: center; }
+  #status { color: #fa0; }
+  #info span { margin: 0 6px; }
+  #canvas-wrap { position: relative; border: 1px solid #333; border-radius: 4px; }
+  canvas { display: block; background: #000; }
+  #controls { margin-top: 8px; display: flex; gap: 14px; align-items: center; font-size: 13px; flex-wrap: wrap; justify-content: center; }
+  #controls label { color: #888; }
+  #controls input[type="range"] { width: 80px; vertical-align: middle; }
+  #controls button { background: #2a2a2a; color: #ccc; border: 1px solid #555; padding: 4px 14px; cursor: pointer; border-radius: 3px; }
+  #controls button:hover { background: #444; }
+  #stat-line { color: #8af; margin-left: 10px; }
+  .val { color: #8f8; }
+</style>
+</head>
+<body>
+<h1>✦ FLYWIRE 138K — LIVE SPIKE RASTER</h1>
+<div id="info">
+  <span id="status">Connecting...</span>
+  <span id="neuron-count">—</span> neurons,
+  <span id="syn-count">—</span> synapses
+  | <span id="frame-rate">0</span> fps
+  | step <span id="step-count" class="val">0</span>
+  | <span id="firing-rate" class="val">0</span> Hz
+</div>
+<div id="canvas-wrap">
+  <canvas id="raster" width="960" height="600"></canvas>
+</div>
+<div id="controls">
+  <label>Speed: <input type="range" id="speed" min="1" max="30" value="10"></label>
+  <button id="pause-btn">⏸ Pause</button>
+  <button id="clear-btn">✕ Clear</button>
+  <span id="stat-line"></span>
+</div>
+
+<script>
+const W = 960, H = 600, PAD = 40;
+let paused = false;
+let frameBuf = [];            // circular: [ {spikes:[...], step, total_spikes, firing_rate} ]
+const MAX_FRAMES = 250;
+let nVisible = 500;
+let nNeurons = 0;
+let stepsPerFrame = 5;
+let ws = null;
+
+const canvas = document.getElementById('raster');
+const ctx = canvas.getContext('2d');
+
+// ── render ──
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  const pW = W - PAD - 10, pH = H - PAD - 20;
+
+  // frame
+  ctx.strokeStyle = '#222';
+  ctx.strokeRect(PAD, 10, pW, pH);
+
+  // y labels
+  ctx.fillStyle = '#444';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= nVisible; i += Math.max(1, Math.floor(nVisible / 12))) {
+    const y = 10 + pH - (i / nVisible) * pH;
+    ctx.fillText(i, PAD - 4, y + 3);
+  }
+
+  const nF = frameBuf.length;
+  if (nF === 0) return;
+
+  // x labels
+  ctx.textAlign = 'center';
+  const xStep = Math.max(1, Math.floor(nF / 8));
+  for (let i = 0; i < nF; i += xStep) {
+    const x = PAD + (i / MAX_FRAMES) * pW;
+    ctx.fillText(`-${nF - i}`, x, 10 + pH + 14);
+  }
+
+  // spikes — draw from oldest to newest
+  for (let fi = 0; fi < nF; fi++) {
+    const frame = frameBuf[fi];
+    const spikes = frame.spikes;
+    if (!spikes) continue;
+
+    for (let si = 0; si < spikes.length; si++) {
+      const ns = spikes[si];
+      if (!ns || ns.length === 0) continue;
+
+      const xOff = PAD + ((fi + si / spikes.length) / MAX_FRAMES) * pW;
+      // color gradient: green (old) → cyan (new)
+      const t = fi / nF;
+      const r = Math.round(20 * (1 - t));
+      const g = Math.round(200 + 55 * t);
+      const b = Math.round(80 + 175 * t);
+
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+
+      for (const ni of ns) {
+        const y = 10 + pH - (ni / nVisible) * pH;
+        ctx.fillRect(xOff, y - 0.5, 1.5, 1.5);
+      }
+    }
+  }
+}
+
+// ── websocket ──
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = location.hostname || 'localhost';
+  const url = `${proto}//${host}:8765`;
+
+  setStatus('Connecting...', '#fa0');
+
+  ws = new WebSocket(url);
+  ws.onopen = () => setStatus('Connected', '#0f0');
+  ws.onclose = () => {
+    setStatus('Disconnected (reconnect in 2s)', '#f44');
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'init') {
+      nNeurons = msg.n_neurons;
+      nVisible = msg.n_visible;
+      stepsPerFrame = msg.steps_per_frame;
+      document.getElementById('neuron-count').innerHTML = `<b>${nNeurons.toLocaleString()}</b>`;
+      document.getElementById('syn-count').innerHTML = `<b>${msg.n_synapses.toLocaleString()}</b>`;
+    } else if (msg.type === 'frame') {
+      if (!paused) {
+        frameBuf.push(msg);
+        if (frameBuf.length > MAX_FRAMES) frameBuf.shift();
+        render();
+        updateStats(msg);
+      }
+    }
+  };
+}
+
+function setStatus(text, color) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.style.color = color;
+}
+
+// ── stats ──
+let fpsCount = 0, fpsTimer = 0;
+function updateStats(msg) {
+  document.getElementById('step-count').textContent = msg.step.toLocaleString();
+  document.getElementById('firing-rate').textContent = (msg.firing_rate || 0).toFixed(1);
+
+  fpsCount++;
+  const now = performance.now();
+  if (now - fpsTimer > 1000) {
+    document.getElementById('frame-rate').textContent = fpsCount;
+    fpsCount = 0;
+    fpsTimer = now;
+  }
+}
+
+// ── controls ──
+document.getElementById('pause-btn').onclick = () => {
+  paused = !paused;
+  document.getElementById('pause-btn').textContent = paused ? '▶ Play' : '⏸ Pause';
+};
+document.getElementById('clear-btn').onclick = () => {
+  frameBuf = [];
+  render();
+};
+
+// ── start ──
+connect();
+</script>
+</body>
+</html>

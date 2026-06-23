@@ -1,0 +1,37 @@
+[workspace]
+members = [".", "cuda"]
+resolver = "2"
+
+[package]
+name = "taas-checkmate"
+version = "0.1.0"
+edition = "2021"
+description = "Pure Rust wavelet neural engine — no ASM, no FFI, just SIMD"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "taas_checkmate"
+
+[dependencies]
+rayon = "1"
+wide = "0.7"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3", "abi3-py311"], optional = true }
+numpy = { version = "0.23", optional = true }
+cuda-kernels = { path = "cuda", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "bench"
+harness = false
+
+[features]
+default = []
+python = ["pyo3", "numpy"]
+cuda = ["cuda-kernels"]
+autograd = []
