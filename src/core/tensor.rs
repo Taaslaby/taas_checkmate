@@ -75,30 +75,24 @@ impl Tensor {
         if n == 1 {
             // 1D: other = [k], self = [m × k]
             result.par_iter_mut().enumerate().for_each(|(i, res)| {
-                unsafe {
-                    kernels::linear_decoder(
-                        res as *mut f32,
-                        self.data[i * k..].as_ptr(),
-                        other.data.as_ptr(),
-                        zero_bias.as_ptr(),
-                        k, 1,
-                    );
-                }
+                kernels::linear_decoder(
+                    std::slice::from_mut(res),
+                    &self.data[i * k..(i + 1) * k],
+                    &other.data,
+                    &zero_bias,
+                );
             });
         } else {
             // 2D: other = [k × n], транспонируем → [n × k]
             let other_t = other.transpose(); // [n × k]
 
             result.par_chunks_exact_mut(n).enumerate().for_each(|(i, row)| {
-                unsafe {
-                    kernels::linear_decoder(
-                        row.as_mut_ptr(),
-                        self.data[i * k..].as_ptr(),
-                        other_t.data.as_ptr(),
-                        zero_bias.as_ptr(),
-                        k, n,
-                    );
-                }
+                kernels::linear_decoder(
+                    row,
+                    &self.data[i * k..(i + 1) * k],
+                    &other_t.data,
+                    &zero_bias,
+                );
             });
         }
 
@@ -115,15 +109,11 @@ impl Tensor {
         let n = result.len();
 
         if bias_len == n {
-            unsafe {
-                kernels::add_simd(result.as_mut_ptr(), bias.data.as_ptr(), n);
-            }
+            kernels::add_simd(&mut result, &bias.data);
         } else {
             // Broadcasting: параллелим по полным чанкам bias_len
             result.par_chunks_exact_mut(bias_len).for_each(|chunk| {
-                unsafe {
-                    kernels::add_simd(chunk.as_mut_ptr(), bias.data.as_ptr(), bias_len);
-                }
+                kernels::add_simd(chunk, &bias.data);
             });
             // Хвост (если n не кратен bias_len)
             let tail_start = (n / bias_len) * bias_len;
@@ -140,7 +130,7 @@ impl Tensor {
     /// ReLU: max(0, x). Использует SIMD f32x8.
     pub fn relu(&self) -> Tensor {
         let mut result = self.data.clone();
-        unsafe { kernels::relu_simd(result.as_mut_ptr(), result.len()); }
+        kernels::relu_simd(&mut result);
         Tensor::new(result, self.shape.clone())
     }
 
@@ -195,28 +185,22 @@ impl Tensor {
 
         if n == 1 {
             result.par_iter_mut().enumerate().for_each(|(i, res)| {
-                unsafe {
-                    kernels::linear_decoder(
-                        res as *mut f32,
-                        self.data[i * k..].as_ptr(),
-                        other.data.as_ptr(),
-                        bias.data.as_ptr(),
-                        k, 1,
-                    );
-                }
+                kernels::linear_decoder(
+                    std::slice::from_mut(res),
+                    &self.data[i * k..(i + 1) * k],
+                    &other.data,
+                    &bias.data,
+                );
             });
         } else {
             let other_t = other.transpose();
             result.par_chunks_exact_mut(n).enumerate().for_each(|(i, row)| {
-                unsafe {
-                    kernels::linear_decoder(
-                        row.as_mut_ptr(),
-                        self.data[i * k..].as_ptr(),
-                        other_t.data.as_ptr(),
-                        bias.data.as_ptr(),
-                        k, n,
-                    );
-                }
+                kernels::linear_decoder(
+                    row,
+                    &self.data[i * k..(i + 1) * k],
+                    &other_t.data,
+                    &bias.data,
+                );
             });
         }
 

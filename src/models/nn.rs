@@ -63,18 +63,13 @@ fn izhikevich_forward(input: &Tensor) -> Tensor {
     let c = vec![-65.0f32; n];  // c (reset potential)
     let d = vec![8.0f32; n];    // d
 
-    unsafe {
-        kernels::izhikevich_step(
-            v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-            a.as_ptr(), b.as_ptr(), data.as_ptr(),
-            0.5,  // dt (ms)
-            0.0,  // trace_decay
-            spikes_i32.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
-            refractory.as_mut_ptr(),
-            0.0,  // tau_ref (нет рефрактерности)
-            n,
-        );
-    }
+    kernels::izhikevich_step(
+        &mut v, &mut u, &mut trace,
+        &a, &b, &data,
+        0.5, 0.0,
+        &mut spikes_i32, &c, &d,
+        &mut refractory, 0.0,
+    );
 
     // i32 → f32 для совместимости с autograd
     let spikes: Vec<f32> = spikes_i32.iter().map(|&s| s as f32).collect();
@@ -101,15 +96,10 @@ fn lif_forward(input: &Tensor) -> Tensor {
         params.push(-75.0);          // v_reset
     }
 
-    unsafe {
-        kernels::lif_step(
-            v.as_mut_ptr(), Ii.as_mut_ptr(), spikes_i32.as_mut_ptr(),
-            params.as_ptr(),
-            refractory.as_mut_ptr(),
-            0.0,  // tau_ref
-            n,
-        );
-    }
+    kernels::lif_step(
+        &mut v, &mut Ii, &mut spikes_i32, &params,
+        &mut refractory, 0.0,
+    );
 
     let spikes: Vec<f32> = spikes_i32.iter().map(|&s| s as f32).collect();
     Tensor::new(spikes, input.shape().to_vec())

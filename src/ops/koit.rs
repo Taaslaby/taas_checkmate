@@ -27,18 +27,10 @@ pub fn xor_attention(
     assert!(keys.len() >= n_keys * n_bytes);
     assert!(values.len() >= n_keys);
     assert!(!out.is_empty());
-    unsafe {
-        kernels::xor_attention(
-            query.as_ptr(), keys.as_ptr(), values.as_ptr(),
-            out.as_mut_ptr(), n_keys, n_bytes,
-        );
-    }
+    kernels::xor_attention(&query[..n_bytes], &keys[..n_keys * n_bytes], &values[..n_keys], &mut out[0]);
 }
 
 /// Fill buffer with pseudo-random floats in [0, 1) via xorshift32.
-/// `n` must be a multiple of 8.
 pub fn rdrand_fill(buf: &mut [f32]) {
-    let n = buf.len();
-    assert!(n.is_multiple_of(8), "n must be multiple of 8 for AVX");
-    unsafe { kernels::rdrand_fill(buf.as_mut_ptr(), n); }
+    kernels::rdrand_fill(buf);
 }

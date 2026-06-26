@@ -148,6 +148,20 @@ impl SpikeRaster {
         (dense, n_steps)
     }
 
+    /// Export spike raster as CSV string.
+    /// Columns: `time_ms, neuron_id` — one row per spike.
+    /// Compatible with matplotlib, Excel, and plotting tools.
+    pub fn to_csv(&self, dt: f32) -> String {
+        use std::fmt::Write;
+        let mut csv = String::with_capacity(self.events.len() * 24);
+        let _ = writeln!(csv, "time_ms,neuron_id");
+        for &(step, neuron) in &self.events {
+            let t_ms = step as f32 * dt;
+            let _ = writeln!(csv, "{:.2},{}", t_ms, neuron);
+        }
+        csv
+    }
+
     pub fn events(&self) -> &[(usize, usize)] { &self.events }
     pub fn total_spikes(&self) -> usize { self.events.len() }
     pub fn n_steps(&self) -> usize { self.n_steps }
@@ -160,4 +174,10 @@ impl SpikeRaster {
 
 impl Default for SpikeRaster {
     fn default() -> Self { Self::new() }
+}
+
+/// Convenience function: create CSV from a SpikeRaster.
+/// Equivalent to `raster.to_csv(dt)`.
+pub fn spike_raster_to_csv(raster: &SpikeRaster, dt: f32) -> String {
+    raster.to_csv(dt)
 }

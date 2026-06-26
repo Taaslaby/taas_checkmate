@@ -138,6 +138,139 @@ pub fn py_bench_connectome_cpu(
     Ok((elapsed, total_spikes))
 }
 
+// ─── Connectome with per-step spike recording ───────────
+
+/// Как bench_connectome_cpu, но записывает per-step спайки в spike_buffer.
+///
+/// spike_buffer [n_steps × n] — заполняется 0/1 для raster plot.
+/// Возвращает (wall_time_sec, total_spikes).
+#[pyfunction]
+#[pyo3(name = "bench_connectome_cpu_recording")]
+#[allow(clippy::too_many_arguments, clippy::similar_names)]
+pub fn py_bench_connectome_cpu_recording(
+    row_ptr: Bound<'_, PyArray1<i32>>,
+    col_indices: Bound<'_, PyArray1<i32>>,
+    values: Bound<'_, PyArray1<f32>>,
+    n_steps: usize,
+    dt: f32,
+    v: Bound<'_, PyArray1<f32>>,
+    u: Bound<'_, PyArray1<f32>>,
+    trace: Bound<'_, PyArray1<f32>>,
+    a: Bound<'_, PyArray1<f32>>,
+    b: Bound<'_, PyArray1<f32>>,
+    c: Bound<'_, PyArray1<f32>>,
+    d: Bound<'_, PyArray1<f32>>,
+    nt_types: Bound<'_, PyArray1<f32>>,
+    external_I: Bound<'_, PyArray1<f32>>,
+    I_buf: Bound<'_, PyArray1<f32>>,
+    spikes: Bound<'_, PyArray1<i32>>,
+    spike_buffer: Bound<'_, PyArray1<i32>>,
+) -> PyResult<(f64, usize)> {
+    let mut v = v.readwrite();
+    let mut u = u.readwrite();
+    let mut trace = trace.readwrite();
+    let a = a.readonly();
+    let b = b.readonly();
+    let c = c.readonly();
+    let d = d.readonly();
+    let nt_types = nt_types.readonly();
+    let external_I = external_I.readonly();
+    let mut I_buf = I_buf.readwrite();
+    let mut spikes = spikes.readwrite();
+    let mut spike_buffer = spike_buffer.readwrite();
+    let row_ptr = row_ptr.readonly();
+    let col_indices = col_indices.readonly();
+    let values = values.readonly();
+
+    let v = v.as_slice_mut()?;
+    let u = u.as_slice_mut()?;
+    let trace = trace.as_slice_mut()?;
+    let a = a.as_slice()?;
+    let b = b.as_slice()?;
+    let c = c.as_slice()?;
+    let d = d.as_slice()?;
+    let nt_types = nt_types.as_slice()?;
+    let external_I = external_I.as_slice()?;
+    let I_buf = I_buf.as_slice_mut()?;
+    let spikes = spikes.as_slice_mut()?;
+    let spike_buffer = spike_buffer.as_slice_mut()?;
+    let row_ptr = row_ptr.as_slice()?;
+    let col_indices = col_indices.as_slice()?;
+    let values = values.as_slice()?;
+
+    let n = v.len();
+    let n_neurons = row_ptr.len() - 1;
+    let mut refractory = vec![0.0f32; n];
+    let mut total_spikes: usize = 0;
+
+    // Initialize I = external_I
+    for i in 0..n.min(external_I.len()) {
+        I_buf[i] = external_I[i];
+    }
+    for i in n..I_buf.len() {
+        I_buf[i] = 0.0;
+    }
+
+    let t0 = std::time::Instant::now();
+
+    for step in 0..n_steps {
+        // 1. Izhikevich step
+        neuron::step_izhikevich(
+            v, u, trace, a, b, I_buf, dt, 0.99,
+            spikes, c, d, &mut refractory, neuron::DEFAULT_TAU_REF,
+        );
+
+        // 2. Record to spike_buffer before reset
+        let buf_offset = step * n_neurons;
+        for i in 0..n_neurons.min(spikes.len()) {
+            if spikes[i] != 0 {
+                let idx = buf_offset + i;
+                if idx < spike_buffer.len() {
+                    spike_buffer[idx] = 1;
+                }
+                total_spikes += 1;
+            }
+        }
+
+        // 3. Reset I = external_I
+        for i in 0..n.min(external_I.len()) {
+            I_buf[i] = external_I[i];
+        }
+        for i in n..I_buf.len() {
+            I_buf[i] = 0.0;
+        }
+
+        // 4. CSR propagate
+        let max_syn = col_indices.len().min(values.len());
+        for i in 0..n_neurons.min(spikes.len()) {
+            if spikes[i] != 0 {
+                let start = row_ptr[i].max(0) as usize;
+                let end = (row_ptr[i + 1] as usize).min(max_syn);
+                let mult = if i < nt_types.len() { nt_types[i] } else { 1.0 };
+                let mut j = start;
+                while j + 4 <= end {
+                    let t0 = col_indices[j] as usize;
+                    let t1 = col_indices[j + 1] as usize;
+                    let t2 = col_indices[j + 2] as usize;
+                    let t3 = col_indices[j + 3] as usize;
+                    if t0 < n { I_buf[t0] += values[j] * mult; }
+                    if t1 < n { I_buf[t1] += values[j + 1] * mult; }
+                    if t2 < n { I_buf[t2] += values[j + 2] * mult; }
+                    if t3 < n { I_buf[t3] += values[j + 3] * mult; }
+                    j += 4;
+                }
+                for j in j..end {
+                    let col = col_indices[j] as usize;
+                    if col < n { I_buf[col] += values[j] * mult; }
+                }
+            }
+        }
+    }
+
+    let elapsed = t0.elapsed().as_secs_f64();
+    Ok((elapsed, total_spikes))
+}
+
 // ─── GPU: connectome simulation using GpuContext ────────
 
 /// Бенчмарк коннектома на GPU (CUDA).
@@ -270,6 +403,413 @@ pub fn py_bench_connectome_gpu(
         // Download final spikes for caller reference
         let _ = gpu_ctx.download_spikes(spikes_sl);
 
+        let elapsed = t0.elapsed().as_secs_f64();
+        Ok((elapsed, total_spikes))
+    }
+}
+
+// ─── GPU: connectome STDP initialization ─────────────
+
+/// Запускает GPU симуляцию коннектома со STDP на пластичных весах.
+///
+/// Порядок на каждом шаге:
+///   1. Izhikevich — динамика нейронов
+///   2. Count spikes
+///   3. CSR STDP — обновление d_weights из pre/post traces
+///   4. CSR propagate — использует d_weights (пластичные)
+///
+/// Инициализирует пластичные веса из статического коннектома.
+/// После STDP можно скачать финальные веса и сравнить с исходными.
+///
+/// spike_buffer [n_steps × n_neurons] — 0/1 для raster plot.
+/// weights_out [n_synapses] — финальные веса после STDP (опционально, None = не скачивать).
+/// Returns: (wall_time_sec, total_spikes, mean_weight_change).
+#[pyfunction]
+#[pyo3(name = "bench_connectome_gpu_stdp", signature = (
+    row_ptr, col_indices, values, n_steps, dt,
+    v, u, _trace, a, b, c, d, nt_types, external_I,
+    _I_buf, _spikes, spike_buffer,
+    lr_ltp, lr_ltd, w_min, w_max,
+    weights_out=None))]
+#[allow(clippy::too_many_arguments, clippy::similar_names)]
+pub fn py_bench_connectome_gpu_stdp(
+    row_ptr: Bound<'_, PyArray1<i32>>,
+    col_indices: Bound<'_, PyArray1<i32>>,
+    values: Bound<'_, PyArray1<f32>>,
+    n_steps: usize,
+    dt: f32,
+    v: Bound<'_, PyArray1<f32>>,
+    u: Bound<'_, PyArray1<f32>>,
+    _trace: Bound<'_, PyArray1<f32>>,
+    a: Bound<'_, PyArray1<f32>>,
+    b: Bound<'_, PyArray1<f32>>,
+    c: Bound<'_, PyArray1<f32>>,
+    d: Bound<'_, PyArray1<f32>>,
+    nt_types: Bound<'_, PyArray1<f32>>,
+    external_I: Bound<'_, PyArray1<f32>>,
+    _I_buf: Bound<'_, PyArray1<f32>>,
+    _spikes: Bound<'_, PyArray1<i32>>,
+    spike_buffer: Bound<'_, PyArray1<i32>>,
+    lr_ltp: f32,
+    lr_ltd: f32,
+    w_min: f32,
+    w_max: f32,
+    weights_out: Option<Bound<'_, PyArray1<f32>>>,
+) -> PyResult<(f64, usize, f32)> {
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = (row_ptr, col_indices, values, n_steps, dt,
+                 v, u, _trace, a, b, c, d, nt_types, external_I,
+                 _I_buf, _spikes, spike_buffer, weights_out,
+                 lr_ltp, lr_ltd, w_min, w_max);
+        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            "CUDA not available — rebuild with --features cuda".to_string()
+        ));
+    }
+
+    #[cfg(feature = "cuda")]
+    {
+        use cuda_kernels::GpuContext;
+
+        let row_ptr_data = row_ptr.readonly();
+        let col_indices_data = col_indices.readonly();
+        let values_data = values.readonly();
+        let mut v_data = v.readwrite();
+        let mut u_data = u.readwrite();
+        let a_data = a.readonly();
+        let b_data = b.readonly();
+        let c_data = c.readonly();
+        let d_data = d.readonly();
+        let nt_types_data = nt_types.readonly();
+        let external_I_data = external_I.readonly();
+        let mut spike_buffer_data = spike_buffer.readwrite();
+
+        let row_ptr_sl = row_ptr_data.as_slice()?;
+        let col_indices_sl = col_indices_data.as_slice()?;
+        let values_sl = values_data.as_slice()?;
+        let a_sl = a_data.as_slice()?;
+        let b_sl = b_data.as_slice()?;
+        let c_sl = c_data.as_slice()?;
+        let d_sl = d_data.as_slice()?;
+        let nt_types_sl = nt_types_data.as_slice()?;
+        let external_I_sl = external_I_data.as_slice()?;
+        let spike_buffer_sl = spike_buffer_data.as_slice_mut()?;
+        let _n = v_data.len()?;
+
+        let n_neurons = row_ptr_sl.len() - 1;
+        let n_synapses = values_sl.len();
+
+        // Copy initial state
+        let v_host = v_data.as_slice()?.to_vec();
+        let u_host = u_data.as_slice()?.to_vec();
+
+        // Create GPU context
+        let gpu_ctx = match GpuContext::new(n_neurons, n_synapses) {
+            Ok(ctx) => ctx,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("GpuContext::new failed: {e}")
+            )),
+        };
+
+        // Upload neuron params
+        if let Err(e) = gpu_ctx.upload_neurons(&v_host, &u_host, a_sl, b_sl, c_sl, d_sl) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_neurons: {e}")
+            ));
+        }
+
+        // Upload CSR connectome + external_I
+        if let Err(e) = gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl,
+            nt_types_sl, external_I_sl)
+        {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_connectome: {e}")
+            ));
+        }
+
+        // Initialize plastic weights from static connectome
+        if let Err(e) = gpu_ctx.init_plastic_weights() {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("init_plastic_weights: {e}")
+            ));
+        }
+
+        // Upload initial I = external_I
+        if let Err(e) = gpu_ctx.upload_I(external_I_sl) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_I: {e}")
+            ));
+        }
+
+        // Allocate device-side spike counter
+        let d_spike_counter = match gpu_ctx.alloc_spike_counter() {
+            Ok(ptr) => ptr,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("alloc_spike_counter: {e}")
+            )),
+        };
+
+        let mut total_spikes: usize = 0;
+        let mut step_spikes = vec![0i32; n_neurons];
+        let t0 = std::time::Instant::now();
+
+        for step in 0..n_steps {
+            // One STDP step: Izhikevich → count → CSR STDP → CSR propagate (plastic)
+            // Uses connectome_stdp_step from GpuContext
+            if let Err(e) = gpu_ctx.connectome_stdp_step(dt, 0.99,
+                lr_ltp, lr_ltd, w_min, w_max, Some(d_spike_counter))
+            {
+                gpu_ctx.free_spike_counter(d_spike_counter);
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("connectome_stdp_step: {e}")
+                ));
+            }
+
+            // Download spikes to host (per-step D2H for recording)
+            if let Err(e) = gpu_ctx.download_spikes(&mut step_spikes) {
+                gpu_ctx.free_spike_counter(d_spike_counter);
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("download_spikes: {e}")
+                ));
+            }
+
+            // Record to spike_buffer
+            let buf_offset = step * n_neurons;
+            let mut step_count = 0usize;
+            for i in 0..n_neurons {
+                if step_spikes[i] != 0 {
+                    let idx = buf_offset + i;
+                    if idx < spike_buffer_sl.len() {
+                        spike_buffer_sl[idx] = 1;
+                    }
+                    step_count += 1;
+                }
+            }
+            total_spikes += step_count;
+        }
+
+        let elapsed = t0.elapsed().as_secs_f64();
+
+        // Download final spike counter
+        let total_spikes_i32 = gpu_ctx.read_spike_counter(d_spike_counter).unwrap_or(-1);
+        gpu_ctx.free_spike_counter(d_spike_counter);
+        let total_spikes = total_spikes_i32.max(0) as usize;
+
+        // Download final weights and compute mean change
+        let mut weights_host = vec![0.0f32; n_synapses];
+        let mean_weight_change = if let Ok(()) = gpu_ctx.download_weights(&mut weights_host) {
+            let mut sum_diff = 0.0f64;
+            let mut count = 0usize;
+            for i in 0..n_synapses.min(values_sl.len()) {
+                let diff = (weights_host[i] - values_sl[i]).abs() as f64;
+                sum_diff += diff;
+                count += 1;
+            }
+            if count > 0 { (sum_diff / count as f64) as f32 } else { 0.0 }
+        } else {
+            0.0
+        };
+
+        // Write weights back to Python array if requested
+        if let Some(wo) = weights_out {
+            let mut wo_data = wo.readwrite();
+            let wo_sl = wo_data.as_slice_mut()?;
+            let write_n = wo_sl.len().min(weights_host.len());
+            for i in 0..write_n {
+                wo_sl[i] = weights_host[i];
+            }
+        }
+
+        // State persistence: download v,u back to host
+        let mut v_back = vec![0.0f32; n_neurons];
+        let mut u_back = vec![0.0f32; n_neurons];
+        let _ = gpu_ctx.download_v(&mut v_back);
+        let _ = gpu_ctx.download_u(&mut u_back);
+
+        let v_slice = v_data.as_slice_mut()?;
+        let u_slice = u_data.as_slice_mut()?;
+        let write_n = n_neurons.min(v_slice.len()).min(v_back.len())
+            .min(u_slice.len()).min(u_back.len());
+        for i in 0..write_n {
+            v_slice[i] = v_back[i];
+            u_slice[i] = u_back[i];
+        }
+
+        Ok((elapsed, total_spikes, mean_weight_change))
+    }
+}
+
+// ─── GPU: connectome with per-step spike recording ────
+
+/// Как bench_connectome_gpu, но записывает per-step спайки в spike_buffer.
+///
+/// После каждого GPU шага скачивает spikes на host (D2H, ~552KB для 138K).
+/// Скачивает v, u обратно на host после симуляции (state persistence).
+///
+/// spike_buffer [n_steps × n_neurons] — 0/1 для raster plot.
+/// Returns: (wall_time_sec, total_spikes).
+#[pyfunction]
+#[pyo3(name = "bench_connectome_gpu_recording")]
+#[allow(clippy::too_many_arguments, clippy::similar_names)]
+pub fn py_bench_connectome_gpu_recording(
+    row_ptr: Bound<'_, PyArray1<i32>>,
+    col_indices: Bound<'_, PyArray1<i32>>,
+    values: Bound<'_, PyArray1<f32>>,
+    n_steps: usize,
+    dt: f32,
+    v: Bound<'_, PyArray1<f32>>,
+    u: Bound<'_, PyArray1<f32>>,
+    _trace: Bound<'_, PyArray1<f32>>,
+    a: Bound<'_, PyArray1<f32>>,
+    b: Bound<'_, PyArray1<f32>>,
+    c: Bound<'_, PyArray1<f32>>,
+    d: Bound<'_, PyArray1<f32>>,
+    nt_types: Bound<'_, PyArray1<f32>>,
+    external_I: Bound<'_, PyArray1<f32>>,
+    _I_buf: Bound<'_, PyArray1<f32>>,
+    _spikes: Bound<'_, PyArray1<i32>>,
+    spike_buffer: Bound<'_, PyArray1<i32>>,
+) -> PyResult<(f64, usize)> {
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = (row_ptr, col_indices, values, n_steps, dt,
+                 v, u, _trace, a, b, c, d, nt_types, external_I,
+                 _I_buf, _spikes, spike_buffer);
+        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            "CUDA not available — rebuild with --features cuda".to_string()
+        ));
+    }
+
+    #[cfg(feature = "cuda")]
+    {
+        use cuda_kernels::GpuContext;
+
+        let row_ptr_data = row_ptr.readonly();
+        let col_indices_data = col_indices.readonly();
+        let values_data = values.readonly();
+        let mut v_data = v.readwrite();
+        let mut u_data = u.readwrite();
+        let a_data = a.readonly();
+        let b_data = b.readonly();
+        let c_data = c.readonly();
+        let d_data = d.readonly();
+        let nt_types_data = nt_types.readonly();
+        let external_I_data = external_I.readonly();
+        let mut spike_buffer_data = spike_buffer.readwrite();
+
+        let row_ptr_sl = row_ptr_data.as_slice()?;
+        let col_indices_sl = col_indices_data.as_slice()?;
+        let values_sl = values_data.as_slice()?;
+        let a_sl = a_data.as_slice()?;
+        let b_sl = b_data.as_slice()?;
+        let c_sl = c_data.as_slice()?;
+        let d_sl = d_data.as_slice()?;
+        let nt_types_sl = nt_types_data.as_slice()?;
+        let external_I_sl = external_I_data.as_slice()?;
+        let spike_buffer_sl = spike_buffer_data.as_slice_mut()?;
+        let _n = v_data.len()?;
+
+        let n_neurons = row_ptr_sl.len() - 1;
+        let n_synapses = values_sl.len();
+
+        // Copy initial state from host (v, u are persistent across batch calls)
+        let v_host = v_data.as_slice()?.to_vec();
+        let u_host = u_data.as_slice()?.to_vec();
+
+        // Create GPU context
+        let gpu_ctx = match GpuContext::new(n_neurons, n_synapses) {
+            Ok(ctx) => ctx,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("GpuContext::new failed: {e}")
+            )),
+        };
+
+        // Upload neuron params (v, u from previous batch's end state)
+        if let Err(e) = gpu_ctx.upload_neurons(&v_host, &u_host, a_sl, b_sl, c_sl, d_sl) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_neurons: {e}")
+            ));
+        }
+
+        // Upload CSR connectome (one-time per GpuContext lifetime)
+        if let Err(e) = gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl,
+            nt_types_sl, external_I_sl)
+        {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_connectome: {e}")
+            ));
+        }
+
+        // Initialize I = external_I
+        if let Err(e) = gpu_ctx.upload_I(external_I_sl) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("upload_I: {e}")
+            ));
+        }
+
+        // Allocate device-side spike counter
+        let d_spike_counter = match gpu_ctx.alloc_spike_counter() {
+            Ok(ptr) => ptr,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("alloc_spike_counter: {e}")
+            )),
+        };
+
+        let mut total_spikes: usize = 0;
+        let mut step_spikes = vec![0i32; n_neurons];
+        let t0 = std::time::Instant::now();
+
+        for step in 0..n_steps {
+            // One GPU step: Izhikevich → count spikes → CSR propagate
+            // All on-device, no H2D/D2H (except d_spike_counter increment)
+            if let Err(e) = gpu_ctx.connectome_step(dt, 0.99, Some(d_spike_counter)) {
+                gpu_ctx.free_spike_counter(d_spike_counter);
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("connectome_step: {e}")
+                ));
+            }
+
+            // Download spikes to host (per-step D2H, needed for recording)
+            if let Err(e) = gpu_ctx.download_spikes(&mut step_spikes) {
+                gpu_ctx.free_spike_counter(d_spike_counter);
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("download_spikes: {e}")
+                ));
+            }
+
+            // Record to spike_buffer
+            let buf_offset = step * n_neurons;
+            let mut step_count = 0usize;
+            for i in 0..n_neurons {
+                if step_spikes[i] != 0 {
+                    let idx = buf_offset + i;
+                    if idx < spike_buffer_sl.len() {
+                        spike_buffer_sl[idx] = 1;
+                    }
+                    step_count += 1;
+                }
+            }
+            total_spikes += step_count;
+        }
+
+        // State persistence: download v, u back to host
+        // Это ключевое исправление — без него каждый batch стартует с начального v,u
+        let mut v_back = vec![0.0f32; n_neurons];
+        let mut u_back = vec![0.0f32; n_neurons];
+        let _ = gpu_ctx.download_v(&mut v_back);
+        let _ = gpu_ctx.download_u(&mut u_back);
+
+        // Write v, u back to Python arrays for persistence across calls
+        let v_slice = v_data.as_slice_mut()?;
+        let u_slice = u_data.as_slice_mut()?;
+        let write_n = n_neurons.min(v_slice.len()).min(v_back.len())
+            .min(u_slice.len()).min(u_back.len());
+        for i in 0..write_n {
+            v_slice[i] = v_back[i];
+            u_slice[i] = u_back[i];
+        }
+
+        gpu_ctx.free_spike_counter(d_spike_counter);
         let elapsed = t0.elapsed().as_secs_f64();
         Ok((elapsed, total_spikes))
     }

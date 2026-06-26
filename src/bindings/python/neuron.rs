@@ -3,10 +3,31 @@
 
 #![allow(non_snake_case)]
 
+use std::cell::RefCell;
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 
 use crate::models::neuron;
+
+thread_local! {
+    static REFRACTORY_BUF: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+}
+
+fn with_refractory(n: usize) -> Vec<f32> {
+    REFRACTORY_BUF.with(|cell| {
+        let mut buf = cell.borrow_mut();
+        buf.resize(n, 0.0);
+        // Take ownership temporarily — will be dropped after the call
+        std::mem::take(&mut *buf)
+    })
+}
+
+fn return_refractory(mut buf: Vec<f32>) {
+    REFRACTORY_BUF.with(|cell| {
+        buf.clear();
+        *cell.borrow_mut() = buf;
+    });
+}
 
 // ─── Neuron bindings ─────────────────────────────────────
 
@@ -54,7 +75,7 @@ pub fn py_step_izhikevich(
     let d = d.readonly();
 
     let n = v.len()?;
-    let mut refractory = vec![0.0f32; n];
+    let mut refractory = with_refractory(n);
 
     neuron::step_izhikevich(
         v.as_slice_mut()?,
@@ -71,6 +92,7 @@ pub fn py_step_izhikevich(
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
+    return_refractory(refractory);
     Ok(())
 }
 
@@ -110,7 +132,7 @@ pub fn py_step_saw(
     let mut spikes = spikes.readwrite();
 
     let n = v.len()?;
-    let mut refractory = vec![0.0f32; n];
+    let mut refractory = with_refractory(n);
 
     neuron::step_saw(
         v.as_slice_mut()?,
@@ -126,6 +148,7 @@ pub fn py_step_saw(
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
+    return_refractory(refractory);
     Ok(())
 }
 
@@ -209,7 +232,7 @@ pub fn py_step_lif(
     let v_reset = v_reset.readonly();
 
     let n = v.len()?;
-    let mut refractory = vec![0.0f32; n];
+    let mut refractory = with_refractory(n);
 
     neuron::step_lif(
         v.as_slice_mut()?,
@@ -223,6 +246,7 @@ pub fn py_step_lif(
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
+    return_refractory(refractory);
     Ok(())
 }
 
@@ -277,7 +301,7 @@ pub fn py_step_adex(
     let b = b.readonly();
 
     let n = v.len()?;
-    let mut refractory = vec![0.0f32; n];
+    let mut refractory = with_refractory(n);
 
     neuron::step_adex(
         v.as_slice_mut()?,
@@ -296,6 +320,7 @@ pub fn py_step_adex(
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
+    return_refractory(refractory);
     Ok(())
 }
 

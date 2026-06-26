@@ -14,7 +14,7 @@ use crate::models::neuron::trainer::EPropTrainer;
 ///
 /// Call `train_batch(images, targets)` to train on multiple images
 /// in parallel, then `predict(image)` for inference.
-#[pyclass]
+#[pyclass(name = "EPropTrainer")]
 pub struct PyEPropTrainer {
     inner: EPropTrainer,
 }
@@ -125,7 +125,7 @@ impl PyEPropTrainer {
 
     fn __repr__(&self) -> String {
         format!(
-            "PyEPropTrainer(ni={}, nh={}, no={}, n_steps={}, lr_in={}, lr_out={}, workers={})",
+            "EPropTrainer(ni={}, nh={}, no={}, n_steps={}, lr_in={}, lr_out={}, workers={})",
             self.inner.ni, self.inner.nh, self.inner.no,
             self.inner.n_steps, self.inner.lr_in, self.inner.lr_out,
             self.inner.num_workers(),

@@ -65,15 +65,11 @@ impl ShortTermPlasticity {
             .zip(self.a[..n8].par_chunks_exact(8))
             .zip(I_out[..n8].par_chunks_exact_mut(8))
             .for_each(|(((((((x8, u8), pre8), td8), tf8), u08), a8), io8)| {
-                unsafe {
-                    kernels::stp_step(
-                        x8.as_mut_ptr(), u8.as_mut_ptr(),
-                        pre8.as_ptr(),
-                        td8.as_ptr(), tf8.as_ptr(),
-                        u08.as_ptr(), a8.as_ptr(),
-                        io8.as_mut_ptr(), self.dt, 8,
-                    );
-                }
+                kernels::stp_step(
+                    x8, u8, pre8,
+                    td8, tf8, u08, a8,
+                    io8, self.dt,
+                );
             });
 
         // Scalar tail (n & 7)

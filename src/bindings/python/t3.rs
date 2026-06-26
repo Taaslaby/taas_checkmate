@@ -30,7 +30,7 @@ use crate::t3::Decoder;
 /// Три популяции связаны cross-coupling (w12, w13, w23).
 ///
 /// Использование:
-///     tri = PyTriOscillator(64, 0.5, 3.0)
+///     tri = TriOscillator(64, 0.5, 3.0)
 ///     tri.set_coupling(0.3, 0.15, 0.08)
 ///     pst = tri.step(0.05, drive=drives)       # один шаг → PST фичи
 ///     tri.set_drive(drives)                      # установить драйв
@@ -39,7 +39,7 @@ use crate::t3::Decoder;
 ///     ph1 = tri.phases(1)                        # фазы популяции 1
 ///
 /// PST фичи: 18n+12 размерность (sin/cos, скорости, r, порядок, cross-order)
-#[pyclass(name = "PyTriOscillator")]
+#[pyclass(name = "TriOscillator")]
 pub struct PyTriOscillator {
     pub inner: crate::t3::TriOscillator,
     _fv: Vec<f32>,
@@ -199,11 +199,11 @@ impl PyTriOscillator {
 /// Онлайн-обучение: w += lr * error * x / (||x||² + eps).
 ///
 /// Использование:
-///     dec = PyNlmsDecoder(pst_dim, lr=0.1, eps=1e-8)
+///     dec = NlmsDecoder(pst_dim, lr=0.1, eps=1e-8)
 ///     prediction = dec.predict(features)
 ///     dec.train(features, target)
 ///     weights = dec.weights()
-#[pyclass(name = "PyNlmsDecoder")]
+#[pyclass(name = "NlmsDecoder")]
 pub struct PyNlmsDecoder {
     pub inner: crate::t3::NlmsDecoder,
 }
@@ -241,10 +241,10 @@ impl PyNlmsDecoder {
 /// Использует фильтр Калмана для оценки весов.
 ///
 /// Использование:
-///     dec = PyKalmanDecoder(pst_dim, q=1.0, r=0.1)
+///     dec = KalmanDecoder(pst_dim, q=1.0, r=0.1)
 ///     prediction = dec.predict(features)
 ///     dec.train(features, target)
-#[pyclass(name = "PyKalmanDecoder")]
+#[pyclass(name = "KalmanDecoder")]
 pub struct PyKalmanDecoder {
     pub inner: crate::t3::KalmanDecoder,
 }
@@ -291,16 +291,15 @@ pub fn py_pst_features(
     Ok(())
 }
 
-/// Вычислить полный PST вектор из TriOscillator (legacy).
+/// Вычислить полный PST вектор из TriOscillator.
 ///
-/// Рекомендуется использовать tri.pst() вместо этой функции.
+/// Возвращает np.ndarray (18n+12,).
+/// Для нового кода рекомендуется tri.pst() — быстрее и короче.
 #[pyfunction]
 #[pyo3(name = "pst_linear_features")]
-pub fn py_pst_linear_features(tri: &PyTriOscillator, out: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+pub fn py_pst_linear_features(tri: &PyTriOscillator, py: Python<'_>) -> Py<PyArray1<f32>> {
     let fv = crate::t3::pst_linear_features(&tri.inner);
-    let n = fv.len().min(out.len()?);
-    out.readwrite().as_slice_mut()?[..n].copy_from_slice(&fv[..n]);
-    Ok(())
+    PyArray1::from_vec(py, fv).into()
 }
 
 /// Размерность PST вектора для n осцилляторов.
@@ -321,6 +320,7 @@ pub fn py_pst_linear_dim(n: usize) -> usize {
 /// Создаётся функцией t2spigrad_forward(), передаётся в t2spigrad_backward().
 /// Содержит все фазы, амплитуды, coupling и драйвы на каждом шаге.
 #[pyclass(name = "T2SpigradTrajectory")]
+// (Rust struct PyT2SpigradTrajectory — Python видит как T2SpigradTrajectory)
 pub struct PyT2SpigradTrajectory {
     inner: crate::t3::spike::T3SpikeTrajectory,
 }
@@ -586,3 +586,221 @@ pub fn py_normalize_features(
     crate::t3::normalize_features(features.readwrite().as_slice_mut()?, n_samples, dim);
     Ok(())
 }
+
+#[pyclass(name = "PstControl")]
+pub struct PyPstControl {
+    inner: crate::t3::PstControl,
+}
+
+#[pymethods]
+impl PyPstControl {
+    #[new]
+    #[pyo3(signature = (n=16, L=2, n_classes=3, ridge_alpha=10.0, inverse_blend=0.3,
+                        drive_min=0.0, drive_max=1.5, n_warmup=70, dt=0.01))]
+    fn new(
+        n: usize, L: usize, n_classes: usize, ridge_alpha: f32,
+        inverse_blend: f32, drive_min: f32, drive_max: f32,
+        n_warmup: usize, dt: f32,
+    ) -> Self {
+        let config = crate::t3::PstControlConfig {
+            n, L, n_classes, ridge_alpha, inverse_blend,
+            drive_min, drive_max, n_warmup, dt,
+        };
+        Self { inner: crate::t3::PstControl::new(config) }
+    }
+
+    fn feat_dim(&self) -> usize { self.inner.feat_dim() }
+    fn base_feat_dim(&self) -> usize { self.inner.base_feat_dim() }
+    fn n_classes(&self) -> usize { self.inner.n_classes() }
+    fn is_fitted(&self) -> bool { self.inner.is_fitted() }
+
+    fn predict_from_pst(&self, pst: Bound<'_, PyArray1<f32>>) -> PyResult<(usize, Vec<f32>)> {
+        let pst_binding = pst.readonly();
+        let pst_slice = pst_binding.as_slice()?;
+        Ok(self.inner.predict_from_pst(pst_slice))
+    }
+
+    fn target_pst(&self, target_class: usize) -> Vec<f32> {
+        self.inner.target_pst(target_class)
+    }
+
+    fn check_target_pst(&self, target_class: usize) -> (usize, f32) {
+        self.inner.check_target_pst(target_class)
+    }
+
+    fn fit_ridge(
+        &mut self,
+        x: Bound<'_, PyArray2<f32>>,
+        y: Bound<'_, PyArray2<f32>>,
+        alpha: f32,
+    ) -> PyResult<f32> {
+        let x_ro = x.readonly();
+        let y_ro = y.readonly();
+        let x_slice = x_ro.as_slice()?;
+        let y_slice = y_ro.as_slice()?;
+        // Infer n from slice length / feat_dim
+        let n = x_slice.len() / self.inner.feat_dim();
+        Ok(self.inner.fit_ridge(x_slice, y_slice, n, alpha))
+    }
+
+    fn find_drive(
+        &self,
+        tri: &mut PyTriOscillator,
+        target_class: usize,
+        n_trials: usize,
+    ) -> (f32, f32) {
+        self.inner.find_drive(&mut tri.inner, target_class, n_trials)
+    }
+
+    fn optimize_drive(
+        &self,
+        tri: &mut PyTriOscillator,
+        target_class: usize,
+        steps: usize,
+        lr: f32,
+    ) -> (f32, usize) {
+        self.inner.optimize_drive(&mut tri.inner, target_class, steps, lr)
+    }
+
+    fn drive_for(
+        &self,
+        tri: &mut PyTriOscillator,
+        target_class: usize,
+        method: &str,
+    ) -> (f32, usize) {
+        self.inner.drive_for(&mut tri.inner, target_class, method)
+    }
+
+    fn save_to_file(&self, path: &str) -> PyResult<()> {
+        self.inner.save_to_file(path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    #[staticmethod]
+    fn load_from_file(path: &str) -> PyResult<Self> {
+        crate::t3::PstControl::load_from_file(path)
+            .map(|inner| Self { inner })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    fn weights(&self) -> Vec<f32> { self.inner.weights().to_vec() }
+    fn bias(&self) -> Vec<f32> { self.inner.bias().to_vec() }
+
+    fn __repr__(&self) -> String {
+        format!("PstControl(n={}, L={}, classes={}, fitted={})",
+                self.inner.config.n, self.inner.config.L,
+                self.inner.n_classes(), self.inner.is_fitted())
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Sparker — спайки → trace → hologram
+// ═══════════════════════════════════════════════════════════════
+
+/// Спарковка: спайки → trace → hologram(3) для FM-драйва T³.
+///
+/// Использование:
+///     positions = np.array([[x1,y1], [x2,y2], ...])  # (N, 2)
+///     sparker = Sparker(positions, tau_ms=50.0)
+///     h = sparker.feed(spikes)      # np.ndarray (3,) — голограмма
+///     h = sparker.hologram()        # текущая голограмма без feed
+#[pyclass(name = "Sparker")]
+pub struct PySparker {
+    inner: crate::t3::Sparker,
+}
+
+#[pymethods]
+impl PySparker {
+    #[new]
+    fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32) -> PyResult<Self> {
+        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
+            .chunks(2).map(|c| [c[0], c[1]]).collect();
+        Ok(Self { inner: crate::t3::Sparker::new(&pos, tau_ms, dt_ms) })
+    }
+
+    /// Подать спайки и получить голограмму.
+    fn feed(&mut self, spikes: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
+        self.inner.feed(spikes.readonly().as_slice()?);
+        Ok(self.inner.hologram())
+    }
+
+    fn hologram(&self) -> Vec<f32> {
+        self.inner.hologram()
+    }
+
+    fn trace(&self) -> Vec<f32> {
+        self.inner.trace().to_vec()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Sparker(n={})", self.inner.hologram().len())
+    }
+}
+
+/// HologramEncoder — cos-проекция N→K с PCA-базисом.
+///
+/// Использование:
+///     enc = HologramEncoder(positions, k=3)
+///     h = enc.encode(trace)      # np.ndarray (k,)
+#[pyclass(name = "HologramEncoder")]
+pub struct PyHologramEncoder {
+    inner: crate::t3::HologramEncoder,
+}
+
+#[pymethods]
+impl PyHologramEncoder {
+    #[new]
+    #[pyo3(signature = (positions, k=3))]
+    fn new(positions: Bound<'_, PyArray2<f32>>, k: usize) -> PyResult<Self> {
+        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
+            .chunks(2).map(|c| [c[0], c[1]]).collect();
+        Ok(Self { inner: crate::t3::HologramEncoder::with_k(&pos, k) })
+    }
+
+    fn encode(&self, trace: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
+        Ok(self.inner.encode(trace.readonly().as_slice()?))
+    }
+
+    fn k(&self) -> usize { self.inner.k() }
+    fn n(&self) -> usize { self.inner.n() }
+
+    fn __repr__(&self) -> String {
+        format!("HologramEncoder(n={}, k={})", self.inner.n(), self.inner.k())
+    }
+}
+
+/// NormalizedSparker — Спарковка с online нормализацией.
+///
+/// Убирает DC-дрейф и масштабирует к target_std.
+#[pyclass(name = "NormalizedSparker")]
+pub struct PyNormalizedSparker {
+    inner: crate::t3::NormalizedSparker,
+}
+
+#[pymethods]
+impl PyNormalizedSparker {
+    #[new]
+    fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32, target_std: f32) -> PyResult<Self> {
+        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
+            .chunks(2).map(|c| [c[0], c[1]]).collect();
+        Ok(Self { inner: crate::t3::NormalizedSparker::new(&pos, tau_ms, dt_ms, target_std) })
+    }
+
+    fn feed(&mut self, spikes: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
+        self.inner.feed(spikes.readonly().as_slice()?);
+        Ok(self.inner.hologram())
+    }
+
+    fn hologram(&mut self) -> Vec<f32> {
+        self.inner.hologram()
+    }
+
+    fn reset_stats(&mut self) {
+        self.inner.reset_stats();
+    }
+
+    fn __repr__(&self) -> String {
+        "NormalizedSparker(k=3)".into()
+    }
+}
+

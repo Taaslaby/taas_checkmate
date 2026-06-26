@@ -40,15 +40,13 @@ pub fn step_izhikevich(
             .zip(c.par_chunks_exact(8))
             .zip(d.par_chunks_exact(8)))
         .for_each(|((((((v8, u8), tr8), I8), sp8), refr8), (((a8, b8), c8), d8))| {
-            unsafe {
-                kernels::izhikevich_step(
-                    v8.as_mut_ptr(), u8.as_mut_ptr(), tr8.as_mut_ptr(),
-                    a8.as_ptr(), b8.as_ptr(), I8.as_mut_ptr(),
-                    dt, trace_decay,
-                    sp8.as_mut_ptr(), c8.as_ptr(), d8.as_ptr(),
-                    refr8.as_mut_ptr(), tau_ref, 8,
-                );
-            }
+            kernels::izhikevich_step(
+                v8, u8, tr8,
+                a8, b8, I8,
+                dt, trace_decay,
+                sp8, c8, d8,
+                refr8, tau_ref,
+            );
         });
 }
 
@@ -101,14 +99,11 @@ impl EPropIzhikevich {
             .zip(spikes[..n8].par_chunks_exact_mut(8))
             .zip(pre_spikes[..n8].par_chunks_exact(8))
             .map(|((((((v8, u8), e8), ps8), I8), sp8), pre8)| {
-                unsafe {
-                    kernels::eprop_izhikevich_step(
-                        v8.as_mut_ptr(), u8.as_mut_ptr(), e8.as_mut_ptr(), ps8.as_mut_ptr(),
-                        I8.as_ptr(), sp8.as_mut_ptr(), pre8.as_ptr(),
-                        self.dt, self.tau_e, self.a, self.b, self.c, self.d, self.tau_surrogate,
-                        8,
-                    )
-                }
+                kernels::eprop_izhikevich_step(
+                    v8, u8, e8, ps8,
+                    I8, sp8, pre8,
+                    self.dt, self.tau_e, self.a, self.b, self.c, self.d, self.tau_surrogate,
+                )
             })
             .sum();
 
@@ -232,21 +227,13 @@ impl EPropIzhikevichMulti {
         let d = self.d;
         let tau_sg = self.tau_surrogate;
 
-        unsafe {
-            kernels::eprop_izhikevich_step_multi(
-                self.v.as_mut_ptr(),
-                self.u.as_mut_ptr(),
-                self.psi.as_mut_ptr(),
-                self.e.as_mut_ptr(),
-                z_pre.as_ptr(),
-                I_ext.as_ptr(),
-                weights.as_ptr(),
-                n,        // column stride = n_post
-                n_pre,
-                dt, tau_e, a, b, c, d, tau_sg,
-                spikes.as_mut_ptr(),
-            )
-        }
+        kernels::eprop_izhikevich_step_multi(
+            &mut self.v, &mut self.u, &mut self.psi, &mut self.e,
+            z_pre, I_ext, weights,
+            n_pre,
+            dt, tau_e, a, b, c, d, tau_sg,
+            spikes,
+        )
     }
 
     /// Apply E-Prop weight update for column-major weight matrix.

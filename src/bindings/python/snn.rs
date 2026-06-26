@@ -14,13 +14,13 @@ use crate::models::neuron;
 /// LIF-AT neuron — LIF с адаптивным порогом (stateful).
 ///
 /// Использование:
-///     n = PyLifNeuron(1000, dt=0.5)
+///     n = LifNeuron(1000, dt=0.5)
 ///     I = np.random.randn(1000).astype(np.float32)
 ///     spikes = np.zeros(1000, dtype=np.int32)
 ///     n.step(I, spikes)
-///     v = np.zeros(1000, dtype=np.float32)
-///     n.copy_v(v)  # или n.v, если добавить property
-#[pyclass]
+///     v = n.v        # свойство — мембранный потенциал
+///     n.v = arr      # свойство — установить
+#[pyclass(name = "LifNeuron")]
 pub struct PyLifNeuron {
     v: Vec<f32>,
     theta: Vec<f32>,
@@ -52,7 +52,7 @@ impl PyLifNeuron {
         let mut I = I.readwrite();
         let mut spikes = spikes.readwrite();
         let n = self.n.div_ceil(8) * 8;
-        let mut refractory = vec![0.0f32; n];
+        let mut refractory = vec![0.0f32; n];  // class-owned, will be field later
         neuron::step_lif_at(
             &mut self.v, &mut self.theta,
             I.as_slice_mut()?, spikes.as_slice_mut()?,
@@ -69,12 +69,7 @@ impl PyLifNeuron {
         PyArray1::from_vec(py, self.v[..self.n].to_vec()).into()
     }
 
-    /// Адаптивный порог как np.ndarray.
-    #[getter]
-    fn theta(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
-        PyArray1::from_vec(py, self.theta[..self.n].to_vec()).into()
-    }
-
+    #[setter]
     fn set_v(&mut self, src: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let src = src.readonly();
         let n = self.n.min(src.len()?);
@@ -82,6 +77,13 @@ impl PyLifNeuron {
         Ok(())
     }
 
+    /// Адаптивный порог как np.ndarray.
+    #[getter]
+    fn theta(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.theta[..self.n].to_vec()).into()
+    }
+
+    #[setter]
     fn set_theta(&mut self, src: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let src = src.readonly();
         let n = self.n.min(src.len()?);
@@ -92,7 +94,7 @@ impl PyLifNeuron {
     fn n_neurons(&self) -> usize { self.n }
 
     fn __repr__(&self) -> String {
-        format!("PyLifNeuron(n={}, dt={})", self.n, self.dt)
+        format!("LifNeuron(n={}, dt={})", self.n, self.dt)
     }
 }
 
@@ -139,7 +141,7 @@ pub fn py_synaptic_normalization(
 //  SORN network
 // ═══════════════════════════════════════════════════════════
 
-#[pyclass]
+#[pyclass(name = "SornNetwork")]
 pub struct PySornNetwork {
     pub inner: neuron::SornNetwork,
 }
@@ -176,6 +178,8 @@ impl PySornNetwork {
     fn __repr__(&self) -> String {
         format!("SornNetwork(n={}, target_sum={})", self.inner.n, self.inner.w_target_sum)
     }
+
+    fn n_neurons(&self) -> usize { self.inner.n }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -242,7 +246,54 @@ impl PyTtfsEncoder {
 
     fn reset(&mut self) { self.inner.reset(); }
 
-    fn __repr__(&self) -> String { format!("TtfsEncoder(max_delay={})", self.inner.max_delay) }
+    fn __repr__(&self) -> String { format!("TtfsEncoder(max_delay={}, n_neurons={})", self.inner.max_delay, self.inner.fire_times.len()) }
+
+    fn n_neurons(&self) -> usize { self.inner.fire_times.len() }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SpikeRaster → CSV export
+// ═══════════════════════════════════════════════════════════
+
+/// Экспорт spike raster из dense буфера в CSV строку.
+///
+/// Принимает dense буфер `[n_steps × n_neurons]` и dt (ms).
+/// Возвращает CSV с колонками `time_ms,neuron_id`.
+///
+/// Args:
+///     spike_buffer: np.ndarray[int32, shape=(n_steps * n_neurons,)]
+///                   Spike events: 0/1, layout [time × neuron]
+///     n_neurons: int — количество нейронов
+///     dt: float — временной шаг в ms
+///
+/// Returns:
+///     str — CSV строка с заголовком "time_ms,neuron_id"
+#[pyfunction]
+#[pyo3(name = "spike_raster_to_csv")]
+pub fn py_spike_raster_to_csv(
+    spike_buffer: Bound<'_, PyArray1<i32>>,
+    n_neurons: usize,
+    dt: f32,
+) -> PyResult<String> {
+    let spike_buffer = spike_buffer.readonly();
+    let buf = spike_buffer.as_slice()?;
+    let n_steps = if n_neurons > 0 { buf.len() / n_neurons } else { 0 };
+
+    // Build raster from dense buffer, then export
+    let mut raster = neuron::SpikeRaster::new();
+    let mut step_buf = vec![0i32; n_neurons];
+    for t in 0..n_steps {
+        step_buf.fill(0);
+        let offset = t * n_neurons;
+        for i in 0..n_neurons {
+            if buf[offset + i] != 0 {
+                step_buf[i] = 1;
+            }
+        }
+        raster.record(t, &step_buf, n_neurons);
+    }
+
+    Ok(raster.to_csv(dt))
 }
 
 /// Hamming окно для BSA энкодера.

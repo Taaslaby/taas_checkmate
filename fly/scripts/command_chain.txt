@@ -1,0 +1,135 @@
+Brain→Actuator Command Chain
+============================================================
+
+FlyWire neurons: 138,327
+MANC VNC neurons: 102,369
+Descending neurons: 1,328
+Motor neurons: 737
+DN→MN synapses: 19,513
+Interneurons DN→MN: 191,837
+Shared DN types: 91
+
+Top DNs by motor influence:
+  DNxl055         (bodyId=  10095) → 141 MNs, weight= 5888
+  DNxl046         (bodyId=  10399) → 196 MNs, weight= 5641
+  DNxl040         (bodyId=  10466) → 200 MNs, weight= 4685
+  DNxl080         (bodyId=  10117) → 115 MNs, weight= 4215
+  DNad004         (bodyId=  13848) → 144 MNs, weight= 3719
+  DNxl046         (bodyId=  10420) → 185 MNs, weight= 3683
+  DNxl040         (bodyId=  10532) → 192 MNs, weight= 3282
+  DNad004         (bodyId=  14007) → 148 MNs, weight= 3217
+  DNp31           (bodyId=  10436) →  64 MNs, weight= 2841
+  DNxl055         (bodyId=  10086) → 111 MNs, weight= 2826
+  DNad003         (bodyId=  27771) →  77 MNs, weight= 2807
+  DNp31           (bodyId=  10428) →  56 MNs, weight= 2638
+  DNad003         (bodyId=  14171) →  60 MNs, weight= 2610
+  DNad006         (bodyId= 176792) → 119 MNs, weight= 2398
+  DNxl048         (bodyId=  10240) → 151 MNs, weight= 2373
+  DNad006         (bodyId=  13365) → 122 MNs, weight= 2183
+  DNxn140         (bodyId=  15769) →  64 MNs, weight= 1998
+  DNxn140         (bodyId=  16082) →  73 MNs, weight= 1994
+  DNnt019         (bodyId=  17193) →  26 MNs, weight= 1955
+  DNnt020         (bodyId=  15226) →  12 MNs, weight= 1923
+  DNnt020         (bodyId=  17279) →  11 MNs, weight= 1814
+  DNnt003         (bodyId=  15047) →  11 MNs, weight= 1690
+  DNnt019         (bodyId=  17537) →  25 MNs, weight= 1689
+  DNxl134         (bodyId=  10623) → 108 MNs, weight= 1680
+  DNxn081         (bodyId=  13203) →  87 MNs, weight= 1675
+  DNnt003         (bodyId=  14937) →  12 MNs, weight= 1671
+  DNut040         (bodyId=  10284) →  61 MNs, weight= 1617
+  DNxl041         (bodyId=  10103) → 146 MNs, weight= 1609
+  DNxn081         (bodyId=  13491) →  86 MNs, weight= 1604
+  DNxl080         (bodyId=  10097) → 100 MNs, weight= 1602
+
+Shared DN types (bridge FlyWire↔MANC):
+  DNa01
+  DNa02
+  DNa03
+  DNa04
+  DNa05
+  DNa06
+  DNa07
+  DNa08
+  DNa09
+  DNa10
+  DNb01
+  DNb02
+  DNb03
+  DNb04
+  DNb05
+  DNb06
+  DNb09
+  DNc01
+  DNc02
+  DNd02
+  DNd03
+  DNg01
+  DNg03
+  DNg04
+  DNg06
+  DNg07
+  DNg09
+  DNg10
+  DNg11
+  DNg13
+  DNg14
+  DNg15
+  DNg16
+  DNg17
+  DNg19
+  DNg20
+  DNg21
+  DNg22
+  DNg23
+  DNg24
+  DNg26
+  DNg27
+  DNg29
+  DNg30
+  DNg31
+  DNg32
+  DNg33
+  DNg34
+  DNg35
+  DNg37
+  DNg38
+  DNg39
+  DNg40
+  DNg41
+  DNp01
+  DNp02
+  DNp03
+  DNp04
+  DNp05
+  DNp06
+  DNp07
+  DNp08
+  DNp09
+  DNp10
+  DNp11
+  DNp12
+  DNp13
+  DNp14
+  DNp15
+  DNp16
+  DNp17
+  DNp18
+  DNp19
+  DNp20
+  DNp22
+  DNp23
+  DNp24
+  DNp25
+  DNp26
+  DNp27
+  DNp28
+  DNp29
+  DNp30
+  DNp31
+  DNp32
+  DNp33
+  DNp34
+  DNp35
+  DNx01
+  DNxl114
+  MDN

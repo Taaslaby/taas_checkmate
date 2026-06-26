@@ -52,11 +52,7 @@ pub fn step_lif_at(
         .zip(refractory.par_chunks_exact_mut(8))
         .zip(params_buf.par_iter())
         .for_each(|(((((v8, th8), I8), sp8), refr8), params)| {
-            unsafe {
-                kernels::lif_at_step(v8.as_mut_ptr(), th8.as_mut_ptr(), I8.as_mut_ptr(),
-                    sp8.as_mut_ptr(), params.as_ptr(),
-                    refr8.as_mut_ptr(), tau_ref, 8);
-            }
+            kernels::lif_at_step(v8, th8, I8, sp8, params, refr8, tau_ref);
         });
 }
 
@@ -92,8 +88,7 @@ pub fn step_lif(
         .zip(refractory.par_chunks_exact_mut(8))
         .zip(params_buf.par_iter())
         .for_each(|((((v8, I8), sp8), refr8), params)| {
-            unsafe { kernels::lif_step(v8.as_mut_ptr(), I8.as_mut_ptr(), sp8.as_mut_ptr(), params.as_ptr(),
-                refr8.as_mut_ptr(), tau_ref, 8); }
+            kernels::lif_step(v8, I8, sp8, params, refr8, tau_ref);
         });
 }
 
@@ -151,15 +146,12 @@ impl EPropLIF {
             .zip(spikes[..n8].par_chunks_exact_mut(8))
             .zip(pre_spikes[..n8].par_chunks_exact(8))
             .map(|((((((v8, th8), e8), ps8), I8), sp8), pre8)| {
-                unsafe {
-                    kernels::eprop_lif_step(
-                        v8.as_mut_ptr(), th8.as_mut_ptr(), e8.as_mut_ptr(), ps8.as_mut_ptr(),
-                        I8.as_ptr(), sp8.as_mut_ptr(), pre8.as_ptr(),
-                        self.dt, self.tau_m, self.tau_e,
-                        self.v_rest, self.v_thresh, self.v_reset, self.tau_surrogate,
-                        8,
-                    )
-                }
+                kernels::eprop_lif_step(
+                    v8, th8, e8, ps8,
+                    I8, sp8, pre8,
+                    self.dt, self.tau_m, self.tau_e,
+                    self.v_rest, self.v_thresh, self.v_reset, self.tau_surrogate,
+                )
             })
             .sum();
 

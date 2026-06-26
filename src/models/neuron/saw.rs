@@ -33,15 +33,13 @@ pub fn step_saw(
             .zip(b.par_chunks_exact(8))
             .zip(I.par_chunks_exact(8)))
         .for_each(|(((((v8, u8), tr8), sp8), refr8), ((a8, b8), I8))| {
-            unsafe {
-                kernels::saw_step(
-                    v8.as_mut_ptr(), u8.as_mut_ptr(), tr8.as_mut_ptr(),
-                    a8.as_ptr(), b8.as_ptr(), I8.as_ptr(),
-                    dt, trace_decay, noise_amp,
-                    sp8.as_mut_ptr(),
-                    refr8.as_mut_ptr(), tau_ref, 8,
-                );
-            }
+            kernels::saw_step(
+                v8, u8, tr8,
+                a8, b8, I8,
+                dt, trace_decay, noise_amp,
+                sp8,
+                refr8, tau_ref,
+            );
         });
 }
 
@@ -66,14 +64,12 @@ pub fn step_psi_wave(
         .zip(I_ext.par_chunks_exact_mut(8))
         .zip(speed.par_chunks_exact_mut(8))
         .for_each(|(((((v8, u8), hr8), hi8), ie8), sp8)| {
-            unsafe {
-                kernels::psi_wave_step(
-                    v8.as_mut_ptr(), u8.as_mut_ptr(),
-                    hr8.as_mut_ptr(), hi8.as_mut_ptr(),
-                    ie8.as_mut_ptr(), sp8.as_mut_ptr(),
-                    dt, hbar, 8,
-                );
-            }
+            kernels::psi_wave_step(
+                v8, u8,
+                hr8, hi8,
+                ie8, sp8,
+                dt, hbar,
+            );
         });
 }
 
@@ -124,14 +120,11 @@ impl EPropSaw {
             .zip(spikes[..n8].par_chunks_exact_mut(8))
             .zip(pre_spikes[..n8].par_chunks_exact(8))
             .map(|((((((v8, u8), e8), ps8), I8), sp8), pre8)| {
-                unsafe {
-                    kernels::eprop_saw_step(
-                        v8.as_mut_ptr(), u8.as_mut_ptr(), e8.as_mut_ptr(), ps8.as_mut_ptr(),
-                        I8.as_ptr(), sp8.as_mut_ptr(), pre8.as_ptr(),
-                        self.dt, self.tau_e, self.a, self.b, self.tau_surrogate,
-                        8,
-                    )
-                }
+                kernels::eprop_saw_step(
+                    v8, u8, e8, ps8,
+                    I8, sp8, pre8,
+                    self.dt, self.tau_e, self.a, self.b, self.tau_surrogate,
+                )
             })
             .sum();
 

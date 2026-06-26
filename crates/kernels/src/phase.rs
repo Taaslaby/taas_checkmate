@@ -1,0 +1,246 @@
+//! Pure Rust SIMD phase dynamics — `wide::f32x8` for Kuramoto, T3.
+//! Replaces all ASM phase kernels with portable SIMD.
+//!
+//! sin/cos are computed per-element (no SIMD for trig in `wide`),
+//! but all arithmetic (addition, multiplication, wrapping) uses f32x8.
+
+use wide::f32x8;
+use crate::wrap_phase;
+use core::f32::consts::TAU;
+
+/// Helper: load f32x8 from raw pointer
+#[inline(always)]
+unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
+    let p = ptr.add(off);
+    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3), *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+}
+#[inline(always)]
+unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
+    let a = v.to_array();
+    let p = ptr.add(off);
+    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
+    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
+}
+
+/// Wrap phases to [0, 2π) and compute sin/cos in one pass.
+///
+/// sin/cos are computed per-element (no SIMD trig in `wide`).
+/// Phase wrapping uses f32x8 for the arithmetic part.
+///
+/// # Safety
+/// `phases[n]`, `cos_out[n]`, `sin_out[n]` must be valid, non-overlapping.
+pub(crate) unsafe fn kuramoto_prepare(
+    phases: *mut f32, cos_out: *mut f32,
+    sin_out: *mut f32, n: usize,
+) {
+    let tau_s = f32x8::splat(TAU);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let pv = load8(phases, off);
+        // Wrap: ϕ − τ·round(ϕ/τ)
+        let wrapped = pv - tau_s * (pv / tau_s).round();
+        let arr: [f32; 8] = wrapped.to_array();
+        let mut co = [0.0f32; 8];
+        let mut si = [0.0f32; 8];
+        for j in 0..8 {
+            co[j] = arr[j].cos();
+            si[j] = arr[j].sin();
+        }
+        store8(phases, off, f32x8::from(arr));
+        store8(cos_out, off, f32x8::from(co));
+        store8(sin_out, off, f32x8::from(si));
+    }
+
+    if n8 < n {
+        let p = std::slice::from_raw_parts_mut(phases, n);
+        let co = std::slice::from_raw_parts_mut(cos_out, n);
+        let si = std::slice::from_raw_parts_mut(sin_out, n);
+        for i in n8..n {
+            let phi = wrap_phase(p[i]);
+            p[i] = phi;
+            co[i] = phi.cos();
+            si[i] = phi.sin();
+        }
+    }
+}
+
+/// Euler-step Kuramoto phases: φ += dt·(ω + coupling).
+/// Uses f32x8 SIMD for all arithmetic.
+///
+/// # Safety
+/// `phases[n]`, `omegas[n]`, `coupling[n]` must be valid, non-overlapping.
+pub(crate) unsafe fn kuramoto_update(
+    phases: *mut f32, omegas: *const f32,
+    coupling: *const f32, dt: f32, n: usize,
+) {
+    let tau_s = f32x8::splat(TAU);
+    let dt_s = f32x8::splat(dt);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let mut pv = load8(phases, off);
+        let ov = load8(omegas, off);
+        let cv = load8(coupling, off);
+        pv = pv + dt_s * (ov + cv);
+        // Wrap phase
+        pv = pv - tau_s * (pv / tau_s).round();
+        store8(phases, off, pv);
+    }
+
+    if n8 < n {
+        let p = std::slice::from_raw_parts_mut(phases, n);
+        let o = std::slice::from_raw_parts(omegas, n);
+        let c = std::slice::from_raw_parts(coupling, n);
+        for i in n8..n {
+            p[i] = wrap_phase(p[i] + dt * (o[i] + c[i]));
+        }
+    }
+}
+
+/// Euler-step phase (Kuramoto) + amplitude (Stuart-Landau).
+/// Matches [`ScalarBackend::update`](crate::t3::backend::ScalarBackend::update) exactly:
+///
+/// ```text
+/// r += dt · ((α − r²)·r + gain·drive − decay·r)     ← Stuart-Landau
+/// θ += dt · (ω + coupling + gain·drive / (r + ε))    ← Kuramoto + drive
+/// ```
+///
+/// # Safety
+/// All pointer args valid for `n` elements, non-overlapping.
+pub(crate) unsafe fn t3_update(
+    phases: *mut f32, amplitudes: *mut f32,
+    omegas: *const f32, coupling: *const f32,
+    drives: *const f32, dt: f32, decay: f32,
+    alpha: f32, gain: f32, n: usize,
+) {
+    let tau_s = f32x8::splat(TAU);
+    let dt_s = f32x8::splat(dt);
+    let decay_s = f32x8::splat(decay);
+    let alpha_s = f32x8::splat(alpha);
+    let gain_s = f32x8::splat(gain);
+    let eps_s = f32x8::splat(0.1);
+    let min_amp = f32x8::splat(0.001);
+    let max_amp = f32x8::splat(10.0);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let mut pv = load8(phases, off);
+        let mut av = load8(amplitudes, off);
+        let ov = load8(omegas, off);
+        let cv = load8(coupling, off);
+        let dv = load8(drives, off);
+
+        // Kuramoto phase FIRST (uses OLD r — matches ScalarBackend):
+        // θ += dt · (ω + c + gain·drive / (r + ε))
+        let drive_phase = gain_s * dv / (av + eps_s);
+        pv = pv + dt_s * (ov + cv + drive_phase);
+        pv = pv - tau_s * (pv / tau_s).round();
+
+        // Stuart-Landau amplitude SECOND: r += dt · ((α − r²)·r + gain·drive − decay·r)
+        let r2 = av * av;
+        let r_dot = (alpha_s - r2) * av + gain_s * dv - decay_s * av;
+        av = av + dt_s * r_dot;
+        av = av.max(min_amp).min(max_amp);
+
+        store8(phases, off, pv);
+        store8(amplitudes, off, av);
+    }
+
+    if n8 < n {
+        let p = std::slice::from_raw_parts_mut(phases, n);
+        let a = std::slice::from_raw_parts_mut(amplitudes, n);
+        let o = std::slice::from_raw_parts(omegas, n);
+        let c = std::slice::from_raw_parts(coupling, n);
+        let d = std::slice::from_raw_parts(drives, n);
+        for i in n8..n {
+            let r = a[i];
+            // Phase first (uses OLD r)
+            let drive_phase = gain * d[i] / (r + 0.1);
+            p[i] = wrap_phase(p[i] + dt * (o[i] + c[i] + drive_phase));
+            // Amplitude second
+            let r_dot = (alpha - r * r) * r + gain * d[i] - decay * r;
+            a[i] = (r + dt * r_dot).max(0.001).min(10.0);
+        }
+    }
+}
+
+/// Full T3 with PLL cross-coupling frequency tracking.
+///
+/// # Safety
+/// All pointer args valid for `n` elements, non-overlapping.
+pub(crate) unsafe fn t3_update_full(
+    phases: *mut f32, amplitudes: *mut f32,
+    omegas: *mut f32, coupling: *const f32,
+    drives: *const f32,
+    x_coupling_sin: *const f32, x_coupling_cos: *const f32,
+    pll_integrator: *mut f32, _pll_band_input: *const f32,
+    dt: f32, _params: *const core::ffi::c_void, n: usize,
+) {
+    let tau_s = f32x8::splat(TAU);
+    let dt_s = f32x8::splat(dt);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let mut pv = load8(phases, off);
+        let mut av = load8(amplitudes, off);
+        let ov = load8(omegas, off);
+        let cv = load8(coupling, off);
+        let dv = load8(drives, off);
+        let xc_s = load8(x_coupling_sin, off);
+        let xc_c = load8(x_coupling_cos, off);
+        let mut pll = load8(pll_integrator, off);
+
+        // PLL error
+        let o_arr: [f32; 8] = ov.to_array();
+        let xcs_arr: [f32; 8] = xc_s.to_array();
+        let xcc_arr: [f32; 8] = xc_c.to_array();
+        let mut pll_err = [0.0f32; 8];
+        let mut o_cos = [0.0f32; 8];
+        let mut o_sin = [0.0f32; 8];
+        for j in 0..8 {
+            o_cos[j] = o_arr[j].cos();
+            o_sin[j] = o_arr[j].sin();
+            pll_err[j] = xcs_arr[j] * o_cos[j] - xcc_arr[j] * o_sin[j];
+        }
+        pll = pll + dt_s * f32x8::from(pll_err);
+
+        // Phase FIRST (uses OLD r): θ += dt · (ω + PLL + c + drive / (r + ε))
+        let drive_phase = dv / (av + f32x8::splat(0.1));
+        pv = pv + dt_s * (ov + pll + cv + drive_phase);
+        pv = pv - tau_s * (pv / tau_s).round();
+
+        // Amplitude SECOND: r += dt · (r − r³ + gain·drive)
+        // alpha=1.0 implicitly: (1 − r²)·r = r − r³, gain=1.0
+        let r_dot = av - av * av * av + dv;
+        av = av + dt_s * r_dot;
+        av = av.max(f32x8::splat(0.001)).min(f32x8::splat(10.0));
+
+        store8(phases, off, pv);
+        store8(amplitudes, off, av);
+        store8(omegas, off, ov);
+        store8(pll_integrator, off, pll);
+    }
+
+    if n8 < n {
+        let p = std::slice::from_raw_parts_mut(phases, n);
+        let a = std::slice::from_raw_parts_mut(amplitudes, n);
+        let o = std::slice::from_raw_parts_mut(omegas, n);
+        let c = std::slice::from_raw_parts(coupling, n);
+        let d = std::slice::from_raw_parts(drives, n);
+        let xc_s = std::slice::from_raw_parts(x_coupling_sin, n);
+        let xc_c = std::slice::from_raw_parts(x_coupling_cos, n);
+        let pll = std::slice::from_raw_parts_mut(pll_integrator, n);
+        for i in n8..n {
+            let perr = xc_s[i] * o[i].cos() - xc_c[i] * o[i].sin();
+            pll[i] += dt * perr;
+            let r = a[i];
+            // Phase first (uses OLD r)
+            let drive_phase = d[i] / (r + 0.1);
+            p[i] = wrap_phase(p[i] + dt * (o[i] + pll[i] + c[i] + drive_phase));
+            // Amplitude second
+            let r_dot = r - r * r * r + d[i];
+            a[i] = (r + dt * r_dot).max(0.001).min(10.0);
+        }
+    }
+}

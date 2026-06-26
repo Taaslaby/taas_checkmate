@@ -82,6 +82,10 @@ pub struct ActorCriticAgent {
     // ─── Pre-allocated current buffer (critic only, 1 neuron) ─
     I_c_buf: Vec<f32>,  // [8]
 
+    // ─── Pre-allocated scratch buffers (zero-alloc hot path) ─
+    rates_buf: Vec<f32>,    // [PADDED(n_input)] for Poisson rates
+    rates_out_buf: Vec<f32>,// [n_actions_real] for softmax
+
     // ─── Last value for TD ─────────────────────────────
     pub last_value: f32,
 
@@ -149,8 +153,10 @@ impl ActorCriticAgent {
             trace_hidden: vec![0.0; nh],
             trace_output: vec![0.0; na],
             trace_critic_val: vec![0.0; 8],
-            // Pre-allocated buffer (critic only, 1 neuron)
+            // Pre-allocated scratch (critic + zero-alloc act)
             I_c_buf: vec![0.0; 8],
+            rates_buf: vec![0.0; PADDED(ni)],
+            rates_out_buf: vec![0.0; n_actions],
             // TD
             last_value: 0.0,
             // Params
@@ -178,16 +184,16 @@ impl ActorCriticAgent {
         let a_ltp = self.a_ltp;
         let a_ltd = self.a_ltd;
 
-        // 1. Set Poisson rates from state
+        // 1. Set Poisson rates from state (reuse buffer, zero alloc)
         let n = ni.min(state.len());
         self.input_spikes_pool.fill(0);
+        self.rates_buf.fill(0.0);
         if n > 0 {
-            let mut rates = vec![0.0; PADDED(ni)];
             for i in 0..n {
                 let val = state[i].clamp(-1.0, 1.0) * 0.5 + 0.5;
-                rates[i] = 10.0 + val * 190.0;
+                self.rates_buf[i] = 10.0 + val * 190.0;
             }
-            self.encoder.set_rates(&rates);
+            self.encoder.set_rates(&self.rates_buf);
         }
 
         // 2. Reset neuron states
@@ -196,35 +202,31 @@ impl ActorCriticAgent {
         // 3. Internal simulation loop (0 heap allocations)
         for _step in 0..n_steps {
             // a. Poisson → weights → Izhikevich (fused: RNG → SIMD accum → dynamics)
-            unsafe {
-                kernels::poisson_fused_hidden_step(
-                    self.v_h.as_mut_ptr(), self.u_h.as_mut_ptr(),
-                    self.trace_h.as_mut_ptr(), self.sp_h.as_mut_ptr(),
-                    self.refr_h.as_mut_ptr(),
-                    self.a_h.as_ptr(), self.b_h.as_ptr(),
-                    self.c_h.as_ptr(), self.d_h.as_ptr(),
-                    self.w_ih.as_ptr(),
-                    self.encoder.rng_states.as_mut_ptr(),
-                    self.encoder.rates.as_ptr(),
-                    self.input_spikes_pool.as_mut_ptr(),
-                    dt, 0.5, tau_ref,
-                    ni, nh,
-                );
-            }
+            kernels::poisson_fused_hidden_step(
+                &mut self.v_h, &mut self.u_h,
+                &mut self.trace_h, &mut self.sp_h,
+                &mut self.refr_h,
+                &self.a_h, &self.b_h,
+                &self.c_h, &self.d_h,
+                &self.w_ih,
+                &mut self.encoder.rng_states,
+                &self.encoder.rates,
+                &mut self.input_spikes_pool,
+                dt, 0.5, tau_ref,
+                ni,
+            );
 
             // b. Fused kernel: hidden spikes → LIF (one SIMD pass, no I_o buffer)
-            unsafe {
-                kernels::fused_output_lif_step(
-                    self.v_o.as_mut_ptr(), self.sp_o.as_mut_ptr(),
-                    self.refr_o.as_mut_ptr(),
-                    self.act_tau_m.as_ptr(), self.act_v_rest.as_ptr(),
-                    self.act_v_th.as_ptr(), self.act_v_reset.as_ptr(),
-                    self.w_ho.as_ptr(),
-                    self.sp_h.as_ptr(),
-                    dt, tau_ref,
-                    nh, na,
-                );
-            }
+            kernels::fused_output_lif_step(
+                &mut self.v_o, &mut self.sp_o,
+                &mut self.refr_o,
+                &self.act_tau_m, &self.act_v_rest,
+                &self.act_v_th, &self.act_v_reset,
+                &self.w_ho,
+                &self.sp_h,
+                dt, tau_ref,
+                nh,
+            );
 
             // d. Critic current (scalar accumulate)
             let mut sum_ic = 0.0f32;
@@ -254,29 +256,29 @@ impl ActorCriticAgent {
             if self.sp_c[0] != 0 { self.critic_count += 1.0; }
         }
 
-        // 4. Softmax over firing rates
+        // 4. Softmax over firing rates (reuse buffer, zero alloc)
         let n_act = self.n_actions_real;
         let duration_s = (n_steps as f32) * self.dt / 1000.0;
-        let mut rates_out = vec![0.0f32; n_act];
+        self.rates_out_buf.fill(0.0);
         let mut max_rate = 0.0f32;
         for k in 0..n_act {
-            rates_out[k] = if duration_s > 0.0 { self.act_counts[k] / duration_s } else { 0.0 };
-            if rates_out[k] > max_rate { max_rate = rates_out[k]; }
+            self.rates_out_buf[k] = if duration_s > 0.0 { self.act_counts[k] / duration_s } else { 0.0 };
+            if self.rates_out_buf[k] > max_rate { max_rate = self.rates_out_buf[k]; }
         }
 
         let temp = 1.0;
         let mut exp_sum = 0.0f32;
         for k in 0..n_act {
-            rates_out[k] = kernels::fast_exp((rates_out[k] - max_rate) / temp);
-            exp_sum += rates_out[k];
+            self.rates_out_buf[k] = kernels::fast_exp((self.rates_out_buf[k] - max_rate) / temp);
+            exp_sum += self.rates_out_buf[k];
         }
         if exp_sum > 1e-10 {
-            for k in 0..n_act { rates_out[k] /= exp_sum; }
+            for k in 0..n_act { self.rates_out_buf[k] /= exp_sum; }
         } else {
-            for k in 0..n_act { rates_out[k] = 1.0 / n_act as f32; }
+            for k in 0..n_act { self.rates_out_buf[k] = 1.0 / n_act as f32; }
         }
 
-        let action = sample_from_softmax(&rates_out);
+        let action = sample_from_softmax(&self.rates_out_buf[..n_act]);
         let value = if duration_s > 0.0 { self.critic_count / duration_s / 100.0 } else { 0.0 };
         self.last_value = value.clamp(0.0, 1.0);
         debug_assert!(!self.last_value.is_nan(), "critic value should not be NaN");
@@ -289,34 +291,23 @@ impl ActorCriticAgent {
         let td_error = reward + self.gamma * next_value * (if done { 0.0 } else { 1.0 }) - self.last_value;
 
         if td_error.abs() > 1e-10 {
-            unsafe {
-                // Actor: input→hidden  (SIMD dopamine_weight_update)
-                kernels::dopamine_weight_update(
-                    self.w_ih.as_mut_ptr(),
-                    self.elig_ih.as_ptr(),
-                    td_error, self.lr_actor,
-                    self.w_min, self.w_max,
-                    self.n_input * self.n_hidden,
-                );
+            // Actor: input→hidden  (SIMD dopamine_weight_update)
+            kernels::dopamine_weight_update(
+                &mut self.w_ih, &self.elig_ih,
+                td_error, self.lr_actor, self.w_min, self.w_max,
+            );
 
-                // Actor: hidden→output (SIMD)
-                kernels::dopamine_weight_update(
-                    self.w_ho.as_mut_ptr(),
-                    self.elig_ho.as_ptr(),
-                    td_error, self.lr_actor,
-                    self.w_min, self.w_max,
-                    self.n_hidden * self.n_actions,
-                );
+            // Actor: hidden→output (SIMD)
+            kernels::dopamine_weight_update(
+                &mut self.w_ho, &self.elig_ho,
+                td_error, self.lr_actor, self.w_min, self.w_max,
+            );
 
-                // Critic: input→critic (SIMD, size ni might not be ×8 — has scalar tail)
-                kernels::dopamine_weight_update(
-                    self.w_ic.as_mut_ptr(),
-                    self.elig_ic.as_ptr(),
-                    td_error, self.lr_critic,
-                    self.w_min, self.w_max,
-                    self.n_input,
-                );
-            }
+            // Critic: input→critic (SIMD, size ni might not be ×8 — has scalar tail)
+            kernels::dopamine_weight_update(
+                &mut self.w_ic, &self.elig_ic,
+                td_error, self.lr_critic, self.w_min, self.w_max,
+            );
         }
 
         self.clear_eligibility();

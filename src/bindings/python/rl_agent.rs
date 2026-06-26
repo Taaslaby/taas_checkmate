@@ -10,12 +10,12 @@ use crate::training::rl;
 /// Actor-Critic RL Agent с дофамин-модулированным STDP (3-factor plasticity).
 ///
 /// Использование:
-///     agent = PyActorCriticAgent(n_input=4, n_hidden=256, n_actions=2)
+///     agent = ActorCriticAgent(n_input=4, n_hidden=256, n_actions=2)
 ///     action, value = agent.act(state)
 ///     td_error = agent.learn(reward, next_value, done)
 ///
 /// Геттеры/сеттеры: gamma, lr_actor, lr_critic, tau_trace, tau_e, a_ltp, a_ltd
-#[pyclass]
+#[pyclass(name = "ActorCriticAgent")]
 pub struct PyActorCriticAgent {
     pub inner: rl::ActorCriticAgent,
 }
@@ -107,7 +107,7 @@ impl PyActorCriticAgent {
     #[setter] fn set_tau_ref(&mut self, v: f32) { self.inner.tau_ref = v; }
 
     fn __repr__(&self) -> String {
-        format!("PyActorCriticAgent(n_input={}, n_hidden={}, n_actions={})",
+        format!("ActorCriticAgent(n_input={}, n_hidden={}, n_actions={})",
             self.inner.n_input, self.inner.n_hidden, self.inner.n_actions_real)
     }
 }

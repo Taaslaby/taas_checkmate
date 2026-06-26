@@ -1,3 +1,7 @@
+# ═══════════════════════════════════════════════════════════
+# TaasLab yakutia \\ ТаасЛаб якутия \\
+# ═════════════════════════════════════
+
 # 🧠 taas-checkmate — Pure Rust SIMD Neural Engine
 
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-blue)]()
@@ -5,8 +9,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 [![CI](https://github.com/USER/taas-checkmate/actions/workflows/ci.yml/badge.svg)]()
 
-> **Pure Rust wavelet neural engine** — no ASM, no C, no FFI.  
-> 100% safe Rust over explicit `wide::f32x8` SIMD kernels.  
+> **Pure Rust wavelet neural engine** 
 
 ## 🏗 Architecture
 
@@ -16,7 +19,6 @@ Python (PyO3)  ⇄  Rust safe wrappers  ⇄  pure Rust SIMD kernels (wide::f32x8
                                              AVX2 / NEON / WASM SIMD
 ```
 
-All kernels are pure Rust using `wide::f32x8` for portable SIMD — no ASM, no C, no FFI.
 
 ## 📦 Module Structure (60+ source files)
 
@@ -276,4 +278,4 @@ cargo doc --no-deps --open
 
 ## 📜 License
 
-MIT
+GNU

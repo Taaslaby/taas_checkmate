@@ -1,0 +1,62 @@
+#![allow(non_snake_case)]
+
+pub use taas_kernels as kernels;
+
+pub mod backend;
+pub mod phase_gate;
+pub mod cochlea;
+pub mod pst;
+pub mod trajectory;
+pub mod ridge;
+pub mod decoders;
+pub mod oscillator;
+pub mod pst_control;
+pub mod sparker;
+pub mod spike;
+
+pub use spike::{
+    T3SpikeTrajectory,
+    t3spike_forward,
+    t3spike_forward_with_backend,
+    t3spike_backward,
+};
+
+#[cfg(feature = "cuda")]
+pub mod backend_cuda;
+
+#[cfg(feature = "cuda")]
+pub mod spike_cuda;
+
+pub const PI: f32 = std::f32::consts::PI;
+pub const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
+
+pub use backend::{T3Backend, Avx2Backend, ScalarBackend};
+
+#[cfg(feature = "cuda")]
+pub use backend_cuda::CudaBackend;
+
+pub use oscillator::TriOscillator;
+
+pub use phase_gate::{phase_gate, gate_coupling};
+
+pub use cochlea::{Biquad, Cochlea};
+
+pub use pst::{pst_features, pst_linear_features, pst_linear_dim};
+
+pub use trajectory::TrajectoryBuffer;
+
+pub use decoders::{
+    Decoder,
+    NlmsDecoder, KalmanDecoder,
+    InverseKuramotoDecoder, StdpDecoder, PstDecoder,
+    HybridDecoder,
+};
+
+pub use ridge::{RidgeSolver, solve_cg, compute_pearson, normalize_features};
+
+pub use pst_control::{PstControl, PstControlConfig};
+
+pub use sparker::{
+    Sparker, SpikeTrace, HologramEncoder, SpikeStats,
+    NormalizedSparker, HybridSparker,
+};

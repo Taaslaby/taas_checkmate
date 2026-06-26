@@ -27,6 +27,7 @@ pub mod eprop;
 pub mod autotune;
 pub mod trainer;
 pub mod connectome;
+pub mod lif_connectome;
 pub mod poisson_stp;
 pub mod rl_agent;
 pub mod taas_format;
@@ -115,6 +116,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(sparse, sparse::py_step_psi_wave_full);
     add_fn!(sparse, sparse::py_propagate_spikes);
     add_fn!(sparse, sparse::py_sim_step);
+    add_fn!(sparse, sparse::py_rate_step);
     add_fn!(sparse, sparse::py_apply_stdp_ltd);
 
     // ─── koit ──────────────────────────────────────────
@@ -128,6 +130,10 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, t3, t3::PyNlmsDecoder);
     export_class!(m, t3, t3::PyKalmanDecoder);
     export_class!(m, t3, t3::PyT2SpigradTrajectory);
+    export_class!(m, t3, t3::PyPstControl);
+    export_class!(m, t3, t3::PySparker);
+    export_class!(m, t3, t3::PyHologramEncoder);
+    export_class!(m, t3, t3::PyNormalizedSparker);
     add_fn!(t3, t3::py_pst_features);
     add_fn!(t3, t3::py_pst_linear_features);
     add_fn!(t3, t3::py_pst_linear_dim);
@@ -140,6 +146,11 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "cuda")]
     add_fn!(t3, t3::py_t2spigrad_backward_cuda);
 
+    // ─── lif_connectome ─────────────────────────────────
+    let lif_connectome = make_sub(m.py(), m, "lif_connectome")?;
+    add_fn!(lif_connectome, lif_connectome::py_lif_sim_cpu_recording);
+    add_fn!(lif_connectome, lif_connectome::py_lif_sim_gpu_recording);
+
     // ─── snn ───────────────────────────────────────────
     let snn = make_sub(m.py(), m, "snn")?;
     export_class!(m, snn, snn::PyLifNeuron);
@@ -151,6 +162,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(snn, snn::py_phase_encode);
     add_fn!(snn, snn::py_bsa_kernel_hamming);
     add_fn!(snn, snn::py_population_rate_decode);
+    add_fn!(snn, snn::py_spike_raster_to_csv);
 
     // ─── eprop ─────────────────────────────────────────
     let eprop = make_sub(m.py(), m, "eprop")?;
@@ -171,7 +183,10 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── connectome ────────────────────────────────────
     let connectome = make_sub(m.py(), m, "connectome")?;
     add_fn!(connectome, connectome::py_bench_connectome_cpu);
+    add_fn!(connectome, connectome::py_bench_connectome_cpu_recording);
     add_fn!(connectome, connectome::py_bench_connectome_gpu);
+    add_fn!(connectome, connectome::py_bench_connectome_gpu_recording);
+    add_fn!(connectome, connectome::py_bench_connectome_gpu_stdp);
     #[cfg(feature = "cuda")]
     add_fn!(connectome, connectome::py_bench_psi_wave_gpu);
     add_fn!(connectome, connectome::py_bench_psi_aberton_gpu);

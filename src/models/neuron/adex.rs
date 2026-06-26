@@ -54,8 +54,7 @@ pub fn step_adex(
         .zip(refractory.par_chunks_exact_mut(8))
         .zip(params_buf.par_iter())
         .for_each(|(((((v8, u8), I8), sp8), refr8), params)| {
-            unsafe { kernels::adex_step(v8.as_mut_ptr(), u8.as_mut_ptr(), I8.as_mut_ptr(), sp8.as_mut_ptr(), params.as_ptr(),
-                refr8.as_mut_ptr(), tau_ref, 8); }
+            kernels::adex_step(v8, u8, I8, sp8, params, refr8, tau_ref);
         });
 }
 
@@ -149,24 +148,16 @@ impl EPropAdExMulti {
         let tau_e = self.tau_e;
         let tau_sg = self.tau_surrogate;
 
-        unsafe {
-            kernels::eprop_adex_step_multi(
-                self.v.as_mut_ptr(),
-                self.w.as_mut_ptr(),
-                self.psi.as_mut_ptr(),
-                self.e.as_mut_ptr(),
-                z_pre.as_ptr(),
-                I_ext.as_ptr(),
-                weights.as_ptr(),
-                n,
-                n_pre,
-                dt, tau_m, tau_w,
-                v_rest, v_thresh, v_reset, delta_t,
-                a, b,
-                tau_e, tau_sg,
-                spikes.as_mut_ptr(),
-            )
-        }
+        kernels::eprop_adex_step_multi(
+            &mut self.v, &mut self.w, &mut self.psi, &mut self.e,
+            z_pre, I_ext, weights,
+            n_pre,
+            dt, tau_m, tau_w,
+            v_rest, v_thresh, v_reset, delta_t,
+            a, b,
+            tau_e, tau_sg,
+            spikes,
+        )
     }
 
     /// Apply E-Prop weight update for column-major weight matrix.

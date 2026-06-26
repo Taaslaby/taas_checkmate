@@ -11,11 +11,12 @@ pub struct SGD {
     pub lr: f32,
     pub momentum: f32,
     velocities: HashMap<String, Tensor>,
+    scratch_vel: Vec<f32>,  // reusable dummy for momentum=0
 }
 
 impl SGD {
     pub fn new(lr: f32) -> Self {
-        Self { lr, momentum: 0.0, velocities: HashMap::new() }
+        Self { lr, momentum: 0.0, velocities: HashMap::new(), scratch_vel: Vec::new() }
     }
 
     pub fn with_momentum(mut self, momentum: f32) -> Self {
@@ -29,25 +30,20 @@ impl SGD {
             let vel = self.velocities
                 .entry(key.to_string())
                 .or_insert_with(|| Tensor::zeros(&[n]));
-            unsafe {
-                kernels::sgd_step_simd(
-                    vel.data_mut().as_mut_ptr(),
-                    weight.data_mut().as_mut_ptr(),
-                    grad.data().as_ptr(),
-                    self.lr, self.momentum, n,
-                );
-            }
+            kernels::sgd_step_simd(
+                vel.data_mut(),
+                weight.data_mut(),
+                grad.data(),
+                self.lr, self.momentum,
+            );
         } else {
-            // plain SGD через SIMD (momentum=0)
-            unsafe {
-                let zeros = weight.data().to_vec(); // dummy — не используется при momentum=0
-                kernels::sgd_step_simd(
-                    zeros.as_ptr() as *mut f32, // dummy velocity, не используется
-                    weight.data_mut().as_mut_ptr(),
-                    grad.data().as_ptr(),
-                    self.lr, 0.0, n,
-                );
-            }
+            self.scratch_vel.resize(n, 0.0);
+            kernels::sgd_step_simd(
+                &mut self.scratch_vel,
+                weight.data_mut(),
+                grad.data(),
+                self.lr, 0.0,
+            );
         }
     }
 }
@@ -83,16 +79,14 @@ impl Adam {
         let beta1_t_corr = 1.0 - beta1_t;
         let beta2_t_corr = 1.0 - beta2_t;
 
-        unsafe {
-            kernels::adam_step_simd(
-                weight.data_mut().as_mut_ptr(),
-                m.data_mut().as_mut_ptr(),
-                v.data_mut().as_mut_ptr(),
-                grad.data().as_ptr(),
-                self.lr, self.beta1, self.beta2, self.eps,
-                beta1_t_corr, beta2_t_corr, n,
-            );
-        }
+        kernels::adam_step_simd(
+            weight.data_mut(),
+            m.data_mut(),
+            v.data_mut(),
+            grad.data(),
+            self.lr, self.beta1, self.beta2, self.eps,
+            beta1_t_corr, beta2_t_corr,
+        );
     }
 
     pub fn reset(&mut self) {

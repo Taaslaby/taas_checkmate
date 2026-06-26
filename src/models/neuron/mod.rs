@@ -42,7 +42,7 @@ pub use sorn::{intrinsic_plasticity, synaptic_normalization, SornNetwork};
 pub use encoding::{bsa_encode, bsa_kernel_hamming, phase_encode, TtfsEncoder};
 pub use poisson::PoissonGenerator;
 pub use delay::DelayBuffer;
-pub use stats::{population_rate_decode, SpikeRaster, firing_rates, mean_firing_rate, compute_isi, compute_cvs};
+pub use stats::{population_rate_decode, SpikeRaster, spike_raster_to_csv, firing_rates, mean_firing_rate, compute_isi, compute_cvs};
 pub use eprop::{surrogate_gradient, eprop_update};
 
 // ─── Constants ──────────────────────────────────────────
@@ -51,4 +51,5 @@ pub use eprop::{surrogate_gradient, eprop_update};
 pub const I_CLAMP: f32 = 100.0;
 
 /// Default refractory period (ms).
-pub const DEFAULT_TAU_REF: f32 = 3.0;
+/// Shiu et al. 2024: 2.2ms for Drosophila LIF.
+pub const DEFAULT_TAU_REF: f32 = 2.2;

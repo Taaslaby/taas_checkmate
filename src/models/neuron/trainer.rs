@@ -184,7 +184,7 @@ impl EPropTrainer {
         for (p, &e) in worker.probs.iter_mut().zip(worker.exps.iter()) { *p = e * inv; }
 
         let loss = -(worker.probs[target as usize].max(1e-30)).ln();
-        let predicted = worker.probs.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+        let predicted = worker.probs.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less)).map(|(i, _)| i).unwrap_or(0);
 
         for k in 0..no { worker.error[k] = -worker.probs[k]; }
         worker.error[target as usize] += 1.0;
@@ -315,7 +315,7 @@ impl EPropTrainer {
             for j in 0..self.nh { sum += w.hc_f32[j] * w.w_out[j * self.no + k]; }
             w.logits[k] = sum;
         }
-        w.logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i as i32).unwrap_or(0)
+        w.logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less)).map(|(i, _)| i as i32).unwrap_or(0)
     }
 }
 

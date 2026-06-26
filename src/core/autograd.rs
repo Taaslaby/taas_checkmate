@@ -472,15 +472,12 @@ impl Var {
 
         if n == 1 {
             for i in 0..m {
-                unsafe {
-                    kernels::linear_decoder(
-                        result[i..].as_mut_ptr(),
-                        a_data[i * k..].as_ptr(),
-                        b_data.as_ptr(),
-                        zero_bias.as_ptr(),
-                        k, 1,
-                    );
-                }
+                kernels::linear_decoder(
+                    &mut result[i..i + 1],
+                    &a_data[i * k..(i + 1) * k],
+                    b_data,
+                    &zero_bias,
+                );
             }
         } else {
             // Транспонируем b для contiguous доступа
@@ -492,15 +489,12 @@ impl Var {
             }
 
             for i in 0..m {
-                unsafe {
-                    kernels::linear_decoder(
-                        result[i * n..].as_mut_ptr(),
-                        a_data[i * k..].as_ptr(),
-                        b_t.as_ptr(),
-                        zero_bias.as_ptr(),
-                        k, n,
-                    );
-                }
+                kernels::linear_decoder(
+                    &mut result[i * n..(i + 1) * n],
+                    &a_data[i * k..(i + 1) * k],
+                    &b_t,
+                    &zero_bias,
+                );
             }
         }
 
@@ -606,15 +600,12 @@ impl Op {
                     let mut grad_a = vec![0.0f32; m * k];
                     let zero_bias = vec![0.0f32; k];
                     for i in 0..m {
-                        unsafe {
-                            kernels::linear_decoder(
-                                grad_a[i * k..].as_mut_ptr(),
-                                grad_output[i * n..].as_ptr(),
-                                b_data.as_ptr(),
-                                zero_bias.as_ptr(),
-                                n, k,
-                            );
-                        }
+                        kernels::linear_decoder(
+                            &mut grad_a[i * k..(i + 1) * k],
+                            &grad_output[i * n..(i + 1) * n],
+                            &b_data,
+                            &zero_bias,
+                        );
                     }
                     add_to_grad(a, &grad_a);
                 }
@@ -637,15 +628,12 @@ impl Op {
                     let mut grad_b = vec![0.0f32; k * n];
                     let zero_bias = vec![0.0f32; n];
                     for t in 0..k {
-                        unsafe {
-                            kernels::linear_decoder(
-                                grad_b[t * n..].as_mut_ptr(),
-                                a_t[t * m..].as_ptr(),
-                                grad_output.as_ptr(),
-                                zero_bias.as_ptr(),
-                                m, n,
-                            );
-                        }
+                        kernels::linear_decoder(
+                            &mut grad_b[t * n..(t + 1) * n],
+                            &a_t[t * m..(t + 1) * m],
+                            grad_output,
+                            &zero_bias,
+                        );
                     }
                     add_to_grad(b, &grad_b);
                 }

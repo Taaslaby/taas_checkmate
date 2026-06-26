@@ -10,10 +10,10 @@ use crate::models::neuron;
 /// E-Prop LIF neuron — LIF с eligibility traces для градиентного обучения.
 ///
 /// Использование:
-///     eprop = PyEPropLIF(256, dt=1.0, tau_m=10.0, tau_e=20.0)
+///     eprop = EPropLIF(256, dt=1.0, tau_m=10.0, tau_e=20.0)
 ///     n_spikes = eprop.step(I, spikes_out, pre_spikes)
 ///     eprop.update_weights(weights, learning_signals, lr=0.01)
-#[pyclass]
+#[pyclass(name = "EPropLIF")]
 pub struct PyEPropLIF {
     pub inner: neuron::EPropLIF,
 }
@@ -60,6 +60,7 @@ impl PyEPropLIF {
         PyArray1::from_vec(py, self.inner.v.clone()).into()
     }
 
+    #[setter]
     fn set_v(&mut self, src: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let src = src.readonly();
         let n = self.inner.n.min(src.len()?);
@@ -70,7 +71,7 @@ impl PyEPropLIF {
     fn reset(&mut self) { self.inner.reset(); }
 
     fn __repr__(&self) -> String {
-        format!("PyEPropLIF(n={}, dt={}, τ_m={}, τ_e={})", self.inner.n, self.inner.dt, self.inner.tau_m, self.inner.tau_e)
+        format!("EPropLIF(n={}, dt={}, τ_m={}, τ_e={})", self.inner.n, self.inner.dt, self.inner.tau_m, self.inner.tau_e)
     }
 }
 
@@ -86,7 +87,7 @@ impl PyEPropLIF {
 /// Step computes: I_total_j = I_ext_j + Σ_i weights[i·n+j] · z_pre[i]
 /// Then Izhikevich dynamics + per-synapse eligibility:
 ///   de_ij/dt = -e_ij/τ_e + ψ_j · z_pre_i
-#[pyclass]
+#[pyclass(name = "EPropIzhikevichMulti")]
 pub struct PyEPropIzhikevichMulti {
     inner: neuron::EPropIzhikevichMulti,
 }
@@ -157,7 +158,7 @@ impl PyEPropIzhikevichMulti {
     fn reset(&mut self) { self.inner.reset(); }
 
     fn __repr__(&self) -> String {
-        format!("PyEPropIzhikevichMulti(n_pre={}, n_post={}, dt={}, τ_e={})",
+        format!("EPropIzhikevichMulti(n_pre={}, n_post={}, dt={}, τ_e={})",
             self.inner.n_pre, self.inner.n_post, self.inner.dt, self.inner.tau_e)
     }
 

@@ -16,11 +16,11 @@ use crate::models::neuron;
 /// Генерирует спайки с заданной частотой по распределению Пуассона.
 ///
 /// Использование:
-///     gen = PyPoissonGenerator(1000, dt=1.0, seed=42)
+///     gen = PoissonGenerator(1000, dt=1.0, seed=42)
 ///     gen.set_rate(0, 50.0)  # нейрон 0: 50 Гц
 ///     spikes = np.zeros(1000, dtype=np.int32)
 ///     gen.step(spikes)
-#[pyclass]
+#[pyclass(name = "PoissonGenerator")]
 pub struct PyPoissonGenerator {
     inner: neuron::PoissonGenerator,
 }
@@ -60,10 +60,10 @@ impl PyPoissonGenerator {
 /// Краткосрочная депрессия + фасилитация синапсов.
 ///
 /// Использование:
-///     stp = PyShortTermPlasticity(1000, dt=1.0)
+///     stp = ShortTermPlasticity(1000, dt=1.0)
 ///     I_out = np.zeros(1000, dtype=np.float32)
 ///     stp.step(pre_spikes, I_out)
-#[pyclass]
+#[pyclass(name = "ShortTermPlasticity")]
 pub struct PyShortTermPlasticity {
     pub inner: neuron::ShortTermPlasticity,
 }
@@ -116,6 +116,8 @@ impl PyShortTermPlasticity {
     fn reset(&mut self) { self.inner.reset(); }
 
     fn __repr__(&self) -> String { format!("ShortTermPlasticity(n={})", self.inner.n) }
+
+    fn n_neurons(&self) -> usize { self.inner.n }
 }
 
 // ═══════════════════════════════════════════════════════════

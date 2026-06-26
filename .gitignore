@@ -1,5 +1,12 @@
 target/
-.so
+*.so
+*.pyc
 __pycache__/
 *.egg-info/
 research/
+.DS_Store
+*.bak
+*~
+.env
+*.o
+*.a

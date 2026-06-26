@@ -10,18 +10,12 @@ use crate::kernels;
 
 pub fn stdp_update(weights: &mut [f32], traces_pre: &[f32], traces_post: &[f32],
     lr_ltd: f32, lr_ltp: f32, w_min: f32, w_max: f32) {
-    let n = weights.len();
-    assert!(n == traces_pre.len() && n == traces_post.len());
-    unsafe { kernels::stdp_update(weights.as_mut_ptr(), traces_pre.as_ptr(), traces_post.as_ptr(),
-        lr_ltd, lr_ltp, w_min, w_max, n); }
+    kernels::stdp_update(weights, traces_pre, traces_post, lr_ltd, lr_ltp, w_min, w_max);
 }
 
 pub fn stdp_homeostatic(weights: &mut [f32], traces_pre: &[f32], traces_post: &[f32],
     lr_ltd: f32, lr_ltp: f32, target_sum: f32, w_max: f32) {
-    let n = weights.len();
-    assert!(n == traces_pre.len() && n == traces_post.len());
-    unsafe { kernels::stdp_homeostatic(weights.as_mut_ptr(), traces_pre.as_ptr(), traces_post.as_ptr(),
-        lr_ltd, lr_ltp, target_sum, w_max, n); }
+    kernels::stdp_homeostatic(weights, traces_pre, traces_post, lr_ltd, lr_ltp, target_sum, w_max);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -93,22 +87,19 @@ impl DopamineSTDP {
         let n8 = n & !7;
         if n8 == 0 { return; }
 
-        unsafe {
-            kernels::dopamine_traces_step(
-                self.trace_pre.as_mut_ptr(),
-                self.trace_post.as_mut_ptr(),
-                self.eligibility.as_mut_ptr(),
-                pre_spikes.as_ptr(),
-                post_spikes.as_ptr(),
-                self.dt,
-                self.tau_pre,
-                self.tau_post,
-                self.tau_e,
-                self.a_ltp,
-                self.a_ltd,
-                n8,
-            );
-        }
+        kernels::dopamine_traces_step(
+            &mut self.trace_pre[..n8],
+            &mut self.trace_post[..n8],
+            &mut self.eligibility[..n8],
+            &pre_spikes[..n8],
+            &post_spikes[..n8],
+            self.dt,
+            self.tau_pre,
+            self.tau_post,
+            self.tau_e,
+            self.a_ltp,
+            self.a_ltd,
+        );
 
         // Scalar tail (n & 7)
         if n8 < n {
@@ -134,17 +125,14 @@ impl DopamineSTDP {
         let n8 = n & !7;
         if n8 == 0 { return; }
 
-        unsafe {
-            kernels::dopamine_weight_update(
-                weights.as_mut_ptr(),
-                self.eligibility.as_ptr(),
-                dopamine,
-                lr,
-                self.w_min,
-                self.w_max,
-                n8,
-            );
-        }
+        kernels::dopamine_weight_update(
+            &mut weights[..n8],
+            &self.eligibility[..n8],
+            dopamine,
+            lr,
+            self.w_min,
+            self.w_max,
+        );
 
         if n8 < n {
             for i in n8..n {

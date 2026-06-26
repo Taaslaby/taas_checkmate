@@ -261,7 +261,9 @@ impl TaasReader {
         pos += 5;
 
         // Header length (u64 LE)
-        let header_len = u64::from_le_bytes(bytes[pos..pos+8].try_into().unwrap()) as usize;
+        let header_len = u64::from_le_bytes(
+            bytes[pos..pos+8].try_into().map_err(|_| "Header length field truncated".to_string())?
+        ) as usize;
         pos += 8;
 
         // Header JSON

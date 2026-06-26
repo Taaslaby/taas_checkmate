@@ -138,6 +138,59 @@ pub fn py_apply_stdp_ltd(
     Ok(())
 }
 
+/// Rate-based step: scatter SpMV (W^T @ r) + clamp + exponential Euler.
+///
+/// Один шаг rate-based динамики на полном коннектоме.
+/// Заменяет scipy SpMV в FlyWireRateBrain на быстрый Rust.
+///
+/// Использует pre-allocated I_buffer для избегания аллокаций. I_buffer будет занулён внутри.
+///
+/// Args:
+///     r: rates [n] (будет изменён)
+///     I_buffer: scratch буфер [n] (user-managed, будет занулён)
+///     row_ptr, col_indices, values: CSR матрица весов
+///     nt_types: тип нейромедиатора (+1 возб, -1 торм) per pre-neuron [n]
+///     external_I: внешний ток [n]
+///     decay: exp(-dt/tau)
+///     inv_decay: 1 - decay
+///
+/// Формула:
+///     I[post] += W[pre,post] * r[pre] * nt_types[pre]  (scatter SpMV)
+///     r = r * decay + clamp(I + I_ext, 0, 1) * (1 - decay)
+#[pyfunction]
+#[pyo3(name = "rate_step")]
+pub fn py_rate_step(
+    r: Bound<'_, PyArray1<f32>>,
+    I_buffer: Bound<'_, PyArray1<f32>>,
+    row_ptr: Bound<'_, PyArray1<i32>>,
+    col_indices: Bound<'_, PyArray1<i32>>,
+    values: Bound<'_, PyArray1<f32>>,
+    nt_types: Bound<'_, PyArray1<f32>>,
+    external_I: Bound<'_, PyArray1<f32>>,
+    decay: f32,
+    inv_decay: f32,
+) -> PyResult<()> {
+    let mut r = r.readwrite();
+    let mut I_buffer = I_buffer.readwrite();
+    let row_ptr = row_ptr.readonly();
+    let col_indices = col_indices.readonly();
+    let values = values.readonly();
+    let nt_types = nt_types.readonly();
+    let external_I = external_I.readonly();
+    sparse::rate_step(
+        r.as_slice_mut()?,
+        I_buffer.as_slice_mut()?,
+        row_ptr.as_slice()?,
+        col_indices.as_slice()?,
+        values.as_slice()?,
+        nt_types.as_slice()?,
+        external_I.as_slice()?,
+        decay,
+        inv_decay,
+    );
+    Ok(())
+}
+
 // ─── Combined sim_step ────────────────────────────────
 
 /// Полный шаг симуляции: inject + Izhikevich + propagate spikes.

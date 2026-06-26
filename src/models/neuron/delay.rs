@@ -26,13 +26,13 @@ impl DelayBuffer {
     pub fn read(&self, delay: usize) -> [f32; 8] {
         let mut out = [0.0f32; 8];
         let read_pos = (self.pos + self.n - delay % self.n) % self.n;
-        unsafe { kernels::delay_buffer_circular(out.as_mut_ptr(), self.buf.as_ptr(), self.n, read_pos); }
+        kernels::delay_buffer_circular(&mut out[..], &self.buf[..self.n], read_pos);
         out
     }
 
     pub fn read_multi(&self, delays: &[i32; 8]) -> [f32; 8] {
         let mut out = [0.0f32; 8];
-        unsafe { kernels::delay_buffer_multi_tap(out.as_mut_ptr(), self.buf.as_ptr(), delays.as_ptr(), self.n, 8); }
+        kernels::delay_buffer_multi_tap(&mut out[..], &self.buf[..self.n], delays);
         out
     }
 }

@@ -28,9 +28,9 @@
 /// IO encoders, decoders, gates, safety clamp
 pub mod io;
 /// Pure Rust SIMD kernels (izhikevich, lif, adex, saw, phase, stp, stdp)
-pub mod kernels;
+pub use taas_kernels as kernels;
 /// T3 engine: TriOscillator, PST features, decoders, phase gate, cochlea
-pub mod t3;
+pub use taas_t3 as t3;
 /// .taas save/load format
 pub mod taas_format;
 /// Tensor and autograd (Var, backward, optimizers)
@@ -83,7 +83,7 @@ pub use training::rl::{
     ActorCriticAgent, test_mdp_episode,
 };
 pub use ops::sparse::{
-    propagate_spikes, compute_hamiltonian, step_psi_wave_full, apply_stdp_ltd,
+    propagate_spikes, compute_hamiltonian, step_psi_wave_full, rate_step, apply_stdp_ltd,
 };
 pub use t3::{
     TriOscillator, NlmsDecoder, KalmanDecoder, InverseKuramotoDecoder,
@@ -91,6 +91,9 @@ pub use t3::{
     Decoder, T3Backend, Avx2Backend, ScalarBackend,
     pst_features, pst_linear_features, pst_linear_dim,
     compute_pearson, normalize_features,
+    PstControl, PstControlConfig,
+    Sparker, SpikeTrace, HologramEncoder, SpikeStats,
+    NormalizedSparker, HybridSparker,
 };
 
 #[cfg(feature = "cuda")]

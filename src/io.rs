@@ -9,14 +9,7 @@ use crate::kernels;
 
 /// Clamp all values in `data` to `[min, max]` using AVX.
 pub fn safety_clamp(data: &mut [f32], min: f32, max: f32) {
-    unsafe {
-        kernels::safety_clamp(
-            data.as_mut_ptr(),
-            data.len(),
-            min,
-            max,
-        );
-    }
+    kernels::safety_clamp(data, min, max);
 }
 
 // ─── PWM Encoder ─────────────────────────────────────────
@@ -100,14 +93,12 @@ impl LinearDecoder {
         assert!(states.len() >= self.n_inputs);
         assert!(out_buffer.len() >= self.n_outputs);
 
-        // ASM path (optimized)
-        unsafe {
-            kernels::linear_decoder(
-                out_buffer.as_mut_ptr(), states.as_ptr(),
-                self.weights.as_ptr(), self.bias.as_ptr(),
-                self.n_inputs, self.n_outputs,
-            );
-        }
+        kernels::linear_decoder(
+            &mut out_buffer[..self.n_outputs],
+            &states[..self.n_inputs],
+            &self.weights,
+            &self.bias,
+        );
     }
 }
 
@@ -118,25 +109,14 @@ pub fn stochastic_encoder(
     target_I: &mut [f32], inputs: &[f32], noise: &[f32],
     threshold: f32, spike_val: f32,
 ) {
-    let n = target_I.len().min(inputs.len()).min(noise.len());
-    unsafe {
-        kernels::stochastic_encoder(
-            target_I.as_mut_ptr(), inputs.as_ptr(), noise.as_ptr(),
-            threshold, spike_val, n,
-        );
-    }
+    kernels::stochastic_encoder(target_I, inputs, noise, threshold, spike_val);
 }
 
 // ─── T3 Drive Encoder ────────────────────────────────────
 
 /// T3 drive encoder: gain * inputs.
 pub fn t3_drive_encoder(drives: &mut [f32], inputs: &[f32], gain: f32) {
-    let n = drives.len().min(inputs.len());
-    unsafe {
-        kernels::t3_drive_encoder(
-            drives.as_mut_ptr(), inputs.as_ptr(), gain, n,
-        );
-    }
+    kernels::t3_drive_encoder(drives, inputs, gain);
 }
 
 // ─── T3 Complex Decoder ──────────────────────────────────
@@ -147,17 +127,12 @@ pub fn t3_complex_decoder(
     biases: &[f32], n_out: usize,
 ) {
     let n_in = amplitudes.len();
-    assert!(n_in == cos_buf.len());
-    assert!(weights.len() >= n_in * n_out);
-    assert!(biases.len() >= n_out);
-    assert!(outputs.len() >= n_out);
-    unsafe {
-        kernels::t3_complex_decoder(
-            outputs.as_mut_ptr(), amplitudes.as_ptr(), cos_buf.as_ptr(),
-            weights.as_ptr(), biases.as_ptr(),
-            n_in, n_out,
-        );
-    }
+    kernels::t3_complex_decoder(
+        &mut outputs[..n_out],
+        amplitudes, cos_buf,
+        &weights[..n_in * n_out],
+        &biases[..n_out],
+    );
 }
 
 // ─── T3 PST Features ─────────────────────────────────────
@@ -167,16 +142,11 @@ pub fn t3_pst_features(
     out_sin: &mut [f32], out_cos: &mut [f32],
     ph1: &[f32], ph2: &[f32],
 ) {
-    let n1 = ph1.len();
-    let n2 = ph2.len();
-    assert!(out_sin.len() >= n1 * n2 && out_cos.len() >= n1 * n2);
-    unsafe {
-        kernels::t3_pst_features(
-            out_sin.as_mut_ptr(), out_cos.as_mut_ptr(),
-            ph1.as_ptr(), ph2.as_ptr(),
-            n1, n2,
-        );
-    }
+    let (n1, n2) = (ph1.len(), ph2.len());
+    kernels::t3_pst_features(
+        &mut out_sin[..n1 * n2], &mut out_cos[..n1 * n2],
+        ph1, ph2,
+    );
 }
 
 // ─── T3 Tact Generator ───────────────────────────────────
@@ -186,14 +156,8 @@ pub fn t3_tact_generator(
     pulses: &mut [f32], ph1: &[f32], ph2: &[f32], ph3: &[f32],
     threshold: f32,
 ) {
-    let n = ph1.len().min(ph2.len()).min(ph3.len());
-    assert!(pulses.len() >= n);
-    unsafe {
-        kernels::t3_tact_generator(
-            pulses.as_mut_ptr(), ph1.as_ptr(), ph2.as_ptr(), ph3.as_ptr(),
-            threshold, n,
-        );
-    }
+    let n = ph1.len().min(ph2.len()).min(ph3.len()).min(pulses.len());
+    kernels::t3_tact_generator(&mut pulses[..n], &ph1[..n], &ph2[..n], &ph3[..n], threshold);
 }
 
 // ─── T3 Inverse Kuramoto ─────────────────────────────────
@@ -204,12 +168,7 @@ pub fn t3_inverse_kuramoto(
     alpha: f32, gain: f32, eps: f32, decay: f32,
 ) {
     let n = drive_out.len().min(r.len()).min(r_prev.len());
-    unsafe {
-        kernels::t3_inverse_kuramoto(
-            drive_out.as_mut_ptr(), r.as_ptr(), r_prev.as_ptr(),
-            alpha, gain, eps, decay, n,
-        );
-    }
+    kernels::t3_inverse_kuramoto(&mut drive_out[..n], &r[..n], &r_prev[..n], alpha, gain, eps, decay);
 }
 
 // ─── Echo State Tap ──────────────────────────────────────
@@ -219,12 +178,7 @@ pub fn echo_tap(
     output: &mut [f32], buffer: &[f32],
     n_osc: usize, delay_len: usize, delay_idx: usize,
 ) {
-    unsafe {
-        kernels::echo_tap(
-            output.as_mut_ptr(), buffer.as_ptr(),
-            n_osc, delay_len, delay_idx,
-        );
-    }
+    kernels::echo_tap(&mut output[..n_osc], &buffer[..n_osc * delay_len], delay_len, delay_idx);
 }
 
 // ─── Thalamic Gate ───────────────────────────────────────
@@ -235,12 +189,7 @@ pub fn thalamic_gate(
     threshold: f32, gain: f32,
 ) {
     let n = target_I.len().min(source_v.len()).min(gate_v.len());
-    unsafe {
-        kernels::thalamic_gate(
-            target_I.as_mut_ptr(), source_v.as_ptr(), gate_v.as_ptr(),
-            threshold, gain, n,
-        );
-    }
+    kernels::thalamic_gate(&mut target_I[..n], &source_v[..n], &gate_v[..n], threshold, gain);
 }
 
 // ─── Sigmoid Gate ────────────────────────────────────────
@@ -250,12 +199,7 @@ pub fn sigmoid_gate(
     output: &mut [f32], input: &[f32], gain: f32, threshold: f32,
 ) {
     let n = output.len().min(input.len());
-    unsafe {
-        kernels::sigmoid_gate(
-            output.as_mut_ptr(), input.as_ptr(), gain, threshold,
-            n,
-        );
-    }
+    kernels::sigmoid_gate(&mut output[..n], &input[..n], gain, threshold);
 }
 
 // ─── Phase Gate ──────────────────────────────────────────
@@ -265,12 +209,7 @@ pub fn phase_gate_apply(
     output: &mut [f32], input: &[f32], r: &[f32], gain: f32, threshold: f32,
 ) {
     let n = output.len().min(input.len()).min(r.len());
-    unsafe {
-        kernels::phase_gate_apply(
-            output.as_mut_ptr(), input.as_ptr(), r.as_ptr(),
-            gain, threshold, n,
-        );
-    }
+    kernels::phase_gate_apply(&mut output[..n], &input[..n], &r[..n], gain, threshold);
 }
 
 // ─── Hebbian Update ──────────────────────────────────────
@@ -280,10 +219,5 @@ pub fn hebbian_update(
     weights: &mut [f32], cos_diff: &[f32], lr: f32, decay: f32, dt: f32,
 ) {
     let n = weights.len().min(cos_diff.len());
-    unsafe {
-        kernels::hebbian_update(
-            weights.as_mut_ptr(), cos_diff.as_ptr(), lr, decay, dt,
-            n,
-        );
-    }
+    kernels::hebbian_update(&mut weights[..n], &cos_diff[..n], lr, decay, dt);
 }

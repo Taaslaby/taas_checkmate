@@ -144,6 +144,79 @@ pub fn step_psi_wave_full(
     }
 }
 
+// ─── Rate-based step ────────────────────────────────────
+
+/// One step of rate-based dynamics (scatter SpMV + clamp + exponential Euler).
+///
+/// Computes:
+///   I[post] += W[pre,post] * r[pre] * nt[pre]  (scatter SpMV = W^T @ r)
+///   r = r * decay + clamp(I + I_ext, 0, 1) * (1 - decay)
+///
+/// Sequential — scatter has fan-in on I (data race with rayon).
+/// Loop-unrolled 4-wide for instruction-level parallelism.
+///
+/// Uses pre-allocated I_buffer (zeroed each call) to avoid per-step allocations.
+///
+/// Args:
+///   r: rates [n], mutated in-place
+///   I_buffer: scratch buffer [n], filled and used internally (user-managed)
+///   row_ptr, col_indices, values: CSR synaptic matrix (W[i,j] = weight from i to j)
+///   nt_types: neurotransmitter sign (+1 exc, -1 inh) per pre-neuron [n]
+///   external_I: external input current [n]
+///   decay: exp(-dt/tau)
+///   inv_decay: 1 - decay
+pub fn rate_step(
+    r: &mut [f32],
+    I_buffer: &mut [f32],
+    row_ptr: &[i32], col_indices: &[i32], values: &[f32],
+    nt_types: &[f32],
+    external_I: &[f32],
+    decay: f32, inv_decay: f32,
+) {
+    let n = r.len().min(I_buffer.len());
+    let max_syn = col_indices.len().min(values.len());
+
+    // Zero the I_buffer
+    I_buffer[..n].fill(0.0);
+
+    // Scatter SpMV: I[col[k]] += values[k] * r[pre] * nt_types[pre]
+    for i in 0..n {
+        let ri = r[i];
+        if ri < 1e-6 { continue; }  // skip near-zero rates (~30% of neurons)
+        let nt_sign = nt_types.get(i).copied().unwrap_or(1.0);
+        let start = row_ptr.get(i).copied().unwrap_or(0).max(0) as usize;
+        let end = (row_ptr.get(i + 1).copied().unwrap_or(0) as usize).min(max_syn);
+        if start >= end { continue; }
+
+        let scale = ri * nt_sign;
+        let mut j = start;
+        while j + 4 <= end {
+            let c0 = col_indices.get(j).copied().unwrap_or(0) as usize;
+            let c1 = col_indices.get(j + 1).copied().unwrap_or(0) as usize;
+            let c2 = col_indices.get(j + 2).copied().unwrap_or(0) as usize;
+            let c3 = col_indices.get(j + 3).copied().unwrap_or(0) as usize;
+            let w0 = values[j]; let w1 = values[j + 1];
+            let w2 = values[j + 2]; let w3 = values[j + 3];
+            if c0 < n { I_buffer[c0] += w0 * scale; }
+            if c1 < n { I_buffer[c1] += w1 * scale; }
+            if c2 < n { I_buffer[c2] += w2 * scale; }
+            if c3 < n { I_buffer[c3] += w3 * scale; }
+            j += 4;
+        }
+        while j < end {
+            let col = col_indices.get(j).copied().unwrap_or(0) as usize;
+            if col < n { I_buffer[col] += values[j] * scale; }
+            j += 1;
+        }
+    }
+
+    // Clamp + exponential Euler
+    for i in 0..n {
+        let target = (I_buffer[i] + external_I.get(i).copied().unwrap_or(0.0)).clamp(0.0, 1.0);
+        r[i] = r[i] * decay + target * inv_decay;
+    }
+}
+
 // ─── STDP LTD (sparse) ──────────────────────────────────
 
 /// Apply STDP LTD — sequential (Fn closure can't mutate weights from par_iter).
