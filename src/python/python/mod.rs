@@ -242,6 +242,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(format, taas_format::py_inspect_taas);
     add_fn!(format, taas_format::py_save_connectome);
     add_fn!(format, taas_format::py_load_connectome);
+    add_fn!(format, taas_format::py_save_model);
 
     // ─── cpe ────────────────────────────────────────────
     let cpe = make_sub(m.py(), m, "cpe")?;

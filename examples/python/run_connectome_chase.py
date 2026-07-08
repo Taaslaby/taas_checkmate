@@ -16,30 +16,32 @@ from matplotlib.patches import Circle
 import time
 import os
 
-# ─── Загрузка ──────────────────────────────────────────
-print('Loading connectome...')
-conn = tcm.load_connectome('chase_brain.taas')
+# ─── Загрузка из единого .taas ──────────────────────────
+print('Loading model from chase_brain.taas...')
+import json
+data = tcm.load_taas('chase_brain.taas')
+conn = data.get('connectome') or tcm.load_connectome('chase_brain.taas')
 n_neurons = conn.n_neurons
 print(f'  {n_neurons} neurons, {conn.n_synapses} synapses')
 
-print('Loading weights...')
-w = np.load('chase_brain_weights.npz')
-bridge_w = w['bridge_w']
-bridge_b = w['bridge_b']
-decode_w = w['decode_w']
-decode_b = w['decode_b']
-readout_idx = w['readout_idx']
-n_osc = int(w['n_osc'])
-dt = float(w['dt'])
-drive_gain = float(w['drive_gain'])
-alpha = float(w['alpha'])
-freq_min = float(w['freq_min'])
-freq_max = float(w['freq_max'])
-coupling_w12 = float(w['coupling_w12'])
-coupling_w13 = float(w['coupling_w13'])
-coupling_w23 = float(w['coupling_w23'])
+meta = data.get('_meta', {})
+bridge_w = np.array(data['bridge_w'], dtype=np.float32)
+bridge_b = np.array(data['bridge_b'], dtype=np.float32)
+decode_w = np.array(data['decoder_w'], dtype=np.float32).reshape(-1, 2)
+decode_b = np.array(data['decoder_b'], dtype=np.float32)
+readout_idx = np.array(json.loads(meta.get('readout_idx', '[]')), dtype=np.int32)
+n_osc = int(meta.get('n_osc', '4'))
+dt = float(meta.get('dt', '0.05'))
+drive_gain = float(meta.get('drive_gain', '12.0'))
+alpha = float(meta.get('alpha', '2.0'))
+freq_min = float(meta.get('freq_min', '0.5'))
+freq_max = float(meta.get('freq_max', '3.0'))
+coupling_w12 = float(meta.get('coupling_w12', '0.3'))
+coupling_w13 = float(meta.get('coupling_w13', '0.15'))
+coupling_w23 = float(meta.get('coupling_w23', '0.08'))
 spike_dim = len(readout_idx)
 pst_dim = 18 * n_osc + 12
+print(f'  T3: n_osc={n_osc}, loaded bridge+decoder from .taas')
 
 # ─── Восстанавливаем bridge ────────────────────────────
 bridge = tcm.SpigradBridge(

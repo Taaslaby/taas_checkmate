@@ -145,24 +145,18 @@ else:
     print('Try more epochs or adjust LR')
 
 # ═══════════════════════════════════════════════════════
-# 5. Сохраняем в .taas + .npz
+# 5. Сохраняем модель в одном .taas файле
 # ═══════════════════════════════════════════════════════
 print('\nSaving model...')
-tcm.save_connectome('chase_brain.taas', conn)
-np.savez('chase_brain_weights.npz',
-    bridge_w=np.array(bridge.weights(), dtype=np.float32),
-    bridge_b=np.array(bridge.bias(), dtype=np.float32),
-    decode_w=decode_w,
-    decode_b=decode_b,
-    readout_idx=readout_idx,
-    n_osc=N_OSC, dt=DT, drive_gain=12.0, alpha=2.0,
-    freq_min=0.5, freq_max=3.0,
-    coupling_w12=0.3, coupling_w13=0.15, coupling_w23=0.08)
-print('  chase_brain.taas (connectome)')
-print('  chase_brain_weights.npz (bridge + decoder)')
-
-# One-line load test
-loaded = np.load('chase_brain_weights.npz')
-w_shape = loaded['bridge_w'].shape
-d_shape = loaded['decode_w'].shape
-print(f'  Load OK: bridge_w={w_shape}, decode_w={d_shape}')
+meta = [
+    ('n_osc', str(N_OSC)), ('dt', str(DT)), ('drive_gain', '12.0'),
+    ('alpha', '2.0'), ('freq_min', '0.5'), ('freq_max', '3.0'),
+    ('coupling_w12', '0.3'), ('coupling_w13', '0.15'), ('coupling_w23', '0.08'),
+    ('spike_dim', str(SPIKE_DIM)), ('pst_dim', str(pst_dim)),
+    ('readout_idx', str(readout_idx.tolist())),
+]
+tcm.save_model('chase_brain.taas', conn,
+    bridge.weights(), bridge.bias(),
+    decode_w.flatten().tolist(), decode_b.tolist(),
+    metadata=meta)
+print('  chase_brain.taas (connectome + bridge + decoder)')

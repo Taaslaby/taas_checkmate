@@ -145,6 +145,20 @@ pub fn py_load_taas(path: &str, py: Python<'_>) -> PyResult<PyObject> {
         }
     }
 
+    // Bridge weights + decoder (generic tensors, stored as flat f32 lists)
+    if let Ok(w) = reader.get_f32("bridge_w") {
+        dict.set_item("bridge_w", w)?;
+    }
+    if let Ok(b) = reader.get_f32("bridge_b") {
+        dict.set_item("bridge_b", b)?;
+    }
+    if let Ok(w) = reader.get_f32("decoder_w") {
+        dict.set_item("decoder_w", w)?;
+    }
+    if let Ok(b) = reader.get_f32("decoder_b") {
+        dict.set_item("decoder_b", b)?;
+    }
+
     Ok(dict.into())
 }
 
@@ -173,6 +187,29 @@ pub fn py_load_connectome(path: &str) -> PyResult<PyConnectomeData> {
     // Reconstruct ConnectomeData with groups from metadata
     // load_connectome already restores groups from JSON metadata
     Ok(PyConnectomeData { inner: conn })
+}
+
+/// Save full model (connectome + bridge + decoder) to a single .taas file.
+#[pyfunction]
+#[pyo3(name = "save_model")]
+pub fn py_save_model(
+    path: &str,
+    connectome: &super::connectome_brain::PyConnectomeData,
+    bridge_weights: Vec<f32>,
+    bridge_bias: Vec<f32>,
+    decoder_weights: Vec<f32>,
+    decoder_bias: Vec<f32>,
+    metadata: Option<Vec<(String, String)>>,
+) -> PyResult<()> {
+    let mut writer = taas_format::TaasWriter::new();
+    if let Some(md) = metadata { for (k, v) in md { writer.add_metadata(&k, &v); } }
+    taas_format::save_connectome(&connectome.inner, &mut writer);
+    writer.add_metadata("type", "Model");
+    writer.add_f32("bridge_w", "Model", &bridge_weights);
+    writer.add_f32("bridge_b", "Model", &bridge_bias);
+    writer.add_f32("decoder_w", "Model", &decoder_weights);
+    writer.add_f32("decoder_b", "Model", &decoder_bias);
+    writer.save_to_file(path).map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))
 }
 
 /// Inspect .taas file. Returns human-readable string.
