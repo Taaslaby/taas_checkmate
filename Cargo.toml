@@ -51,6 +51,7 @@ taas-t3 = { path = "crates/t3", optional = true }
 cuda-kernels = { path = "crates/cuda", optional = true }
 taas-connectome = { path = "crates/connectome", optional = true }
 karmac = { path = "crates/karmac", optional = true }
+taas-unity = { path = "crates/unity", optional = true }
 
 # External dependencies
 rayon = "1"
@@ -71,8 +72,32 @@ harness = false
 
 [features]
 default = ["t3"]
-t3 = ["taas-t3", "taas-train/t3"]
-python = ["dep:pyo3", "dep:numpy", "taas-connectome", "karmac", "connectome"]
-connectome = ["taas-train/connectome"]
-cuda = ["cuda-kernels", "taas-t3/cuda", "taas-connectome/cuda", "taas-train/cuda"]
+
+# Core T3 oscillator engine (oscillator + PST + decoders)
+t3 = ["taas-t3"]
+
+# Training (BPTT, SPIGRAD, connectome chase)
+train = ["taas-train/t3"]
+
+# Connectome brain simulator
+connectome = ["taas-connectome"]
+
+# Cognitive architecture (GNW, LOD, BasalGanglia)
+karmac = ["dep:karmac"]
+
+# GPU acceleration — compound feature, implies t3 + connectome
+cuda = ["t3", "connectome",
+        "cuda-kernels",
+        "taas-t3/cuda",
+        "taas-connectome/cuda",
+        "taas-train/cuda"]
+
+# Python bindings
+python = ["dep:pyo3", "dep:numpy", "connectome", "t3", "taas-train/connectome", "karmac"]
+
+# Unity C ABI
+unity = ["dep:taas-unity", "connectome"]
+
+# Everything
+all = ["t3", "train", "connectome", "karmac", "cuda", "python", "unity"]
 

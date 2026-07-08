@@ -769,6 +769,7 @@ dependencies = [
  "taas-kernels",
  "taas-t3",
  "taas-train",
+ "taas-unity",
  "wide",
 ]
 

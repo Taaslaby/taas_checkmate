@@ -41,6 +41,10 @@ pub use decoders::{
     NlmsDecoder, KalmanDecoder,
     InverseKuramotoDecoder, StdpDecoder, PstDecoder,
     HybridDecoder,
+    nlms_decode, nlms_update,
+    kalman_decode,
+    inverse_kuramoto_decode,
+    stdp_decode,
 };
 
 pub use ridge::{RidgeSolver, solve_cg, compute_pearson, normalize_features};

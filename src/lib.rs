@@ -13,12 +13,15 @@
 //!
 //! ## Feature gates
 //!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | default | Core + T3 oscillator engine |
-//! | t3      | T3 oscillator engine + decoders |
-//! | python  | PyO3 Python bindings + Connectome |
-//! | cuda    | CUDA GPU backend (implies python) |
+//! | Feature    | Description |
+//! |------------|-------------|
+//! | default    | T3 oscillator engine (oscillator + PST + decoders) |
+//! | train      | BPTT, SPIGRAD, connectome chase |
+//! | connectome | Connectome LIF brain simulator |
+//! | karmac     | Cognitive architecture (GNW, LOD, Basal) |
+//! | cuda       | GPU acceleration (implies t3 + connectome) |
+//! | python     | PyO3 bindings (implies t3 + connectome + train + karmac) |
+//! | unity      | C ABI for Unity (implies connectome) |
 
 // ─── Internal crate re-exports ─────────────────────────
 pub use taas_kernels as kernels;

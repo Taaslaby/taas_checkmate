@@ -14,6 +14,58 @@
 
 use crate::{T3Backend, TriOscillator};
 use super::ridge::{solve_cg, compute_pearson};
+use std::slice;
+
+// ─── Free functions (composable, no trait overhead) ──────
+
+/// NLMS prediction: dot(weights, states) + bias.
+#[inline]
+pub fn nlms_decode(weights: &[f32], bias: f32, states: &[f32]) -> f32 {
+    weights.iter().zip(states).map(|(w, s)| w * s).sum::<f32>() + bias
+}
+
+/// NLMS train step: returns error, updates weights and bias in place.
+/// Delegates to SIMD kernel.
+#[inline]
+pub fn nlms_update(weights: &mut [f32], bias: &mut f32, states: &[f32], target: f32, lr: f32, eps: f32) -> f32 {
+    let y = nlms_decode(weights, *bias, states);
+    let error = target - y;
+    crate::kernels::nlms_train(weights, slice::from_mut(bias), states, error, lr, eps);
+    error
+}
+
+/// Kalman/RLS prediction: dot(weights, states) + bias.
+#[inline]
+pub fn kalman_decode(weights: &[f32], bias: f32, states: &[f32]) -> f32 {
+    nlms_decode(weights, bias, states)
+}
+
+/// Inverse Kuramoto: recover drive from amplitude derivative.
+/// Formula: drive = (r_dot - (α - r²)·r) / gain
+/// `prev_amps` is mutated in place for the next call.
+#[inline]
+pub fn inverse_kuramoto_decode(prev_amps: &mut [f32], amps: &[f32], alpha: f32, drive_gain: f32, dt: f32) -> f32 {
+    let n = prev_amps.len().min(amps.len());
+    let mut sum_d = 0.0;
+    let mut count = 0;
+    for i in 0..n {
+        let r = amps[i];
+        let r_dot = if dt > 1e-12 { (r - prev_amps[i]) / dt } else { 0.0 };
+        let drive = if drive_gain.abs() > 1e-10 {
+            (r_dot - (alpha - r * r) * r) / drive_gain
+        } else { 0.0 };
+        sum_d += drive.clamp(-10.0, 10.0);
+        prev_amps[i] = r;
+        count += 1;
+    }
+    if count > 0 { sum_d / count as f32 } else { 0.0 }
+}
+
+/// STDP prediction: dot(weights, states) + bias.
+#[inline]
+pub fn stdp_decode(weights: &[f32], bias: f32, states: &[f32]) -> f32 {
+    nlms_decode(weights, bias, states)
+}
 
 // ─── Decoder trait ───────────────────────────────────────
 
