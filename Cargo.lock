@@ -116,6 +116,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "connectome-gpt"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "serde",
+ "serde_json",
+ "taas-connectome",
+ "taas-core",
+ "taas-format",
+ "taas-kernels",
+ "taas-train",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -187,7 +201,6 @@ name = "cuda-kernels"
 version = "0.1.0"
 dependencies = [
  "cc",
- "taas-checkmate",
 ]
 
 [[package]]
@@ -304,6 +317,15 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "karmac"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "rayon",
+ "taas-format",
 ]
 
 [[package]]
@@ -733,21 +755,69 @@ dependencies = [
  "bytemuck",
  "criterion",
  "cuda-kernels",
+ "karmac",
  "numpy",
  "pyo3",
  "rand",
  "rayon",
  "serde",
  "serde_json",
+ "taas-connectome",
+ "taas-core",
+ "taas-cpe",
+ "taas-format",
  "taas-kernels",
  "taas-t3",
+ "taas-train",
  "wide",
+]
+
+[[package]]
+name = "taas-connectome"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "cuda-kernels",
+ "rand",
+ "serde",
+ "taas-kernels",
+]
+
+[[package]]
+name = "taas-core"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "rayon",
+ "taas-kernels",
+]
+
+[[package]]
+name = "taas-cpe"
+version = "0.1.0"
+dependencies = [
+ "taas-kernels",
+]
+
+[[package]]
+name = "taas-format"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "cuda-kernels",
+ "serde",
+ "serde_json",
+ "taas-connectome",
+ "taas-core",
+ "taas-t3",
+ "taas-train",
 ]
 
 [[package]]
 name = "taas-kernels"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "wide",
 ]
 
@@ -759,6 +829,26 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "taas-kernels",
+]
+
+[[package]]
+name = "taas-train"
+version = "0.1.0"
+dependencies = [
+ "cuda-kernels",
+ "rand",
+ "taas-connectome",
+ "taas-core",
+ "taas-kernels",
+ "taas-t3",
+]
+
+[[package]]
+name = "taas-unity"
+version = "0.1.0"
+dependencies = [
+ "taas-connectome",
  "taas-kernels",
 ]
 

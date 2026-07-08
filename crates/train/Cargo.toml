@@ -1,0 +1,20 @@
+[package]
+name = "taas-train"
+version.workspace = true
+edition.workspace = true
+description = "Spiking RL, T3-SPIKE GRAD BPTT, optimizers"
+
+[dependencies]
+taas-kernels = { path = "../kernels" }
+taas-core = { path = "../core" }
+taas-t3 = { path = "../t3", optional = true }
+taas-connectome = { path = "../connectome", optional = true }
+cuda-kernels = { path = "../cuda", optional = true }
+rand = "0.8"
+
+[features]
+t3 = ["taas-t3"]
+connectome = ["taas-connectome", "t3"]
+cuda = ["cuda-kernels", "taas-t3/cuda"]
+default = []
+

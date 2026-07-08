@@ -1,14 +1,19 @@
 [package]
 name = "taas-t3"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "T3 oscillator engine — 3-population Kuramoto + Stuart-Landau + decoders"
+
+[lib]
+name = "taas_t3"
 
 [dependencies]
 taas-kernels = { path = "../kernels" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 rand = "0.8"
 cuda-kernels = { path = "../cuda", optional = true }
 
 [features]
-cuda = ["cuda-kernels"]
+default = ["serde", "serde_json"]
+cuda = ["dep:cuda-kernels"]

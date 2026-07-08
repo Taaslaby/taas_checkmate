@@ -1,7 +1,12 @@
 [package]
 name = "taas-kernels"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "Pure Rust SIMD neural kernels — LIF, Izhikevich, ψ-wave, Kuramoto, STDP"
+
+[lib]
+name = "taas_kernels"
 
 [dependencies]
 wide = "0.7"
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }

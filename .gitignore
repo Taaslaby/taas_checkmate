@@ -10,3 +10,9 @@ research/
 .env
 *.o
 *.a
+.venv/
+.vscode/
+.idea/
+.python-version
+__pypackages__/
+Cargo.lock

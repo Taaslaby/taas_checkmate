@@ -1,6 +1,6 @@
 //! # Cochlea — auditory filter bank with envelope followers.
 //!
-//! Из оригинального Nakajima NeuroBrain cochlea.rs.
+//! Из оригинального taas_chaser cochlea.rs.
 //!
 //! ```text
 //! Audio → [Biquad Bandpass × N] → [Envelope Follower × N] → envelopes
@@ -8,7 +8,7 @@
 //!                                 spike detection
 //! ```
 
-use crate::TWO_PI;
+use super::TWO_PI;
 
 // ─── Biquad IIR Filter ───────────────────────────────────
 
@@ -16,15 +16,27 @@ use crate::TWO_PI;
 ///
 /// Audio EQ Cookbook formulas for bandpass, lowpass, highpass.
 pub struct Biquad {
-    pub b0: f32, pub b1: f32, pub b2: f32,
-    pub a1: f32, pub a2: f32,
-    pub x1: f32, pub x2: f32,
+    pub b0: f32,
+    pub b1: f32,
+    pub b2: f32,
+    pub a1: f32,
+    pub a2: f32,
+    pub x1: f32,
+    pub x2: f32,
 }
 
 impl Biquad {
     /// Create passthrough filter.
     pub fn new() -> Self {
-        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, x1: 0.0, x2: 0.0 }
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
+        }
     }
 
     /// Init as bandpass: fc, q, sample_rate
@@ -38,7 +50,8 @@ impl Biquad {
             b2: -alpha / a0,
             a1: -2.0 * w0.cos() / a0,
             a2: (1.0 - alpha) / a0,
-            x1: 0.0, x2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
         }
     }
 
@@ -54,7 +67,8 @@ impl Biquad {
             b2: (1.0 - cos_w0) / (2.0 * a0),
             a1: -2.0 * cos_w0 / a0,
             a2: (1.0 - alpha) / a0,
-            x1: 0.0, x2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
         }
     }
 
@@ -67,11 +81,16 @@ impl Biquad {
     }
 
     /// Reset filter state.
-    pub fn reset(&mut self) { self.x1 = 0.0; self.x2 = 0.0; }
+    pub fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.x2 = 0.0;
+    }
 }
 
 impl Default for Biquad {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─── Cochlea ─────────────────────────────────────────────
@@ -103,7 +122,8 @@ impl Cochlea {
         let mut center_freqs = Vec::with_capacity(n);
         for i in 0..n {
             let t = i as f32 / (n - 1) as f32;
-            let fc = (log_low + t * (log_high - log_low)).exp()
+            let fc = (log_low + t * (log_high - log_low))
+                .exp()
                 .clamp(20.0, sample_rate / 2.0 - 1.0);
             filters.push(Biquad::bandpass(fc, q, sample_rate));
             center_freqs.push(fc);
@@ -125,28 +145,34 @@ impl Cochlea {
     pub fn tick(&mut self, sample: f32) -> &[f32] {
         for i in 0..self.n_bands {
             let y = self.filters[i].tick(sample);
-            self.envelopes[i] = self.smoothing * self.envelopes[i]
-                + (1.0 - self.smoothing) * y.abs();
+            self.envelopes[i] =
+                self.smoothing * self.envelopes[i] + (1.0 - self.smoothing) * y.abs();
         }
         &self.envelopes
     }
 
     /// Reset all filters and envelopes.
     pub fn reset(&mut self) {
-        for f in self.filters.iter_mut() { f.reset(); }
+        for f in self.filters.iter_mut() {
+            f.reset();
+        }
         self.envelopes.fill(0.0);
     }
 
     /// Detect spikes: returns indices where envelope > threshold.
     pub fn detect_spikes(&self, threshold: f32) -> Vec<usize> {
-        self.envelopes.iter().enumerate()
+        self.envelopes
+            .iter()
+            .enumerate()
             .filter(|(_, &e)| e > threshold)
             .map(|(i, _)| i)
             .collect()
     }
 
     /// Get current envelopes as slice.
-    pub fn get_envelopes(&self) -> &[f32] { &self.envelopes }
+    pub fn get_envelopes(&self) -> &[f32] {
+        &self.envelopes
+    }
 }
 
 #[cfg(test)]
@@ -171,8 +197,11 @@ mod tests {
             c.tick(sample);
         }
         // At least one envelope should respond to 440Hz
-        assert!(c.envelopes.iter().any(|&e| e > 0.01),
-            "envelopes should respond to 440Hz: {:?}", c.envelopes);
+        assert!(
+            c.envelopes.iter().any(|&e| e > 0.01),
+            "envelopes should respond to 440Hz: {:?}",
+            c.envelopes
+        );
     }
 
     #[test]

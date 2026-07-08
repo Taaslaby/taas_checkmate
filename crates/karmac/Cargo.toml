@@ -1,0 +1,10 @@
+[package]
+name = "karmac"
+version.workspace = true
+edition.workspace = true
+description = "GNW (Global Neuronal Workspace) + LOD (Carmack BSP neuron system)"
+
+[dependencies]
+taas-format = { path = "../taas-format" }
+rand = "0.8"
+rayon = "1"

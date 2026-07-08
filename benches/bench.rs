@@ -248,6 +248,86 @@ fn bench_kalman(c: &mut Criterion) {
     g.finish();
 }
 
+fn bench_hh_lut(c: &mut Criterion) {
+    use taas_checkmate::neuron::hh::{HhLutConfig, step_hh_lut, standard_config};
+    let mut g = c.benchmark_group("hh_lut");
+    // Single neuron
+    let mut cfg1 = standard_config(1, 0.01);
+    cfg1.Ii[0] = 10.0;
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| { step_hh_lut(&mut cfg1); black_box(()); }));
+    // 8 neurons
+    let mut cfg8 = standard_config(8, 0.01);
+    for i in 0..8 { cfg8.Ii[i] = 10.0; }
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| { step_hh_lut(&mut cfg8); black_box(()); }));
+    // 1024 neurons
+    let mut cfg1024 = standard_config(1024, 0.01);
+    for i in 0..1024 { cfg1024.Ii[i] = 10.0; }
+    g.throughput(Throughput::Elements(1024));
+    g.bench_function("simd_n1024", |b| b.iter(|| { step_hh_lut(&mut cfg1024); black_box(()); }));
+    g.finish();
+}
+
+fn bench_hh_exact(c: &mut Criterion) {
+    use taas_checkmate::kernels::neuron::hh::{ChannelSpec, standard_channels, na_m_alpha, na_m_beta, na_h_alpha, na_h_beta, k_n_alpha, k_n_beta};
+    fn exact_step(v: &mut [f32], gates: &mut [f32], I: &[f32],
+                  g_leak: &[f32], E_leak: &[f32], C_m: &[f32],
+                  channels: &[ChannelSpec], dt: f32) {
+        for i in 0..v.len() {
+            let vi = v[i];
+            let mut I_ion = 0.0;
+            let mut gi = 0;
+            for ch in channels {
+                let mut g_ch = ch.g_max;
+                for gate in &ch.gates {
+                    let a = (gate.alpha)(vi);
+                    let b = (gate.beta)(vi);
+                    let sum = a + b;
+                    let m_inf = if sum > 1e-12 { a / sum } else { 0.5 };
+                    let tau = if sum > 1e-12 { 1.0 / sum } else { 1.0 };
+                    let decay = (-dt / tau).exp();
+                    gates[gi * v.len() + i] = m_inf + (gates[gi * v.len() + i] - m_inf) * decay;
+                    g_ch *= gates[gi * v.len() + i].powi(gate.power as i32);
+                    gi += 1;
+                }
+                I_ion += g_ch * (vi - ch.E_rev);
+            }
+            let I_leak = g_leak[i] * (vi - E_leak[i]);
+            v[i] += (I[i] - I_ion - I_leak) / C_m[i] * dt;
+        }
+    }
+    let channels = standard_channels();
+    let n_gates: usize = channels.iter().map(|ch| ch.gates.len()).sum();
+    let mut g = c.benchmark_group("hh_exact");
+    // Single neuron
+    let (mut v1, mut g1, I1, gl1, El1, cm1) =
+        (vec![-65.0f32], vec![0.5f32; n_gates], vec![10.0f32], vec![0.3f32], vec![-65.0f32], vec![1.0f32]);
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        exact_step(&mut v1, &mut g1, &I1, &gl1, &El1, &cm1, &channels, 0.01);
+        black_box(());
+    }));
+    // 8 neurons
+    let (mut v8, mut g8, I8, gl8, El8, cm8) =
+        (vec![-65.0f32; 8], vec![0.5f32; 8 * n_gates], vec![10.0f32; 8], vec![0.3f32; 8], vec![-65.0f32; 8], vec![1.0f32; 8]);
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("scalar_n8", |b| b.iter(|| {
+        exact_step(&mut v8, &mut g8, &I8, &gl8, &El8, &cm8, &channels, 0.01);
+        black_box(());
+    }));
+    // 1024 neurons
+    let n1024 = 1024;
+    let (mut v1024, mut g1024, I1024, gl1024, El1024, cm1024) =
+        (vec![-65.0f32; n1024], vec![0.5f32; n1024 * n_gates], vec![10.0f32; n1024], vec![0.3f32; n1024], vec![-65.0f32; n1024], vec![1.0f32; n1024]);
+    g.throughput(Throughput::Elements(1024));
+    g.bench_function("scalar_n1024", |b| b.iter(|| {
+        exact_step(&mut v1024, &mut g1024, &I1024, &gl1024, &El1024, &cm1024, &channels, 0.01);
+        black_box(());
+    }));
+    g.finish();
+}
+
 fn pack1(vals: &[f32]) -> Vec<f32> { vals.to_vec() }
 fn pack8(vals: &[f32]) -> Vec<f32> {
     let mut p = Vec::with_capacity(vals.len() * 8);
@@ -255,5 +335,5 @@ fn pack8(vals: &[f32]) -> Vec<f32> {
     p
 }
 
-criterion_group!(benches, bench_izhikevich, bench_lif, bench_lif_at, bench_adex, bench_saw, bench_psi, bench_stdp, bench_kuramoto, bench_t3, bench_clamp, bench_hebbian, bench_nlms, bench_kalman);
+criterion_group!(benches, bench_izhikevich, bench_lif, bench_lif_at, bench_adex, bench_saw, bench_psi, bench_stdp, bench_kuramoto, bench_t3, bench_clamp, bench_hebbian, bench_nlms, bench_kalman, bench_hh_lut, bench_hh_exact);
 criterion_main!(benches);

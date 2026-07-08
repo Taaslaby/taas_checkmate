@@ -1,0 +1,10 @@
+[package]
+name = "taas-core"
+version.workspace = true
+edition.workspace = true
+description = "Spiking neuron models + Kuramoto + NN layers"
+
+[dependencies]
+taas-kernels = { path = "../kernels" }
+rand = "0.8"
+rayon = "1"

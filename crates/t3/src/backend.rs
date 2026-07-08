@@ -17,7 +17,7 @@
 //!   └── B::kalman_update(...)             →  Kalman weight update
 //! ```
 
-use crate::{PI, TWO_PI};
+use super::{PI, TWO_PI};
 
 // ─── T3Backend trait ─────────────────────────────────────
 
@@ -235,7 +235,7 @@ impl T3Backend for ScalarBackend {
 //
 // ```ignore
 // pub struct CudaBackend {
-//     ctx: cuda_kernels::GpuContext,
+//     ctx: crate::cuda::GpuContext,
 //     n: usize,
 // }
 // impl T3Backend for CudaBackend { ... }

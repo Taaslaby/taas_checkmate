@@ -6,8 +6,8 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-blue)]()
 [![SIMD](https://img.shields.io/badge/SIMD-f32x8-orange)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
-[![CI](https://github.com/USER/taas-checkmate/actions/workflows/ci.yml/badge.svg)]()
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)]()
+[![CI](https://github.com/anomalyco/taas-checkmate/actions/workflows/ci.yml/badge.svg)]()
 
 > **Pure Rust wavelet neural engine** 
 
@@ -278,4 +278,4 @@ cargo doc --no-deps --open
 
 ## 📜 License
 
-GNU
+GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.

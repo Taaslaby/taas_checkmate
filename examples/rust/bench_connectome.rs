@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use taas_checkmate::models::neuron::{self, DEFAULT_TAU_REF};
+use taas_checkmate::core::neuron::{self, DEFAULT_TAU_REF};
 use taas_checkmate::ops::sparse;
 
 const DT: f32 = 0.5;

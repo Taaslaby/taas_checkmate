@@ -1,6 +1,6 @@
 //! # TrajectoryBuffer — ring buffer for L-frame trajectories.
 //!
-//! Из оригинального Nakajima NeuroBrain trajectory.rs.
+//! Из оригинального Taas_chaser_v3 trajectory.rs.
 //! Хранит per-frame features в кольцевом буфере и строит
 //! L-кадровые траектории для PstDecoder/Ridge.
 
@@ -35,9 +35,15 @@ impl TrajectoryBuffer {
 
     /// Build trajectory by concatenating L consecutive frames.
     pub fn trajectory(&self, L: usize) -> Vec<f32> {
-        if self.count < L || L == 0 { return vec![]; }
+        if self.count < L || L == 0 {
+            return vec![];
+        }
         let mut traj = Vec::with_capacity(L * self.feat_dim);
-        let start = if self.pos >= L { self.pos - L } else { self.capacity - (L - self.pos) };
+        let start = if self.pos >= L {
+            self.pos - L
+        } else {
+            self.capacity - (L - self.pos)
+        };
         for k in 0..L {
             let idx = (start + k) % self.capacity;
             let off = idx * self.feat_dim;
@@ -47,16 +53,29 @@ impl TrajectoryBuffer {
     }
 
     /// Check if buffer is full.
-    pub fn is_full(&self) -> bool { self.count >= self.capacity }
+    #[inline]
+    pub fn is_full(&self) -> bool {
+        self.count >= self.capacity
+    }
 
     /// Clear buffer.
-    pub fn clear(&mut self) { self.pos = 0; self.count = 0; self.buf.fill(0.0); }
+    pub fn clear(&mut self) {
+        self.pos = 0;
+        self.count = 0;
+        self.buf.fill(0.0);
+    }
 
     /// Current number of frames in buffer.
-    pub fn len(&self) -> usize { self.count }
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.count
+    }
 
     /// Maximum capacity.
-    pub fn capacity(&self) -> usize { self.capacity }
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
 
     /// Export buffer contents as CSV string.
     /// One row per frame in chronological order.
@@ -81,9 +100,9 @@ impl TrajectoryBuffer {
         for k in 0..n {
             // idx in [0, capacity) pointing to the k-th oldest frame
             let idx = if self.count < self.capacity {
-                k  // contiguous: oldest is buf[0]
+                k // contiguous: oldest is buf[0]
             } else {
-                (self.pos + k) % self.capacity  // wrapped: oldest is buf[pos]
+                (self.pos + k) % self.capacity // wrapped: oldest is buf[pos]
             };
             let off = idx * d;
             let _ = write!(csv, "{}", k);

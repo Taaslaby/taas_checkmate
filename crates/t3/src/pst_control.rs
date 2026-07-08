@@ -25,7 +25,7 @@
 //! ```
 
 use serde::{Serialize, Deserialize};
-use crate::{
+use super::{
     T3Backend, TriOscillator,
     pst::{pst_linear_features, pst_linear_dim},
     ridge::RidgeSolver,
@@ -501,12 +501,12 @@ impl PstControl {
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
         use std::fs::File;
         use std::io::BufWriter;
-        let data = SaveData {
-            config: self.config.clone(),
-            weights: self.weights.clone(),
-            bias: self.bias.clone(),
-            mean_pst: self.mean_pst.clone(),
-            wtw_inv: self.wtw_inv.clone(),
+        let data = SaveDataRef {
+            config: &self.config,
+            weights: &self.weights,
+            bias: &self.bias,
+            mean_pst: &self.mean_pst,
+            wtw_inv: &self.wtw_inv,
             n_pst: self.n_pst,
         };
         let f = File::create(path)?;
@@ -539,6 +539,16 @@ impl PstControl {
     pub fn weights(&self) -> &[f32] { &self.weights }
     pub fn bias(&self) -> &[f32] { &self.bias }
     pub fn mean_pst(&self) -> &[f32] { &self.mean_pst }
+}
+
+#[derive(Serialize)]
+struct SaveDataRef<'a> {
+    config: &'a PstControlConfig,
+    weights: &'a [f32],
+    bias: &'a [f32],
+    mean_pst: &'a [f32],
+    wtw_inv: &'a [f32],
+    n_pst: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -646,7 +656,7 @@ mod tests {
         let (x, y) = make_test_data(n, n_pst, 2);
         ctrl.fit_ridge(&x, &y, n, 0.1);
 
-        let path = "/tmp/test_pst_control.json";
+        let path = "test_pst_control.json";
         ctrl.save_to_file(path).unwrap();
         let loaded = PstControl::load_from_file(path).unwrap();
 

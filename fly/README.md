@@ -1,69 +1,86 @@
-# 🪰 Fly — Drosophila Connectome → MuJoCo Body
+# 🧠 FlyWire Brain Simulation
 
-Интеграция полного коннектома дрозофилы (FlyWire мозг + MANC VNC) с биомеханической моделью мухи в MuJoCo.
+Полная симуляция мозга *Drosophila melanogaster* на реальном FlyWire коннектоме
+(138K нейронов, 3.7M синапсов) с MuJoCo телом.
 
-## Структура
+```
+Сенсоры → Мозг (LIF/Izhikevich) → VNC → MuJoCo → Движение
+```
+
+## 🗂️ Структура
 
 ```
 fly/
-├── models/                  ← MuJoCo flybody (из google-deepmind/mujoco_menagerie)
-│   ├── fruitfly.xml         ← MJCF модель тела мухи
-│   ├── scene.xml            ← сцена для визуализации
-│   └── assets/              ← 85 .obj мешей (ноги, крылья, голова, тело)
-│
-├── connectome/
-│   ├── brain/               ← FlyWire мозг (138K нейронов)
-│   │   ├── model.py         ← LIF модель на базе FlyWire (из Drosophila_brain_model)
-│   │   └── utils.py         ← утилиты загрузки коннектома
-│   ├── vnc/                 ← MANC спинной мозг (102K нейронов)
-│   │   └── ...
-│   ├── simulation.py        ← flygym симуляция
-│   ├── anatomy.py           ← анатомия мухи (нейроны → тело)
-│   └── rendering.py         ← рендеринг
-│
+├── models/                  # MuJoCo 3D модель мухи
+│   ├── scene.xml            #   сцена со стенами и едой
+│   ├── fruitfly.xml         #   анатомическая модель
+│   └── assets/              #   80+ .obj мешей
 ├── scripts/
-│   ├── explore_manc.py      ← загрузка MANC (нейроны, синапсы, моторные цепи)
-│   └── fly_sim.py           ← минимальная симуляция MuJoCo + connectome
-│
-└── notebooks/               ← Jupyter ноутбуки
+│   ├── flywire_brain.py     # ⭐ Ядро: CSR + LIF/Izhikevich/Rate/ψ
+│   ├── vnc_walk.py          # ⭐ GUI симуляция (ходьба)
+│   ├── test_arena.py        # ⭐ 5 тестов: BABY/ALIVE/LIMBO/DEAD
+│   ├── profile_v2.py        #   профилирование производительности
+│   ├── diagnose_v2.py       #   диагностика коннектома
+│   ├── validate_vs_brian2.py#   валидация против Brian2
+│   └── autotune_params.py   #   подбор Izhikevich параметров
+│   └── autotune_results/    #   готовые параметры
+├── archive/
+│   └── vnc_controller.py    # VNC контроллер (legacy, используется)
+├── config.py                # Настройки путей
+└── README.md
 ```
 
-## Pipeline
-
-```
-FlyWire (мозг, 138K нейронов)
-       │
-       ▼ CvC (cervical connective)
-MANC (VNC, 102K нейронов)
-       │
-       ▼ 737 motor neurons
-MuJoCo flybody (85 мешей, 18 DOF ног + крылья)
-       │
-       ▼ sensory feedback
-Sensory neurons → Ascending neurons → FlyWire
-```
-
-## Источники
-
-| Компонент | Источник | Ссылка |
-|:----------|:---------|:-------|
-| MuJoCo flybody | Google DeepMind + HHMI Janelia | [mujoco_menagerie/flybody](https://github.com/google-deepmind/mujoco_menagerie/tree/main/flybody) |
-| FlyWire коннектом | Princeton + HHMI Janelia | [flywire.ai](https://flywire.ai/) |
-| MANC VNC | HHMI Janelia | [neuprint.janelia.org](https://neuprint.janelia.org) |
-| Drosophila brain model | Shiu et al. 2024 | [github.com/philshiu/Drosophila_brain_model](https://github.com/philshiu/Drosophila_brain_model) |
-| NeuroMechFly v2 | EPFL NeLy | [github.com/NeLy-EPFL/flygym](https://github.com/NeLy-EPFL/flygym) |
-
-## Данные
-
-MANC и FlyWire CSV/freezer файлы находятся в `~/Загрузки/`.
-
-## Запуск
+## 🚀 Быстрый старт
 
 ```bash
-# Исследовать MANC моторные нейроны
+# LIF мозг (Shiu et al. 2024) — GUI
 cd taas_checkmate
-python3 fly/scripts/explore_manc.py
+python3 fly/scripts/vnc_walk.py --model lif --duration 30
 
-# Визуализировать MuJoCo flybody
-python3 -m mujoco.viewer --mjcf fly/models/fruitfly.xml
+# Izhikevich мозг
+python3 fly/scripts/vnc_walk.py --model izhi
+
+# Тестовый полигон (без GUI)
+python3 fly/scripts/test_arena.py --fast
+python3 fly/scripts/test_arena.py --duration 10 --trials 3
 ```
+
+## 🧪 Test Arena
+
+| Тест | Что проверяет |
+|---|---|
+| 1. Baseline Walking | DNg100=80 → муха ходит? |
+| 2. DNg100 Perturbation | DNg100=0 → останавливается? |
+| 3. Looming Response | Стена близко → тормозит? |
+| 4. Food Seeking | Еда сбоку → поворачивает? |
+| 5. Random Baseline | Мозг ≠ random шум? |
+
+**Вердикты:** BRAIN_ALIVE (4+/5) · BRAIN_LIMBO (2-3/5) · BRAIN_DEAD (<2/5)
+
+## 🧠 Модели нейронов
+
+| Модель | Описание | Скорость |
+|---|---|---|
+| `lif` | LIF (Shiu et al. 2024, Nature) | ~0.01× RT |
+| `izhi` | Izhikevich (биологичный) | ~0.02× RT |
+| `rate` | Rate-based ANN | ~100× RT |
+| `psi` | ψ-wave (экспериментальная) | ~0.01× RT |
+
+## 🎮 Управление (vnc_walk.py)
+
+| Клавиша | Действие |
+|---|---|
+| `←` `→` | Поворот влево/вправо |
+| `1` `2` | DN частота |
+| `3` `4` | CPG частота |
+| `7` `8` | CPG частота 1-20Hz |
+| `9` | CPG амплитуда |
+| `0` | Сброс поворота |
+| `R` | Полный сброс |
+
+## 📚 Почитать
+
+- [Shiu et al. 2024 — Drosophila brain model](https://www.nature.com/articles/s41586-024-07621-6)
+- [Lappalainen et al. 2024 — Connectome-constrained networks](https://www.nature.com/articles/s41586-024-07591-9)
+- [FlyWire](https://flywire.ai/)
+- [flyvis](https://github.com/TuragaLab/flyvis)

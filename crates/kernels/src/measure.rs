@@ -206,6 +206,59 @@ pub(crate) unsafe fn lazy_sincos_update(
     }
 }
 
+/// Spike entropy: H = -Σ p_i · log₂(p_i) where p_i = spike_counts[i] / total_steps.
+///
+/// Also computes H_penalty = |H - H_target| — отклонение от целевой энтропии.
+/// Уточнение пользователя: штраф как |H - H_target|, а не абсолютная H,
+/// чтобы избежать dead neuron problem (все p→0, H→0, штрафа нет).
+///
+/// # Safety
+/// `spike_counts[n]` valid; `h_output`, `h_penalty` non-null.
+pub(crate) unsafe fn spike_entropy(
+    h_output: *mut f32,
+    h_penalty: *mut f32,
+    spike_counts: *const f32,
+    n: usize,
+    total_steps: f32,
+    h_target: f32,
+) {
+    let eps = 1e-10f32;
+    let inv_steps = 1.0 / total_steps.max(1.0);
+    let log2e = core::f32::consts::LOG2_E;
+
+    let n8 = n & !7;
+    let mut h_sum_simd = f32x8::splat(0.0);
+
+    for off in (0..n8).step_by(8) {
+        let counts = load8(spike_counts, off);
+        let p = counts * f32x8::splat(inv_steps);
+        let p_arr: [f32; 8] = p.to_array();
+        let mut hc = [0.0f32; 8];
+        for j in 0..8 {
+            if p_arr[j] > 0.0 {
+                hc[j] = p_arr[j] * p_arr[j].max(eps).ln() * log2e;
+            }
+        }
+        h_sum_simd = h_sum_simd - f32x8::from(hc);
+    }
+
+    let arr: [f32; 8] = h_sum_simd.to_array();
+    let mut total_h: f32 = arr.iter().sum();
+
+    if n8 < n {
+        let counts = std::slice::from_raw_parts(spike_counts, n);
+        for i in n8..n {
+            let p = counts[i] * inv_steps;
+            if p > 0.0 {
+                total_h -= p * p.max(eps).ln() * log2e;
+            }
+        }
+    }
+
+    *h_output = total_h.max(0.0);
+    *h_penalty = (*h_output - h_target).abs();
+}
+
 /// All-pairs coherence between groups of oscillators.
 /// Uses f32x8 SIMD for reduction within each area.
 ///

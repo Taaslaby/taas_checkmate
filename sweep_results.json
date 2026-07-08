@@ -1,0 +1,1730 @@
+[
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.737619400024414,
+    "tasks_loss": 0.4666666666666667,
+    "accuracy": 0.5384615384615384,
+    "train_ms": 334.9167760461569,
+    "task_ms": 42.613876052200794,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.5
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.738000512123108,
+    "tasks_loss": 0.4666666666666667,
+    "accuracy": 0.5384615384615384,
+    "train_ms": 163.41679799370468,
+    "task_ms": 24.048271006904542,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.5
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.165379524230957,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 646.7242930084467,
+    "task_ms": 44.29580201394856,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3736557960510254,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 180.35307398531586,
+    "task_ms": 15.526365023106337,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6221733093261719,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 457.6107000466436,
+    "task_ms": 28.59645604621619,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.16695237159729,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 367.1562719391659,
+    "task_ms": 24.078033049590886,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3659762144088745,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 159.67557195108384,
+    "task_ms": 16.194044961594045,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6173509359359741,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 415.02823401242495,
+    "task_ms": 21.1561459582299,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6008842587471008,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 687.2105620568618,
+    "task_ms": 16.72953099478036,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5996891856193542,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 904.5014480361715,
+    "task_ms": 56.621266063302755,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1702873706817627,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 452.0225810119882,
+    "task_ms": 19.15536797605455,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3692171573638916,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 213.97709497250617,
+    "task_ms": 27.814839966595173,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6219294667243958,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 730.6288770632818,
+    "task_ms": 52.957822917960584,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1711641550064087,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 660.5767869623378,
+    "task_ms": 38.128949934616685,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3713668584823608,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 249.3997539859265,
+    "task_ms": 42.37932397518307,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6220043897628784,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 847.9535040678456,
+    "task_ms": 29.98354402370751,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5978434681892395,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 584.4318249728531,
+    "task_ms": 24.084905977360904,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5992659330368042,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 418.3153990888968,
+    "task_ms": 21.648825029842556,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7369283437728882,
+    "tasks_loss": 0.5,
+    "accuracy": 0.5,
+    "train_ms": 192.86535505671054,
+    "task_ms": 21.73430600669235,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.5
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.0904473066329956,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 545.0293909525499,
+    "task_ms": 27.457511983811855,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.301673173904419,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 336.1731630284339,
+    "task_ms": 34.10208795685321,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5560811758041382,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 772.7362080477178,
+    "task_ms": 26.047533028759062,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.0911678075790405,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 773.7252279184759,
+    "task_ms": 60.989252058789134,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.299508810043335,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 343.36794493719935,
+    "task_ms": 55.7962479069829,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5523905754089355,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 841.4603819837794,
+    "task_ms": 43.56087604537606,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.737139344215393,
+    "tasks_loss": 0.5,
+    "accuracy": 0.5,
+    "train_ms": 169.75085099693388,
+    "task_ms": 23.175847018137574,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.5
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.0936644077301025,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 524.0334669360891,
+    "task_ms": 27.115453965961933,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3003255128860474,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 220.03399895038456,
+    "task_ms": 32.74394606705755,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5538526773452759,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 426.61686800420284,
+    "task_ms": 20.342577015981078,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.0959707498550415,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 457.9036580398679,
+    "task_ms": 25.865521980449557,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.295485258102417,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 218.61452097073197,
+    "task_ms": 19.456017995253205,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5532234311103821,
+    "tasks_loss": 0.5222222222222221,
+    "accuracy": 0.5,
+    "train_ms": 419.72761205397546,
+    "task_ms": 20.923144998960197,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.3333333333333333
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7910435199737549,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 160.88302002754062,
+    "task_ms": 17.730593914166093,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7730712890625,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 185.57869899086654,
+    "task_ms": 39.010716951452196,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1453287601470947,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 838.9656479703262,
+    "task_ms": 52.02527903020382,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3423187732696533,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 317.9656339343637,
+    "task_ms": 40.118849952705204,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7708384990692139,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 185.7356650289148,
+    "task_ms": 20.767336012795568,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.141918420791626,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 411.9992880150676,
+    "task_ms": 20.338900038041174,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3435051441192627,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 253.97042697295547,
+    "task_ms": 39.47676997631788,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7922697067260742,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 157.66224300023168,
+    "task_ms": 16.863114084117115,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7917461395263672,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 251.75664806738496,
+    "task_ms": 24.207919952459633,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7724183797836304,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 175.48569396603853,
+    "task_ms": 29.15723400656134,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1419041156768799,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 465.89304704684764,
+    "task_ms": 21.567460033111274,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.346900463104248,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 270.7507819868624,
+    "task_ms": 25.194186018779874,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7717002630233765,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 199.68966697342694,
+    "task_ms": 20.721038919873536,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.14105224609375,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 404.7025670297444,
+    "task_ms": 21.174645982682705,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3454030752182007,
+    "tasks_loss": 0.5777777777777777,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 195.1261709909886,
+    "task_ms": 32.250538002699614,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.590514063835144,
+    "tasks_loss": 0.6000000000000001,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 677.339639980346,
+    "task_ms": 33.66043500136584,
+    "copy_acc": 1.0,
+    "recall_acc": 0.2,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.149736762046814,
+    "tasks_loss": 0.6000000000000001,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 583.2388249691576,
+    "task_ms": 26.42836794257164,
+    "copy_acc": 1.0,
+    "recall_acc": 0.2,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3452003002166748,
+    "tasks_loss": 0.6000000000000001,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 187.00378888752311,
+    "task_ms": 24.95218499097973,
+    "copy_acc": 1.0,
+    "recall_acc": 0.2,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5911968350410461,
+    "tasks_loss": 0.6000000000000001,
+    "accuracy": 0.46153846153846156,
+    "train_ms": 493.1283800397068,
+    "task_ms": 44.50243501923978,
+    "copy_acc": 1.0,
+    "recall_acc": 0.2,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 64,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7936607599258423,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 223.82891597226262,
+    "task_ms": 25.72056499775499,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7717996835708618,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 240.57709600310773,
+    "task_ms": 40.456301998347044,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1401052474975586,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 510.1832520449534,
+    "task_ms": 14.673224999569356,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3430988788604736,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 435.6641770573333,
+    "task_ms": 31.162962084636092,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5944321751594543,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 822.7494769962505,
+    "task_ms": 55.840351968072355,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7714325189590454,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 395.6913910806179,
+    "task_ms": 57.76403599884361,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1416912078857422,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 916.6522369487211,
+    "task_ms": 23.769791005179286,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3426268100738525,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 405.54849395994097,
+    "task_ms": 66.67177204508334,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5923837423324585,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 924.1688969777897,
+    "task_ms": 33.6334869498387,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7708122730255127,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 224.4191219797358,
+    "task_ms": 30.79383890144527,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1428554058074951,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 518.6290079727769,
+    "task_ms": 26.963447919115424,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.342604398727417,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 182.6151730492711,
+    "task_ms": 24.820259073749185,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5923616886138916,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 471.2555259466171,
+    "task_ms": 32.711873995140195,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7708938121795654,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 201.75642997492105,
+    "task_ms": 32.18521608505398,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.140798807144165,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 470.60241107828915,
+    "task_ms": 31.86896489933133,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.340695858001709,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 189.42769698332995,
+    "task_ms": 20.824092091061175,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 128,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.5937113165855408,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 530.4740240098909,
+    "task_ms": 27.609287993982434,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1477055549621582,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 434.9195600952953,
+    "task_ms": 40.21580796688795,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3577802181243896,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 325.74010000098497,
+    "task_ms": 55.12588901910931,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3512669801712036,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 387.8927349578589,
+    "task_ms": 41.04949603788555,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.594868540763855,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 599.2772410390899,
+    "task_ms": 18.80959898699075,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.8046627044677734,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 386.35992095805705,
+    "task_ms": 41.31596197839826,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1895720958709717,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 680.059676989913,
+    "task_ms": 28.935874928720295,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3931992053985596,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 193.82037594914436,
+    "task_ms": 29.866985976696014,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6239044666290283,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 467.64005499426275,
+    "task_ms": 24.039139971137047,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.804462194442749,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 378.4775120439008,
+    "task_ms": 38.96678297314793,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1860359907150269,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 683.7487450102344,
+    "task_ms": 29.935625032521784,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3883945941925049,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 308.1509420881048,
+    "task_ms": 41.3695260649547,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6246650218963623,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 674.3060209555551,
+    "task_ms": 27.31734002009034,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1457602977752686,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 574.2864109342918,
+    "task_ms": 30.674465000629425,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.592486560344696,
+    "tasks_loss": 0.6333333333333333,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 447.2151859663427,
+    "task_ms": 35.30257300008088,
+    "copy_acc": 1.0,
+    "recall_acc": 0.1,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.8049347400665283,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 259.8573020659387,
+    "task_ms": 51.980728982016444,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1848393678665161,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 668.4633569093421,
+    "task_ms": 30.944279045797884,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3910390138626099,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 296.07562406454235,
+    "task_ms": 42.86593303550035,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 4,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6252172589302063,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 631.4423190196976,
+    "task_ms": 27.24271302577108,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.8027904033660889,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 286.3187990151346,
+    "task_ms": 48.84614096954465,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.188937783241272,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 524.406170938164,
+    "task_ms": 30.986863072030246,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3893709182739258,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 209.07719898968935,
+    "task_ms": 24.295776966027915,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 512,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 50
+    },
+    "loss": 0.6270242929458618,
+    "tasks_loss": 0.6111111111111112,
+    "accuracy": 0.4230769230769231,
+    "train_ms": 510.0979780545458,
+    "task_ms": 23.993924958631396,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.16666666666666666
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7784593105316162,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 157.41621295455843,
+    "task_ms": 19.468590966425836,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7779169082641602,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 162.4472129624337,
+    "task_ms": 19.224526942707598,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 16,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 50
+    },
+    "loss": 1.1471446752548218,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 426.8535110168159,
+    "task_ms": 21.210971986874938,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 4,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7754300832748413,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 190.9906700020656,
+    "task_ms": 32.60494000278413,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.05,
+      "n_epochs": 20
+    },
+    "loss": 1.7749662399291992,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 204.71276401076466,
+    "task_ms": 21.285014925524592,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  },
+  {
+    "config": {
+      "sp_dim": 256,
+      "workspace": 32,
+      "cortical_dim": 256,
+      "wm_slots": 8,
+      "lr": 0.1,
+      "n_epochs": 20
+    },
+    "loss": 1.3485453128814697,
+    "tasks_loss": 0.6666666666666667,
+    "accuracy": 0.38461538461538464,
+    "train_ms": 167.2940799035132,
+    "task_ms": 23.56617304030806,
+    "copy_acc": 1.0,
+    "recall_acc": 0.0,
+    "count_acc": 0.0
+  }
+]

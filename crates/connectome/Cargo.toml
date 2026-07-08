@@ -1,0 +1,25 @@
+[package]
+name = "taas-connectome"
+version.workspace = true
+edition = "2021"
+description = "Connectome brain simulator — LIF/Izhikevich/Rate/ψ on CSR"
+
+[lib]
+name = "taas_connectome"
+
+[dependencies]
+taas-kernels = { path = "../kernels" }
+cuda-kernels = { path = "../cuda", optional = true }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+
+[[bench]]
+name = "bench_rcm"
+harness = false
+
+[features]
+default = []
+cuda = ["cuda-kernels"]

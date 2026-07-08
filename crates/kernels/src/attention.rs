@@ -4,6 +4,8 @@
 //! XOR attention: sim = max(0, 1 - popcnt(Q⊕K) / n_bits)
 //! Returns weighted average of values (or 0 if no weight).
 
+const RNG_SCALE_32: f32 = 2.3283064e-10;
+
 /// XOR attention with popcnt similarity.
 ///
 /// # Safety
@@ -44,6 +46,6 @@ pub(crate) unsafe fn rdrand_fill(buf: *mut f32, n: usize) {
         state ^= state << 13;
         state ^= state >> 17;
         state ^= state << 5;
-        *v = state as f32 * 2.3283064e-10;
+        *v = state as f32 * RNG_SCALE_32;
     }
 }

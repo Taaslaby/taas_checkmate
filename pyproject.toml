@@ -6,6 +6,9 @@ build-backend = "maturin"
 name = "taas-checkmate"
 version = "0.1.0"
 requires-python = ">=3.10"
+description = "Pure Rust wavelet neural engine — SIMD, CUDA, FlyWire connectome"
+authors = [{ name = "TaasLab", email = "taaslab@proton.me" }]
+license = "GPL-3.0-only"
 
 [tool.maturin]
 bindings = "pyo3"

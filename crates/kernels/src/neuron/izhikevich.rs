@@ -403,3 +403,78 @@ pub(crate) unsafe fn eprop_izhikevich_step(
 
     total_spikes
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn izhikevich_spikes_with_strong_current() {
+        let n = 16;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![30.0f32; n];
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut total_spikes = 0i32;
+        for _ in 0..50 {
+            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
+                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            total_spikes += spikes.iter().sum::<i32>();
+        }
+        assert!(total_spikes > 0, "Expected spikes with I=30");
+    }
+
+    #[test]
+    fn izhikevich_no_spike_inhibitory() {
+        let n = 8;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![-20.0f32; n];
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut total_spikes = 0i32;
+        for _ in 0..50 {
+            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
+                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            total_spikes += spikes.iter().sum::<i32>();
+        }
+        assert_eq!(total_spikes, 0, "No spikes with I=-20");
+    }
+
+    #[test]
+    fn izhikevich_non_aligned_n() {
+        let n = 13;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![30.0f32; n];
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut total_spikes = 0i32;
+        for _ in 0..50 {
+            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
+                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            total_spikes += spikes.iter().sum::<i32>();
+        }
+        assert!(total_spikes > 0, "Spikes with I=30, n=13");
+    }
+
+}

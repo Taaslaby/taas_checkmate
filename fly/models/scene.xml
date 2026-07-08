@@ -20,5 +20,10 @@
 
   <worldbody>
     <geom name="floor" type="plane" size="5 5 .1" material="grid" pos="0 0 -.132" solref="0.0002 1"/>
+    <!-- Food target -->
+    <body name="food_target" pos="0.2 0 0">
+      <geom name="food" type="sphere" size="0.015" rgba="0.0 0.9 0.2 0.9" contype="0" conaffinity="0"/>
+      <site name="food_site" size="0.001"/>
+    </body>
   </worldbody>
 </mujoco>

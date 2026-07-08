@@ -1,6 +1,6 @@
 //! Phase Gate — sigmoid attenuator for cross-coupling.
 //!
-//! Из оригинального Nakajima NeuroBrain toroidal.rs.
+//! Из оригинального taas_chaser toroidal.rs.
 //! Защищает медленные слои от шума быстрых через order parameter R.
 //!
 //! ```text

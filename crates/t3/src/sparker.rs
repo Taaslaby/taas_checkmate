@@ -161,7 +161,9 @@ impl HologramEncoder {
         mat
     }
 
+    #[inline]
     pub fn k(&self) -> usize { self.k }
+    #[inline]
     pub fn n(&self) -> usize { self.n }
 }
 

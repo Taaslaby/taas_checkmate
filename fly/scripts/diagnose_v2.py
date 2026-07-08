@@ -23,23 +23,16 @@ from collections import defaultdict
 
 import numpy as np
 
-FLY_DIR = Path(__file__).parent.parent
+FLY_DIR = Path(__file__).parent.parent  # fly/
+PROJ = FLY_DIR.parent  # корень проекта (taas_checkmate/)
+sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(FLY_DIR / "scripts"))
 XML_PATH = FLY_DIR / "models" / "scene.xml"
-
-LEGS = [("L1", "T1_left"), ("R1", "T1_right"),
-        ("L2", "T2_left"), ("R2", "T2_right"),
-        ("L3", "T3_left"), ("R3", "T3_right")]
-
-SEGMENTS = ["coxa_abduct", "coxa_twist", "coxa",
-            "femur_twist", "femur", "tibia",
-            "tarsus", "tarsus2"]
-
 
 def diagnose(duration=10.0, model='lif'):
     import mujoco as mu
     from flywire_brain import FlyWireCSR, FlyWireLIFBrain
-    from vnc_walk import V2VNCController, LEGS, SEGMENTS
+    from fly.archive.vnc_controller import V2VNCController, LEGS, SEGMENTS
 
     print("═" * 65)
     print("  🧬 V2 Диагностика: активность нейронов")
@@ -247,8 +240,9 @@ def diagnose(duration=10.0, model='lif'):
 
                     print()
 
-        # VNC step
-        vnc.step(dt, data)
+        # VNC step — каждые 2 MuJoCo шага
+        if step % 2 == 0:
+            vnc.step(dt * 2.0, data)  # dt*2 потому что 2 шага прошло
         mu.mj_step(mj_model, data)
 
         if t >= duration:

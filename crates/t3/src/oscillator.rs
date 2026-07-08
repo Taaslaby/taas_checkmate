@@ -12,7 +12,7 @@
 //! Cross-coupling умножается на [`phase_gate`](super::phase_gate::phase_gate) function
 //! для защиты медленных слоёв от шума быстрых.
 
-use crate::{
+use super::{
     PI, TWO_PI,
     backend::T3Backend,
     phase_gate::phase_gate,
@@ -85,6 +85,14 @@ impl<B: T3Backend> TriOscillator<B> {
             gamma1: 0.5, gamma2: 1.0, gamma3: 1.12,
             initialised: false,
         }
+    }
+
+    /// Recompute sin/cos and wrap phases (calls backend.prepare).
+    /// Useful after manually setting th/r for PST feature extraction without advancing dynamics.
+    pub fn prepare(&mut self) {
+        self.backend.prepare(&mut self.th1, &mut self.cos1, &mut self.sin1);
+        self.backend.prepare(&mut self.th2, &mut self.cos2, &mut self.sin2);
+        self.backend.prepare(&mut self.th3, &mut self.cos3, &mut self.sin3);
     }
 
     /// Set uniform cross-coupling strengths.
@@ -214,16 +222,19 @@ impl<B: T3Backend> TriOscillator<B> {
     }
 
     /// Get phases of all 3 populations as slices.
+    #[inline]
     pub fn phases(&self) -> (&[f32], &[f32], &[f32]) {
         (&self.th1, &self.th2, &self.th3)
     }
 
     /// Get amplitudes of all 3 populations as slices.
+    #[inline]
     pub fn amplitudes(&self) -> (&[f32], &[f32], &[f32]) {
         (&self.r1, &self.r2, &self.r3)
     }
 
     /// Get natural frequencies of all 3 populations as slices.
+    #[inline]
     pub fn omegas(&self) -> (&[f32], &[f32], &[f32]) {
         (&self.omega1, &self.omega2, &self.omega3)
     }

@@ -15,7 +15,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::T3Backend;
-use cuda_kernels::GpuContext;
+use crate::cuda::GpuContext;
 
 /// CUDA GPU backend for T3 computations with async transfers.
 pub struct CudaBackend {
@@ -32,7 +32,7 @@ impl CudaBackend {
     }
 
     pub fn is_available() -> bool {
-        cuda_kernels::get_device_count().unwrap_or(0) > 0
+        crate::cuda::get_device_count().unwrap_or(0) > 0
     }
 
     pub fn sync(&self) -> Result<(), String> { self.ctx.sync() }
@@ -52,7 +52,7 @@ impl T3Backend for CudaBackend {
                 eprintln!("CudaBackend::prepare failed: {e}");
             }
         } else {
-            let _ = cuda_kernels::t3_prepare(
+            let _ = crate::cuda::t3_prepare(
                 &mut phases[..n], &mut cos_out[..n], &mut sin_out[..n],
             );
         }
@@ -70,14 +70,9 @@ impl T3Backend for CudaBackend {
         gain: f32,
     ) {
         let n = self.n.min(phases.len()).min(amplitudes.len());
-        let initialized = self.state_on_gpu.load(Ordering::Relaxed);
-
-        let r = if !initialized {
-            self.state_on_gpu.store(true, Ordering::Relaxed);
-            self.ctx.t3_upload_async(&phases[..n], &amplitudes[..n], &omegas[..n])
-        } else { Ok(()) };
-
-        if let Err(e) = r
+        // Always upload — each call may be a different population (pop1/pop2/pop3)
+        // with its own phases/amplitudes/omegas. GPU buffers are shared.
+        if let Err(e) = self.ctx.t3_upload_async(&phases[..n], &amplitudes[..n], &omegas[..n])
             .and_then(|()| self.ctx.t3_upload_drives_async(&drives[..n]))
             .and_then(|()| self.ctx.t3_upload_coupling_async(&coupling[..n]))
             .and_then(|()| self.ctx.t3_update(dt, alpha, gain))
@@ -97,7 +92,7 @@ impl T3Backend for CudaBackend {
             for (w, &s) in weights.iter_mut().zip(states.iter()) { *w += mu * error * s; }
             bias[0] += mu * error;
         } else {
-            let _ = cuda_kernels::nlms_train(weights, bias, states, error, lr, eps);
+            let _ = crate::cuda::nlms_train(weights, bias, states, error, lr, eps);
         }
     }
 
@@ -112,7 +107,7 @@ impl T3Backend for CudaBackend {
                 cov[i] -= k * cov[i];
             }
         } else {
-            let _ = cuda_kernels::kalman_update(weights, cov, states, error, s);
+            let _ = crate::cuda::kalman_update(weights, cov, states, error, s);
         }
     }
 }

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{load8, load8_mut, store8, spike_mask_to_i32};
+use super::{load8, load8_mut, store8, spike_mask_to_i32, RNG_SCALE_24};
 
 // ═══════════════════════════════════════════════════════
 //  Fused Izhikevich with weight accumulation (SIMD)
@@ -310,7 +310,7 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
             .wrapping_mul(1664525)
             .wrapping_add(1013904223);
         *rng_states.add(i) = state;
-        let r = (state >> 8) as f32 / 16777216.0;
+        let r = (state >> 8) as f32 * RNG_SCALE_24;
         let p = (*rates.add(i) * dt_sec).clamp(0.0, 1.0);
         *input_spikes_out.add(i) = if r < p { 1 } else { 0 };
     }

@@ -1,21 +1,59 @@
 [workspace]
-members = [".", "crates/cuda", "crates/kernels", "crates/t3"]
 resolver = "2"
+members = [
+    "crates/kernels", "crates/t3", "crates/cuda", "crates/connectome",
+    "crates/core",     "crates/train",
+    "crates/taas-format",
+    "crates/connectome-gpt",
+    "crates/cpe",
+    "crates/karmac",
+    "crates/unity",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["TaasLab <taaslab@proton.me>"]
+license = "GPL-3.0-only"
+repository = "https://github.com/anomalyco/taas-checkmate"
+homepage = "https://taaslab.ai"
+readme = "README.md"
+keywords = ["neural", "simd", "spiking-neural-networks", "brain-simulation", "wavelets"]
+categories = ["science::neuroscience", "science::robotics", "algorithms::machine-learning"]
 
 [package]
 name = "taas-checkmate"
-version = "0.1.0"
-edition = "2021"
-description = "Pure Rust wavelet neural engine — no ASM, no FFI, just SIMD"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Pure Rust wavelet neural engine — SIMD, CUDA, FlyWire connectome"
 
 [lib]
 crate-type = ["cdylib", "lib"]
 name = "taas_checkmate"
 
 [dependencies]
-rayon = "1"
+# Internal crates (always present)
 taas-kernels = { path = "crates/kernels" }
-taas-t3 = { path = "crates/t3" }
+taas-core = { path = "crates/core" }
+taas-train = { path = "crates/train" }
+taas-format = { path = "crates/taas-format" }
+taas-cpe = { path = "crates/cpe" }
+
+# Internal crates (optional, behind features)
+taas-t3 = { path = "crates/t3", optional = true }
+cuda-kernels = { path = "crates/cuda", optional = true }
+taas-connectome = { path = "crates/connectome", optional = true }
+karmac = { path = "crates/karmac", optional = true }
+
+# External dependencies
+rayon = "1"
 wide = "0.7"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -23,37 +61,18 @@ serde_json = "1"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 pyo3 = { version = "0.23", features = ["extension-module", "abi3", "abi3-py311"], optional = true }
 numpy = { version = "0.23", optional = true }
-cuda-kernels = { path = "crates/cuda", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-
-[[example]]
-name = "bench_connectome"
-path = "examples/rust/bench_connectome.rs"
-
-[[example]]
-name = "mnist_eprop"
-path = "examples/rust/mnist_eprop.rs"
-
-[[example]]
-name = "mnist_t3"
-path = "examples/rust/mnist_t3.rs"
-
-[[example]]
-name = "mnist_train"
-path = "examples/rust/mnist_train.rs"
-
-[[example]]
-name = "learning_bench"
-path = "examples/rust/learning_bench.rs"
 
 [[bench]]
 name = "bench"
 harness = false
 
 [features]
-default = []
-python = ["pyo3", "numpy"]
-cuda = ["cuda-kernels", "taas-t3/cuda"]
-autograd = []
+default = ["t3"]
+t3 = ["taas-t3", "taas-train/t3"]
+python = ["dep:pyo3", "dep:numpy", "taas-connectome", "karmac", "connectome"]
+connectome = ["taas-train/connectome"]
+cuda = ["cuda-kernels", "taas-t3/cuda", "taas-connectome/cuda", "taas-train/cuda"]
+

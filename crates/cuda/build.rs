@@ -4,7 +4,7 @@ use std::process::Command;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let kernels_dir = manifest_dir.join("src").join("kernels");
+    let kernels_dir = manifest_dir.join("kernels");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-env-changed=CUDA_HOME");
@@ -26,6 +26,9 @@ fn main() {
         "t3_bptt_step.cu",
         "snn_kernels.cu",
         "psi_wave.cu",
+        "hh.cu",
+        "csr_spmv_tanh.cu",
+        "stdp_dopamine.cu",
     ];
     let mut obj_files = Vec::new();
     let nvcc = which_nvcc();

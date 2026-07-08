@@ -96,6 +96,44 @@ extern "C" {
     // Upload/download
     fn gpu_context_upload_I(ctx: *mut GpuCtx, I: *const c_float, n: c_int) -> c_int;
     fn gpu_context_download_spikes(ctx: *mut GpuCtx, spikes: *mut c_int, n: c_int) -> c_int;
+    fn gpu_context_batch_lif_steps(
+        ctx: *mut GpuCtx,
+        external_I: *const c_float,
+        n_external: c_int,
+        dev_spike_buf: *mut c_int,
+        host_spike_buf: *mut c_int,
+        host_v: *mut c_float,
+        n_steps: c_int,
+        n_neurons: c_int,
+    ) -> c_int;
+    fn gpu_context_batch_izhikevich_steps(
+        ctx: *mut GpuCtx,
+        external_I: *const c_float,
+        n_external: c_int,
+        dt: c_float,
+        trace_decay: c_float,
+        dev_spike_buf: *mut c_int,
+        host_spike_buf: *mut c_int,
+        host_v: *mut c_float,
+        host_u: *mut c_float,
+        n_steps: c_int,
+        n_neurons: c_int,
+    ) -> c_int;
+    fn gpu_context_batch_hh_steps(
+        ctx: *mut GpuCtx,
+        external_I: *const c_float,
+        n_external: c_int,
+        host_spike_buf: *mut c_int,
+        host_v: *mut c_float,
+        host_I_syn: *mut c_float,
+        n_steps: c_int,
+        n_neurons: c_int,
+        dt: c_float,
+        tau_ref: c_float,
+        tau_syn: c_float,
+        weight_scale: c_float,
+    ) -> c_int;
+    fn gpu_context_upload_v_only(ctx: *mut GpuCtx, v: *const c_float, n: c_int) -> c_int;
     fn gpu_context_download_v(ctx: *mut GpuCtx, v: *mut c_float, n: c_int) -> c_int;
     fn gpu_context_download_u(ctx: *mut GpuCtx, u: *mut c_float, n: c_int) -> c_int;
     fn gpu_context_download_adex_w(ctx: *mut GpuCtx, w: *mut c_float, n: c_int) -> c_int;
@@ -287,10 +325,87 @@ impl GpuContext {
         ok_or(unsafe { gpu_context_download_spikes(self.ctx, spikes.as_mut_ptr(), n as c_int) }, "download_spikes")
     }
 
+    /// Upload only v (no u/a/b/c/d — saves bandwidth for LIF path).
+    pub fn upload_v_only(&self, v: &[f32]) -> Result<(), String> {
+        let n = v.len().min(self.n_neurons) as c_int;
+        ok_or(unsafe { gpu_context_upload_v_only(self.ctx, v.as_ptr(), n) }, "upload_v_only")
+    }
+
+    /// Run `n_steps` of Izhikevich + CSR propagate on GPU with batched spike accumulation.
+    ///
+    /// Same pattern as batch_lif_steps. Also downloads u at the end for state persistence.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn batch_izhikevich_steps(
+        &self,
+        external_I: &[f32],
+        dt: f32,
+        trace_decay: f32,
+        dev_spike_buf: *mut c_int,
+        host_spike_buf: &mut [i32],
+        host_v: &mut [f32],
+        host_u: &mut [f32],
+        n_steps: usize,
+    ) -> Result<(), String> {
+        let n_external = external_I.len().min(self.n_neurons) as c_int;
+        let n_neurons = self.n_neurons as c_int;
+        ok_or(unsafe {
+            gpu_context_batch_izhikevich_steps(
+                self.ctx,
+                external_I.as_ptr(),
+                n_external,
+                dt,
+                trace_decay,
+                dev_spike_buf,
+                host_spike_buf.as_mut_ptr(),
+                host_v.as_mut_ptr(),
+                host_u.as_mut_ptr(),
+                n_steps as c_int,
+                n_neurons,
+            )
+        }, "batch_izhikevich_steps")
+    }
+
     /// Download membrane potentials from GPU.
     pub fn download_v(&self, v: &mut [f32]) -> Result<(), String> {
         let n = v.len().min(self.n_neurons);
         ok_or(unsafe { gpu_context_download_v(self.ctx, v.as_mut_ptr(), n as c_int) }, "download_v")
+    }
+
+    /// Run `n_steps` of LIF + CSR propagate on GPU with batched spike accumulation.
+    ///
+    /// Accumulates spikes in `dev_spike_buf` via per-step D2D copies (no per-step D2H).
+    /// Downloads entire spike buffer + final v in ONE sync at the end.
+    /// Also updates `d_external_I` (per-step reset baseline) — fixes stale baseline bug.
+    ///
+    /// Args:
+    ///   external_I: current external input current (updates both baseline and working I)
+    ///   dev_spike_buf: pre-allocated device buffer `[n_steps × n_neurons]` ints
+    ///   host_spike_buf: output buffer `[n_steps × n_neurons]` ints
+    ///   host_v: output buffer `[n_neurons]` floats (final membrane potentials)
+    ///   n_steps: number of LIF steps to run
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn batch_lif_steps(
+        &self,
+        external_I: &[f32],
+        dev_spike_buf: *mut c_int,
+        host_spike_buf: &mut [i32],
+        host_v: &mut [f32],
+        n_steps: usize,
+    ) -> Result<(), String> {
+        let n_external = external_I.len().min(self.n_neurons) as c_int;
+        let n_neurons = self.n_neurons as c_int;
+        ok_or(unsafe {
+            gpu_context_batch_lif_steps(
+                self.ctx,
+                external_I.as_ptr(),
+                n_external,
+                dev_spike_buf,
+                host_spike_buf.as_mut_ptr(),
+                host_v.as_mut_ptr(),
+                n_steps as c_int,
+                n_neurons,
+            )
+        }, "batch_lif_steps")
     }
 
     /// Download recovery variable u from GPU.
@@ -689,6 +804,111 @@ impl GpuContext {
         self.graph_replay()?;
         self.sync()
     }
+
+    // ═══════════════════════════════════════════════════════
+    //  HH operations (direct computation with __expf())
+    // ═══════════════════════════════════════════════════════
+
+    /// Upload HH state: v, gates, Ii, g_leak, E_leak, C_m.
+    /// Allocates device arrays on first call.
+    ///
+    /// `gates` is row-major `[n_neurons * n_gates]` — gate variables per neuron.
+    /// `n_gates` is the total number of gates across all channels (e.g. 3 for NaV+KV).
+    pub fn hh_upload_state(&self,
+        v: &[f32], gates: &[f32], Ii: &[f32],
+        g_leak: &[f32], E_leak: &[f32], C_m: &[f32],
+        n_gates: usize) -> Result<(), String>
+    {
+        let n = self.n_neurons.min(v.len()).min(gates.len() / n_gates.max(1))
+            .min(Ii.len()).min(g_leak.len()).min(E_leak.len()).min(C_m.len());
+        ok_or(unsafe {
+            gpu_hh_upload_state(self.ctx,
+                v.as_ptr(), gates.as_ptr(), Ii.as_ptr(),
+                g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
+                n as c_int, n_gates as c_int)
+        }, "hh_upload_state")
+    }
+
+    /// Upload HH channel info (E_rev, g_max, powers, n_gates_per_ch).
+    /// Must be called once after `hh_upload_state()`.
+    ///
+    /// On GPU, HH uses direct computation with `__expf()` — no LUTs.
+    /// Channel arrays provide per-channel params to the kernel.
+    pub fn hh_upload_channels(&self,
+        E_rev_arr: &[f32], g_max_arr: &[f32],
+        powers: &[u32], n_gates_per_ch: &[i32],
+        n_gates: usize, n_channels: usize) -> Result<(), String>
+    {
+        ok_or(unsafe {
+            gpu_hh_upload_channels(self.ctx,
+                E_rev_arr.as_ptr(), g_max_arr.as_ptr(),
+                powers.as_ptr(), n_gates_per_ch.as_ptr(),
+                n_gates as c_int, n_channels as c_int)
+        }, "hh_upload_channels")
+    }
+
+    /// Run one HH step (async, no sync).
+    /// Requires state + channels to have been uploaded.
+    /// tau_ref = 0 means no refractory period (CPU HHLUT compatible).
+    pub fn hh_step_async(&self, dt: f32, tau_ref: f32) -> Result<(), String> {
+        ok_or(unsafe { gpu_hh_step_async(self.ctx, dt, tau_ref) }, "hh_step")
+    }
+
+    /// Run one HH step, then sync.
+    pub fn hh_step(&self, dt: f32, tau_ref: f32) -> Result<(), String> {
+        self.hh_step_async(dt, tau_ref)?;
+        self.sync()
+    }
+
+    /// Run `n_steps` of HH + CSR propagate + I_syn decay on GPU.
+    ///
+    /// All per-step work stays on GPU — no H2D/D2H transfers per step.
+    /// Single D2H at end for spike buffer, final v, and final I_syn.
+    ///
+    /// Requires connectome to have been uploaded via `upload_connectome()`.
+    /// Device spike buffer is managed internally (cached between calls).
+    ///
+    /// Args:
+    ///   external_I — host buffer [n_neurons], uploaded to d_external_I once
+    ///   host_spike_buf — output buffer [n_steps × n_neurons] ints
+    ///   host_v — output buffer [n_neurons] floats (final v)
+    ///   host_I_syn — output buffer [n_neurons] floats (final I_syn, modified in-place)
+    ///   n_steps — number of HH steps to run
+    ///   dt — HH timestep (ms)
+    ///   tau_ref — refractory period (ms)
+    ///   tau_syn — synaptic decay time constant (ms)
+    ///   weight_scale — additional multiplier for CSR weights (e.g. 0.005 for HH)
+    pub fn batch_hh_steps(
+        &self,
+        external_I: &[f32],
+        host_spike_buf: &mut [i32],
+        host_v: &mut [f32],
+        host_I_syn: &mut [f32],
+        n_steps: usize,
+        dt: f32,
+        tau_ref: f32,
+        tau_syn: f32,
+        weight_scale: f32,
+    ) -> Result<(), String> {
+        let n_external = external_I.len().min(self.n_neurons) as c_int;
+        let n_neurons = self.n_neurons as c_int;
+        ok_or(unsafe {
+            gpu_context_batch_hh_steps(
+                self.ctx,
+                external_I.as_ptr(),
+                n_external,
+                host_spike_buf.as_mut_ptr(),
+                host_v.as_mut_ptr(),
+                host_I_syn.as_mut_ptr(),
+                n_steps as c_int,
+                n_neurons,
+                dt,
+                tau_ref,
+                tau_syn,
+                weight_scale,
+            )
+        }, "batch_hh_steps")
+    }
 }
 
 impl Drop for GpuContext {
@@ -803,6 +1023,51 @@ extern "C" {
         states: *const c_float, error: c_float, s: c_float, n: c_int) -> c_int;
     fn cuda_echo_tap(output: *mut c_float, buffer: *const c_float,
         n_osc: c_int, delay_len: c_int, delay_idx: c_int) -> c_int;
+    fn cuda_ring_synthesis(output: *mut c_float, amplitudes: *const c_float,
+        trig_buf: *const c_float, weights: *const c_float, n: c_int) -> c_int;
+
+    // Interference / coherence / signal analysis
+    fn cuda_interference(output: *mut c_float, phases_a: *const c_float,
+        phases_b: *const c_float, na: c_int, nb: c_int) -> c_int;
+    fn cuda_interference_mean(output: *mut c_float, phases_a: *const c_float,
+        phases_b: *const c_float, n: c_int) -> c_int;
+    fn cuda_phase_coherence(output: *mut c_float, sin_buf: *const c_float,
+        cos_buf: *const c_float, amplitudes: *const c_float, n: c_int) -> c_int;
+    fn cuda_band_energy(band_energies: *mut c_float, amplitudes: *const c_float,
+        omegas: *const c_float, band_edges: *const c_float,
+        n_bands: c_int, n: c_int) -> c_int;
+    fn cuda_winding_matrix(output: *mut c_float, phases_a: *const c_float,
+        phases_b: *const c_float, na: c_int, nb: c_int) -> c_int;
+
+    // Kuramoto extensions
+    fn cuda_lazy_sincos_update(sin_out: *mut c_float, cos_out: *mut c_float,
+        phases: *const c_float, phases_prev: *mut c_float,
+        eps: c_float, n: c_int) -> c_int;
+    fn cuda_batch_coherence_sweep(output: *mut c_float,
+        areas: *const c_float, areas_sin: *const c_float, areas_cos: *const c_float,
+        n_areas: c_int, n_elem: c_int) -> c_int;
+
+    // Gate functions
+    fn cuda_t3_tact_generator(pulses: *mut c_float,
+        ph1: *const c_float, ph2: *const c_float, ph3: *const c_float,
+        threshold: c_float, n: c_int) -> c_int;
+
+    // Sawtooth neuron
+    fn cuda_saw_step(v: *mut c_float, u: *mut c_float, trace: *mut c_float,
+        a: *const c_float, b: *const c_float, I: *const c_float,
+        dt: c_float, trace_decay: c_float, noise_amp: c_float,
+        spikes: *mut c_int, refractory: *mut c_float, tau_ref: c_float,
+        n: c_int) -> c_int;
+
+    // HH standalone kernel (sync)
+    fn cuda_hh_step(
+        v: *mut c_float, gates: *mut c_float,
+        Ii: *const c_float, spikes: *mut c_int, refractory: *mut c_float,
+        g_leak: *const c_float, E_leak: *const c_float, C_m: *const c_float,
+        n: c_int, n_gates: c_int, dt: c_float, tau_ref: c_float,
+        E_rev_arr: *const c_float, g_max_arr: *const c_float,
+        powers: *const u32, n_gates_per_ch: *const c_int,
+        n_channels: c_int) -> c_int;
 
     // T3 CUDA kernels
     fn cuda_t3_update(phases: *mut c_float, amplitudes: *mut c_float,
@@ -862,6 +1127,30 @@ extern "C" {
         host_v: *mut c_float, host_u: *mut c_float, n: c_int) -> c_int;
     fn gpu_psi_upload_drive_async(ctx: *mut GpuCtx,
         host_i_ext: *const c_float, n: c_int) -> c_int;
+
+    // CSR SpMV + tanh (for GPU SPAUN)
+    fn cuda_csr_spmv_tanh(
+        out: *mut c_float,
+        in_state: *const c_float,
+        row_ptr: *const c_int,
+        col_indices: *const c_int,
+        values: *const c_float,
+        input_vec: *const c_float,
+        input_scale: c_float,
+        n: c_int,
+        stream: *mut c_void,
+    ) -> c_int;
+
+    // LUT-HH operations (direct computation, no LUTs on GPU)
+    fn gpu_hh_step_async(ctx: *mut GpuCtx, dt: c_float, tau_ref: c_float) -> c_int;
+    fn gpu_hh_upload_state(ctx: *mut GpuCtx,
+        v: *const c_float, gates: *const c_float, Ii: *const c_float,
+        g_leak: *const c_float, E_leak: *const c_float, C_m: *const c_float,
+        n: c_int, n_gates: c_int) -> c_int;
+    fn gpu_hh_upload_channels(ctx: *mut GpuCtx,
+        E_rev_arr: *const c_float, g_max_arr: *const c_float,
+        powers: *const u32, n_gates_per_ch: *const c_int,
+        n_gates: c_int, n_channels: c_int) -> c_int;
 
     // Aberton async operations
     fn gpu_aber_upload_async(ctx: *mut GpuCtx,
@@ -997,6 +1286,16 @@ pub fn t3_inverse_kuramoto(drive_out: &mut [f32], r: &[f32], r_prev: &[f32],
         r_prev.as_ptr(), alpha, gain, eps, decay, n) }, "t3_inverse")
 }
 
+pub fn t3_tact_generator(pulses: &mut [f32],
+    ph1: &[f32], ph2: &[f32], ph3: &[f32], threshold: f32) -> Result<(), String>
+{
+    let n = pulses.len().min(ph1.len()).min(ph2.len()).min(ph3.len()) as c_int;
+    ok_or(unsafe {
+        cuda_t3_tact_generator(pulses.as_mut_ptr(), ph1.as_ptr(),
+            ph2.as_ptr(), ph3.as_ptr(), threshold, n)
+    }, "t3_tact")
+}
+
 pub fn nlms_train(weights: &mut [f32], bias: &mut [f32], states: &[f32],
     error: f32, lr: f32, eps: f32) -> Result<(), String>
 {
@@ -1022,6 +1321,94 @@ pub fn echo_tap(output: &mut [f32], buffer: &[f32],
     }, "echo_tap")
 }
 
+pub fn ring_synthesis(output: &mut [f32], amplitudes: &[f32],
+    trig_buf: &[f32], weights: &[f32]) -> Result<(), String>
+{
+    let n = output.len().min(amplitudes.len()).min(trig_buf.len()).min(weights.len()) as c_int;
+    ok_or(unsafe {
+        cuda_ring_synthesis(output.as_mut_ptr(), amplitudes.as_ptr(),
+            trig_buf.as_ptr(), weights.as_ptr(), n)
+    }, "ring_synthesis")
+}
+
+// ─── Signal analysis (interference, coherence, band energy) ─
+
+pub fn interference_matrix(output: &mut [f32],
+    phases_a: &[f32], phases_b: &[f32]) -> Result<(), String>
+{
+    let na = phases_a.len() as c_int;
+    let nb = phases_b.len() as c_int;
+    ok_or(unsafe {
+        cuda_interference(output.as_mut_ptr(), phases_a.as_ptr(),
+            phases_b.as_ptr(), na, nb)
+    }, "interference")
+}
+
+pub fn interference_mean(output: &mut [f32],
+    phases_a: &[f32], phases_b: &[f32]) -> Result<(), String>
+{
+    let n = phases_a.len().min(phases_b.len()) as c_int;
+    ok_or(unsafe {
+        cuda_interference_mean(output.as_mut_ptr(), phases_a.as_ptr(),
+            phases_b.as_ptr(), n)
+    }, "interference_mean")
+}
+
+pub fn phase_coherence(output: &mut [f32],
+    sin_buf: &[f32], cos_buf: &[f32], amplitudes: &[f32]) -> Result<(), String>
+{
+    let n = sin_buf.len().min(cos_buf.len()).min(amplitudes.len()) as c_int;
+    ok_or(unsafe {
+        cuda_phase_coherence(output.as_mut_ptr(), sin_buf.as_ptr(),
+            cos_buf.as_ptr(), amplitudes.as_ptr(), n)
+    }, "phase_coherence")
+}
+
+pub fn band_energy(band_energies: &mut [f32],
+    amplitudes: &[f32], omegas: &[f32], band_edges: &[f32]) -> Result<(), String>
+{
+    let n_bands = band_energies.len() as c_int;
+    let n = amplitudes.len().min(omegas.len()) as c_int;
+    ok_or(unsafe {
+        cuda_band_energy(band_energies.as_mut_ptr(), amplitudes.as_ptr(),
+            omegas.as_ptr(), band_edges.as_ptr(), n_bands, n)
+    }, "band_energy")
+}
+
+pub fn winding_matrix(output: &mut [f32],
+    phases_a: &[f32], phases_b: &[f32]) -> Result<(), String>
+{
+    let na = phases_a.len() as c_int;
+    let nb = phases_b.len() as c_int;
+    ok_or(unsafe {
+        cuda_winding_matrix(output.as_mut_ptr(), phases_a.as_ptr(),
+            phases_b.as_ptr(), na, nb)
+    }, "winding_matrix")
+}
+
+pub fn lazy_sincos_update(sin_out: &mut [f32], cos_out: &mut [f32],
+    phases: &[f32], phases_prev: &mut [f32], eps: f32) -> Result<(), String>
+{
+    let n = sin_out.len().min(cos_out.len()).min(phases.len()).min(phases_prev.len()) as c_int;
+    ok_or(unsafe {
+        cuda_lazy_sincos_update(sin_out.as_mut_ptr(), cos_out.as_mut_ptr(),
+            phases.as_ptr(), phases_prev.as_mut_ptr(), eps, n)
+    }, "lazy_sincos")
+}
+
+pub fn batch_coherence_sweep(output: &mut [f32],
+    areas: &[f32], areas_sin: &[f32], areas_cos: &[f32],
+    n_elem: usize) -> Result<(), String>
+{
+    let total = areas.len();
+    let n_areas = total / n_elem;
+    ok_or(unsafe {
+        cuda_batch_coherence_sweep(output.as_mut_ptr(), areas.as_ptr(),
+            areas_sin.as_ptr(), areas_cos.as_ptr(),
+            n_areas as c_int, n_elem as c_int)
+    }, "batch_coherence")
+}
+
 // ═══════════════════════════════════════════════════════════
 //  T3 kernels (host wrappers)
 // ═══════════════════════════════════════════════════════════
@@ -1043,8 +1430,47 @@ pub fn t3_prepare(phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [f32]) 
     ok_or(unsafe { cuda_t3_prepare(phases.as_mut_ptr(), cos_out.as_mut_ptr(), sin_out.as_mut_ptr(), n) }, "t3_prepare")
 }
 
+pub fn saw_step(v: &mut [f32], u: &mut [f32], trace: &mut [f32],
+    a: &[f32], b: &[f32], I: &[f32],
+    dt: f32, trace_decay: f32, noise_amp: f32,
+    spikes: &mut [i32], refractory: &mut [f32], tau_ref: f32) -> Result<(), String>
+{
+    let n = v.len() as c_int;
+    ok_or(unsafe {
+        cuda_saw_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+            a.as_ptr(), b.as_ptr(), I.as_ptr(), dt, trace_decay, noise_amp,
+            spikes.as_mut_ptr(), refractory.as_mut_ptr(), tau_ref, n)
+    }, "saw_step")
+}
+
 // ═══════════════════════════════════════════════════════════
-//  T3 BPTT Jacobian kernel (K1)
+//  Dopamine-gated STDP + trace update
+// ═══════════════════════════════════════════════════════════
+
+extern "C" {
+    fn cuda_update_trace(trace: *mut c_float, rate: *const c_float, decay: c_float, n: c_int) -> c_int;
+    fn cuda_csr_stdp_dopamine(
+        weights: *mut c_float,
+        row_ptr: *const c_int, col_indices: *const c_int,
+        trace: *const c_float,
+        lr: c_float, delta: c_float, w_min: c_float, w_max: c_float,
+        n_neurons: c_int) -> c_int;
+    fn cuda_update_eligibility(
+        elig: *mut c_float,
+        spikes: *const c_int,
+        row_ptr: *const c_int, col_indices: *const c_int,
+        elig_add: c_float, elig_decay: c_float,
+        n_neurons: c_int) -> c_int;
+    fn cuda_csr_elig_stdp(
+        weights: *mut c_float,
+        elig: *const c_float,
+        lr: c_float, delta: c_float, gate: c_float,
+        w_min: c_float, w_max: c_float,
+        n_synapses: c_int) -> c_int;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  T3 BPTT — full backward pass (K2+K3 + K1)
 // ═══════════════════════════════════════════════════════════
 
 extern "C" {
@@ -1055,6 +1481,26 @@ extern "C" {
         d_v: *mut c_float,
         n: c_int,
     ) -> c_int;
+
+    fn cuda_pst_jacobian_add(
+        d_final_state: *const c_float,
+        d_grad_pst: *const c_float,
+        d_sums: *mut c_float,
+        d_v: *mut c_float,
+        n: c_int,
+    ) -> c_int;
+
+    // T3 BPTT step (K2 + K3)
+    fn cuda_bptt_step(
+        d_state_step: *const c_float,  // [6n]
+        d_drive_step: *const c_float,  // [3n]
+        d_v: *mut c_float,             // [6n] in: v_current, out: v_prev
+        d_scratch: *mut c_float,       // [12] or [12 * n_blocks]
+        d_grad_step: *mut c_float,     // [3n] output grad for this step
+        d_grad_pst: *const c_float,    // [pst_dim] velocity contribution
+        w12: c_float, w13: c_float, w23: c_float,
+        dt: c_float, gain: c_float, alpha: c_float, eps: c_float,
+        n: c_int, is_last_step: c_int) -> c_int;
 }
 
 /// Compute PST Jacobian-vector product on GPU.
@@ -1079,6 +1525,203 @@ pub fn pst_jacobian_gpu(
             n as c_int,
         )
     }, "pst_jacobian_gpu")
+}
+
+// ─── CSR SpMV + tanh (GPU SPAUN) ────────────────────────
+
+// ═══════════════════════════════════════════════════════════
+//  Dopamine-gated STDP + trace update wrappers
+// ═══════════════════════════════════════════════════════════
+
+/// Update per-neuron eligibility traces from rate activity.
+/// trace[i] = trace[i] * decay + abs(rate[i])
+pub fn update_trace(trace: &mut [f32], rate: &[f32], decay: f32) -> Result<(), String> {
+    let n = trace.len().min(rate.len());
+    ok_or(unsafe { cuda_update_trace(trace.as_mut_ptr(), rate.as_ptr(), decay, n as c_int) }, "update_trace")
+}
+
+/// Dopamine-gated CSR STDP:
+/// w_ij += lr * delta * (trace[pre] - trace[post])
+/// Sign-preserving clip to [w_min, w_max]
+pub fn csr_stdp_dopamine(
+    weights: &mut [f32],
+    row_ptr: &[i32],
+    col_indices: &[i32],
+    trace: &[f32],
+    lr: f32,
+    delta: f32,
+    w_min: f32,
+    w_max: f32,
+) -> Result<(), String> {
+    let n = trace.len();
+    ok_or(unsafe {
+        cuda_csr_stdp_dopamine(
+            weights.as_mut_ptr(),
+            row_ptr.as_ptr(),
+            col_indices.as_ptr(),
+            trace.as_ptr(),
+            lr, delta, w_min, w_max,
+            n as c_int,
+        )
+    }, "csr_stdp_dopamine")
+}
+
+/// Update per-synapse eligibility trace (CPE-style):
+/// For spiking pre-neurons, add elig_add to all outgoing synapses.
+/// Then decay all traces by elig_decay.
+pub fn update_eligibility(
+    elig: &mut [f32],
+    spikes: &[i32],
+    row_ptr: &[i32],
+    col_indices: &[i32],
+    elig_add: f32,
+    elig_decay: f32,
+) -> Result<(), String> {
+    let n = row_ptr.len() - 1;
+    ok_or(unsafe {
+        cuda_update_eligibility(
+            elig.as_mut_ptr(),
+            spikes.as_ptr(),
+            row_ptr.as_ptr(),
+            col_indices.as_ptr(),
+            elig_add, elig_decay,
+            n as c_int,
+        )
+    }, "update_eligibility")
+}
+
+/// Apply dopamine-gated STDP with per-synapse eligibility:
+/// w[i] += lr * delta * elig[i] * gate
+/// Sign-preserving clip to [w_min, w_max]
+pub fn csr_elig_stdp(
+    weights: &mut [f32],
+    elig: &[f32],
+    lr: f32,
+    delta: f32,
+    gate: f32,
+    w_min: f32,
+    w_max: f32,
+) -> Result<(), String> {
+    let n = weights.len().min(elig.len());
+    ok_or(unsafe {
+        cuda_csr_elig_stdp(
+            weights.as_mut_ptr(),
+            elig.as_ptr(),
+            lr, delta, gate, w_min, w_max,
+            n as c_int,
+        )
+    }, "csr_elig_stdp")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Device-pointer wrappers for dopamine STDP kernels
+// ═══════════════════════════════════════════════════════════
+
+/// Dopamine-gated CSR STDP (device pointers only).
+/// Same as csr_stdp_dopamine but takes raw device pointers.
+pub fn csr_stdp_dopamine_devptr(
+    d_weights: *mut c_float,
+    d_row_ptr: *const c_int,
+    d_col_indices: *const c_int,
+    d_trace: *const c_float,
+    lr: f32,
+    delta: f32,
+    w_min: f32,
+    w_max: f32,
+    n_neurons: usize,
+) -> Result<(), String> {
+    ok_or(unsafe {
+        cuda_csr_stdp_dopamine(
+            d_weights, d_row_ptr, d_col_indices, d_trace,
+            lr, delta, w_min, w_max,
+            n_neurons as c_int,
+        )
+    }, "csr_stdp_dopamine_devptr")
+}
+
+/// CSR SpMV + tanh on GPU.
+///
+/// out = tanh(W × in + input_scale * input_vec)
+///
+/// All pointers must be device pointers (GPU memory).
+/// `stream` is a CUDA stream (can be NULL for default stream).
+///
+/// Returns Ok(()) on success.
+pub fn csr_spmv_tanh(
+    out: *mut c_float,
+    in_state: *const c_float,
+    row_ptr: *const c_int,
+    col_indices: *const c_int,
+    values: *const c_float,
+    input_vec: *const c_float,
+    input_scale: f32,
+    n: usize,
+    stream: Option<*mut c_void>,
+) -> Result<(), String> {
+    let stream_ptr = stream.unwrap_or(core::ptr::null_mut());
+    let err = unsafe {
+        cuda_csr_spmv_tanh(
+            out, in_state, row_ptr, col_indices, values,
+            input_vec, input_scale, n as c_int, stream_ptr,
+        )
+    };
+    if err == 0 { Ok(()) } else { Err(format!("csr_spmv_tanh: error {err}")) }
+}
+
+/// Compute v += J^T · grad_pst on GPU (ADD variant for per-step SPIGRAD).
+///
+/// Same as `pst_jacobian_gpu` but ADDS to `d_v` instead of overwriting.
+pub fn pst_jacobian_gpu_add(
+    d_state: &DevicePtr<f32>,
+    d_grad_pst: &DevicePtr<f32>,
+    d_sums: &DevicePtr<f32>,
+    d_v: &DevicePtr<f32>,
+    n: usize,
+) -> Result<(), String> {
+    ok_or(unsafe {
+        cuda_pst_jacobian_add(
+            d_state.as_ptr() as *const c_float,
+            d_grad_pst.as_ptr() as *const c_float,
+            d_sums.as_ptr() as *mut c_float,
+            d_v.as_ptr() as *mut c_float,
+            n as c_int,
+        )
+    }, "pst_jacobian_gpu_add")
+}
+
+/// Run one T3 BPTT step on GPU: drive gradient (K3) + backprop through dynamics (K2).
+///
+/// All buffers are device pointers (pre-allocated via `DevicePtr`).
+/// `d_v` is updated in-place: [6n] v_current → v_prev.
+/// `d_grad_step` receives the drive gradient for this timestep: [3n].
+pub fn bptt_step_gpu(
+    d_state_step: &DevicePtr<f32>,
+    d_drive_step: &DevicePtr<f32>,
+    d_v: &DevicePtr<f32>,
+    d_scratch: &DevicePtr<f32>,
+    d_grad_step: &DevicePtr<f32>,
+    d_grad_pst: Option<&DevicePtr<f32>>,
+    w12: f32, w13: f32, w23: f32,
+    dt: f32, gain: f32, alpha: f32, eps: f32,
+    n: usize, is_last_step: bool,
+) -> Result<(), String> {
+    let grad_pst_ptr = d_grad_pst
+        .map(|p| p.as_ptr() as *const c_float)
+        .unwrap_or(core::ptr::null());
+    ok_or(unsafe {
+        cuda_bptt_step(
+            d_state_step.as_ptr() as *const c_float,
+            d_drive_step.as_ptr() as *const c_float,
+            d_v.as_ptr() as *mut c_float,
+            d_scratch.as_ptr() as *mut c_float,
+            d_grad_step.as_ptr() as *mut c_float,
+            grad_pst_ptr,
+            w12, w13, w23,
+            dt, gain, alpha, eps,
+            n as c_int,
+            is_last_step as c_int,
+        )
+    }, "bptt_step_gpu")
 }
 
 // ─── Device memory helper ─────────────────────────────────
@@ -1142,6 +1785,10 @@ impl<T> Drop for DevicePtr<T> {
         }
     }
 }
+
+// SAFETY: DevicePtr only holds a raw pointer + size; used exclusively through Mutex in GPU module.
+unsafe impl<T> Send for DevicePtr<T> {}
+unsafe impl<T> Sync for DevicePtr<T> {}
 
 // Required for extern block — these are already declared elsewhere but we need them here
 // The cudaMalloc/cudaMemcpy/cudaFree are already declared in the connectome section above

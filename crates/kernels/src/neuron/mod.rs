@@ -14,9 +14,13 @@
 //! | `lif_step` | LIF | dv/dt = (v_rest − v + I) / τ_m |
 //! | `lif_at_step` | LIF-AT | LIF + adaptive threshold θ |
 //! | `adex_step` | AdEx | exponential + adaptation current w |
+//! | `hh_lut_step` | LUT-HH | HH ion channels via LUT, zero exp() at runtime |
 
 #![allow(non_snake_case)]
 use wide::f32x8;
+
+const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
+const RNG_SCALE_16: f32 = 1.0 / 65536.0;
 
 // ═══════════════════════════════════════════════════════
 //  Helper: load f32x8 from raw pointer (index offset)
@@ -76,7 +80,7 @@ fn rand_f32() -> f32 {
     let mut s = SEED.fetch_add(1103515245, Ordering::Relaxed);
     s = s.wrapping_mul(1103515245).wrapping_add(12345);
     SEED.store(s, Ordering::Relaxed);
-    (s >> 16) as f32 / 65536.0
+    (s >> 16) as f32 * RNG_SCALE_16
 }
 
 // ═══════════════════════════════════════════════════════
@@ -96,7 +100,7 @@ fn rand_f32() -> f32 {
 /// Speed: ~2–3× faster than `f32::exp()`.
 #[inline(always)]
 pub fn fast_exp(x: f32) -> f32 {
-    let log2e = 1.4426950408889634f32;
+    let log2e = std::f32::consts::LOG2_E;
     let t = x * log2e;
     let n = t.floor() as i32;
     let f = t - n as f32;
@@ -136,7 +140,7 @@ pub fn fast_exp(x: f32) -> f32 {
 #[inline(always)]
 pub fn fast_exp_simd(x: f32x8) -> f32x8 {
     // log2(e) ≈ 1.4426950408889634
-    let log2e = f32x8::splat(1.4426950408889634);
+    let log2e = f32x8::splat(std::f32::consts::LOG2_E);
     let t = x * log2e;
 
     // Split into integer and fractional parts (per-element for floor + bit ops)
@@ -191,6 +195,7 @@ pub mod izhikevich;
 pub mod saw;
 pub mod lif;
 pub mod adex;
+pub mod hh;
 pub mod stp;
 pub mod dopamine;
 pub mod fused;

@@ -13,7 +13,7 @@
 //! ```
 
 use crate::{T3Backend, TriOscillator};
-use crate::ridge::{solve_cg, compute_pearson};
+use super::ridge::{solve_cg, compute_pearson};
 
 // ─── Decoder trait ───────────────────────────────────────
 

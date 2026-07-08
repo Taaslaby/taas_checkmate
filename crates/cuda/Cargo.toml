@@ -1,17 +1,11 @@
 [package]
 name = "cuda-kernels"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
-description = "CUDA kernels for neuron-engine — XOR attention, spiking neurons, Kuramoto oscillators"
+description = "CUDA GPU kernels for neural simulation — Izhikevich, LIF, STDP, Kuramoto, T3"
 
 [lib]
-crate-type = ["lib", "staticlib"]
 name = "cuda_kernels"
-
-[dependencies]
 
 [build-dependencies]
 cc = "1.0"
-
-[dev-dependencies]
-taas-checkmate = { path = "../.." }

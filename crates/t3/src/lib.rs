@@ -2,6 +2,9 @@
 
 pub use taas_kernels as kernels;
 
+#[cfg(feature = "cuda")]
+pub use cuda_kernels as cuda;
+
 pub mod backend;
 pub mod phase_gate;
 pub mod cochlea;
@@ -12,20 +15,8 @@ pub mod decoders;
 pub mod oscillator;
 pub mod pst_control;
 pub mod sparker;
-pub mod spike;
-
-pub use spike::{
-    T3SpikeTrajectory,
-    t3spike_forward,
-    t3spike_forward_with_backend,
-    t3spike_backward,
-};
-
 #[cfg(feature = "cuda")]
 pub mod backend_cuda;
-
-#[cfg(feature = "cuda")]
-pub mod spike_cuda;
 
 pub const PI: f32 = std::f32::consts::PI;
 pub const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
@@ -41,7 +32,7 @@ pub use phase_gate::{phase_gate, gate_coupling};
 
 pub use cochlea::{Biquad, Cochlea};
 
-pub use pst::{pst_features, pst_linear_features, pst_linear_dim};
+pub use pst::{pst_features, pst_linear_features, pst_linear_dim, pst_fast, pst_fast_dim};
 
 pub use trajectory::TrajectoryBuffer;
 

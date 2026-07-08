@@ -465,6 +465,6 @@ fn main() {
         N_TRAIN as f64 / total_elapsed.as_secs_f64());
     println!();
     println!("{}", "═".repeat(60));
-    println!("  Done. Paper saved to /tmp/bellec2020_eprop.pdf");
+    println!("  Done. Paper saved to bellec2020_eprop.pdf");
     println!("{}", "═".repeat(60));
 }

@@ -38,11 +38,19 @@ DLOAD = FLYWIRE_DATA
 HERE = Path(__file__).parent
 PROJ = HERE.parent.parent
 
-# Сначала пробуем release (с CUDA), затем debug как fallback
-if str(PROJ / 'target' / 'release') not in sys.path:
-    sys.path.insert(0, str(PROJ / 'target' / 'release'))
-if str(PROJ / 'target' / 'debug') not in sys.path:
-    sys.path.append(str(PROJ / 'target' / 'debug'))
+# Ensure the compiled .so is findable — PyO3 outputs libtaas_checkmate.so
+# but Python needs taas_checkmate.so (without lib prefix).
+_target_release = PROJ / 'target' / 'release'
+if str(_target_release) not in sys.path:
+    sys.path.insert(0, str(_target_release))
+# Create symlink if needed (survives cargo clean)
+_so_lib = _target_release / 'libtaas_checkmate.so'
+_so_mod = _target_release / 'taas_checkmate.so'
+if _so_lib.exists() and not _so_mod.exists():
+    try:
+        _so_mod.symlink_to(_so_lib)
+    except OSError:
+        pass  # fallback: just try import without symlink
 try:
     import taas_checkmate as tcm
 except ImportError:
@@ -344,7 +352,7 @@ class FlyWireCSR:
                     if pos >= len(col_indices):
                         continue
                     col_indices[pos] = np.int32(post_idx)
-                    values[pos] = max(weight, 0.0)
+                    values[pos] = float(row[weight_col])  # сохраняем знак (GABA=отрицательный), nt_types применится в propagate
                     cursor[pre_idx] += 1
 
         # Trim to actual synapses + rebuild row_ptr compactly
@@ -506,6 +514,8 @@ class FlyWireCSR:
 
         # ─── 5. Visual afferent indices ─────────────────
         print("  [CSR] Finding visual afferents...")
+        # ─── 5. Visual afferent indices ─────────────────
+        print("  [CSR] Finding visual afferents...")
         self.visual_afferent_indices = []
         for rid, idx in sorted(self.root_to_idx.items(), key=lambda x: x[1]):
             typ = self.type_map.get(rid, '')
@@ -514,6 +524,22 @@ class FlyWireCSR:
                     self.visual_afferent_indices.append(idx)
                     break
         print(f"    {len(self.visual_afferent_indices)} visual afferents "
+              f"[{time.time()-t0:.1f}s]")
+
+        # ─── 6. Olfactory afferent indices ────────────────
+        print("  [CSR] Finding olfactory afferents...")
+        OLFACTORY_PATTERNS = ('ORN', 'OSN', 'antennal', 'projection',
+                              'mALT', 'mlACT', 'lALT')
+        self.olfactory_indices = []
+        self.olfactory_root_ids = []
+        for rid, idx in sorted(self.root_to_idx.items(), key=lambda x: x[1]):
+            typ = self.type_map.get(rid, '')
+            for pat in OLFACTORY_PATTERNS:
+                if pat in typ or typ.startswith(pat):
+                    self.olfactory_indices.append(idx)
+                    self.olfactory_root_ids.append(rid)
+                    break
+        print(f"    {len(self.olfactory_indices)} olfactory afferents "
               f"[{time.time()-t0:.1f}s]")
 
         print(f"  [CSR] ✅ Загружено: {self.n_neurons:,} нейронов, "
@@ -687,6 +713,34 @@ class FlyWireBrain:
         self.visual_afferent_mask[self.visual_afferent_indices[:n_vis]] = True
         print(f"  [IZHI] Vision looming: {np.sum(self.visual_afferent_mask)} afferents")
 
+        # ─── Food seeking (olfactory + visual population code) ───
+        self.food_x = 0.2      # default food position
+        self.food_y = 0.0
+        self.food_bearing = 0.0  # radians from fly heading to food
+        self.food_distance = 1.0
+        # Build sensory population for food direction encoding
+        olfactory_idx = csr.olfactory_indices if hasattr(csr, 'olfactory_indices') else []
+        combined = list(self.visual_afferent_indices) + list(olfactory_idx)
+        combined = [i for i in combined if i < self.n]
+        # Remove duplicates while preserving order
+        self._food_sense_indices = []
+        seen = set()
+        for i in combined:
+            if i not in seen:
+                seen.add(i)
+                self._food_sense_indices.append(i)
+        self._food_sense_indices = np.array(self._food_sense_indices, dtype=np.int32)
+        n_fs = len(self._food_sense_indices)
+        if n_fs > 0:
+            # Assign each sensory neuron a preferred direction uniformly around the circle
+            self._food_sense_pref = np.linspace(-math.pi, math.pi, n_fs, dtype=np.float32)
+            self._food_sense_amp = 8.0  # max injection current per neuron
+            self._food_sense_enabled = True
+            print(f"  [IZHI] Food seeking: {n_fs} sensory neurons (population code)")
+        else:
+            self._food_sense_enabled = False
+            print(f"  [IZHI] Food seeking: no sensory neurons found")
+
         # ─── Drive mask ───
         rng2 = np.random.RandomState(42)
         self.drive_mask = rng2.rand(self.n) < 0.3
@@ -698,12 +752,59 @@ class FlyWireBrain:
         # ─── Injection targets (DNg100, CB0013) — set by VNC controller ───
         self._injection_targets = {}
 
-        # ─── Rust backend check ───
+        # ─── Backend check: GPU (CUDA) > CPU Rust > Python fallback ───
         self.use_rust = hasattr(tcm, 'connectome') and \
             hasattr(tcm.connectome, 'bench_connectome_cpu_recording')
-        backend = 'Rust bench_connectome_cpu_recording' if self.use_rust else 'Python fallback'
-        if not self.use_rust:
-            print("  ⚠ Rust backend недоступен. Использую Python (очень медленно).")
+        self.use_gpu = False
+        self._gpu_sim = None
+        self._gpu_conn = None
+        self._gpu_a = None
+        self._gpu_b = None
+        self._gpu_c = None
+        self._gpu_d = None
+        if hasattr(tcm.BrainSimulator, 'step_batch_gpu_izhikevich'):
+            # GPU probe — mini connectome + BrainSimulator
+            try:
+                _rp = np.array([0, 1], dtype=np.int32)
+                _ci = np.array([0], dtype=np.int32)
+                _vals = np.array([1.0], dtype=np.float32)
+                _nt = np.array([1.0], dtype=np.float32)
+                _conn = tcm.ConnectomeData(_rp, _ci, _vals, _nt)
+                _sim = tcm.BrainSimulator(1, 'izhikevich')
+                _ext = np.array([10.0], dtype=np.float32)
+                _a = np.full(1, 0.02, np.float32)
+                _b = np.full(1, 0.2, np.float32)
+                _c = np.full(1, -65.0, np.float32)
+                _d = np.full(1, 8.0, np.float32)
+                _sim.step_batch_gpu_izhikevich(_conn, 10, 0.5, _ext, _a, _b, _c, _d)
+                self.use_gpu = True
+                backend = 'GPU CUDA'
+            except Exception as e:
+                self.use_gpu = False
+                print(f"  [IZHI] GPU probe failed (будет CPU): {e}")
+        if not self.use_gpu:
+            if self.use_rust:
+                backend = 'Rust bench_connectome_cpu_recording'
+            else:
+                print("  ⚠ Rust backend недоступен. Использую Python (очень медленно).")
+                backend = 'Python fallback'
+
+        # ─── Persistent GPU sim + connectome ───
+        if self.use_gpu:
+            nt = self.csr.nt_types[:self.n].copy() if self.csr.nt_types is not None else np.ones(self.n, dtype=np.float32)
+            groups = [("dn", self.csr.dn_indices)]
+            if self.csr.mn_indices:
+                groups.append(("mn", self.csr.mn_indices))
+            self._gpu_conn = tcm.ConnectomeData(
+                self.csr.row_ptr, self.csr.col_indices, self.csr.values, nt, groups,
+            )
+            self._gpu_sim = tcm.BrainSimulator(self.n, 'izhikevich')
+            # Cache GPU params (per-neuron a,b,c,d — may have autotune)
+            self._gpu_a = self.a[:self.n].copy()
+            self._gpu_b = self.b[:self.n].copy()
+            self._gpu_c = self.c[:self.n].copy()
+            self._gpu_d = self.d[:self.n].copy()
+            print(f"  [IZHI] GPU: persistent BrainSimulator ready")
 
         print(f"  [IZHI] Izhikevich: {self.n:,} нейронов, dt={dt_ms}ms, "
               f"{len(csr.dn_indices)} DN, "
@@ -740,10 +841,16 @@ class FlyWireBrain:
             vec[i] = rates.get(bid, 0.0)
         return vec
 
-    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0):
-        if not self.looming_enabled:
-            return
-        self.looming.compute(x, y, vx, vy)
+    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0,
+                           food_x: float = None, food_y: float = None):
+        if self.looming_enabled:
+            self.looming.compute(x, y, vx, vy)
+        if food_x is not None and food_y is not None:
+            self.food_x, self.food_y = float(food_x), float(food_y)
+            dx = self.food_x - x
+            dy = self.food_y - y
+            self.food_distance = math.sqrt(dx*dx + dy*dy)
+            self.food_bearing = math.atan2(dy, dx) if self.food_distance > 0.001 else 0.0
 
     def _set_sensory_input(self, t: float):
         self.external_I.fill(0.0)
@@ -760,6 +867,17 @@ class FlyWireBrain:
             if len(aff_indices):
                 ramp = np.linspace(1.0, 0.3, len(aff_indices), dtype=np.float32)
                 self.external_I[aff_indices] += self.looming.looming * 10.0 * ramp
+
+        # ─── Food injection: population code for bearing ───
+        if self._food_sense_enabled and self.food_distance < 0.5:
+            n_fs = len(self._food_sense_indices)
+            # Cosine tuning: each neuron fires strongest when food is in its pref direction
+            # cos(bearing - pref_dir) gives [-1, 1], we clip to [0, 1] for excitation
+            cos_tuning = np.cos(self.food_bearing - self._food_sense_pref)
+            # Distance falloff: stronger signal when food is close
+            dist_factor = max(0.0, 1.0 - self.food_distance / 0.5)
+            inj_current = self._food_sense_amp * dist_factor * np.maximum(0.0, cos_tuning)
+            self.external_I[self._food_sense_indices] += inj_current.astype(np.float32)
 
     def step_batch(self, t_mujoco: float):
         """Izhikevich batch: единый Rust вызов bench_connectome_cpu_recording."""
@@ -782,8 +900,28 @@ class FlyWireBrain:
         self.I_buf.fill(0.0)
         self.I_buf[:self.n] = self.external_I[:self.n]
 
-        if self.use_rust:
-            spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
+        spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
+
+        if self.use_gpu and self._gpu_sim is not None:
+            try:
+                # Sync v+u state → GPU sim (both are needed for Izhikevich!)
+                self._gpu_sim.set_v(self.v)
+                self._gpu_sim.set_u(self.u)
+                # Izhikevich GPU call with per-neuron params
+                spike_buf = self._gpu_sim.step_batch_gpu_izhikevich(
+                    self._gpu_conn, n_steps, dt,
+                    self.external_I[:self.n].astype(np.float32),
+                    self._gpu_a, self._gpu_b, self._gpu_c, self._gpu_d,
+                )
+                # Sync v+u state back from GPU
+                self.v[:self.n] = self._gpu_sim.v()
+                self.u[:self.n] = self._gpu_sim.u()
+            except Exception as e:
+                print(f"  ⚠ GPU Izhikevich error: {e}, fallback to CPU")
+                self.use_gpu = False
+                spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
+
+        if not self.use_gpu and self.use_rust:
             try:
                 tcm.connectome.bench_connectome_cpu_recording(
                     self.csr.row_ptr, self.csr.col_indices, self.csr.values,
@@ -969,10 +1107,16 @@ class FlyWireRateBrain:
             vec[i] = rates.get(bid, 0.0)
         return vec
 
-    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0):
-        if not self.looming_enabled:
-            return
-        self.looming.compute(x, y, vx, vy)
+    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0,
+                           food_x: float = None, food_y: float = None):
+        if self.looming_enabled:
+            self.looming.compute(x, y, vx, vy)
+        if food_x is not None and food_y is not None:
+            self.food_x, self.food_y = float(food_x), float(food_y)
+            dx = self.food_x - x
+            dy = self.food_y - y
+            self.food_distance = math.sqrt(dx*dx + dy*dy)
+            self.food_bearing = math.atan2(dy, dx) if self.food_distance > 0.001 else 0.0
 
     def _set_sensory_input(self, t: float):
         self.external_r.fill(0.0)
@@ -1137,10 +1281,16 @@ class FlyWirePsiBrain:
             vec[i] = rates.get(bid, 0.0)
         return vec
 
-    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0):
-        if not self.looming_enabled:
-            return
-        self.looming.compute(x, y, vx, vy)
+    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0,
+                           food_x: float = None, food_y: float = None):
+        if self.looming_enabled:
+            self.looming.compute(x, y, vx, vy)
+        if food_x is not None and food_y is not None:
+            self.food_x, self.food_y = float(food_x), float(food_y)
+            dx = self.food_x - x
+            dy = self.food_y - y
+            self.food_distance = math.sqrt(dx*dx + dy*dy)
+            self.food_bearing = math.atan2(dy, dx) if self.food_distance > 0.001 else 0.0
 
     def _set_sensory_input(self, t: float):
         self.external_I.fill(0.0)
@@ -1283,6 +1433,31 @@ class FlyWireLIFBrain:
         self.visual_afferent_mask[self.visual_afferent_indices[:n_vis]] = True
         print(f"  [LIFBrain] Vision looming: {np.sum(self.visual_afferent_mask)} afferents")
 
+        # ─── Food seeking (olfactory + visual population code) ───
+        self.food_x = 0.2
+        self.food_y = 0.0
+        self.food_bearing = 0.0
+        self.food_distance = 1.0
+        olfactory_idx = csr.olfactory_indices if hasattr(csr, 'olfactory_indices') else []
+        combined = list(self.visual_afferent_indices) + list(olfactory_idx)
+        combined = [i for i in combined if i < self.n]
+        self._food_sense_indices = []
+        seen = set()
+        for i in combined:
+            if i not in seen:
+                seen.add(i)
+                self._food_sense_indices.append(i)
+        self._food_sense_indices = np.array(self._food_sense_indices, dtype=np.int32)
+        n_fs = len(self._food_sense_indices)
+        if n_fs > 0:
+            self._food_sense_pref = np.linspace(-math.pi, math.pi, n_fs, dtype=np.float32)
+            self._food_sense_amp = 80.0  # Hz Poisson rate (background is 100-360 Hz)
+            self._food_sense_enabled = True
+            print(f"  [LIFBrain] Food seeking: {n_fs} sensory neurons (population code, amp=80Hz)")
+        else:
+            self._food_sense_enabled = False
+            print(f"  [LIFBrain] Food seeking: no sensory neurons found")
+
         # ─── Drive mask (30% of neurons get strong input) ───
         rng2 = np.random.RandomState(42)
         self.drive_mask = rng2.rand(self.n) < 0.3
@@ -1306,21 +1481,64 @@ class FlyWireLIFBrain:
         # Applied inside step_batch AFTER _set_sensory_input (which zeros external_I)
         self._injection_targets = {}  # {csr_idx: current_pA}
 
-        # ─── Backend check: CPU Rust by default, GPU probe happens on first step_batch ───
+        # ─── Backend check: GPU (CUDA) > CPU Rust > Python fallback ───
         self.use_rust = hasattr(tcm, 'lif_connectome') and \
             hasattr(tcm.lif_connectome, 'lif_sim_cpu_recording')
-        self.use_gpu = False  # Real GPU probe in step_batch
-        self._gpu_probed = False  # First step probes GPU once
-        if self.use_rust:
-            backend = 'Rust CPU lif_sim_cpu_recording'
-        else:
-            self.use_rust_fallback = hasattr(tcm, 'step_lif') and \
-                hasattr(tcm, 'sparse') and hasattr(tcm.sparse, 'propagate_spikes')
-            if not self.use_rust_fallback:
-                print("  ⚠ Rust backend недоступен. Использую Python (очень медленно).")
-            backend = 'Python fallback'
+        self.use_gpu = False
+        self._gpu_sim = None
+        self._gpu_conn = None
+        if hasattr(tcm.BrainSimulator, 'step_batch_gpu'):
+            # GPU probe — mini connectome + BrainSimulator
+            try:
+                _rp = np.array([0, 1], dtype=np.int32)
+                _ci = np.array([0], dtype=np.int32)
+                _vals = np.array([1.0], dtype=np.float32)
+                _nt = np.array([1.0], dtype=np.float32)
+                _conn = tcm.ConnectomeData(_rp, _ci, _vals, _nt)
+                _sim = tcm.BrainSimulator(1, 'lif')
+                _ext = np.array([5.0], dtype=np.float32)
+                _sim.step_batch_gpu(_conn, 10, 0.5, _ext,
+                    np.full(1, 20.0, np.float32),
+                    np.full(1, -52.0, np.float32),
+                    np.full(1, -45.0, np.float32),
+                    np.full(1, -52.0, np.float32))
+                self.use_gpu = True
+                backend = 'GPU CUDA'
+            except Exception as e:
+                self.use_gpu = False
+                print(f"  [LIFBrain] GPU probe failed (будет CPU): {e}")
+        if not self.use_gpu:
+            if self.use_rust:
+                backend = 'Rust CPU lif_sim_cpu_recording'
+            else:
+                self.use_rust_fallback = hasattr(tcm, 'step_lif') and \
+                    hasattr(tcm, 'sparse') and hasattr(tcm.sparse, 'propagate_spikes')
+                if not self.use_rust_fallback:
+                    print("  ⚠ Rust backend недоступен. Использую Python (очень медленно).")
+                backend = 'Python fallback'
 
-        # ─── Cached MN rates (avoids recomputing from spike_buf every MuJoCo step) ───
+        # ─── SpikeRecorder (Rust) вместо Python loop for DN/MN extraction ───
+        self._recorder = None
+        if hasattr(tcm, 'SpikeRecorder'):
+            try:
+                self._recorder = tcm.SpikeRecorder(self.n)
+                print(f"  [LIFBrain] SpikeRecorder: Rust DN/MN extraction")
+            except Exception as e:
+                print(f"  [LIFBrain] ⚠ SpikeRecorder init failed: {e}")
+
+        # ─── Persistent GPU sim + connectome ───
+        if self.use_gpu:
+            nt = self.csr.nt_types[:self.n].copy() if self.csr.nt_types is not None else np.ones(self.n, dtype=np.float32)
+            groups = [("dn", self.csr.dn_indices)]
+            if self.csr.mn_indices:
+                groups.append(("mn", self.csr.mn_indices))
+            self._gpu_conn = tcm.ConnectomeData(
+                self.csr.row_ptr, self.csr.col_indices, self.csr.values, nt, groups,
+            )
+            self._gpu_sim = tcm.BrainSimulator(self.n, 'lif')
+            print(f"  [LIFBrain] GPU: persistent BrainSimulator ready")
+
+        # ─── Cached MN rates ───
         self._cached_mn_rates = np.array([])
 
         print(f"  [LIFBrain] LIF: {self.n:,} нейронов, dt={dt_ms}ms, "
@@ -1361,10 +1579,16 @@ class FlyWireLIFBrain:
             vec[i] = rates.get(bid, 0.0)
         return vec
 
-    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0):
-        if not self.looming_enabled:
-            return
-        self.looming.compute(x, y, vx, vy)
+    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0,
+                           food_x: float = None, food_y: float = None):
+        if self.looming_enabled:
+            self.looming.compute(x, y, vx, vy)
+        if food_x is not None and food_y is not None:
+            self.food_x, self.food_y = float(food_x), float(food_y)
+            dx = self.food_x - x
+            dy = self.food_y - y
+            self.food_distance = math.sqrt(dx*dx + dy*dy)
+            self.food_bearing = math.atan2(dy, dx) if self.food_distance > 0.001 else 0.0
 
     def _set_sensory_input(self, t: float):
         """Poisson spike input (Shiu et al. 2024).
@@ -1400,6 +1624,16 @@ class FlyWireLIFBrain:
                 looming_spike = self._poisson_rng.rand(len(aff_indices)) < looming_rate * self.dt_ms / 1000.0
                 self.external_I[aff_indices[looming_spike]] += pulse_amp * 0.5
 
+        # ─── Food injection: Poisson rate boost based on bearing ───
+        if self._food_sense_enabled and self.food_distance < 0.5:
+            cos_tuning = np.cos(self.food_bearing - self._food_sense_pref)
+            dist_factor = max(0.0, 1.0 - self.food_distance / 0.5)
+            # Convert to Poisson rate: higher cos_tuning → higher spike probability
+            food_spike_rate = self._food_sense_amp * dist_factor * np.maximum(0.0, cos_tuning)
+            food_spike_prob = food_spike_rate * self.dt_ms / 1000.0
+            food_spiking = self._poisson_rng.rand(len(self._food_sense_indices)) < food_spike_prob
+            self.external_I[self._food_sense_indices[food_spiking]] += pulse_amp * 0.3
+
     def step_batch(self, t_mujoco: float):
         """LIF batch: единый Rust вызов lif_sim_cpu_recording.
 
@@ -1426,42 +1660,30 @@ class FlyWireLIFBrain:
         self.I_buf[:self.n] = self.external_I[:self.n]
 
         spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
-        gpu_ok = False
 
-        # ─── Probe GPU once on first step_batch ───
-        if not self._gpu_probed:
-            self._gpu_probed = True
-            if hasattr(tcm, 'lif_connectome') and hasattr(tcm.lif_connectome, 'lif_sim_gpu_recording'):
-                try:
-                    tcm.lif_connectome.lif_sim_gpu_recording(
-                        self.csr.row_ptr, self.csr.col_indices, self.csr.values,
-                        n_steps, dt,
-                        self.v, self.tau_m, self.v_rest, self.v_thresh, self.v_reset,
-                        self.nt_types, self.external_I,
-                        spike_buf,
-                    )
-                    self.use_gpu = True
-                    gpu_ok = True
-                    # GPU succeeded — v and spike_buf contain valid state
-                except Exception:
-                    self.use_gpu = False
-                    print("  [LIFBrain] GPU недоступен, использую CPU Rust")
-
-        if self.use_gpu and not gpu_ok:
-            # GPU didn't work in this step, try again (but label said GPU)
+        if self.use_gpu and self._gpu_sim is not None:
             try:
-                tcm.lif_connectome.lif_sim_gpu_recording(
-                    self.csr.row_ptr, self.csr.col_indices, self.csr.values,
-                    n_steps, dt,
-                    self.v, self.tau_m, self.v_rest, self.v_thresh, self.v_reset,
-                    self.nt_types, self.external_I,
-                    spike_buf,
+                # Sync v state → GPU sim
+                self._gpu_sim.set_v(self.v)
+                # Build LIF params from current sim params
+                tau_m_arr = np.full(self.n, float(self.tau_m[0]), dtype=np.float32)
+                v_rest_arr = np.full(self.n, float(self.v_rest[0]), dtype=np.float32)
+                v_thresh_arr = np.full(self.n, float(self.v_thresh[0]), dtype=np.float32)
+                v_reset_arr = np.full(self.n, float(self.v_reset[0]), dtype=np.float32)
+                # GPU call
+                spike_buf = self._gpu_sim.step_batch_gpu(
+                    self._gpu_conn, n_steps, dt,
+                    self.external_I[:self.n].astype(np.float32),
+                    tau_m_arr, v_rest_arr, v_thresh_arr, v_reset_arr,
                 )
-                gpu_ok = True
-            except Exception:
-                self.use_gpu = False  # Больше не пробовать GPU
+                # Sync v state back from GPU
+                self.v[:self.n] = self._gpu_sim.v()
+            except Exception as e:
+                print(f"  ⚠ GPU LIF error: {e}, fallback to CPU")
+                self.use_gpu = False
+                spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
 
-        if not gpu_ok and self.use_rust:
+        if not self.use_gpu and self.use_rust:
             try:
                 tcm.lif_connectome.lif_sim_cpu_recording(
                     self.csr.row_ptr, self.csr.col_indices, self.csr.values,
@@ -1476,7 +1698,7 @@ class FlyWireLIFBrain:
                 print(f"  ⚠ Rust CPU LIF error: {e}")
                 # continue with empty spike_buf
 
-        if not gpu_ok and not self.use_rust:
+        if not self.use_rust:
             # ─── Fallback: per-step Rust step_lif + propagate_spikes ───
             if hasattr(self, 'use_rust_fallback') and self.use_rust_fallback:
                 self.I_buf[:self.n] = self.external_I[:self.n]
@@ -1515,9 +1737,8 @@ class FlyWireLIFBrain:
                                 self.I_buf[post] += self.csr.values[j] * self.csr.nt_types[pre_idx]
                 self.v[:self.n] = v
 
-        # ─── DN + MN rates из spike_buffer ───
-        self._extract_dn_rates(spike_buf, n_steps)
-        self._cache_mn_rates(spike_buf, n_steps)
+        # ─── DN + MN rates через Rust SpikeRecorder ───
+        self._extract_rates_via_recorder(spike_buf, n_steps)
         # Store for V2VNCController
         self._last_spike_buf = spike_buf
         self._last_n_steps = n_steps
@@ -1537,18 +1758,52 @@ class FlyWireLIFBrain:
                 dn_mon.append(f'{name}: {rate:.1f}Hz')
             print(f"    [{self._batch_count}] DN: {' | '.join(dn_mon)}")
 
-    def _extract_dn_rates(self, spike_buf: np.ndarray, n_steps: int):
-        """DN rate = spike_count / (n_steps * dt) normalized to [0, 1]."""
+    def _extract_rates_via_recorder(self, spike_buf: np.ndarray, n_steps: int):
+        """DN + MN rate extraction через Rust SpikeRecorder вместо Python loop.
+
+        SpikeRecorder::record_group делает single pass over spike_buffer в Rust,
+        что в ~80× быстрее Python loop (8.5ms → ~0.1ms).
+        """
+        rec = self._recorder
+        if rec is not None:
+            # DN rates
+            dn_indices = self.csr.dn_indices
+            if dn_indices:
+                max_rate = 100.0
+                self.dn_rate = np.array(
+                    rec.record_group(spike_buf, n_steps, self.dt_ms,
+                                     dn_indices, max_rate),
+                    dtype=np.float32,
+                )
+            else:
+                self.dn_rate = np.array([], dtype=np.float32)
+
+            # MN rates
+            mn_indices = self.csr.mn_indices
+            if mn_indices:
+                max_rate = 100.0
+                self._cached_mn_rates = np.array(
+                    rec.record_group(spike_buf, n_steps, self.dt_ms,
+                                     mn_indices, max_rate),
+                    dtype=np.float32,
+                )
+            else:
+                self._cached_mn_rates = np.array([], dtype=np.float32)
+        else:
+            # Fallback: Python extraction
+            self._extract_dn_rates_py(spike_buf, n_steps)
+            self._cache_mn_rates_py(spike_buf, n_steps)
+
+    def _extract_dn_rates_py(self, spike_buf: np.ndarray, n_steps: int):
+        """Python fallback for DN rate extraction."""
         dn_indices = self.csr.dn_indices
         n_dn = len(dn_indices)
-
         dn_spikes = np.zeros(n_dn, dtype=np.int32)
         for step in range(n_steps):
             offset = step * self.n
             for i, dn_idx in enumerate(dn_indices):
                 if dn_idx < self.n and spike_buf[offset + dn_idx]:
                     dn_spikes[i] += 1
-
         batch_time_s = n_steps * self.dt_ms / 1000.0
         max_rate = 100.0
         self.dn_rate = np.clip(
@@ -1556,32 +1811,23 @@ class FlyWireLIFBrain:
             0.0, 1.0,
         )
 
-    def _cache_mn_rates(self, spike_buf: np.ndarray, n_steps: int):
-        """Vectorized MN rate extraction — обновляет кеш.
-
-        Использует numpy fancy indexing вместо Python double loop.
-        """
+    def _cache_mn_rates_py(self, spike_buf: np.ndarray, n_steps: int):
+        """Python fallback for MN rate extraction."""
         mn_indices = self.csr.mn_indices
         n_mn = len(mn_indices)
         if n_mn == 0 or self.n == 0:
             self._cached_mn_rates = np.array([])
             return
-
         mn_idx_arr = np.array(mn_indices, dtype=np.int32)
         valid = mn_idx_arr < self.n
         if not np.any(valid):
             self._cached_mn_rates = np.zeros(n_mn, dtype=np.float32)
             return
-
-        # Vectorized: sum spikes across all steps at MN indices
-        # spike_buf shape: (n_steps * n,) → reshape to (n_steps, n)
-        # Then count spikes at mn_indices across all steps
         mn_spikes = np.zeros(n_mn, dtype=np.int32)
         for step in range(n_steps):
             offset = step * self.n
             step_spikes = spike_buf[offset:offset + self.n]
             mn_spikes[valid] += step_spikes[mn_idx_arr[valid]].astype(np.int32)
-
         batch_time_s = n_steps * self.dt_ms / 1000.0
         max_rate = 100.0
         self._cached_mn_rates = np.clip(
@@ -1596,12 +1842,397 @@ class FlyWireLIFBrain:
         """
         if len(self._cached_mn_rates) == 0 and hasattr(self, '_last_spike_buf') and self._last_spike_buf is not None:
             # Fallback: compute on demand (shouldn't happen normally)
-            self._cache_mn_rates(self._last_spike_buf, self._last_n_steps)
+            self._extract_rates_via_recorder(self._last_spike_buf, self._last_n_steps)
         return self._cached_mn_rates
 
     def get_r_histogram(self, bins=20):
         hist, edges = np.histogram(
             np.clip(self.v[:self.n], -70.0, -40.0),
             bins=bins, range=(-70, -40)
+        )
+        return hist, edges
+
+
+# ═══════════════════════════════════════════════════════════════
+#  FlyWire HH Brain — Hodgkin-Huxley (HHLUT) на полном коннектоме
+# ═══════════════════════════════════════════════════════════════
+
+class FlyWireHHBrain:
+    """HH brain с HHLUT бэкендом + Rust CSR propagation.
+
+    Использует реальные HH каналы (NaV+KV+CaV-T для pacemaking)
+    через LUT аппроксимацию. Вход — Poisson импульсы (как LIF).
+
+    Sensory Poisson -> HHLUT -> spikes -> CSR propagate -> DN/MN rates
+    """
+
+    def __init__(self, csr: FlyWireCSR, dt_ms: float = 0.1,
+                 manc_bodyids: list = None, fw_to_manc: dict = None,
+                 vnc_gain: float = 2.0):
+        self.csr = csr
+        self.dt_ms = dt_ms
+        self.n = csr.n_neurons
+        self.manc_bodyids = manc_bodyids or []
+        self.fw_to_manc = fw_to_manc or {}
+        self.vnc_gain = vnc_gain
+
+        # --- HHLUT / GpuHHLUT simulator ---
+        self._use_gpu = False
+        self.sim = None
+        if hasattr(tcm.hh, 'GpuHHLUT'):
+            try:
+                self.sim = tcm.hh.GpuHHLUT(self.n, dt=dt_ms, pacemaking=False, tau_ref=0.0)
+                self._use_gpu = True
+            except Exception as e:
+                print(f"  [HHBrain] GpuHHLUT init failed: {e}")
+        if self.sim is None:
+            self.sim = tcm.hh.HHLUT(self.n, dt=dt_ms, pacemaking=False)
+        self._prop_scale = 0.005  # connectome scaling for HH units
+
+        # --- External input (Poisson pulse amplitudes) ---
+        self.external_I = np.zeros(self.n, dtype=np.float32)
+
+        # --- Synaptic buffer (accumulated from CSR propagation) ---
+        self.I_syn = np.zeros(self.n, dtype=np.float32)
+
+        # --- CSR data ---
+        self.row_ptr = csr.row_ptr
+        self.col_indices = csr.col_indices
+        self.values = csr.values
+        self.nt_types = np.ones(self.n, dtype=np.float32)
+        if csr.nt_types is not None:
+            self.nt_types = csr.nt_types[:self.n].copy()
+
+        # --- Alpha-synapse ---
+        self.tau_syn = 5.0
+
+        # --- Poisson generator ---
+        self._poisson_rng = np.random.RandomState(0)
+
+        # --- Looming ---
+        self.looming = LoomingSensor()
+        self.looming_enabled = len(csr.visual_afferent_indices) > 0
+        self.visual_afferent_indices = csr.visual_afferent_indices
+        self.visual_afferent_mask = np.zeros(self.n, dtype=bool)
+        n_vis = min(len(self.visual_afferent_indices), self.n // 2)
+        self.visual_afferent_mask[self.visual_afferent_indices[:n_vis]] = True
+        print(f"  [HHBrain] Vision looming: {np.sum(self.visual_afferent_mask)} afferents")
+
+        # --- Food seeking ---
+        self.food_x = 0.2
+        self.food_y = 0.0
+        self.food_bearing = 0.0
+        self.food_distance = 1.0
+        olfactory_idx = csr.olfactory_indices if hasattr(csr, 'olfactory_indices') else []
+        combined = list(self.visual_afferent_indices) + list(olfactory_idx)
+        combined = [i for i in combined if i < self.n]
+        self._food_sense_indices = []
+        seen = set()
+        for i in combined:
+            if i not in seen:
+                seen.add(i)
+                self._food_sense_indices.append(i)
+        self._food_sense_indices = np.array(self._food_sense_indices, dtype=np.int32)
+        n_fs = len(self._food_sense_indices)
+        if n_fs > 0:
+            self._food_sense_pref = np.linspace(-math.pi, math.pi, n_fs, dtype=np.float32)
+            self._food_sense_amp = -15.0
+            self._food_sense_enabled = True
+            print(f"  [HHBrain] Food seeking: {n_fs} sensory neurons (pop code, amp=5)")
+        else:
+            self._food_sense_enabled = False
+            print(f"  [HHBrain] Food seeking: no sensory neurons found")
+
+        # --- Drive mask ---
+        rng2 = np.random.RandomState(42)
+        self.drive_mask = rng2.rand(self.n) < 0.3
+
+        # --- DN rate buffer ---
+        self.dn_rate = np.zeros(len(csr.dn_indices), dtype=np.float32)
+        self._batch_count = 0
+
+        # --- Named DN monitoring ---
+        self.named_dn_indices = {}
+        for name in ['DNg100', 'DNb08']:
+            entry = csr.named_dns.get(name)
+            if entry is not None:
+                rid, idx = entry
+                self.named_dn_indices[name] = idx
+        if self.named_dn_indices:
+            dn_list = ', '.join(f'{n}(idx={idx})' for n, idx in self.named_dn_indices.items())
+            print(f"  [HHBrain] Named DN monitoring: {dn_list}")
+
+        # --- Injection targets (values in LIF pA; scaled to HH muA/cm2) ---
+        self._injection_targets = {}
+        self._injection_scale = 0.06  # pA -> muA/cm2 (tuned to avoid depolarization block)
+
+        # --- Spike recording ---
+        self._recorder = None
+        if hasattr(tcm, 'SpikeRecorder'):
+            try:
+                self._recorder = tcm.SpikeRecorder(self.n)
+                print(f"  [HHBrain] SpikeRecorder: Rust DN/MN extraction")
+            except Exception as e:
+                print(f"  [HHBrain] SpikeRecorder init failed: {e}")
+
+        # --- Cached MN rates ---
+        self._cached_mn_rates = np.array([])
+        self._last_spike_buf = None
+        self._last_n_steps = 0
+
+        # --- V_reset buffer for set_v ---
+        self._v_reset_arr = np.full(self.n, -65.0, dtype=np.float32)
+
+        backend = "GpuHHLUT" if self._use_gpu else "HHLUT"
+        print(f"  [HHBrain] {backend}: {self.n:,} neurons, dt={dt_ms}ms, "
+              f"{len(csr.dn_indices)} DN, "
+              f"VNC mapped: {len(self.manc_bodyids)}")
+
+    @property
+    def bodyids(self):
+        return self.manc_bodyids
+
+    def get_rates(self, t: float) -> dict:
+        return self.get_dn_rates()
+
+    def get_dn_rates(self) -> dict:
+        manc_rates = defaultdict(list)
+        for i, rid in enumerate(self.csr.dn_root_ids):
+            if i < len(self.dn_rate):
+                rate = float(self.dn_rate[i]) * self.vnc_gain
+                if rate > 0.01:
+                    manc_bid = self.fw_to_manc.get(int(rid))
+                    if manc_bid is not None:
+                        manc_rates[manc_bid].append(rate)
+        rates = {}
+        for bid, rate_list in manc_rates.items():
+            avg = sum(rate_list) / len(rate_list)
+            if avg > 0.05:
+                rates[bid] = min(1.0, avg)
+        return rates
+
+    def get_vnc_rates_vector(self) -> np.ndarray:
+        vec = np.zeros(len(self.manc_bodyids), dtype=np.float32)
+        rates = self.get_dn_rates()
+        for i, bid in enumerate(self.manc_bodyids):
+            vec[i] = rates.get(bid, 0.0)
+        return vec
+
+    def set_sensory_state(self, x: float, y: float, vx: float = 0.0, vy: float = 0.0,
+                           food_x: float = None, food_y: float = None):
+        if self.looming_enabled:
+            self.looming.compute(x, y, vx, vy)
+        if food_x is not None and food_y is not None:
+            self.food_x, self.food_y = float(food_x), float(food_y)
+            dx = self.food_x - x
+            dy = self.food_y - y
+            self.food_distance = math.sqrt(dx*dx + dy*dy)
+            self.food_bearing = math.atan2(dy, dx) if self.food_distance > 0.001 else 0.0
+
+    def _set_sensory_input(self, t: float):
+        """DC current input for HH.
+
+        HH neurons integrate sustained current. We use DC levels that
+        produce ~20-80Hz baseline firing. Modulation (looming, food)
+        adds small additional current on top.
+        """
+        self.external_I.fill(0.0)
+        mod = 0.5 + 0.5 * math.sin(2 * math.pi * 2.0 * t)
+
+        # DC baseline — drives continuous spiking for recurrent connectome
+        base_drive = 10.0
+        base_non = 6.0
+        mod_drive = mod * 2.0
+        mod_non = mod * 1.0
+
+        self.external_I[:self.n] = np.where(
+            self.drive_mask[:self.n],
+            base_drive + mod_drive,
+            base_non + mod_non,
+        ).astype(np.float32)
+
+        if self.looming_enabled and self.looming.looming > 0.01:
+            aff_indices = np.where(self.visual_afferent_mask[:self.n])[0]
+            if len(aff_indices):
+                ramp = np.linspace(1.0, 0.3, len(aff_indices), dtype=np.float32)
+                self.external_I[aff_indices] += self.looming.looming * 2.0 * ramp
+
+        if self._food_sense_enabled and self.food_distance < 0.5:
+            cos_tuning = np.cos(self.food_bearing - self._food_sense_pref)
+            dist_factor = max(0.0, 1.0 - self.food_distance / 0.5)
+            food_dc = self._food_sense_amp * dist_factor * np.maximum(0.0, cos_tuning)
+            self.external_I[self._food_sense_indices] += food_dc.astype(np.float32)
+
+    def warmup(self, ms: float = 500.0):
+        """Run brain offline — lets network settle before body coupling."""
+        n_batches = max(1, int(ms / 25.0))
+        print(f"  [HHBrain] Warmup: {n_batches} batches ({ms}ms)...")
+        for i in range(n_batches):
+            self.step_batch(0.0)
+            if i % 10 == 9:
+                print(f"  [HHBrain] Warmup batch {i+1}/{n_batches}")
+
+    def step_batch(self, t_mujoco: float):
+        """HH batch: HHLUT step + CSR propagation for 25ms simulation."""
+        n_steps = max(1, int(25.0 / self.dt_ms))
+        dt = self.dt_ms
+
+        self._set_sensory_input(t_mujoco)
+        self._batch_count += 1
+
+        # Voltage noise every batch — maintains asynchronous firing
+        noise = np.random.RandomState(self._batch_count).randn(self.n).astype(np.float32) * 0.15
+        v_cur = np.array(self.sim.v)
+        v_cur[:self.n] += noise
+        np.clip(v_cur[:self.n], -100.0, 50.0, out=v_cur[:self.n])
+        self.sim.set_v(v_cur)
+
+        # --- Apply persistent injection targets (scaled pA -> muA/cm2) ---
+        for csr_idx, current in self._injection_targets.items():
+            if csr_idx < self.n and current > 0:
+                self.external_I[csr_idx] += current * self._injection_scale
+
+        # Clip external_I to prevent numerical instability in HH
+        np.clip(self.external_I[:self.n], -5.0, 30.0, out=self.external_I[:self.n])
+
+        if self._use_gpu:
+            spike_buf = self.sim.step_batch(
+                self.external_I, self.I_syn, n_steps, self.tau_syn, dt,
+                self.row_ptr, self.col_indices, self.values,
+                self.nt_types, self._prop_scale,
+            )
+        else:
+            spike_buf = np.zeros(n_steps * self.n, dtype=np.int32)
+            I_total = np.zeros(self.n, dtype=np.float32)
+            for step in range(n_steps):
+                np.add(self.external_I, self.I_syn, out=I_total)
+                self.sim.set_I_all(I_total)
+
+                v_before = np.array(self.sim.v)
+                self.sim.step()
+                v_after = np.array(self.sim.v)
+
+                np.clip(v_after, -80.0, 50.0, out=v_after)
+
+                spiked_mask = (v_after > 0.0) & (v_before <= 0.0)
+                spiked_idx = np.where(spiked_mask)[0]
+
+                if len(spiked_idx):
+                    spike_buf[step * self.n + spiked_idx] = 1
+                    v_after[spiked_idx] = -65.0
+                    tcm.sparse.propagate_spikes(
+                        self.row_ptr, self.col_indices, self.values,
+                        spiked_idx.astype(np.int32),
+                        self.nt_types, self.I_syn, self._prop_scale,
+                    )
+
+                self.sim.set_v(v_after)
+
+                decay = 1.0 - dt / self.tau_syn
+                if decay > 0.0:
+                    self.I_syn *= decay
+                else:
+                    self.I_syn.fill(0.0)
+
+        self._extract_rates_via_recorder(spike_buf, n_steps)
+        self._last_spike_buf = spike_buf
+        self._last_n_steps = n_steps
+
+        if self.named_dn_indices:
+            dn_mon = []
+            for name, csr_idx in self.named_dn_indices.items():
+                spike_count = 0
+                for step in range(n_steps):
+                    offset = step * self.n
+                    if csr_idx < self.n:
+                        pos = offset + csr_idx
+                        if pos < len(spike_buf) and spike_buf[pos]:
+                            spike_count += 1
+                rate = spike_count / (n_steps * self.dt_ms / 1000.0)
+                dn_mon.append(f'{name}: {rate:.1f}Hz')
+            print(f"    [{self._batch_count}] DN: {' | '.join(dn_mon)}")
+
+    def _extract_rates_via_recorder(self, spike_buf: np.ndarray, n_steps: int):
+        """DN + MN rate extraction via Rust SpikeRecorder."""
+        rec = self._recorder
+        if rec is not None:
+            dn_indices = self.csr.dn_indices
+            if dn_indices:
+                max_rate = 100.0
+                self.dn_rate = np.array(
+                    rec.record_group(spike_buf, n_steps, self.dt_ms,
+                                     dn_indices, max_rate),
+                    dtype=np.float32,
+                )
+            else:
+                self.dn_rate = np.array([], dtype=np.float32)
+
+            mn_indices = self.csr.mn_indices
+            if mn_indices:
+                max_rate = 100.0
+                self._cached_mn_rates = np.array(
+                    rec.record_group(spike_buf, n_steps, self.dt_ms,
+                                     mn_indices, max_rate),
+                    dtype=np.float32,
+                )
+            else:
+                self._cached_mn_rates = np.array([], dtype=np.float32)
+        else:
+            self._extract_dn_rates_py(spike_buf, n_steps)
+            self._cache_mn_rates_py(spike_buf, n_steps)
+
+    def _extract_dn_rates_py(self, spike_buf: np.ndarray, n_steps: int):
+        """Python fallback for DN rate extraction."""
+        dn_indices = self.csr.dn_indices
+        n_dn = len(dn_indices)
+        dn_spikes = np.zeros(n_dn, dtype=np.int32)
+        for step in range(n_steps):
+            offset = step * self.n
+            for i, dn_idx in enumerate(dn_indices):
+                if dn_idx < self.n and spike_buf[offset + dn_idx]:
+                    dn_spikes[i] += 1
+        batch_time_s = n_steps * self.dt_ms / 1000.0
+        max_rate = 100.0
+        self.dn_rate = np.clip(
+            dn_spikes.astype(np.float32) / (batch_time_s * max_rate),
+            0.0, 1.0,
+        )
+
+    def _cache_mn_rates_py(self, spike_buf: np.ndarray, n_steps: int):
+        """Python fallback for MN rate extraction."""
+        mn_indices = self.csr.mn_indices
+        n_mn = len(mn_indices)
+        if n_mn == 0 or self.n == 0:
+            self._cached_mn_rates = np.array([])
+            return
+        mn_idx_arr = np.array(mn_indices, dtype=np.int32)
+        valid = mn_idx_arr < self.n
+        if not np.any(valid):
+            self._cached_mn_rates = np.zeros(n_mn, dtype=np.float32)
+            return
+        mn_spikes = np.zeros(n_mn, dtype=np.int32)
+        for step in range(n_steps):
+            offset = step * self.n
+            step_spikes = spike_buf[offset:offset + self.n]
+            mn_spikes[valid] += step_spikes[mn_idx_arr[valid]].astype(np.int32)
+        batch_time_s = n_steps * self.dt_ms / 1000.0
+        max_rate = 100.0
+        self._cached_mn_rates = np.clip(
+            mn_spikes.astype(np.float32) / (batch_time_s * max_rate),
+            0.0, 1.0,
+        )
+
+    def get_mn_rates(self) -> np.ndarray:
+        """Get motor neuron spike rates [n_mn] from cache."""
+        if len(self._cached_mn_rates) == 0 and hasattr(self, '_last_spike_buf') and self._last_spike_buf is not None:
+            self._extract_rates_via_recorder(self._last_spike_buf, self._last_n_steps)
+        return self._cached_mn_rates
+
+    def get_r_histogram(self, bins=20):
+        """HH voltage histogram."""
+        v_arr = np.array(self.sim.v)
+        hist, edges = np.histogram(
+            np.clip(v_arr[:self.n], -80.0, 50.0),
+            bins=bins, range=(-80, 50)
         )
         return hist, edges

@@ -5,7 +5,7 @@
 //! but all arithmetic (addition, multiplication, wrapping) uses f32x8.
 
 use wide::f32x8;
-use crate::wrap_phase;
+use super::wrap_phase;
 use core::f32::consts::TAU;
 
 /// Helper: load f32x8 from raw pointer
@@ -165,82 +165,3 @@ pub(crate) unsafe fn t3_update(
     }
 }
 
-/// Full T3 with PLL cross-coupling frequency tracking.
-///
-/// # Safety
-/// All pointer args valid for `n` elements, non-overlapping.
-pub(crate) unsafe fn t3_update_full(
-    phases: *mut f32, amplitudes: *mut f32,
-    omegas: *mut f32, coupling: *const f32,
-    drives: *const f32,
-    x_coupling_sin: *const f32, x_coupling_cos: *const f32,
-    pll_integrator: *mut f32, _pll_band_input: *const f32,
-    dt: f32, _params: *const core::ffi::c_void, n: usize,
-) {
-    let tau_s = f32x8::splat(TAU);
-    let dt_s = f32x8::splat(dt);
-    let n8 = n & !7;
-
-    for off in (0..n8).step_by(8) {
-        let mut pv = load8(phases, off);
-        let mut av = load8(amplitudes, off);
-        let ov = load8(omegas, off);
-        let cv = load8(coupling, off);
-        let dv = load8(drives, off);
-        let xc_s = load8(x_coupling_sin, off);
-        let xc_c = load8(x_coupling_cos, off);
-        let mut pll = load8(pll_integrator, off);
-
-        // PLL error
-        let o_arr: [f32; 8] = ov.to_array();
-        let xcs_arr: [f32; 8] = xc_s.to_array();
-        let xcc_arr: [f32; 8] = xc_c.to_array();
-        let mut pll_err = [0.0f32; 8];
-        let mut o_cos = [0.0f32; 8];
-        let mut o_sin = [0.0f32; 8];
-        for j in 0..8 {
-            o_cos[j] = o_arr[j].cos();
-            o_sin[j] = o_arr[j].sin();
-            pll_err[j] = xcs_arr[j] * o_cos[j] - xcc_arr[j] * o_sin[j];
-        }
-        pll = pll + dt_s * f32x8::from(pll_err);
-
-        // Phase FIRST (uses OLD r): θ += dt · (ω + PLL + c + drive / (r + ε))
-        let drive_phase = dv / (av + f32x8::splat(0.1));
-        pv = pv + dt_s * (ov + pll + cv + drive_phase);
-        pv = pv - tau_s * (pv / tau_s).round();
-
-        // Amplitude SECOND: r += dt · (r − r³ + gain·drive)
-        // alpha=1.0 implicitly: (1 − r²)·r = r − r³, gain=1.0
-        let r_dot = av - av * av * av + dv;
-        av = av + dt_s * r_dot;
-        av = av.max(f32x8::splat(0.001)).min(f32x8::splat(10.0));
-
-        store8(phases, off, pv);
-        store8(amplitudes, off, av);
-        store8(omegas, off, ov);
-        store8(pll_integrator, off, pll);
-    }
-
-    if n8 < n {
-        let p = std::slice::from_raw_parts_mut(phases, n);
-        let a = std::slice::from_raw_parts_mut(amplitudes, n);
-        let o = std::slice::from_raw_parts_mut(omegas, n);
-        let c = std::slice::from_raw_parts(coupling, n);
-        let d = std::slice::from_raw_parts(drives, n);
-        let xc_s = std::slice::from_raw_parts(x_coupling_sin, n);
-        let xc_c = std::slice::from_raw_parts(x_coupling_cos, n);
-        let pll = std::slice::from_raw_parts_mut(pll_integrator, n);
-        for i in n8..n {
-            let perr = xc_s[i] * o[i].cos() - xc_c[i] * o[i].sin();
-            pll[i] += dt * perr;
-            let r = a[i];
-            // Phase first (uses OLD r)
-            let drive_phase = d[i] / (r + 0.1);
-            p[i] = wrap_phase(p[i] + dt * (o[i] + pll[i] + c[i] + drive_phase));
-            // Amplitude second
-            let r_dot = r - r * r * r + d[i];
-            a[i] = (r + dt * r_dot).max(0.001).min(10.0);
-        }
-    }
-}

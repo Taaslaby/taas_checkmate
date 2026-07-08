@@ -14,6 +14,7 @@ setup(
     name="taas-tools",
     version="0.1.0",
     description="CLI toolkit for taas-checkmate neural engine",
+    license="GPL-3.0-only",
     packages=find_packages(include=["taas"]),
     python_requires=">=3.10",
     install_requires=[
