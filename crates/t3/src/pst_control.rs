@@ -101,6 +101,7 @@ pub struct PstControl {
 }
 
 impl PstControl {
+    /// Create PST controller with given config.
     pub fn new(config: PstControlConfig) -> Self {
         let base_dim = pst_linear_dim(config.n);
         let n_pst = config.L * base_dim;
@@ -116,17 +117,23 @@ impl PstControl {
         }
     }
 
+    /// PST feature dimension (base_dim × L).
     pub fn feat_dim(&self) -> usize { self.n_pst }
+    /// Per-frame feature dimension (3N·6 + 12).
     pub fn base_feat_dim(&self) -> usize { self.base_dim }
+    /// Number of output classes.
     pub fn n_classes(&self) -> usize { self.config.n_classes }
+    /// Whether ridge weights have been fitted.
     pub fn is_fitted(&self) -> bool { self.fitted }
 
     // ─── PST features ──────────────────────────────────────────
 
+    /// Compute PST features from oscillator state (delegates to `pst_linear_features`).
     pub fn compute_pst_features<B: T3Backend>(tri: &TriOscillator<B>) -> Vec<f32> {
         pst_linear_features(tri)
     }
 
+    /// Get circular trajectory buffer as contiguous `feat_dim`-length Vec.
     pub fn get_trajectory(&self) -> Vec<f32> {
         if !self.pst_filled {
             return vec![0.0; self.n_pst];
@@ -142,6 +149,7 @@ impl PstControl {
         out
     }
 
+    /// Push one PST frame into the circular trajectory buffer.
     pub fn push_pst<B: T3Backend>(&mut self, tri: &TriOscillator<B>) {
         let start = self.pst_pos * self.base_dim;
         let feats = Self::compute_pst_features(tri);
@@ -153,6 +161,7 @@ impl PstControl {
         }
     }
 
+    /// Reset circular trajectory buffer (clears accumulated history).
     pub fn reset_buffer(&mut self) {
         self.pst_buf.fill(0.0);
         self.pst_pos = 0;
@@ -376,6 +385,7 @@ impl PstControl {
         result
     }
 
+    /// Check how well the target PST reconstructs: returns (predicted_class, margin).
     pub fn check_target_pst(&self, target_class: usize) -> (usize, f32) {
         let pst = self.target_pst(target_class);
         let (pred, scores) = self.predict_from_pst(&pst);
@@ -498,6 +508,7 @@ impl PstControl {
 
     // ─── Сериализация ──────────────────────────────────────────
 
+    /// Serialise controller weights + config to JSON file.
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
         use std::fs::File;
         use std::io::BufWriter;
@@ -514,6 +525,7 @@ impl PstControl {
         Ok(())
     }
 
+    /// Deserialise controller from JSON file.
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         use std::fs::File;
         use std::io::BufReader;
@@ -536,8 +548,11 @@ impl PstControl {
         })
     }
 
+    /// Fitted ridge weights (n_classes × feat_dim).
     pub fn weights(&self) -> &[f32] { &self.weights }
+    /// Fitted bias per class.
     pub fn bias(&self) -> &[f32] { &self.bias }
+    /// Mean PST template per class (n_classes × feat_dim).
     pub fn mean_pst(&self) -> &[f32] { &self.mean_pst }
 }
 

@@ -79,8 +79,8 @@ t3 = ["taas-t3"]
 # Training (BPTT, SPIGRAD, connectome chase)
 train = ["taas-train/t3"]
 
-# Connectome brain simulator
-connectome = ["taas-connectome"]
+# Connectome brain simulator (also exposes connectome_chase in train)
+connectome = ["taas-connectome", "taas-train/connectome"]
 
 # Cognitive architecture (GNW, LOD, BasalGanglia)
 karmac = ["dep:karmac"]

@@ -14,6 +14,7 @@ pub struct TrajectoryBuffer {
 }
 
 impl TrajectoryBuffer {
+    /// Create ring buffer for `capacity` frames, each `feat_dim` wide.
     pub fn new(capacity: usize, feat_dim: usize) -> Self {
         Self {
             buf: vec![0.0; capacity * feat_dim],

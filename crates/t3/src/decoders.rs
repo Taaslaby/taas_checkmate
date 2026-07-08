@@ -101,6 +101,7 @@ pub struct NlmsDecoder {
 }
 
 impl NlmsDecoder {
+    /// Create NLMS decoder with `n` features, learning rate `lr`, normalisation floor `eps`.
     pub fn new(n: usize, lr: f32, eps: f32) -> Self {
         Self { weights: vec![0.0; n], bias: vec![0.0; 1], lr, eps }
     }
@@ -143,6 +144,7 @@ pub struct KalmanDecoder {
 }
 
 impl KalmanDecoder {
+    /// Create RLS/Kalman decoder with `n` features, process noise `q`, measurement noise `r`.
     pub fn new(n: usize, q: f32, r: f32) -> Self {
         Self {
             weights: vec![0.0; n],
@@ -204,6 +206,7 @@ pub struct InverseKuramotoDecoder {
 }
 
 impl InverseKuramotoDecoder {
+    /// Create inverse-Kuramoto decoder for `n` oscillators.
     pub fn new(n: usize, alpha: f32, drive_gain: f32) -> Self {
         Self {
             n,
@@ -223,6 +226,8 @@ impl InverseKuramotoDecoder {
         self.dt = dt;
     }
 
+    /// Decode drive from one frame of amplitudes (mutates internal `prev_amps`).
+    /// First call returns 0.0 (initialisation), subsequent calls yield physical estimates.
     pub fn decode(&mut self, amps: &[f32]) -> f32 {
         if !self.initialised {
             self.prev_amps.copy_from_slice(amps);
@@ -248,6 +253,7 @@ impl InverseKuramotoDecoder {
         if sum_w > 1e-10 { sum_d / sum_w } else { 0.0 }
     }
 
+    /// Batch-decode multiple frames. `amps` length must be `n × n_frames`.
     pub fn decode_batch(&mut self, amps: &[f32]) -> Vec<f32> {
         let n_frames = amps.len() / self.n;
         let mut out = Vec::with_capacity(n_frames);
@@ -289,6 +295,7 @@ pub struct StdpDecoder {
 }
 
 impl StdpDecoder {
+    /// Create anti-Hebbian STDP decoder with `n` features.
     pub fn new(n: usize, lr: f32, decay: f32, sparsity: f32) -> Self {
         Self {
             weights: vec![0.0; n],
@@ -355,6 +362,7 @@ pub struct PstDecoder {
 }
 
 impl PstDecoder {
+    /// Create PST (trajectory) decoder from `feat_dim` features and `L`-step trajectory.
     pub fn new(feat_dim: usize, L: usize, alpha: f32) -> Self {
         let n_weights = feat_dim * L;
         Self {
@@ -403,6 +411,7 @@ impl PstDecoder {
         compute_pearson(&y_pred, y)
     }
 
+    /// Predict from concatenated trajectory features.
     pub fn predict(&self, trajectory: &[f32]) -> f32 {
         self.weights.iter().zip(trajectory).map(|(w, x)| w * x).sum::<f32>() + self.bias
     }

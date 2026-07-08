@@ -55,6 +55,7 @@ pub struct RidgeSolver {
 }
 
 impl RidgeSolver {
+    /// Create ridge solver with regularisation strength `alpha` (clamped ≥ 1e-8).
     pub fn new(alpha: f32) -> Self { Self { alpha: alpha.max(1e-8) } }
 
     /// Solve ridge regression.

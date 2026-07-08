@@ -25,11 +25,13 @@ pub struct SpikeTrace {
 }
 
 impl SpikeTrace {
+    /// Create exponential trace with time constant `tau_ms`, simulation step `dt_ms`.
     pub fn new(n_neurons: usize, tau_ms: f32, dt_ms: f32) -> Self {
         let alpha = (-dt_ms / tau_ms).exp();
         Self { trace: vec![0.0; n_neurons], alpha }
     }
 
+    /// Update trace with one step of spikes (in-place EMA).
     pub fn update(&mut self, spikes: &[f32]) {
         let a = self.alpha;
         let b = 1.0 - a;
@@ -38,6 +40,7 @@ impl SpikeTrace {
         }
     }
 
+    /// Current trace values (read-only).
     pub fn get(&self) -> &[f32] { &self.trace }
 }
 
@@ -139,6 +142,7 @@ impl HologramEncoder {
         dirs
     }
 
+    /// Encode trace into K hologram channels.
     pub fn encode(&self, trace: &[f32]) -> Vec<f32> {
         let mut h = vec![0.0; self.k];
         for i in 0..self.n {
@@ -161,8 +165,10 @@ impl HologramEncoder {
         mat
     }
 
+    /// Number of hologram channels.
     #[inline]
     pub fn k(&self) -> usize { self.k }
+    /// Number of input neurons.
     #[inline]
     pub fn n(&self) -> usize { self.n }
 }
@@ -186,6 +192,7 @@ pub struct Sparker {
 }
 
 impl Sparker {
+    /// Create sparker with 2D neuron positions, EMA time constant `tau_ms`, step `dt_ms`.
     pub fn new(positions: &[[f32; 2]], tau_ms: f32, dt_ms: f32) -> Self {
         let n = positions.len();
         Self {
@@ -194,14 +201,17 @@ impl Sparker {
         }
     }
 
+    /// Feed one step of spikes into the EMA trace.
     pub fn feed(&mut self, spikes: &[f32]) {
         self.trace.update(spikes);
     }
 
+    /// Compute hologram from current trace (returns K = 3 channels).
     pub fn hologram(&self) -> Vec<f32> {
         self.encoder.encode(self.trace.get())
     }
 
+    /// Current trace values (read-only).
     pub fn trace(&self) -> &[f32] {
         self.trace.get()
     }
@@ -218,6 +228,7 @@ pub struct SpikeStats {
 }
 
 impl SpikeStats {
+    /// Compute per-frame statistics: mean rate, burstiness, synchrony.
     pub fn compute_frame(spikes: &[f32], sample_rate: f32) -> Self {
         let n = spikes.len() as f32;
         let active = spikes.iter().filter(|&&s| s > 0.5).count() as f32;
@@ -242,6 +253,7 @@ impl SpikeStats {
         Self { mean_rate, burstiness, synchrony }
     }
 
+    /// Scale base gain down when synchrony or firing rate is high.
     pub fn adaptive_gain(&self, base_gain: f32) -> f32 {
         let syn_factor = 1.0 / (1.0 + self.synchrony * 2.0);
         let rate_factor = 1.0 / (1.0 + self.mean_rate * 0.1);
@@ -261,6 +273,7 @@ pub struct NormalizedSparker {
 }
 
 impl NormalizedSparker {
+    /// Create normalised sparker with online DC/scale estimation.
     pub fn new(positions: &[[f32; 2]], tau_ms: f32, dt_ms: f32, target_std: f32) -> Self {
         let k = 3;
         Self {
@@ -272,10 +285,12 @@ impl NormalizedSparker {
         }
     }
 
+    /// Feed one step of spikes.
     pub fn feed(&mut self, spikes: &[f32]) {
         self.inner.feed(spikes);
     }
 
+    /// Compute normalised hologram (DC-free, unit variance scaled to `target_std`).
     pub fn hologram(&mut self) -> Vec<f32> {
         let h = self.inner.hologram();
         let k = h.len();
@@ -298,8 +313,10 @@ impl NormalizedSparker {
         h_norm
     }
 
+    /// Current raw trace (read-only).
     pub fn trace(&self) -> &[f32] { self.inner.trace() }
 
+    /// Reset online statistics (running mean/var).
     pub fn reset_stats(&mut self) {
         let k = self.running_mean.len();
         self.running_mean = vec![0.0; k];
@@ -318,6 +335,7 @@ pub struct HybridSparker {
 }
 
 impl HybridSparker {
+    /// Create hybrid sparker with adaptive gain from spike statistics.
     pub fn new(positions: &[[f32; 2]], tau_ms: f32, dt_ms: f32, sample_rate: f32, base_gain: f32) -> Self {
         Self {
             inner: NormalizedSparker::new(positions, tau_ms, dt_ms, 1.0),
@@ -326,10 +344,12 @@ impl HybridSparker {
         }
     }
 
+    /// Feed one step of spikes.
     pub fn feed(&mut self, spikes: &[f32]) {
         self.inner.feed(spikes);
     }
 
+    /// Compute hologram + adaptive FM gain (lower gain when synchrony/burstiness high).
     pub fn hologram_with_gain(&mut self, spikes: &[f32]) -> (Vec<f32>, f32) {
         let stats = SpikeStats::compute_frame(spikes, self.sample_rate);
         let gain = stats.adaptive_gain(self.base_gain);
@@ -337,6 +357,7 @@ impl HybridSparker {
         (h, gain)
     }
 
+    /// Current normalised trace (read-only).
     pub fn trace(&self) -> &[f32] { self.inner.trace() }
 }
 
