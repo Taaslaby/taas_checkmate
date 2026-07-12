@@ -14,6 +14,10 @@
 //! spike_buf = sim.step_batch(conn, n_steps=50, external_I=...)
 //! rates = tcm.SpikeRecorder(conn.n_neurons).record_group(
 //!     spike_buf, 50, 0.5, conn.group("mn"), max_rate=100.0)
+//!
+//! # Conductance-based (requires receptor_types):
+//! conn.build_receptor_types()
+//! spike_buf = sim.step_batch_synaptic(conn, n_steps=50, external_I=...)
 //! ```
 
 #![allow(non_snake_case)]
@@ -25,6 +29,7 @@ use crate::connectome::{
     self as conn,
     ConnectomeData, NeuronModel,
     LifParams, IzhikevichParams, RateParams, PsiParams,
+    SynapticKinetics,
 };
 
 // ─── ConnectomeData ──────────────────────────────────
@@ -112,6 +117,26 @@ impl PyConnectomeData {
     pub fn nt_types<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         self.inner.nt_types.clone().into_pyarray(py)
     }
+
+    /// Build per-synapse receptor_types from nt_types (sign-based mapping).
+    /// Must be called once before using ``step_batch_synaptic``.
+    pub fn build_receptor_types(&mut self) {
+        self.inner.build_receptor_types();
+    }
+
+    /// Raw receptor_types (read-only copy) — per synapse, maps to ReceptorType.
+    pub fn receptor_types<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<u8>>> {
+        if self.inner.receptor_types.is_empty() {
+            None
+        } else {
+            Some(self.inner.receptor_types.clone().into_pyarray(py))
+        }
+    }
+
+    /// Check if receptor_types have been built.
+    pub fn has_receptor_types(&self) -> bool {
+        !self.inner.receptor_types.is_empty()
+    }
 }
 
 // ─── BrainSimulator ──────────────────────────────────
@@ -130,6 +155,7 @@ pub struct PyBrainSimulator {
     state: conn::BrainState,
     model: NeuronModel,
     n_neurons: usize,
+    kinetics: Option<SynapticKinetics>,
 }
 
 #[pymethods]
@@ -147,7 +173,7 @@ impl PyBrainSimulator {
             )),
         };
         let state = conn::BrainState::new(n_neurons, nm);
-        Ok(Self { state, model: nm, n_neurons })
+        Ok(Self { state, model: nm, n_neurons, kinetics: None })
     }
 
     /// Getter for n_neurons.
@@ -223,10 +249,98 @@ impl PyBrainSimulator {
         Ok(spike_buf.into_pyarray(py))
     }
 
-    /// Reset brain state with small noise.
+    /// Run a batch of conductance-based LIF steps.
+    ///
+    /// Requires ``connectome.build_receptor_types()`` to have been called first.
+    /// Conductance-based synapses give realistic PSC decay (AMPA τ≈2ms, GABA_A τ≈10ms).
+    /// Synaptic kinetics persist across calls — conductances carry over between batches.
+    ///
+    /// Args:
+    ///     connectome: ``ConnectomeData`` — CSR graph with NT + receptor types.
+    ///     n_steps: number of simulation steps.
+    ///     dt_ms: timestep in milliseconds (default 0.5).
+    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None))]
+    pub fn step_batch_synaptic<'py>(
+        &mut self,
+        py: Python<'py>,
+        connectome: &PyConnectomeData,
+        n_steps: usize,
+        dt_ms: f32,
+        external_I: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        if connectome.inner.receptor_types.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "receptor_types empty — call connectome.build_receptor_types() first"
+            ));
+        }
+
+        let conn_data = &connectome.inner;
+        let n = self.n_neurons;
+
+        let ext_I: Vec<f32> = match external_I {
+            Some(arr) => {
+                let ro = arr.readonly();
+                let sl = ro.as_slice()?;
+                let mut v = vec![0.0f32; n];
+                let copy_n = sl.len().min(n);
+                v[..copy_n].copy_from_slice(&sl[..copy_n]);
+                v
+            }
+            None => vec![0.0f32; n],
+        };
+
+        // Initialize kinetics on first call
+        if self.kinetics.is_none() {
+            self.kinetics = Some(SynapticKinetics::new(n));
+        }
+        let kinetics = self.kinetics.as_mut().unwrap();
+
+        let spike_buf = match self.model {
+            NeuronModel::LIF => {
+                let tau_m = vec![20.0f32; n];
+                let v_rest = vec![-70.0f32; n];
+                let v_thresh = vec![-58.0f32; n];
+                let v_reset = vec![-70.0f32; n];
+                let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
+                conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics)
+            }
+            NeuronModel::Izhikevich => {
+                let params = IzhikevichParams {
+                    a: vec![0.02f32; n],
+                    b: vec![0.2f32; n],
+                    c: vec![-65.0f32; n],
+                    d: vec![8.0f32; n],
+                    dt_ms,
+                    tau_ref: 2.0,
+                };
+                conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics)
+            }
+            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Synaptic mode not supported for model {:?}", self.model)
+            )),
+        };
+
+        Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Reset synaptic conductances to zero (keeps membrane potentials intact).
+    pub fn reset_kinetics(&mut self) {
+        if let Some(k) = &mut self.kinetics {
+            k.reset();
+        }
+    }
+
+    /// Reset brain state with small noise. Also resets synaptic conductances.
     pub fn reset(&mut self) {
         self.state = conn::BrainState::new(self.n_neurons, self.model);
         self.state.reset_with_noise(self.n_neurons);
+        if let Some(k) = &mut self.kinetics {
+            k.reset();
+        }
     }
 
     /// Set membrane potentials (v) from numpy array.
