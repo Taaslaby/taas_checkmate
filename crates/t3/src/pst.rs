@@ -52,83 +52,81 @@ pub fn pst_features(ph1: &[f32], ph2: &[f32]) -> (Vec<f32>, Vec<f32>) {
 ///
 /// ## Оптимизация
 ///
-/// Pre-computes sin/cos для всех 3 популяций ОДИН раз (6N trig calls),
-/// затем переиспользует для:
-/// - шага 1 (sin/cos фичи)
-/// - шага 4 (sin²/cos² — квадратичные, без trig)
-/// - шага 5 (cross order params — без trig, только мультипликация)
-/// - шага 6 (mean sin/cos — без trig)
-///
-/// Всего: **6N trig calls** вместо **18N** в старой версии.
+/// **0 trig calls** — sin/cos берутся из pre-computed `TriOscillator.sin1`/`cos1`.
 pub fn pst_linear_features<B: T3Backend>(tri: &TriOscillator<B>) -> Vec<f32> {
+    let dim = pst_linear_dim(tri.n);
+    let mut fv = vec![0.0; dim];
+    pst_linear_features_into(tri, &mut fv);
+    fv
+}
+
+/// Zero-allocation variant — writes into pre-allocated `out`.
+pub fn pst_linear_features_into<B: T3Backend>(tri: &TriOscillator<B>, out: &mut [f32]) {
     let n = tri.n;
-    let mut fv = Vec::with_capacity(3 * n * 6 + 12);
+    let dim = pst_linear_dim(n);
+    assert!(out.len() >= dim, "pst_linear_features_into: out len {} < dim {}", out.len(), dim);
 
-    // ── Pre-compute sin/cos for ALL 3 populations ONCE ──────────
-    // (no padding needed — TriOscillator stores exact n elements)
+    let sin1 = &tri.sin1[..n];
+    let cos1 = &tri.cos1[..n];
+    let sin2 = &tri.sin2[..n];
+    let cos2 = &tri.cos2[..n];
+    let sin3 = &tri.sin3[..n];
+    let cos3 = &tri.cos3[..n];
 
-    let mut sin1 = vec![0.0f32; n];
-    let mut cos1 = vec![0.0f32; n];
-    let mut sin2 = vec![0.0f32; n];
-    let mut cos2 = vec![0.0f32; n];
-    let mut sin3 = vec![0.0f32; n];
-    let mut cos3 = vec![0.0f32; n];
-
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..n {
-        sin1[i] = tri.th1[i].sin();
-        cos1[i] = tri.th1[i].cos();
-        sin2[i] = tri.th2[i].sin();
-        cos2[i] = tri.th2[i].cos();
-        sin3[i] = tri.th3[i].sin();
-        cos3[i] = tri.th3[i].cos();
-    }
+    let mut pos = 0;
 
     // 1. sin(θ), cos(θ) for each oscillator
-    for i in 0..n { fv.push(sin1[i]); fv.push(cos1[i]); }
-    for i in 0..n { fv.push(sin2[i]); fv.push(cos2[i]); }
-    for i in 0..n { fv.push(sin3[i]); fv.push(cos3[i]); }
+    for i in 0..n { out[pos] = sin1[i]; out[pos + 1] = cos1[i]; pos += 2; }
+    for i in 0..n { out[pos] = sin2[i]; out[pos + 1] = cos2[i]; pos += 2; }
+    for i in 0..n { out[pos] = sin3[i]; out[pos + 1] = cos3[i]; pos += 2; }
 
     // 2. dθ/dt — real phase velocity from prev
     for (ph, prev) in [(&tri.th1, &tri.prev_th1), (&tri.th2, &tri.prev_th2), (&tri.th3, &tri.prev_th3)] {
         for i in 0..n {
             let mut d = ph[i] - prev[i];
             if d > PI { d -= TWO_PI; } else if d < -PI { d += TWO_PI; }
-            fv.push(d);
+            out[pos] = d;
+            pos += 1;
         }
     }
 
     // 3. Amplitudes r (direct copy — no trig)
-    fv.extend_from_slice(&tri.r1[..n]);
-    fv.extend_from_slice(&tri.r2[..n]);
-    fv.extend_from_slice(&tri.r3[..n]);
+    out[pos..pos + n].copy_from_slice(&tri.r1[..n]); pos += n;
+    out[pos..pos + n].copy_from_slice(&tri.r2[..n]); pos += n;
+    out[pos..pos + n].copy_from_slice(&tri.r3[..n]); pos += n;
 
     // 4. Squared features — from PRE-COMPUTED sin/cos (NO trig!)
-    for i in 0..n { fv.push(sin1[i] * sin1[i]); fv.push(cos1[i] * cos1[i]); }
-    for i in 0..n { fv.push(sin2[i] * sin2[i]); fv.push(cos2[i] * cos2[i]); }
-    for i in 0..n { fv.push(sin3[i] * sin3[i]); fv.push(cos3[i] * cos3[i]); }
+    for i in 0..n { out[pos] = sin1[i] * sin1[i]; out[pos + 1] = cos1[i] * cos1[i]; pos += 2; }
+    for i in 0..n { out[pos] = sin2[i] * sin2[i]; out[pos + 1] = cos2[i] * cos2[i]; pos += 2; }
+    for i in 0..n { out[pos] = sin3[i] * sin3[i]; out[pos + 1] = cos3[i] * cos3[i]; pos += 2; }
 
     // 5. Cross order parameters — from PRE-COMPUTED sin/cos (NO trig!)
-    fv.push(cross_order_from_sincos(&sin1, &cos1, &sin2, &cos2, n));
-    fv.push(cross_order_from_sincos(&sin2, &cos2, &sin3, &cos3, n));
-    fv.push(cross_order_from_sincos(&sin1, &cos1, &sin3, &cos3, n));
+    out[pos] = cross_order_from_sincos(sin1, cos1, sin2, cos2, n); pos += 1;
+    out[pos] = cross_order_from_sincos(sin2, cos2, sin3, cos3, n); pos += 1;
+    out[pos] = cross_order_from_sincos(sin1, cos1, sin3, cos3, n); pos += 1;
 
     // 6. Mean sin/cos + mean amplitude per population
     let nf = n as f32;
     // Pop 1
-    let mut ms = 0.0; let mut mc = 0.0; let mut mr = 0.0;
-    for i in 0..n { ms += sin1[i]; mc += cos1[i]; mr += tri.r1[i]; }
-    fv.push(ms / nf); fv.push(mc / nf); fv.push(mr / nf);
+    let (ms1, mc1) = mean_sincos(sin1, cos1, n);
+    let mr1: f32 = tri.r1[..n].iter().sum::<f32>() / nf;
+    out[pos] = ms1; out[pos + 1] = mc1; out[pos + 2] = mr1; pos += 3;
     // Pop 2
-    ms = 0.0; mc = 0.0; mr = 0.0;
-    for i in 0..n { ms += sin2[i]; mc += cos2[i]; mr += tri.r2[i]; }
-    fv.push(ms / nf); fv.push(mc / nf); fv.push(mr / nf);
+    let (ms2, mc2) = mean_sincos(sin2, cos2, n);
+    let mr2: f32 = tri.r2[..n].iter().sum::<f32>() / nf;
+    out[pos] = ms2; out[pos + 1] = mc2; out[pos + 2] = mr2; pos += 3;
     // Pop 3
-    ms = 0.0; mc = 0.0; mr = 0.0;
-    for i in 0..n { ms += sin3[i]; mc += cos3[i]; mr += tri.r3[i]; }
-    fv.push(ms / nf); fv.push(mc / nf); fv.push(mr / nf);
+    let (ms3, mc3) = mean_sincos(sin3, cos3, n);
+    let mr3: f32 = tri.r3[..n].iter().sum::<f32>() / nf;
+    out[pos] = ms3; out[pos + 1] = mc3; out[pos + 2] = mr3; pos += 3;
+}
 
-    fv
+#[inline]
+fn mean_sincos(sin: &[f32], cos: &[f32], n: usize) -> (f32, f32) {
+    let nf = n as f32;
+    let ms: f32 = sin.iter().sum::<f32>() / nf;
+    let mc: f32 = cos.iter().sum::<f32>() / nf;
+    (ms, mc)
 }
 
 /// Compute cross order parameter R = |mean(exp(i·(θ₁ − θ₂)))| from
@@ -230,19 +228,18 @@ mod tests {
 
     #[test]
     fn test_pst_linear_features_sin_cos_values() {
-        // Проверка: sin/cos в feature vector матчатся pre-computed значениям
         let mut tri = TriOscillator::new(8, 0.5, 1.5, Avx2Backend);
         tri.set_uniform_coupling(0.1, 0.05, 0.02);
         tri.step(0.01);
+        tri.prepare();
         let fv = pst_linear_features(&tri);
 
         let n = tri.n;
-        // Pop 1 sin/cos: первые 2N элементов
         for i in 0..n {
-            let ref_sin = tri.th1[i].sin();
-            let ref_cos = tri.th1[i].cos();
-            assert!((fv[2 * i] - ref_sin).abs() < 1e-6, "sin1[{}]: {} != {}", i, fv[2 * i], ref_sin);
-            assert!((fv[2 * i + 1] - ref_cos).abs() < 1e-6, "cos1[{}]: {} != {}", i, fv[2 * i + 1], ref_cos);
+            assert!((fv[2 * i] - tri.sin1[i]).abs() < 1e-6,
+                "sin1[{}]: fv={} != tri.sin1={}", i, fv[2 * i], tri.sin1[i]);
+            assert!((fv[2 * i + 1] - tri.cos1[i]).abs() < 1e-6,
+                "cos1[{}]: fv={} != tri.cos1={}", i, fv[2 * i + 1], tri.cos1[i]);
         }
     }
 

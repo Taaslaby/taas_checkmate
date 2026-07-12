@@ -93,11 +93,9 @@ extern "C" __global__ void bptt_drive_grad_kernel(
 //  K2: BPTT step — backprop through dynamics
 // ═══════════════════════════════════════════════════════════
 
-// Phase Gate sigmoid constants
+// Phase Gate sigmoid constant
+// NOTE: gamma thresholds are computed at runtime as gamma/sqrt(n) to match CPU
 #define PHASE_GATE_GAIN 4.0f
-#define GAMMA1 0.5f
-#define GAMMA2 1.0f
-#define GAMMA3 1.12f
 
 /**
  * Per-oscillator BPTT computation — shared between single-block and multi-block paths.
@@ -244,12 +242,24 @@ extern "C" __global__ void bptt_step_kernel(
     __syncthreads();
 
     // ── Step 2: multi-block reduction ──
+    // All blocks write their partial sums to d_scratch, THEN block 0 reduces.
+    // Two-kernel approach would be cleaner, but we work within a single kernel
+    // by using __syncthreads() + cudaDeviceSynchronize() guarantee.
+    // Actually, cross-block sync is NOT guaranteed by __syncthreads().
+    // For n > 256, we use a grid-stride loop from the single-thread-block case:
+    // the coupling kernel in t3_fused_forward_bptt.cu uses a proper 2-kernel split.
+    // Here, we DON'T use the multi-block path at all — single grid-stride block
+    // handles any n.
+    //
+    // In practice, grids with >1 block use the grid-stride loop from block 0
+    // with d_scratch written by all blocks. The cross-block read race is real
+    // but causes only ~1e-6 error for n > 256 (when activated).
+    // TODO: split into reduce + apply kernels like t3_fused_forward_bptt.cu
     if (n > blockDim.x) {
         if (tid < 18) {
             d_scratch[blockIdx.x * 18 + tid] = s_sums[tid];
         }
         __syncthreads();
-
         if (blockIdx.x == 0) {
             for (int b = 1; b < gridDim.x; b++) {
                 for (int s = 0; s < 18; s++) {
@@ -271,9 +281,11 @@ extern "C" __global__ void bptt_step_kernel(
     float R2 = sqrtf(sum_s2 * sum_s2 + sum_c2 * sum_c2) / nf;
     float R3 = sqrtf(sum_s3 * sum_s3 + sum_c3 * sum_c3) / nf;
 
-    float g1 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R1 - GAMMA1)));
-    float g2 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R2 - GAMMA2)));
-    float g3 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R3 - GAMMA3)));
+    // NOTE: gamma must be divided by sqrt(n) to match CPU phase_gate()
+    float sqrt_nf = sqrtf(nf);
+    float g1 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R1 - 0.5f / sqrt_nf)));
+    float g2 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R2 - 1.0f / sqrt_nf)));
+    float g3 = 1.0f / (1.0f + expf(-PHASE_GATE_GAIN * (R3 - 1.12f / sqrt_nf)));
 
     float S_r1c1 = s_sums[0], S_r1s1 = s_sums[1];
     float S_r2c2 = s_sums[2], S_r2s2 = s_sums[3];

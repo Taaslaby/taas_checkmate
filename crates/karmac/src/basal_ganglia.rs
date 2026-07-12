@@ -42,8 +42,6 @@
 //! assert!(action < 4); // valid action index selected
 //! ```
 
-use rayon::prelude::*;
-
 /// Configuration for Basal Ganglia.
 #[derive(Debug, Clone)]
 pub struct BgConfig {
@@ -92,12 +90,38 @@ pub struct BasalGanglia {
     lateral_inhibit: Vec<f32>,
     /// Previous winning action (for hysteresis).
     prev_action: Option<usize>,
+    /// Pre-allocated drive buffer — avoids heap alloc in hot `step()`.
+    drive_buf: Vec<f32>,
+    /// Pre-allocated output buffer — avoids clone in hot `step()`.
+    output_buf: Vec<f32>,
 }
 
 impl BasalGanglia {
     /// Create a new Basal Ganglia with Xavier-initialized weights.
     pub fn new(n_cortical: usize, n_actions: usize) -> Self {
         Self::with_config(BgConfig { n_cortical, n_actions, ..Default::default() })
+    }
+
+    /// Create with explicit weight matrix (useful for demo/debug/pretrained).
+    /// `cortico_stratial` must be [n_actions × n_cortical] row-major.
+    pub fn from_weights(cortico_stratial: Vec<f32>, n_cortical: usize, n_actions: usize) -> Self {
+        let mut lateral_inhibit = vec![0.0f32; n_actions * n_actions];
+        for i in 0..n_actions {
+            for j in 0..n_actions {
+                if i != j {
+                    lateral_inhibit[i * n_actions + j] = -3.0;
+                }
+            }
+        }
+        Self {
+            config: BgConfig { n_cortical, n_actions, ..Default::default() },
+            state: vec![0.0; n_cortical],
+            cortico_stratial,
+            lateral_inhibit,
+            prev_action: None,
+            drive_buf: vec![0.0; n_actions],
+            output_buf: vec![0.0; n_actions],
+        }
     }
 
     /// Create with explicit configuration.
@@ -129,6 +153,8 @@ impl BasalGanglia {
             cortico_stratial,
             lateral_inhibit,
             prev_action: None,
+            drive_buf: vec![0.0; n_a],
+            output_buf: vec![0.0; n_a],
         }
     }
 
@@ -150,11 +176,12 @@ impl BasalGanglia {
         }
 
         // 2. Cortico-striatal drive: drive_a = Σ_j W[a,j] * state[j]
-        let mut drive = vec![0.0f32; n_a];
+        //    Используем iter() — n_cortical мал (8), par_iter только добавит overhead.
+        self.drive_buf.fill(0.0);
         for a in 0..n_a {
             let row_start = a * n_c;
             let row = &self.cortico_stratial[row_start..row_start + n_c];
-            drive[a] = row.par_iter().zip(self.state.par_iter())
+            self.drive_buf[a] = row.iter().zip(self.state.iter())
                 .map(|(w, s)| w * s)
                 .sum();
         }
@@ -162,44 +189,40 @@ impl BasalGanglia {
         // 3. D1 (Go) vs D2 (NoGo) modulation
         // Positive drive → D1 amplifies; negative drive → D2 suppresses
         for a in 0..n_a {
-            if drive[a] > 0.0 {
-                drive[a] *= self.config.d1_gain;
+            if self.drive_buf[a] > 0.0 {
+                self.drive_buf[a] *= self.config.d1_gain;
             } else {
-                drive[a] *= self.config.d2_gain;
+                self.drive_buf[a] *= self.config.d2_gain;
             }
         }
 
         // 4. STN broad excitation: raises baseline for all actions
         // Prevents premature commitment when all drives are low
-        let mean_drive: f32 = drive.iter().sum::<f32>() / n_a as f32;
+        let mean_drive: f32 = self.drive_buf.iter().sum::<f32>() / n_a as f32;
         let stn_bias = self.config.stn_excitation * mean_drive;
         for a in 0..n_a {
-            drive[a] += stn_bias;
+            self.drive_buf[a] += stn_bias;
         }
 
         // 5. Lateral inhibition (GPi): winner-take-all
-        // drive_new[i] = drive[i] + Σ_j lateral[i,j] * drive[j]
-        // The strongest drive wins; others are suppressed
-        let mut output = drive.clone();
+        // output[i] = drive[i] + Σ_j lateral[i,j] * drive[j]
+        self.output_buf.copy_from_slice(&self.drive_buf);
         for i in 0..n_a {
             for j in 0..n_a {
                 if i != j {
-                    // Inhibit j proportionally to i's strength (soft WTA)
-                    output[i] += self.lateral_inhibit[i * n_a + j] * drive[j].max(0.0);
+                    self.output_buf[i] += self.lateral_inhibit[i * n_a + j] * self.drive_buf[j].max(0.0);
                 }
             }
         }
 
         // 6. Thalamic relay: re-enable winning channel
         if let Some(prev) = self.prev_action {
-            // Hysteresis: boost previous winner significantly
-            // This prevents rapid switching when input is ambiguous
-            let max_output = output.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            output[prev] += self.config.thalamus_gain * 0.5 * (max_output.abs() + 0.1);
+            let max_output = self.output_buf.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            self.output_buf[prev] += self.config.thalamus_gain * 0.5 * (max_output.abs() + 0.1);
         }
 
         // 7. Winner-take-all: select argmax
-        let winner = output.iter()
+        let winner = self.output_buf.iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)

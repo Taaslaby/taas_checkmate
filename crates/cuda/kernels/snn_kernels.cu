@@ -49,11 +49,13 @@ extern "C" __global__ void lif_at_step_kernel(
     float th = theta[idx];
     float Ii = I[idx];
 
-    // dv/dt = (v_rest - v + I) / tau_m
-    vi += dt / tau_m * (-(vi - v_rest) + Ii);
+    // Exponential Euler for membrane: v = v_rest + (v - v_rest) * exp(-dt/τ) + I * (1 - exp(-dt/τ))
+    float decay = __expf(-dt / fmaxf(tau_m, 1e-6f));
+    vi = v_rest + (vi - v_rest) * decay + Ii * (1.0f - decay);
 
-    // dθ/dt = -θ / tau_θ
-    th -= dt * th / fmaxf(tau_theta, 1e-6f);
+    // Exponential Euler for adaptive threshold: θ *= exp(-dt/τ_θ)
+    float theta_decay = __expf(-dt / fmaxf(tau_theta, 1e-6f));
+    th *= theta_decay;
 
     // Effective threshold = v_thresh + θ
     int spiked = (vi >= v_thresh + th) ? 1 : 0;
@@ -65,6 +67,7 @@ extern "C" __global__ void lif_at_step_kernel(
     v[idx] = vi;
     theta[idx] = th;
     spikes[idx] = spiked;
+    I[idx] = 0.0f;  // BUGFIX: reset current for next step's propagation
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -325,6 +328,13 @@ extern "C" int cuda_population_rate_decode(
 // Use cuda_lif_at_step() directly for host-managed params.
 extern "C" int gpu_lif_at_step(void* vctx, const float* host_params, int n) {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_v, nn*sizeof(float));
+    ENSURE_ALLOC(d_adex_w, nn*sizeof(float));
+    ENSURE_ALLOC(d_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_spikes, nn*sizeof(int));
+    ENSURE_ALLOC(d_lif_params, (1+6*nn)*sizeof(float));
+
     int n_params = 1 + 6 * n;
     cudaError_t e = cudaMemcpyAsync(ctx->d_lif_params, host_params,
         (size_t)n_params * sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
@@ -343,7 +353,10 @@ extern "C" int gpu_lif_at_step(void* vctx, const float* host_params, int n) {
 extern "C" int gpu_intrinsic_plasticity(void* vctx,
     float lr_ip, float target_rate, float decay) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_adex_w, nn*sizeof(float));
+    ENSURE_ALLOC(d_spikes, nn*sizeof(int));
+    int bs = 256, n = nn;
     intrinsic_plasticity_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(
         ctx->d_adex_w, ctx->d_spikes, lr_ip, target_rate, decay, n);
     cudaError_t e = cudaGetLastError();

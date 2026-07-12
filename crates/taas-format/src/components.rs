@@ -185,9 +185,9 @@ pub fn save_trioscilator(tri: &taas_t3::TriOscillator, writer: &mut TaasWriter) 
     writer.add_f32("coupling1", "TriOscillator", &tri.coupling1);
     writer.add_f32("coupling2", "TriOscillator", &tri.coupling2);
     writer.add_f32("coupling3", "TriOscillator", &tri.coupling3);
-    writer.add_f32_shape("cross_w12", "TriOscillator", &tri.cross_w12, vec![tri.n, tri.n]);
-    writer.add_f32_shape("cross_w13", "TriOscillator", &tri.cross_w13, vec![tri.n, tri.n]);
-    writer.add_f32_shape("cross_w23", "TriOscillator", &tri.cross_w23, vec![tri.n, tri.n]);
+    writer.add_scalar_f32("w12", "TriOscillator", tri.w12);
+    writer.add_scalar_f32("w13", "TriOscillator", tri.w13);
+    writer.add_scalar_f32("w23", "TriOscillator", tri.w23);
     writer.add_scalar_f32("alpha", "TriOscillator", tri.alpha);
     writer.add_scalar_f32("drive_gain", "TriOscillator", tri.drive_gain);
     writer.add_scalar_f32("epsilon", "TriOscillator", tri.epsilon);
@@ -203,7 +203,10 @@ pub fn load_trioscilator(reader: &TaasReader, n: usize) -> Result<taas_t3::TriOs
     let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) { tri.$field.copy_from_slice(&v); }
+            if let Ok(v) = reader.get_f32($name) {
+                let n = v.len().min(tri.$field.len());
+                tri.$field[..n].copy_from_slice(&v[..n]);
+            }
         };
     }
     restore!(th1, "th1"); restore!(th2, "th2"); restore!(th3, "th3");
@@ -216,7 +219,9 @@ pub fn load_trioscilator(reader: &TaasReader, n: usize) -> Result<taas_t3::TriOs
     restore!(sin2, "sin2"); restore!(cos2, "cos2");
     restore!(sin3, "sin3"); restore!(cos3, "cos3");
     restore!(coupling1, "coupling1"); restore!(coupling2, "coupling2"); restore!(coupling3, "coupling3");
-    restore!(cross_w12, "cross_w12"); restore!(cross_w13, "cross_w13"); restore!(cross_w23, "cross_w23");
+    tri.w12 = reader.get_scalar_f32("w12").unwrap_or(0.0);
+    tri.w13 = reader.get_scalar_f32("w13").unwrap_or(0.0);
+    tri.w23 = reader.get_scalar_f32("w23").unwrap_or(0.0);
     tri.alpha = reader.get_scalar_f32("alpha").unwrap_or(1.0);
     tri.drive_gain = reader.get_scalar_f32("drive_gain").unwrap_or(10.0);
     tri.epsilon = reader.get_scalar_f32("epsilon").unwrap_or(0.1);
@@ -326,12 +331,13 @@ pub fn save_eprop_lif(eprop: &taas_core::neuron::EPropLIF, writer: &mut TaasWrit
     writer.add_metadata("type", "EPropLIF");
     writer.add_metadata("n", &eprop.n.to_string());
     writer.add_f32("eprop_v", "EPropLIF", &eprop.v);
-    writer.add_f32("eprop_theta", "EPropLIF", &eprop.theta);
     writer.add_f32("eprop_eligibility", "EPropLIF", &eprop.eligibility);
     writer.add_f32("eprop_psi", "EPropLIF", &eprop.psi);
+    writer.add_f32("eprop_refractory", "EPropLIF", &eprop.refractory);
     writer.add_scalar_f32("eprop_dt", "EPropLIF", eprop.dt);
     writer.add_scalar_f32("eprop_tau_m", "EPropLIF", eprop.tau_m);
     writer.add_scalar_f32("eprop_tau_e", "EPropLIF", eprop.tau_e);
+    writer.add_scalar_f32("eprop_tau_ref", "EPropLIF", eprop.tau_ref);
     writer.add_scalar_f32("eprop_v_rest", "EPropLIF", eprop.v_rest);
     writer.add_scalar_f32("eprop_v_thresh", "EPropLIF", eprop.v_thresh);
     writer.add_scalar_f32("eprop_v_reset", "EPropLIF", eprop.v_reset);
@@ -342,14 +348,19 @@ pub fn load_eprop_lif(reader: &TaasReader, n: usize) -> Result<taas_core::neuron
     let mut eprop = taas_core::neuron::EPropLIF::new(n, 1.0, 10.0, 20.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) { eprop.$field.copy_from_slice(&v); }
+            if let Ok(v) = reader.get_f32($name) {
+                let n = v.len().min(eprop.$field.len());
+                eprop.$field[..n].copy_from_slice(&v[..n]);
+            }
         };
     }
-    restore!(v, "eprop_v"); restore!(theta, "eprop_theta");
+    restore!(v, "eprop_v");
     restore!(eligibility, "eprop_eligibility"); restore!(psi, "eprop_psi");
+    restore!(refractory, "eprop_refractory");
     eprop.dt = reader.get_scalar_f32("eprop_dt").unwrap_or(1.0);
     eprop.tau_m = reader.get_scalar_f32("eprop_tau_m").unwrap_or(10.0);
     eprop.tau_e = reader.get_scalar_f32("eprop_tau_e").unwrap_or(20.0);
+    eprop.tau_ref = reader.get_scalar_f32("eprop_tau_ref").unwrap_or(3.0);
     eprop.v_rest = reader.get_scalar_f32("eprop_v_rest").unwrap_or(-65.0);
     eprop.v_thresh = reader.get_scalar_f32("eprop_v_thresh").unwrap_or(-50.0);
     eprop.v_reset = reader.get_scalar_f32("eprop_v_reset").unwrap_or(-70.0);
@@ -375,7 +386,10 @@ pub fn load_stp(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::Shor
     let mut stp = taas_core::neuron::ShortTermPlasticity::new(n, 1.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) { stp.$field.copy_from_slice(&v); }
+            if let Ok(v) = reader.get_f32($name) {
+                let n = v.len().min(stp.$field.len());
+                stp.$field[..n].copy_from_slice(&v[..n]);
+            }
         };
     }
     restore!(x, "stp_x"); restore!(u, "stp_u");
@@ -387,6 +401,7 @@ pub fn load_stp(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::Shor
 
 // ─── ActorCriticAgent ────────────────────────────────────
 
+#[cfg(feature = "train")]
 pub fn save_actor_critic_agent(agent: &taas_train::rl::ActorCriticAgent, writer: &mut TaasWriter) {
     writer.add_metadata("type", "ActorCriticAgent");
     writer.add_metadata("n_input", &agent.n_input.to_string());
@@ -417,6 +432,7 @@ pub fn save_actor_critic_agent(agent: &taas_train::rl::ActorCriticAgent, writer:
     writer.add_scalar_f32("rl_last_value", "ActorCriticAgent", agent.last_value);
 }
 
+#[cfg(feature = "train")]
 pub fn load_actor_critic_agent(reader: &TaasReader) -> Result<taas_train::rl::ActorCriticAgent, String> {
     let n_input = reader.metadata().get("n_input").and_then(|s| s.parse().ok()).ok_or("n_input not found")?;
     let n_hidden = reader.metadata().get("n_hidden").and_then(|s| s.parse().ok()).ok_or("n_hidden not found")?;
@@ -527,7 +543,10 @@ pub fn load_inverse_kuramoto(reader: &TaasReader, n: usize) -> Result<taas_t3::I
     let mut dec = taas_t3::InverseKuramotoDecoder::new(n, 1.0, 1.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) { dec.$field.copy_from_slice(&v); }
+            if let Ok(v) = reader.get_f32($name) {
+                let n = v.len().min(dec.$field.len());
+                dec.$field[..n].copy_from_slice(&v[..n]);
+            }
         };
     }
     restore!(prev_amps, "ikd_prev_amps"); restore!(weights, "ikd_weights");
@@ -550,13 +569,17 @@ pub fn save_stdp_decoder(dec: &taas_t3::StdpDecoder, writer: &mut TaasWriter) {
     writer.add_scalar_f32("sd_lr", "StdpDecoder", dec.lr);
     writer.add_scalar_f32("sd_decay", "StdpDecoder", dec.decay);
     writer.add_scalar_f32("sd_sparsity", "StdpDecoder", dec.sparsity);
+    writer.add_scalar_bool("sd_initialised", "StdpDecoder", dec.initialised);
 }
 
 pub fn load_stdp_decoder(reader: &TaasReader, n: usize) -> Result<taas_t3::StdpDecoder, String> {
     let mut dec = taas_t3::StdpDecoder::new(n, 0.01, 0.9, 1e-5);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) { dec.$field.copy_from_slice(&v); }
+            if let Ok(v) = reader.get_f32($name) {
+                let n = v.len().min(dec.$field.len());
+                dec.$field[..n].copy_from_slice(&v[..n]);
+            }
         };
     }
     restore!(weights, "sd_weights"); restore!(traces, "sd_traces"); restore!(prev_states, "sd_prev_states");
@@ -581,7 +604,10 @@ pub fn save_pst_decoder(dec: &taas_t3::PstDecoder, writer: &mut TaasWriter) {
 
 pub fn load_pst_decoder(reader: &TaasReader, feat_dim: usize, l: usize) -> Result<taas_t3::PstDecoder, String> {
     let mut dec = taas_t3::PstDecoder::new(feat_dim, l, 0.01);
-    if let Ok(v) = reader.get_f32("pst_weights") { dec.weights.copy_from_slice(&v); }
+    if let Ok(v) = reader.get_f32("pst_weights") {
+        let n = v.len().min(dec.weights.len());
+        dec.weights[..n].copy_from_slice(&v[..n]);
+    }
     dec.bias = reader.get_scalar_f32("pst_bias").unwrap_or(0.0);
     dec.alpha = reader.get_scalar_f32("pst_alpha").unwrap_or(0.01);
     Ok(dec)

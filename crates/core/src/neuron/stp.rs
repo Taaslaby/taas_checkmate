@@ -73,14 +73,22 @@ impl ShortTermPlasticity {
             });
 
         // Scalar tail (n & 7)
+        // BUGFIX: save pre-decay u/x for spike-dependent terms (matching SIMD kernel)
         if n8 < n {
             let dt = self.dt;
             for i in n8..n {
                 let s = if pre_spikes[i] != 0 { 1.0 } else { 0.0 };
                 let tf_i = self.tau_f[i].max(1e-10);
                 let td_i = self.tau_d[i].max(1e-10);
-                self.u[i] += dt * ((self.u0[i] - self.u[i]) / tf_i + self.u0[i] * (1.0 - self.u[i]) * s / dt);
-                self.x[i] += dt * ((1.0 - self.x[i]) / td_i - self.u[i] * self.x[i] * s / dt);
+                // Save pre-decay values (matching SIMD)
+                let u_pre = self.u[i];
+                let x_pre = self.x[i];
+                // Decay (always applied)
+                self.u[i] += dt * (self.u0[i] - self.u[i]) / tf_i;
+                self.x[i] += dt * (1.0 - self.x[i]) / td_i;
+                // Spike-dependent terms using PRE-decay values (matching SIMD)
+                self.u[i] += self.u0[i] * (1.0 - u_pre) * s;
+                self.x[i] -= self.u[i] * x_pre * s;  // NEW u, PRE-decay x
                 I_out[i] += self.a[i] * self.u[i] * self.x[i] * s;
             }
         }

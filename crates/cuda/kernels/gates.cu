@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <math.h>
+#include "gpu_context.h"
 
 // ─── Device kernels ──────────────────────────────────────
 
@@ -100,7 +101,9 @@ extern "C" int cuda_safety_clamp(float* data, float min_val, float max_val, int 
 
 extern "C" int gpu_safety_clamp_async(void* vctx, float min_val, float max_val) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_v, nn*sizeof(float));
+    int bs = 256, n = nn;
     safety_clamp_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(ctx->d_v, min_val, max_val, n);
     return (int)cudaGetLastError();
 }

@@ -3,6 +3,12 @@
 //!
 //! sin/cos are computed per-element (no SIMD for trig in `wide`),
 //! but all arithmetic (addition, multiplication, wrapping) uses f32x8.
+//!
+//! ## Kuramoto models
+//! - `kuramoto_update` — стандартная: φ += dt·(ω + coupling)
+//! - `kuramoto_update_viscous` — с вязким демпфированием: φ += dt·(ω + coupling + η·∇²φ)
+//!   Вязкий член η·∇²φ = η·(mean_neighbor_phase - φ) сглаживает фазовые разности
+//!   и подавляет хаотический шум при переключении фаз.
 
 use wide::f32x8;
 use super::wrap_phase;
@@ -40,16 +46,11 @@ pub(crate) unsafe fn kuramoto_prepare(
         let pv = load8(phases, off);
         // Wrap: ϕ − τ·round(ϕ/τ)
         let wrapped = pv - tau_s * (pv / tau_s).round();
-        let arr: [f32; 8] = wrapped.to_array();
-        let mut co = [0.0f32; 8];
-        let mut si = [0.0f32; 8];
-        for j in 0..8 {
-            co[j] = arr[j].cos();
-            si[j] = arr[j].sin();
-        }
-        store8(phases, off, f32x8::from(arr));
-        store8(cos_out, off, f32x8::from(co));
-        store8(sin_out, off, f32x8::from(si));
+        // SIMD sin/cos via minimax polynomial (~1e-4 accuracy, ~4× faster than libm)
+        let (si, co) = super::fast_sincos_simd(wrapped);
+        store8(phases, off, wrapped);
+        store8(cos_out, off, co);
+        store8(sin_out, off, si);
     }
 
     if n8 < n {
@@ -94,6 +95,78 @@ pub(crate) unsafe fn kuramoto_update(
         let c = std::slice::from_raw_parts(coupling, n);
         for i in n8..n {
             p[i] = wrap_phase(p[i] + dt * (o[i] + c[i]));
+        }
+    }
+}
+
+/// Viscous Kuramoto update: φ += dt·(ω + coupling + η·∇²φ)
+///
+/// Вязкий член η·∇²φ аппроксимируется как разность с соседями по CSR:
+///   η·∇²φ_i = η · Σ_j W_ij · sin(φ_j − φ_i)  — для разреженной связности
+///
+/// Для fully-connected попарной связности (когда каждый с каждым):
+///   η·∇²φ_i = η · (mean(φ) − φ_i)
+///   где mean(φ) — средняя фаза всех осцилляторов
+///
+/// Вязкое демпфирование подавляет высокочастотные фазовые разности,
+/// сглаживая переходы между синхронными состояниями. Без этого члена
+/// Kuramoto-ансамбль может хаотически переключаться между модами.
+///
+/// Reference: Kuramoto (1984) "Chemical Oscillations, Waves, and Turbulence"
+///
+/// # Args
+/// - `phases`: фазы осцилляторов [n]
+/// - `omegas`: собственные частоты [n]
+/// - `coupling`: внешняя связность (через sin) [n]
+/// - `eta`: коэффициент вязкости (η ≥ 0). η=0 → обычный Kuramoto.
+/// - `dt`: шаг интегрирования
+/// - `n`: количество осцилляторов
+///
+/// # Safety
+/// All pointers valid for `n` elements, non-overlapping.
+pub(crate) unsafe fn kuramoto_update_viscous(
+    phases: *mut f32, omegas: *const f32,
+    coupling: *const f32, eta: f32, dt: f32, n: usize,
+) {
+    let tau_s = f32x8::splat(TAU);
+    let dt_s = f32x8::splat(dt);
+
+    if eta <= 0.0 {
+        return kuramoto_update(phases, omegas, coupling, dt, n);
+    }
+
+    // 1. Compute mean phase (scalar, one pass)
+    let mean_phase = {
+        let p = std::slice::from_raw_parts(phases, n);
+        let mut sum = 0.0f32;
+        for i in 0..n { sum += p[i]; }
+        sum / n as f32
+    };
+
+    // 2. SIMD viscous update: φ += dt·(ω + c + η·(mean − φ))
+    let eta_s = f32x8::splat(eta);
+    let mean_s = f32x8::splat(mean_phase);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let mut pv = load8(phases, off);
+        let ov = load8(omegas, off);
+        let cv = load8(coupling, off);
+
+        let viscous = eta_s * (mean_s - pv);
+        pv = pv + dt_s * (ov + cv + viscous);
+        pv = pv - tau_s * (pv / tau_s).round();
+        store8(phases, off, pv);
+    }
+
+    // 3. Scalar tail
+    if n8 < n {
+        let p = std::slice::from_raw_parts_mut(phases, n);
+        let o = std::slice::from_raw_parts(omegas, n);
+        let c = std::slice::from_raw_parts(coupling, n);
+        for i in n8..n {
+            let viscous = eta * (mean_phase - p[i]);
+            p[i] = wrap_phase(p[i] + dt * (o[i] + c[i] + viscous));
         }
     }
 }

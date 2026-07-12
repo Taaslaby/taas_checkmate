@@ -75,7 +75,7 @@ pub fn py_bench_connectome_cpu(
     let n = v.len();
     let n_neurons = row_ptr.len() - 1;
     let mut refractory = vec![0.0f32; n];
-    let mut total_spikes: usize = 0;
+    let mut _total_spikes: usize = 0;
 
     // Initialize I = external_I (same as GPU: upload_I before loop)
     for i in 0..n.min(external_I.len()) {
@@ -110,7 +110,7 @@ pub fn py_bench_connectome_cpu(
         let max_syn = col_indices.len().min(values.len());
         for i in 0..n_neurons.min(spikes.len()) {
             if spikes[i] != 0 {
-                total_spikes += 1;
+                _total_spikes += 1;
                 let start = row_ptr[i].max(0) as usize;
                 let end = (row_ptr[i + 1] as usize).min(max_syn);
                 let mult = if i < nt_types.len() { nt_types[i] } else { 1.0 };
@@ -135,7 +135,7 @@ pub fn py_bench_connectome_cpu(
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    Ok((elapsed, total_spikes))
+    Ok((elapsed, _total_spikes))
 }
 
 // ─── Connectome with per-step spike recording ───────────
@@ -201,7 +201,7 @@ pub fn py_bench_connectome_cpu_recording(
     let n = v.len();
     let n_neurons = row_ptr.len() - 1;
     let mut refractory = vec![0.0f32; n];
-    let mut total_spikes: usize = 0;
+    let mut _total_spikes: usize = 0;
 
     // Initialize I = external_I
     for i in 0..n.min(external_I.len()) {
@@ -228,7 +228,7 @@ pub fn py_bench_connectome_cpu_recording(
                 if idx < spike_buffer.len() {
                     spike_buffer[idx] = 1;
                 }
-                total_spikes += 1;
+                _total_spikes += 1;
             }
         }
 
@@ -268,7 +268,7 @@ pub fn py_bench_connectome_cpu_recording(
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    Ok((elapsed, total_spikes))
+    Ok((elapsed, _total_spikes))
 }
 
 // ─── GPU: connectome simulation using GpuContext ────────
@@ -549,7 +549,7 @@ pub fn py_bench_connectome_gpu_stdp(
             )),
         };
 
-        let mut total_spikes: usize = 0;
+        let mut _total_spikes: usize = 0;
         let mut step_spikes = vec![0i32; n_neurons];
         let t0 = std::time::Instant::now();
 
@@ -585,7 +585,7 @@ pub fn py_bench_connectome_gpu_stdp(
                     step_count += 1;
                 }
             }
-            total_spikes += step_count;
+            _total_spikes += step_count;
         }
 
         let elapsed = t0.elapsed().as_secs_f64();
@@ -755,7 +755,7 @@ pub fn py_bench_connectome_gpu_recording(
             )),
         };
 
-        let mut total_spikes: usize = 0;
+        let mut _total_spikes: usize = 0;
         let mut step_spikes = vec![0i32; n_neurons];
         let t0 = std::time::Instant::now();
 
@@ -789,7 +789,7 @@ pub fn py_bench_connectome_gpu_recording(
                     step_count += 1;
                 }
             }
-            total_spikes += step_count;
+            _total_spikes += step_count;
         }
 
         // State persistence: download v, u back to host
@@ -811,7 +811,7 @@ pub fn py_bench_connectome_gpu_recording(
 
         gpu_ctx.free_spike_counter(d_spike_counter);
         let elapsed = t0.elapsed().as_secs_f64();
-        Ok((elapsed, total_spikes))
+        Ok((elapsed, _total_spikes))
     }
 }
 

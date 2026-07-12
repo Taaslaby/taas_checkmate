@@ -130,13 +130,15 @@ impl EPropSaw {
             })
             .sum();
 
+        // Scalar tail (n & 7) — exact exponential decay, matching SIMD kernel
         let mut tail_count = 0;
         if n8 < n {
             let dt = self.dt;
-            let tau_e = self.tau_e;
+            let tau_e = self.tau_e.max(1e-6);
             let a = self.a;
             let b = self.b;
             let tau_sg = self.tau_surrogate;
+            let e_decay = (-dt / tau_e).exp();
             for i in n8..n {
                 let vv = self.v[i];
                 let dv = (0.04 * vv + 5.0) * vv + 140.0 - self.u[i] + I[i];
@@ -145,7 +147,7 @@ impl EPropSaw {
                 self.u[i] += dt * du;
                 self.psi[i] = surrogate_gradient(self.v[i], 30.0, tau_sg);
                 let z_pre = if pre_spikes[i] != 0 { 1.0 } else { 0.0 };
-                self.eligibility[i] += dt * (-self.eligibility[i] / tau_e + self.psi[i] * z_pre);
+                self.eligibility[i] = self.eligibility[i] * e_decay + self.psi[i] * z_pre * tau_e * (1.0 - e_decay);
                 if self.v[i] >= 30.0 {
                     spikes[i] = 1;
                     tail_count += 1;

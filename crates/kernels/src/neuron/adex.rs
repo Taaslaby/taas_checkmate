@@ -149,7 +149,8 @@ pub(crate) unsafe fn adex_step(
 ///   dw/dt = (a·(v - v_rest) - w) / τ_w
 ///   v ≥ v_T → v = v_reset, w += b
 ///
-/// E-Prop: de/dt = −e/τ_e + ψ·z_pre  (ψ = surrogate gradient using v_thresh)
+/// E-Prop eligibility (Exponential Euler):
+///   e(t+dt) = e·exp(-dt/τ_e) + ψ·z_pre·τ_e·(1 - exp(-dt/τ_e))
 ///
 /// Uses `f32x8` SIMD with fast exponential approximation.
 ///
@@ -187,6 +188,10 @@ pub(crate) unsafe fn eprop_adex_step_multi(
     let tau_sg_s = f32x8::splat(tau_sg);
     let n8 = n & !7;
     let mut total_spikes = 0usize;
+
+    // Precompute e_decay — constant across all SIMD blocks
+    let e_decay = fast_exp_simd(-dt_s / tau_e_s);
+    let one_minus_e_decay = one - e_decay;
 
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
@@ -240,15 +245,15 @@ pub(crate) unsafe fn eprop_adex_step_multi(
         store8(w, off, ww);
         store8(psi, off, ps);
 
-        // Per-synapse eligibility: e_ij = e_ij * (1 - dt/τ_e) + dt * ψ_j * z_pre[i]
-        let decay = one - dt_s / tau_e_s;
+        // Per-synapse eligibility: exponential Euler
+        // e_ij(t+dt) = e_ij·e_decay + ψ_j·z_pre·τ_e·(1 - e_decay)
         for i in 0..n_pre {
             let z = *z_pre.add(i) as f32;
             let mut e_simd = load8_mut(e, i * n + off);
             if z != 0.0 {
-                e_simd = e_simd * decay + ps * f32x8::splat(z * dt);
+                e_simd = e_simd * e_decay + ps * f32x8::splat(z) * tau_e_s * one_minus_e_decay;
             } else {
-                e_simd = e_simd * decay;
+                e_simd = e_simd * e_decay;
             }
             store8(e, i * n + off, e_simd);
         }
@@ -266,6 +271,8 @@ pub(crate) unsafe fn eprop_adex_step_multi(
         let psi_sl = std::slice::from_raw_parts_mut(psi, n);
         let i_sl = std::slice::from_raw_parts(I_ext, n);
         let sp_sl = std::slice::from_raw_parts_mut(spikes, n);
+        let e_decay_s = (-dt / tau_e).exp();
+        let one_minus_e_decay_s = 1.0 - e_decay_s;
         for j in n8..n {
             let mut vv = v_sl[j];
             let mut ww = w_sl[j];
@@ -290,11 +297,11 @@ pub(crate) unsafe fn eprop_adex_step_multi(
 
             psi_sl[j] = surrogate_gradient(vv, v_thresh, tau_sg);
 
-            // Per-synapse eligibility
+            // Per-synapse eligibility (exponential Euler)
             for i in 0..n_pre {
                 let z = *z_pre.add(i) as f32;
                 let e_ptr = e.add(i * n + j);
-                *e_ptr += dt * (-*e_ptr / tau_e + psi_sl[j] * z);
+                *e_ptr = *e_ptr * e_decay_s + psi_sl[j] * z * tau_e * one_minus_e_decay_s;
             }
 
             if vv >= v_thresh || vv.is_nan() {

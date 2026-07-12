@@ -19,7 +19,7 @@ use std::f32::consts::TAU;
 use crate::core::neuron::hh::{HhLutConfig, step_hh_lut, build_config_from_channels};
 
 /// Full hologram pipeline: phase encoding → HH → STDP → decode.
-#[pyclass(name = "HologramBridge")]
+#[pyclass(name = "HologramBridge", module = "taas_checkmate.hologram")]
 pub struct PyHologramBridge {
     // HH simulator
     cfg: HhLutConfig,
@@ -122,17 +122,11 @@ impl PyHologramBridge {
             self.cfg.Ii[i] = self.i_base + self.i_amp * (self.omega * self.t + phases[i]).sin();
         }
 
-        // 2. Save voltages before step (for spike detection)
-        // 3. HH step
-        step_hh_lut(&mut self.cfg);
+        // 2+3+4. HH step with built-in spike detection
+        step_hh_lut(&mut self.cfg, &mut self.spike_buf);
 
-        // 4. Spike detection + EPSC
-        let mut n_spikes = 0;
-        for i in 0..self.cfg.n {
-            self.spike_buf[i] = if self.prev_v[i] < 0.0 && self.cfg.v[i] >= 0.0 { 1 } else { 0 };
-            if self.spike_buf[i] == 1 { n_spikes += 1; }
-            self.prev_v[i] = self.cfg.v[i];
-        }
+        // 4b. EPSC: all-to-all pre→post (note: spike_buf uses reverse zero-crossing)
+        let n_spikes: usize = self.spike_buf.iter().map(|&s| s as usize).sum();
 
         // 5. EPSC: all-to-all pre→post
         for pre in 0..self.cfg.n {

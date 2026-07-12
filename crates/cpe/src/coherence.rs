@@ -74,8 +74,8 @@ mod tests {
         let counts = vec![10.0f32; 8];
         let (h, err) = spike_entropy(&counts, 100, 3.0);
         // 8 uniform bins: p=0.1 each, H = -8 * 0.1 * log2(0.1) = 2.658
-        assert!((h - 2.658).abs() < 0.01, "uniform 8-bin entropy should be ~2.658, got {h}");
-        let expected_err = (2.658 - 3.0).abs();
+        assert!((h - 2.658_f32).abs() < 0.01, "uniform 8-bin entropy should be ~2.658, got {h}");
+        let expected_err = (2.658_f32 - 3.0_f32).abs();
         assert!((err - expected_err).abs() < 0.01);
     }
 

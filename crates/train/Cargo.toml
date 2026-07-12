@@ -11,10 +11,11 @@ taas-t3 = { path = "../t3", optional = true }
 taas-connectome = { path = "../connectome", optional = true }
 cuda-kernels = { path = "../cuda", optional = true }
 rand = "0.8"
+wide = "0.7"
 
 [features]
 t3 = ["taas-t3"]
 connectome = ["taas-connectome", "t3"]
-cuda = ["cuda-kernels", "taas-t3/cuda"]
+cuda = ["cuda-kernels", "taas-t3/cuda", "taas-connectome/cuda"]
 default = []
 

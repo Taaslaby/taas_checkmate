@@ -9,10 +9,11 @@
  *   ch=1 KV:  n⁴  — E_rev=-77mV, g_max=36 mS/cm² — repolarization
  *   ch=2 CaT: c¹  — E_rev=120mV, g_max=0.5 mS/cm² — T-type calcium, pacemaking
  *
- * Gate layout (row-major, coalesced):
- *   gates[neuron * n_gates + gate_idx]
- *   For standard HH: gates[neuron * 3 + 0] = m, [1] = h, [2] = n
- *   With CaV-T:      gates[neuron * 4 + 0] = m, [1] = h, [2] = n, [3] = c
+ * Gate layout (SOA — fully coalesced):
+ *   gates[gate_idx * n + neuron_idx]
+ *   For standard HH: gates[0*n + neuron] = m, gates[1*n + neuron] = h,
+ *                    gates[2*n + neuron] = n
+ *   With CaV-T:      gates[3*n + neuron] = c
  */
 #include <cuda_runtime.h>
 #include <math.h>
@@ -123,7 +124,6 @@ extern "C" __global__ void hh_step_kernel(
     }
 
     float vi = v[idx];
-    float* g = &gates[idx * n_gates];
 
     int gi = 0;  // global gate index
     float I_ion = 0.0f;
@@ -151,15 +151,18 @@ extern "C" __global__ void hh_step_kernel(
             float tau = 1.0f / sum;
             float decay = __expf(-dt / tau);
 
+            // SOA gate access: gates[gate_idx * n + neuron_idx]
+            float* g_ptr = &gates[gi * n];
+
             // Gate update: g(t+dt) = m_inf + (g(t) - m_inf) * exp(-dt/tau)
-            g[gi] = m_inf + (g[gi] - m_inf) * decay;
+            float g_val = m_inf + (g_ptr[idx] - m_inf) * decay;
+            g_ptr[idx] = g_val;
 
             // Apply gate power: g_ch *= gate^power
             unsigned int p = powers[gi];
-            float g_factor = g[gi];
             #pragma unroll
             for (unsigned int k = 0; k < p; k++) {
-                g_ch *= g_factor;
+                g_ch *= g_val;
             }
 
             gi++;
@@ -224,6 +227,8 @@ extern "C" int cuda_hh_step(
 
 extern "C" int gpu_hh_step_async(void* vctx, float dt, float tau_ref) {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_spikes, ctx->n_neurons*sizeof(int));
+    ENSURE_ALLOC(d_refractory, ctx->n_neurons*sizeof(float));
     int bs = 256;
     int n = ctx->n_neurons;
     int n_gates = ctx->n_hh_gates;

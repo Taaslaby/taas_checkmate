@@ -42,11 +42,14 @@ impl WorkerState {
         ni: usize, nh: usize, no: usize,
         dt: f32, tau_e: f32,
         weight_scale: f32, seed: u64,
+        worker_id: usize,
     ) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
         let weights: Vec<f32> = (0..ni * nh).map(|_| rng.gen_range(-weight_scale..weight_scale)).collect();
         let w_out: Vec<f32> = (0..nh * no).map(|_| rng.gen_range(-0.1..0.1)).collect();
-        let rng = StdRng::seed_from_u64(seed);
+        // Unique seed per worker for Poisson noise — ensures Hogwild! workers
+        // see independent stochasticity, not identical noise patterns.
+        let rng = StdRng::seed_from_u64(seed.wrapping_add(worker_id as u64 * 7919));
         Self {
             eprop: EPropIzhikevichMulti::new(ni, nh, dt, tau_e),
             rng,
@@ -124,7 +127,7 @@ impl EPropTrainer {
 
         // Workers: identical init via same seed
         let workers: Vec<WorkerState> = (0..nw)
-            .map(|_| WorkerState::new(ni, nh, no, dt, tau_e, weight_scale, seed))
+            .map(|wi| WorkerState::new(ni, nh, no, dt, tau_e, weight_scale, seed, wi))
             .collect();
 
         // Master copy (copy from first worker since all are identical)
@@ -188,8 +191,10 @@ impl EPropTrainer {
         for k in 0..no { worker.error[k] = -worker.probs[k]; }
         worker.error[target as usize] += 1.0;
 
+        // BUGFIX: gradient clipping for output weights
+        const GRAD_CLIP: f32 = 1.0;
         for k in 0..no {
-            let ek = worker.error[k];
+            let ek = worker.error[k].clamp(-GRAD_CLIP, GRAD_CLIP);
             for j in 0..nh { worker.w_out[j * no + k] += lr_out * worker.hc_f32[j] * ek; }
             worker.bias_out[k] += lr_out * ek;
         }

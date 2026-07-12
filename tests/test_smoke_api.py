@@ -135,22 +135,22 @@ if KalmanDec:
 
 # ─── 5. T2-SPIGRAD ───────────────────────────────────────
 
-section("5. T2-SPIGRAD")
+section("5. T2-SPIKE-GRAD")
 
 # Forward
 n_osc, n_steps = 8, 5
 drives = np.random.randn(n_steps, 3 * n_osc).astype(np.float32) * 0.1
-pst_vec, traj = tcm.t2spigrad_forward(
+pst_vec, traj = tcm.t2spike_grad_forward(
     n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0,
     0.3, 0.15, 0.08, drives,
 )
-check(len(pst_vec) == 18 * n_osc + 12, f"t2spigrad forward PST dim={len(pst_vec)}")
+check(len(pst_vec) == 18 * n_osc + 12, f"t2spike_grad forward PST dim={len(pst_vec)}")
 check(hasattr(traj, "n_osc") and traj.n_osc() == n_osc, "trajectory has correct n_osc")
 check(hasattr(traj, "n_steps") and traj.n_steps() == n_steps, "trajectory has correct n_steps")
 
 # Backward
 grad_pst = np.random.randn(len(pst_vec)).astype(np.float32)
-grad_drives = tcm.t2spigrad_backward(grad_pst, traj)
+grad_drives = tcm.t2spike_grad_backward(grad_pst, traj)
 check(grad_drives.shape == (n_steps, 3 * n_osc),
       f"backward gradient shape {grad_drives.shape}")
 
@@ -412,21 +412,21 @@ if hasattr(tcm.autotune, 'probe_eprop_fr'):
 
 section("18. Trajectory introspection")
 
-traj = getattr(tcm, "T2SpigradTrajectory", None)
+traj = getattr(tcm, "T2SpikeGradTrajectory", None)
 if traj is None:
-    # T2SpigradTrajectory might be in t3 submodule
-    traj = getattr(tcm.t3, "T2SpigradTrajectory", None)
+    # T2SpikeGradTrajectory might be in t3 submodule
+    traj = getattr(tcm.t3, "T2SpikeGradTrajectory", None)
 
 # Re-create a traj from forward
 if traj:
     drives_t = np.random.randn(3, 3 * 8).astype(np.float32) * 0.1
-    _, t = tcm.t2spigrad_forward(8, 3, 0.05, 10.0, 1.0, 0.5, 3.0,
-                                  0.3, 0.15, 0.08, drives_t)
+    _, t = tcm.t2spike_grad_forward(8, 3, 0.05, 10.0, 1.0, 0.5, 3.0,
+                                     0.3, 0.15, 0.08, drives_t)
     check(t.n_osc() == 8, f"traj.n_osc={t.n_osc()}")
     check(t.n_steps() == 3, f"traj.n_steps={t.n_steps()}")
     check(abs(t.dt() - 0.05) < 1e-6, f"traj.dt={t.dt()}")
     check(abs(t.drive_gain() - 10.0) < 1e-6, f"traj.drive_gain={t.drive_gain()}")
-    check("T2SpigradTrajectory" in repr(t), f"traj.__repr__: {repr(t)}")
+    check("T2SpikeGradTrajectory" in repr(t), f"traj.__repr__: {repr(t)}")
 
 
 # ─── Summary ──────────────────────────────────────────────

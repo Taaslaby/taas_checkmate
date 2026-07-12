@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{load8, load8_mut, load8_i32, store8, spike_mask_to_i32, rand_f32, surrogate_gradient};
+use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i32, rand_f32, surrogate_gradient};
 
 // ═══════════════════════════════════════════════════════
 //  SAW (Spike-Adaptive-Width)
@@ -52,7 +52,13 @@ pub(crate) unsafe fn saw_step(
         let sm = vv.cmp_ge(v_th) & not_refr;
 
         // Reset after spike
-        vv = refr_mask.blend(vv, sm.blend(v_reset, vv + na_s * (f32x8::splat(rand_f32()) - f32x8::splat(0.5))));
+        // Generate 8 independent random values for noise (each neuron gets its own)
+        let rand_vals = [
+            rand_f32(), rand_f32(), rand_f32(), rand_f32(),
+            rand_f32(), rand_f32(), rand_f32(), rand_f32(),
+        ];
+        let rand_v = f32x8::from(rand_vals);
+        vv = refr_mask.blend(vv, sm.blend(v_reset, vv + na_s * (rand_v - f32x8::splat(0.5))));
         uu = refr_mask.blend(uu, uu + sm.blend(u_add, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
@@ -123,7 +129,8 @@ pub(crate) unsafe fn saw_step(
 ///   du/dt = a·(b·v − u)
 ///   if v ≥ 30: v = −65, u += 8
 ///
-/// E-Prop: de/dt = −e/τ_e + ψ·z_pre
+/// E-Prop eligibility (Exponential Euler):
+///   e(t+dt) = e·exp(-dt/τ_e) + ψ·z_pre·τ_e·(1 - exp(-dt/τ_e))
 ///   ψ = surrogate gradient = 1 / (1 + |v − 30|/τ)²
 ///
 /// # Returns
@@ -173,10 +180,12 @@ pub(crate) unsafe fn eprop_saw_step(
         let one_plus_diff = one + diff;
         let ps = one / (one_plus_diff * one_plus_diff);
 
-        // Eligibility trace: de/dt = -e/τ_e + ψ · z_pre
+        // Eligibility trace: exponential Euler
+        // de/dt = -e/τ_e + ψ · z_pre → e(t+dt) = e·exp(-dt/τ_e) + ψ·z_pre·τ_e·(1 - exp(-dt/τ_e))
         let z_pre = pre.cmp_gt(zero).blend(one, zero);
-        let de = -ee / tau_e_s + ps * z_pre;
-        ee = ee + de * dt_s;
+        let e_decay = fast_exp_simd(-dt_s / tau_e_s);
+        let one_minus_e_decay = one - e_decay;
+        ee = ee * e_decay + ps * z_pre * tau_e_s * one_minus_e_decay;
 
         // Spike detection: v ≥ 30 → hardcoded reset
         let sm = vv.cmp_ge(v_th);
@@ -217,7 +226,8 @@ pub(crate) unsafe fn eprop_saw_step(
             u_sl[i] += dt * du;
             psi_sl[i] = surrogate_gradient(v_sl[i], 30.0, tau_sg);
             let z_pre = if pre_sl[i] != 0 { 1.0 } else { 0.0 };
-            e_sl[i] += dt * (-e_sl[i] / tau_e + psi_sl[i] * z_pre);
+            let e_decay = (-dt / tau_e).exp();
+            e_sl[i] = e_sl[i] * e_decay + psi_sl[i] * z_pre * tau_e * (1.0 - e_decay);
             if v_sl[i] >= 30.0 {
                 sp_sl[i] = 1;
                 total_spikes += 1;

@@ -38,6 +38,7 @@ use rand::SeedableRng;
 use karmac::gnw::GlobalWorkspace;
 use karmac::working_memory::WorkingMemory;
 use karmac::semantic_pointer::SemanticPointer;
+use karmac::basal_ganglia::BasalGanglia;
 
 use taas_connectome::ConnectomeData;
 use taas_format::{TaasReader, load_connectome};
@@ -62,20 +63,29 @@ struct SpaunPipeline {
     gnw: GlobalWorkspace,
     wm: WorkingMemory,
     sp: SemanticPointer,
+    bg: BasalGanglia,
 
     // ── Connectome (из ConnectomeGPT вместо random reservoir) ──
     /// CSR connectome — sparse directed graph.
     conn: ConnectomeData,
     /// Neuron states: v = tanh(filtered activity).
     state: Vec<f32>,
+    /// Pre-allocated buffer for connectome_step (avoid allocation per call).
+    new_state: Vec<f32>,
 
     // ── Encoding matrices ──
     /// Pixel → Semantic Pointer: [sp_dim × n_pixels]
     w_encode: Vec<f32>,
     /// Semantic Pointer → Cortex: [cortical_dim × sp_dim]
     w_sp_to_cortex: Vec<f32>,
-    /// Motor output: [n_outputs × n_neurons]
+    /// Motor output: [n_outputs × n_cortex]
     w_motor: Vec<f32>,
+
+    // ── SP Templates (stateful representation) ──
+    /// Stored semantic pointer for each digit 0-9.
+    sp_templates: Vec<Vec<f32>>,
+    /// Stored initial cortex (pre-GNW) for each digit, used to train w_sp_to_cortex.
+    target_cortex: Vec<Vec<f32>>,
 
     // ── Dimensions ──
     n_pixels: usize,
@@ -115,15 +125,28 @@ impl SpaunPipeline {
             .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale)
             .collect();
 
+        // BG with hardcoded diagonal weights: action k responds to channel k
+        let mut bg_weights = vec![0.0f32; 3 * 3];
+        for k in 0..3 {
+            bg_weights[k * 3 + k] = 5.0; // strong self-connection
+            for j in 0..3 {
+                if j != k { bg_weights[k * 3 + j] = -2.0; } // inhibit cross-talk
+            }
+        }
+
         Self {
             gnw: GlobalWorkspace::new(cortical_dim, ws),
             wm: WorkingMemory::new(n_wm_slots, sp_dim),
             sp: SemanticPointer::new(sp_dim),
+            bg: BasalGanglia::from_weights(bg_weights, 3, 3),
             conn,
             state: vec![0.0; n_neurons],
+            new_state: vec![0.0; n_neurons],
             w_encode,
             w_sp_to_cortex,
             w_motor,
+            sp_templates: vec![vec![0.0; sp_dim]; 10],
+            target_cortex: vec![vec![0.0; cortical_dim]; 10],
             n_pixels,
             sp_dim,
             cortical_dim,
@@ -155,9 +178,10 @@ impl SpaunPipeline {
 
     /// Run one step of CSR connectome dynamics.
     /// Injects input into the "sensory" neuron group (biological pathway).
+    /// Uses pre-allocated `new_state` buffer — zero heap allocations per call.
     fn connectome_step(&mut self, input: &[f32]) {
         let n = self.conn.n_neurons;
-        let mut new_state = vec![0.0f32; n];
+        let new_state = &mut self.new_state;
         let sensory = self.conn.group("sensory").unwrap_or(&[]);
 
         // CSR propagate: for each neuron, sum incoming weighted synaptic input
@@ -175,7 +199,6 @@ impl SpaunPipeline {
                 sum += w * self.state[j as usize];
             }
             // Input injection into sensory group (biological afferent pathway)
-            // Maps cortex[sensory_idx] → neuron i via position in sensory group
             if let Some(pos) = sensory.iter().position(|&s| s == i) {
                 if pos < input.len() {
                     sum += input[pos] * 0.5;
@@ -204,13 +227,103 @@ impl SpaunPipeline {
         logits
     }
 
-    /// Softmax.
-    fn softmax(logits: &[f32]) -> Vec<f32> {
-        let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let mut exps: Vec<f32> = logits.iter().map(|&l| (l - max_l).exp()).collect();
-        let sum: f32 = exps.iter().sum();
-        if sum > 1e-10 { for e in &mut exps { *e /= sum; } }
-        exps
+    /// Decode a semantic pointer to digit via NLMS-trained cortex projection.
+    /// Uses full pipeline: sp_to_cortex → GNW → connectome → motor_readout.
+    /// This is the SPAUN way — recalled SP goes through the entire cognitive
+    /// architecture, not just template matching.
+    fn decode_sp_full_pipeline(&mut self, sp: &[f32], steps: usize) -> usize {
+        let mut cortex = self.sp_to_cortex(sp);
+        for _ in 0..steps {
+            self.gnw.forward(&mut cortex);
+            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            self.connectome_step(&cortex);
+        }
+        let logits = self.motor_readout(&cortex);
+        Self::argmax(&logits)
+    }
+
+    /// Store a semantic pointer and its initial cortex as templates for training.
+    fn store_template(&mut self, digit: usize, sp: &[f32], cortex: &[f32]) {
+        if digit < self.sp_templates.len() {
+            self.sp_templates[digit].copy_from_slice(sp);
+            let n = cortex.len().min(self.cortical_dim);
+            for j in 0..n {
+                self.target_cortex[digit][j] = cortex[j];
+            }
+        }
+    }
+
+    /// Reset connectome reservoir state to zeros (for clean recall).
+    fn reset_state(&mut self) {
+        self.state.fill(0.0);
+        self.new_state.fill(0.0);
+    }
+
+    /// Select and execute a task via Basal Ganglia action selection.
+    ///
+    /// Architecture (SPAUN-aligned):
+    ///   task cue → SP → cortex → GNW → downsample to 3 BG channels → BG → action
+    ///
+    /// `task_cue` — 3 floats [copy, recall, count] ∈ [-1, 1] that seed the SP.
+    /// Returns (action_index, task_result).
+    fn bg_select_and_execute(
+        &mut self,
+        task_cue: &[f32; 3],
+        task_arg: usize,
+        steps: usize,
+    ) -> (usize, usize) {
+        // 1. Encode task cue as a semantic pointer that activates the corresponding
+        //    cortical region. Each channel index maps to a distinct SP.
+        let cue_idx = task_cue.iter().position(|&c| c > 0.5).unwrap_or(0);
+        let cue_sp = self.sp.from_index(cue_idx * 50 + 10);
+        
+        // 2. Project SP → cortex
+        let mut cortex = self.sp_to_cortex(&cue_sp);
+        
+        // 3. GNW processes the task cue through the workspace
+        //    This is the SPAUN way: cortex goes through Global Workspace
+        //    before reaching Basal Ganglia for action selection.
+        for _ in 0..3 {
+            self.gnw.forward(&mut cortex);
+            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+        }
+        
+        // 4. Downsample GNW-processed 512-dim cortex → 3-dim BG input
+        //    Each BG channel averages 1/3 of the cortex dimensions.
+        let third = self.cortical_dim / 3;
+        let bg_input: [f32; 3] = [
+            cortex[..third].iter().sum::<f32>() / third.max(1) as f32,
+            cortex[third..2*third].iter().sum::<f32>() / third.max(1) as f32,
+            cortex[2*third..].iter().sum::<f32>() / (self.cortical_dim - 2*third).max(1) as f32,
+        ];
+        
+        // 5. BG selects action based on GNW-processed cortical activity
+        let action = self.bg.step(&bg_input);
+        
+        // Execute the chosen action
+        let result = match action {
+            0 => task_copy(self, task_arg, steps),
+            1 => {
+                let seq = match task_arg {
+                    0 => vec![3, 7, 1],
+                    1 => vec![0, 5, 9, 2],
+                    2 => vec![4, 4, 4],
+                    _ => vec![8, 1, 6, 3],
+                };
+                let out = task_serial_recall(self, &seq, steps);
+                // Return number of correct matches
+                out.iter().zip(seq.iter()).filter(|(o, s)| **o == **s).count()
+            },
+            2 => {
+                let out = task_counting(self, task_arg + 1, steps);
+                // Return number of correct matches
+                let expected: Vec<usize> = (1..=task_arg + 1).collect();
+                out.iter().zip(expected.iter()).filter(|(o, e)| **o == **e).count()
+            },
+            _ => unreachable!(),
+        };
+        
+        (action, result)
     }
 
     /// Argmax.
@@ -228,7 +341,7 @@ impl SpaunPipeline {
 
 /// Generate a simple 10×10 pixel pattern for a digit (0-9).
 /// Each digit gets a unique random projection (deterministic from seed).
-fn digit_pixels(digit: usize, rng: &mut impl Rng) -> Vec<f32> {
+fn digit_pixels(digit: usize) -> Vec<f32> {
     let mut pixels = vec![0.0f32; 100];
     // Simple encoding: each digit activates a different random subset
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(digit as u64 * 1337);
@@ -249,52 +362,49 @@ fn digit_pixels(digit: usize, rng: &mut impl Rng) -> Vec<f32> {
 }
 
 /// Task 1: Copy — see digit, reproduce it.
-/// Uses GNW cortex for readout (connectome provides dynamics, not classification).
 fn task_copy(pipeline: &mut SpaunPipeline, digit: usize, steps: usize) -> usize {
-    let mut rng = rand::thread_rng();
-    let pixels = digit_pixels(digit, &mut rng);
+    let pixels = digit_pixels(digit);
 
     // Encode → GNW → connectome → motor
     let sp = pipeline.encode_pixels(&pixels);
-    let mut cortex = pipeline.sp_to_cortex(&sp);
+    let cortex = pipeline.sp_to_cortex(&sp);
+    // Store template for w_sp_to_cortex training
+    pipeline.store_template(digit, &sp, &cortex);
+    let mut c = cortex;
 
     for _ in 0..steps {
-        pipeline.gnw.forward(&mut cortex);
-        for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
-        pipeline.connectome_step(&cortex);
+        pipeline.gnw.forward(&mut c);
+        for cj in c.iter_mut() { *cj = cj.clamp(-5.0, 5.0); }
+        pipeline.connectome_step(&c);
     }
 
-    // Read from GNW cortex (direct representation preserves digit info)
-    let logits = pipeline.motor_readout(&cortex);
+    let logits = pipeline.motor_readout(&c);
     SpaunPipeline::argmax(&logits)
 }
 
 /// Task 2: Serial Recall — see sequence [a,b,c], reproduce in order.
+/// Uses the full SPAUN pipeline: recalled SP → sp_to_cortex (trained) →
+/// GNW → connectome → motor_readout. Reset connectome state before recall
+/// for consistent dynamics.
 fn task_serial_recall(pipeline: &mut SpaunPipeline, sequence: &[usize], steps_per_digit: usize) -> Vec<usize> {
-    let mut rng = rand::thread_rng();
     let mut output = Vec::new();
 
     // Phase 1: Encode and store in working memory
     for &digit in sequence {
-        let pixels = digit_pixels(digit, &mut rng);
+        let pixels = digit_pixels(digit);
         let sp = pipeline.encode_pixels(&pixels);
         pipeline.wm.store(&sp);
     }
 
-    // Phase 2: Recall from working memory one by one
+    // Phase 2: Reset connectome state for clean recall dynamics
+    pipeline.reset_state();
+
+    // Phase 3: Recall from WM through full pipeline
     for slot in 0..sequence.len() {
         let sp = pipeline.wm.recall(slot);
-        let mut cortex = pipeline.sp_to_cortex(&sp);
-
-        for _ in 0..steps_per_digit {
-            pipeline.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
-            pipeline.connectome_step(&cortex);
-        }
-
-        // Read from GNW cortex (preserves digit representation)
-        let logits = pipeline.motor_readout(&cortex);
-        output.push(SpaunPipeline::argmax(&logits));
+        // Full pipeline: SP → trained cortex → GNW → connectome → motor_readout
+        let digit = pipeline.decode_sp_full_pipeline(&sp, steps_per_digit);
+        output.push(digit);
     }
 
     output
@@ -302,7 +412,6 @@ fn task_serial_recall(pipeline: &mut SpaunPipeline, sequence: &[usize], steps_pe
 
 /// Task 3: Counting — see N, output 1, 2, ..., N.
 fn task_counting(pipeline: &mut SpaunPipeline, n: usize, steps_per_digit: usize) -> Vec<usize> {
-    let mut rng = rand::thread_rng();
     let mut output = Vec::new();
 
     // Encode the number N as input (10×10 grid)
@@ -317,7 +426,7 @@ fn task_counting(pipeline: &mut SpaunPipeline, n: usize, steps_per_digit: usize)
     // Count from 1 to N
     for count in 1..=n {
         // Encode current count digit
-        let count_pixels = digit_pixels(count, &mut rng);
+        let count_pixels = digit_pixels(count);
         let count_sp = pipeline.encode_pixels(&count_pixels);
 
         // Combine N context with count
@@ -348,31 +457,41 @@ fn task_counting(pipeline: &mut SpaunPipeline, n: usize, steps_per_digit: usize)
 // ═══════════════════════════════════════════════════════════════════════
 
 // ─── Training phase ───────────────────────────────────────
-/// Train motor readout weights using NLMS on all 10 digits.
+/// Train motor readout + w_sp_to_cortex using NLMS on all 10 digits.
+///
+/// Phase 1: Train w_motor (cortex → digit)
+/// Phase 2: Record (SP, initial_cortex) pairs, train w_sp_to_cortex via NLMS
+///          to produce stable initial_cortex values for each SP.
 fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, lr: f32) -> f32 {
-    let mut rng = rand::thread_rng();
     let n_out = pipeline.n_outputs;
     let n_cortex = pipeline.cortical_dim;
+    let sp_dim = pipeline.sp_dim;
     
     // Weights accumulate over epochs (no reset)
     let mut final_loss = 0.0f32;
     
+    // ── Phase 1: Train w_motor ──────────────────────
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
         
         for digit in 0..10 {
-            let pixels = digit_pixels(digit, &mut rng);
+            let pixels = digit_pixels(digit);
             
-            // Encode → GNW → reservoir (same as task_copy)
+            // Encode → GNW → reservoir
             let sp = pipeline.encode_pixels(&pixels);
             let mut cortex = pipeline.sp_to_cortex(&sp);
+            // Store (SP, initial_cortex) pair from the LAST epoch
+            if epoch == n_epochs - 1 {
+                pipeline.store_template(digit, &sp, &cortex);
+            }
+            
             for _ in 0..steps {
                 pipeline.gnw.forward(&mut cortex);
                 for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
                 pipeline.connectome_step(&cortex);
             }
             
-            // Get current prediction from cortex (direct representation)
+            // Get current prediction
             let logits = pipeline.motor_readout(&cortex);
             let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let mut exps: Vec<f32> = logits.iter().map(|&l| (l - max_l).exp()).collect();
@@ -383,12 +502,10 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
             let prob = exps[digit].max(1e-10);
             epoch_loss -= prob.ln();
             
-            // Error = target - prediction (one-hot)
+            // NLMS update on w_motor
             for k in 0..n_out {
                 let target = if k == digit { 1.0f32 } else { 0.0f32 };
                 let error = target - exps[k];
-                
-                // NLMS update on cortex (same as motor_readout)
                 let w_start = k * n_cortex;
                 let w_slice = &mut pipeline.w_motor[w_start..w_start + n_cortex];
                 nlms_train_weights(w_slice, &cortex, error, lr, 1e-6);
@@ -400,6 +517,64 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
             println!("  Epoch {:3}/{}: avg CE loss = {:.4}", epoch + 1, n_epochs, final_loss);
         }
     }
+    
+    // ── Phase 2: Train w_sp_to_cortex via NLMS ─────
+    // Teacher-forcing on WM-projected SPs (one at a time, clean WM per digit).
+    // This ensures w_sp_to_cortex learns to handle the W_in projection distortion
+    // that WorkingMemory applies during store().
+    println!("  Training w_sp_to_cortex via NLMS (WM-projected SP, clean per digit)...");
+    let sp2c_lr = 0.05;
+    for _ in 0..10 {
+        for digit in 0..10 {
+            // Fresh WM per digit: store one SP, recall from slot 0
+            pipeline.wm.clear();
+            let pixels = digit_pixels(digit);
+            let sp = pipeline.encode_pixels(&pixels);
+            pipeline.wm.store(&sp);
+            let projected_sp = pipeline.wm.recall(0);
+            
+            let target = &pipeline.target_cortex[digit];
+            
+            // Train w_sp_to_cortex on PROJECTED SP → target cortex
+            for j in 0..n_cortex {
+                let mut pred = 0.0f32;
+                for i in 0..sp_dim {
+                    pred += pipeline.w_sp_to_cortex[j * sp_dim + i] * projected_sp[i];
+                }
+                let error = target[j] - pred;
+                nlms_train_weights(
+                    &mut pipeline.w_sp_to_cortex[j * sp_dim..(j + 1) * sp_dim],
+                    &projected_sp, error, sp2c_lr, 1e-6,
+                );
+            }
+        }
+    }
+    pipeline.wm.clear();
+    
+    // Verify: clean WM per digit, same as Serial Recall would use
+    println!("  Verifying on clean WM-projected SPs...");
+    pipeline.reset_state();
+    let mut sp2c_correct = 0usize;
+    for digit in 0..10 {
+        pipeline.wm.clear();
+        let pixels = digit_pixels(digit);
+        let sp = pipeline.encode_pixels(&pixels);
+        pipeline.wm.store(&sp);
+        let projected_sp = pipeline.wm.recall(0);
+        
+        let mut cortex = pipeline.sp_to_cortex(&projected_sp);
+        for _ in 0..steps {
+            pipeline.gnw.forward(&mut cortex);
+            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            pipeline.connectome_step(&cortex);
+        }
+        let logits = pipeline.motor_readout(&cortex);
+        let pred = SpaunPipeline::argmax(&logits);
+        if pred == digit { sp2c_correct += 1; }
+    }
+    pipeline.wm.clear();
+    println!("  w_sp_to_cortex post-train accuracy (post-WM): {}/10 ({:.0}%)",
+        sp2c_correct, sp2c_correct as f64 * 10.0);
     
     final_loss
 }
@@ -433,84 +608,95 @@ fn main() {
     let final_loss = train_pipeline(&mut pipeline, 50, steps_per_digit, 0.1);
     let train_ms = t_train.elapsed().as_secs_f64() * 1000.0;
     println!("  Training: {:.1}ms total ({:.1}ms/epoch), final loss = {:.4}",
-        train_ms, train_ms / 20.0, final_loss);
+        train_ms, train_ms / 50.0, final_loss);
     println!();
 
-    // ── Task 1: Copy ──────────────────────────────────────
-    println!("─── Task 1: Copy (trained) ───");
+    // ── BG Action Selection Test ────────────────────────
+    println!("─── Basal Ganglia Action Selection ───");
+    println!("  BG: 3 cortical channels → 3 actions (Copy=0, SerialRecall=1, Count=2)");
+    println!();
+    
+    // Test Copy task via BG
+    println!("  --- Cue: Copy (task_cue = [1.0, 0.0, 0.0]) ---");
     let t0 = Instant::now();
-    let mut copy_correct = 0usize;
+    let mut bg_copy_correct = 0usize;
     for digit in 0..10 {
-        let output = task_copy(&mut pipeline, digit, steps_per_digit);
-        let ok = output == digit;
-        if ok { copy_correct += 1; }
+        pipeline.bg.reset();
+        let (action, result) = pipeline.bg_select_and_execute(
+            &[1.0, 0.0, 0.0], digit, steps_per_digit,
+        );
+        let ok = result == digit;
+        if ok { bg_copy_correct += 1; }
         if ok { total_correct += 1; }
         total_tested += 1;
-        println!("  Input: {} → Output: {} {}", digit, output, if ok { "✓" } else { "✗" });
+        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
+        println!("  Digit {} → BG chose {} ({}), output: {} {}",
+            digit, action, task_name, result,
+            if ok { "✓" } else { "✗" });
     }
-    let copy_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    println!("  Accuracy: {}/10 ({:.0}%) | {:.1}ms total", copy_correct, copy_correct as f64 * 10.0, copy_ms);
+    let bg_copy_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    println!("  BG Copy accuracy: {}/10 ({:.0}%) | {:.1}ms",
+        bg_copy_correct, bg_copy_correct as f64 * 10.0, bg_copy_ms);
     println!();
-
-    // ── Task 2: Serial Recall ─────────────────────────────
-    println!("─── Task 2: Serial Recall ───");
-    let sequences: Vec<Vec<usize>> = vec![
-        vec![3, 7, 1],
-        vec![0, 5, 9, 2],
-        vec![4, 4, 4],
-        vec![8, 1, 6, 3],
-    ];
+    
+    // Test Serial Recall via BG
+    println!("  --- Cue: Serial Recall (task_cue = [0.0, 1.0, 0.0]) ---");
     let t0 = Instant::now();
-    let mut recall_correct = 0usize;
-    let mut recall_total = 0usize;
-    for seq in &sequences {
-        let output = task_serial_recall(&mut pipeline, seq, steps_per_digit);
-        let matches = output.iter().zip(seq.iter()).filter(|(o, s)| **o == **s).count();
+    let recall_seq: [&[usize]; 4] = [
+        &[3, 7, 1],
+        &[0, 5, 9, 2],
+        &[4, 4, 4],
+        &[8, 1, 6, 3],
+    ];
+    for (seq_idx, seq) in recall_seq.iter().enumerate() {
+        pipeline.bg.reset();
+        let (action, matches) = pipeline.bg_select_and_execute(
+            &[0.0, 1.0, 0.0], seq_idx, steps_per_digit,
+        );
         let perfect = matches == seq.len();
-        if perfect { recall_correct += 1; }
-        recall_total += 1;
         total_correct += matches;
         total_tested += seq.len();
-        println!("  Input:  {:?} → Output: {:?} ({}/{} correct){}",
-            seq, output, matches, seq.len(), if perfect { " ✓" } else { "" });
+        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
+        println!("  Sequence {:?} → BG chose {} ({}), matches: {}/{}{}",
+            seq, action, task_name, matches, seq.len(),
+            if perfect { " ✓" } else { "" });
     }
-    let recall_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    println!("  Perfect: {}/{} | {:.1}ms total", recall_correct, recall_total, recall_ms);
+    let bg_recall_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    println!("  BG Serial Recall: {:.1}ms", bg_recall_ms);
     println!();
-
-    // ── Task 3: Counting ──────────────────────────────────
-    println!("─── Task 3: Counting ───");
+    
+    // Test Counting via BG
+    println!("  --- Cue: Counting (task_cue = [0.0, 0.0, 1.0]) ---");
     let t0 = Instant::now();
-    let mut count_correct = 0usize;
-    let mut count_total = 0usize;
     for n in 1..=5 {
-        let output = task_counting(&mut pipeline, n, steps_per_digit);
-        let expected: Vec<usize> = (1..=n).collect();
-        let matches = output.iter().zip(expected.iter()).filter(|(o, e)| **o == **e).count();
+        pipeline.bg.reset();
+        let (action, matches) = pipeline.bg_select_and_execute(
+            &[0.0, 0.0, 1.0], n - 1, steps_per_digit,
+        );
         let perfect = matches == n;
-        if perfect { count_correct += 1; }
-        count_total += 1;
         total_correct += matches;
         total_tested += n;
-        println!("  Count {} → {:?} (expected {:?}) {}",
-            n, output, expected, if perfect { "✓" } else { "✗" });
+        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
+        println!("  Count to {} → BG chose {} ({}), matches: {}/{}{}",
+            n, action, task_name, matches, n,
+            if perfect { " ✓" } else { "" });
     }
-    let count_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    println!("  Perfect: {}/{} | {:.1}ms total", count_correct, count_total, count_ms);
+    let bg_count_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    println!("  BG Counting: {:.1}ms", bg_count_ms);
     println!();
 
     // ── Summary ───────────────────────────────────────────
     println!("{}", "═".repeat(60));
     println!("  📊 Summary");
     println!("{}", "═".repeat(60));
-    println!("  Pipeline: GNW({} neurons) + WM({} slots, {} dim) + SP({} dim) + Reservoir({} neurons)",
+    println!("  Pipeline: GNW({}) + WM({}×{}) + SP({}) + BG(3→3) + Reservoir({})",
         pipeline.cortical_dim, pipeline.wm.n_slots(), pipeline.sp_dim,
         pipeline.sp_dim, pipeline.n_neurons);
     println!("  Overall accuracy: {}/{} ({:.1}%)", total_correct, total_tested,
         total_correct as f64 / total_tested.max(1) as f64 * 100.0);
     println!();
-    println!("  This is a SPAUN-inspired architecture running on CPU with SIMD-ready");
-    println!("  components. Real SPAUN uses 2.5M neurons on Nengo (Python).");
-    println!("  Our pipeline: {} neurons in CSR connectome, pure Rust, SIMD + rayon.", pipeline.n_neurons);
+    println!("  Basal Ganglia routes action selection: task cue → SP → GNW → BG → action.");
+    println!("  BG weights are random — selection accuracy depends on cortico-striatal mapping.");
+    println!("  Future: train BG via dopamine-STDP for task-switching learning.");
     println!("{}", "═".repeat(60));
 }

@@ -29,32 +29,32 @@ pub fn step_adex(
         && n == tau_w.len() && n == v_rest.len() && n == v_thresh.len()
         && n == v_reset.len() && n == delta_t.len() && n == a.len() && n == b.len() && n == refractory.len());
 
-    let chunks = n / 8;
-    let mut params_buf = vec![[0.0f32; 72]; chunks];
+    kernels::safety_clamp(I, -super::I_CLAMP, super::I_CLAMP);
 
-    params_buf.par_iter_mut().enumerate().for_each(|(chunk, params)| {
-        let i = chunk * 8;
-        for j in 0..8 {
-            params[j] = dt;
-            params[8 + j] = tau_m[i + j];
-            params[16 + j] = tau_w[i + j];
-            params[24 + j] = v_rest[i + j];
-            params[32 + j] = v_thresh[i + j];
-            params[40 + j] = v_reset[i + j];
-            params[48 + j] = delta_t[i + j];
-            params[56 + j] = a[i + j];
-            params[64 + j] = b[i + j];
-        }
-    });
-
+    // Build params on stack per chunk — avoids heap allocation on every step.
+    // Each chunk builds [72]f32: [dt×8, tau_m×8, tau_w×8, v_rest×8, v_thresh×8,
+    // v_reset×8, delta_t×8, a×8, b×8].
     v.par_chunks_exact_mut(8)
         .zip(u.par_chunks_exact_mut(8))
         .zip(I.par_chunks_exact_mut(8))
         .zip(spikes.par_chunks_exact_mut(8))
         .zip(refractory.par_chunks_exact_mut(8))
-        .zip(params_buf.par_iter())
-        .for_each(|(((((v8, u8), I8), sp8), refr8), params)| {
-            kernels::adex_step(v8, u8, I8, sp8, params, refr8, tau_ref);
+        .enumerate()
+        .for_each(|(chunk, ((((v8, u8), I8), sp8), refr8))| {
+            let i = chunk * 8;
+            let mut params = [0.0f32; 72];
+            for j in 0..8 {
+                params[j] = dt;
+                params[8 + j] = tau_m[i + j];
+                params[16 + j] = tau_w[i + j];
+                params[24 + j] = v_rest[i + j];
+                params[32 + j] = v_thresh[i + j];
+                params[40 + j] = v_reset[i + j];
+                params[48 + j] = delta_t[i + j];
+                params[56 + j] = a[i + j];
+                params[64 + j] = b[i + j];
+            }
+            kernels::adex_step(v8, u8, I8, sp8, &params, refr8, tau_ref);
         });
 }
 

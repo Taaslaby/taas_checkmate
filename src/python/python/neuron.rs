@@ -400,3 +400,133 @@ pub fn py_stdp_homeostatic(
     );
     Ok(())
 }
+
+// ─── FitzHugh-Nagumo ─────────────────────────────────────
+
+/// FitzHugh-Nagumo neuron — упрощённая версия Hodgkin-Huxley.
+///
+/// Уравнения:
+///   dv/dt = v - v³/3 - w + I_ext
+///   dw/dt = (v + a - b·w) / τ
+///
+/// Args:
+///     v: мембранный потенциал [n]
+///     w: recovery variable [n]
+///     I: внешний ток [n]
+///     dt: шаг по времени (мс)
+///     tau_w: временная константа recovery [n]
+///     a: параметр nullcline [n]
+///     b: параметр nullcline [n]
+///     spikes: спайки (int32, будет заполнен 0/1) [n]
+///
+/// Returns: None. Все изменения in-place.
+#[pyfunction]
+#[pyo3(name = "step_fhn")]
+pub fn py_step_fhn(
+    v: Bound<'_, PyArray1<f32>>,
+    w: Bound<'_, PyArray1<f32>>,
+    I: Bound<'_, PyArray1<f32>>,
+    dt: f32,
+    tau_w: Bound<'_, PyArray1<f32>>,
+    a: Bound<'_, PyArray1<f32>>,
+    b: Bound<'_, PyArray1<f32>>,
+    spikes: Bound<'_, PyArray1<i32>>,
+) -> PyResult<()> {
+    let mut v = v.readwrite();
+    let mut w = w.readwrite();
+    let I = I.readonly();
+    let tau_w = tau_w.readonly();
+    let a = a.readonly();
+    let b = b.readonly();
+    let mut spikes = spikes.readwrite();
+
+    neuron::step_fhn(
+        v.as_slice_mut()?,
+        w.as_slice_mut()?,
+        I.as_slice()?,
+        spikes.as_slice_mut()?,
+        dt,
+        tau_w.as_slice()?,
+        a.as_slice()?,
+        b.as_slice()?,
+    );
+    Ok(())
+}
+
+// ─── Wilson-Cowan ─────────────────────────────────────────
+
+/// Wilson-Cowan population model — модель возбуждения-торможения.
+///
+/// Уравнения:
+///   τ_E · dE/dt = -E + sigmoid(w_EE·E - w_EI·I + I_E)
+///   τ_I · dI/dt = -I + sigmoid(w_IE·E - w_II·I + I_I)
+///
+/// Это rate-based модель (непрерывные скорости, без генерации спайков).
+///
+/// Args:
+///     e: скорость возбуждающей популяции [n]
+///     i: скорость тормозящей популяции [n]
+///     i_e: внешний вход для E [n]
+///     i_i: внешний вход для I [n]
+///     dt: шаг по времени (мс)
+///     tau_E: временная константа E [n]
+///     tau_I: временная константа I [n]
+///     w_EE: вес E→E [n]
+///     w_EI: вес I→E [n]
+///     w_IE: вес E→I [n]
+///     w_II: вес I→I [n]
+///     beta: крутизна сигмоиды [n]
+///     spikes_e: выходная скорость E (float32) [n]
+///     spikes_i: выходная скорость I (float32) [n]
+///
+/// Returns: None. Все изменения in-place.
+#[pyfunction]
+#[pyo3(name = "step_wc")]
+pub fn py_step_wc(
+    e: Bound<'_, PyArray1<f32>>,
+    i: Bound<'_, PyArray1<f32>>,
+    i_e: Bound<'_, PyArray1<f32>>,
+    i_i: Bound<'_, PyArray1<f32>>,
+    dt: f32,
+    tau_E: Bound<'_, PyArray1<f32>>,
+    tau_I: Bound<'_, PyArray1<f32>>,
+    w_EE: Bound<'_, PyArray1<f32>>,
+    w_EI: Bound<'_, PyArray1<f32>>,
+    w_IE: Bound<'_, PyArray1<f32>>,
+    w_II: Bound<'_, PyArray1<f32>>,
+    beta: Bound<'_, PyArray1<f32>>,
+    spikes_e: Bound<'_, PyArray1<f32>>,
+    spikes_i: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    let mut e = e.readwrite();
+    let mut i = i.readwrite();
+    let i_e = i_e.readonly();
+    let i_i = i_i.readonly();
+    let tau_E = tau_E.readonly();
+    let tau_I = tau_I.readonly();
+    let w_EE = w_EE.readonly();
+    let w_EI = w_EI.readonly();
+    let w_IE = w_IE.readonly();
+    let w_II = w_II.readonly();
+    let beta = beta.readonly();
+    let mut spikes_e = spikes_e.readwrite();
+    let mut spikes_i = spikes_i.readwrite();
+
+    neuron::step_wc(
+        e.as_slice_mut()?,
+        i.as_slice_mut()?,
+        i_e.as_slice()?,
+        i_i.as_slice()?,
+        spikes_e.as_slice_mut()?,
+        spikes_i.as_slice_mut()?,
+        dt,
+        tau_E.as_slice()?,
+        tau_I.as_slice()?,
+        w_EE.as_slice()?,
+        w_EI.as_slice()?,
+        w_IE.as_slice()?,
+        w_II.as_slice()?,
+        beta.as_slice()?,
+    );
+    Ok(())
+}

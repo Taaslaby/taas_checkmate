@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use taas_checkmate::t3::{
     TriOscillator, Avx2Backend,
-    pst_linear_features, pst_linear_dim,
+    pst_linear_features_into, pst_linear_dim,
     InverseKuramotoDecoder,
     NlmsDecoder, Decoder,
 };
@@ -223,12 +223,10 @@ impl MultiHybridDecoder {
         self.build_amps_buf(tri);
         let ik_drive = self.ik.decode(&self.amps_buf);
 
-        // PST linear features
-        let pst = pst_linear_features(tri);
-        debug_assert_eq!(pst.len(), self.pst_dim);
-
-        // Concatenate: fv = [pst | ik_drive]
-        self.fv[..self.pst_dim].copy_from_slice(&pst);
+        // PST linear features (0 alloc — пишем напрямую в self.fv)
+        pst_linear_features_into(tri, &mut self.fv[..self.pst_dim]);
+        debug_assert_eq!(self.pst_dim, crate::t3::pst_linear_dim(self.n));
+        // fv[..self.pst_dim] уже заполнен
         self.fv[self.pst_dim] = ik_drive;
     }
 

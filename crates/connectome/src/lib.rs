@@ -44,12 +44,16 @@ pub use data::{
 };
 pub use record::{SpikeRecorder, SpikeRecordings};
 pub use rcm::{reverse_cuthill_mckee, build_adjacency, bandwidth, mean_bandwidth,
-    apply_permutation_to_csr, apply_permutation_to_state, apply_permutation_to_groups};
+    apply_permutation_to_csr, apply_permutation_to_state, apply_permutation_to_groups,
+    spectral_ordering, fiedler_vector};
 pub use sim::{
     BrainState, NeuronModel, LifParams, IzhikevichParams, RateParams, PsiParams,
-    sim_lif, sim_izhikevich, sim_rate, sim_psi, sim_psi_record,
-    csr_propagate, csr_propagate_from_queue, push_spikes_to_queue, SpikeQueue,
+    sim_lif, sim_lif_synaptic, sim_hh, sim_hh_synaptic,
+    sim_izhikevich, sim_izhikevich_synaptic, sim_rate, sim_psi, sim_psi_record,
+    csr_propagate, csr_propagate_from_queue, csr_propagate_conductance_from_queue,
+    push_spikes_to_queue, SpikeQueue,
 };
+pub use taas_kernels::neuron::synapse::{SynapticKinetics, DecayFactors, ReceptorType};
 
 #[cfg(feature = "cuda")]
 pub use sim::gpu::{sim_lif_gpu, sim_izhikevich_gpu};

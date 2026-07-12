@@ -20,7 +20,7 @@ use crate::core::neuron;
 ///     gen.set_rate(0, 50.0)  # нейрон 0: 50 Гц
 ///     spikes = np.zeros(1000, dtype=np.int32)
 ///     gen.step(spikes)
-#[pyclass(name = "PoissonGenerator")]
+#[pyclass(name = "PoissonGenerator", module = "taas_checkmate.stp")]
 pub struct PyPoissonGenerator {
     inner: neuron::PoissonGenerator,
 }
@@ -63,7 +63,7 @@ impl PyPoissonGenerator {
 ///     stp = ShortTermPlasticity(1000, dt=1.0)
 ///     I_out = np.zeros(1000, dtype=np.float32)
 ///     stp.step(pre_spikes, I_out)
-#[pyclass(name = "ShortTermPlasticity")]
+#[pyclass(name = "ShortTermPlasticity", module = "taas_checkmate.stp")]
 pub struct PyShortTermPlasticity {
     pub inner: neuron::ShortTermPlasticity,
 }

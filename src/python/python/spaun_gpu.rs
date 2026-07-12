@@ -17,7 +17,7 @@ use cuda_kernels::{DevicePtr, csr_spmv_tanh as cuda_csr_spmv_tanh,
     csr_stdp_dopamine_devptr};
 
 /// GPU SPAUN pipeline: 1M+ нейронов на CUDA.
-#[pyclass(name = "SpaunPipelineGPU", module = "taas_checkmate")]
+#[pyclass(name = "SpaunPipelineGPU", module = "taas_checkmate.spaun_gpu")]
 pub struct PySpaunPipelineGPU {
     gnw: GlobalWorkspace,
     wm: WorkingMemory,

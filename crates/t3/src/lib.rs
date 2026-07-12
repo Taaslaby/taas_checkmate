@@ -5,6 +5,7 @@ pub use taas_kernels as kernels;
 #[cfg(feature = "cuda")]
 pub use cuda_kernels as cuda;
 
+pub mod attention_coupling;
 pub mod backend;
 pub mod phase_gate;
 pub mod cochlea;
@@ -14,7 +15,7 @@ pub mod ridge;
 pub mod decoders;
 pub mod oscillator;
 pub mod pst_control;
-pub mod sparker;
+pub mod spiker;
 #[cfg(feature = "cuda")]
 pub mod backend_cuda;
 
@@ -32,7 +33,7 @@ pub use phase_gate::{phase_gate, gate_coupling};
 
 pub use cochlea::{Biquad, Cochlea};
 
-pub use pst::{pst_features, pst_linear_features, pst_linear_dim, pst_fast, pst_fast_dim};
+pub use pst::{pst_features, pst_linear_features, pst_linear_features_into, pst_linear_dim, pst_fast, pst_fast_dim};
 
 pub use trajectory::TrajectoryBuffer;
 
@@ -51,7 +52,7 @@ pub use ridge::{RidgeSolver, solve_cg, compute_pearson, normalize_features};
 
 pub use pst_control::{PstControl, PstControlConfig};
 
-pub use sparker::{
-    Sparker, SpikeTrace, HologramEncoder, SpikeStats,
-    NormalizedSparker, HybridSparker,
+pub use spiker::{
+    Spiker, SpikeTrace, HologramEncoder, SpikeStats,
+    NormalizedSpiker, HybridSpiker,
 };

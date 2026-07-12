@@ -74,6 +74,7 @@ pub(crate) unsafe fn stp_step(
     }
 
     // Scalar tail (n & 7)
+    // BUGFIX: save pre-decay u/x for spike-dependent terms (matching SIMD)
     if n8 < n {
         let x_sl = std::slice::from_raw_parts_mut(x, n);
         let u_sl = std::slice::from_raw_parts_mut(u, n);
@@ -87,8 +88,15 @@ pub(crate) unsafe fn stp_step(
             let s = if pre[i] != 0 { 1.0 } else { 0.0 };
             let tf_i = tf[i].max(1e-10);
             let td_i = td[i].max(1e-10);
-            u_sl[i] += dt * ((u0v[i] - u_sl[i]) / tf_i + u0v[i] * (1.0 - u_sl[i]) * s / dt);
-            x_sl[i] += dt * ((1.0 - x_sl[i]) / td_i - u_sl[i] * x_sl[i] * s / dt);
+            // Save pre-decay values for spike-dependent terms (matching SIMD)
+            let u_pre = u_sl[i];
+            let x_pre = x_sl[i];
+            // Decay (always applied)
+            u_sl[i] += dt * (u0v[i] - u_sl[i]) / tf_i;
+            x_sl[i] += dt * (1.0 - x_sl[i]) / td_i;
+            // Spike-dependent terms (using PRE-decay values, like SIMD)
+            u_sl[i] += u0v[i] * (1.0 - u_pre) * s;
+            x_sl[i] -= u_sl[i] * x_pre * s;  // uses NEW u, PRE-decay x — matches SIMD
             io[i] += av[i] * u_sl[i] * x_sl[i] * s;
         }
     }

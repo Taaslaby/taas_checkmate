@@ -2,6 +2,7 @@
 #define GPU_CONTEXT_H
 
 #include <cuda_runtime.h>
+#include <stdio.h>
 
 typedef struct {
     float* d_v; float* d_u; float* d_trace; int* d_spikes; float* d_I;
@@ -12,7 +13,7 @@ typedef struct {
     float* d_cos_buf; float* d_sin_buf; float* d_phases_prev;
     float* d_gate_out;
     float* d_decoder_w; float* d_decoder_bias;
-    float* d_decoder_cov; float* d_echo_buf;
+    float* d_decoder_cov;
     // CSR connectome arrays (for GPU-accelerated spike propagation)
     int* d_row_ptr;
     int* d_col_indices;
@@ -26,6 +27,7 @@ typedef struct {
     float* d_drives;
     float* d_t3_prev_amps;
     float* d_adex_w;
+    unsigned int* d_noise;      // [n_neurons] persistent LCG state for SAW
     // ψ-wave arrays
     float* d_psi_v;
     float* d_psi_u;
@@ -61,10 +63,20 @@ typedef struct {
     float psi_graph_dt, psi_graph_hbar; // cached params for invalidation
 } GpuCtx;
 
-// Echo state delay buffer length (per neuron)
-#define DELAY_LEN 256
-
 static inline int gs(int n, int bs) { return (n + bs - 1) / bs; }
+
+// Lazy alloc: allocates + zeroes device memory on first use.
+#define ENSURE_ALLOC(ptr, n_bytes) do { \
+    if (!ctx->ptr) { \
+        cudaError_t _e = cudaMalloc(&ctx->ptr, (size_t)(n_bytes)); \
+        if (_e) { fprintf(stderr,#ptr": %s\n",cudaGetErrorString(_e)); return (_e); } \
+        _e = cudaMemsetAsync(ctx->ptr, 0, (size_t)(n_bytes), ctx->stream); \
+        if (_e) return (_e); \
+    } \
+} while(0)
+
+// Pre-allocate all arrays (must be called before graph capture)
+extern "C" int gpu_context_ensure_all(void* vctx);
 
 // Async kernels (defined in hh.cu, fused.cu, etc.)
 extern "C" int gpu_hh_step_async(void* vctx, float dt, float tau_ref);

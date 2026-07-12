@@ -1,5 +1,22 @@
 //! STDP (Spike-Timing Dependent Plasticity) + dopamine-modulated STDP.
 //!
+//! ## Decay semantics: exp(-dt/τ) vs (1 - dt/τ)
+//!
+//! Trace decay uses **exponential Euler**: `trace *= exp(-dt/τ)`.
+//! This is the exact solution of `d(trace)/dt = -trace/τ` for constant τ.
+//!
+//! The RL agent (`rl.rs`) uses **Forward Euler**: `trace *= (1 - dt/τ)`.
+//! At dt/τ = 0.1 (e.g. dt=1ms, τ=10ms),
+//! the difference is ~0.5%: `exp(-0.1) = 0.9048` vs `1 - 0.1 = 0.9000`.
+//! This is an intentional speed choice (no exp() in hot loop)
+//! and is NOT a bug — both are valid integration schemes.
+//!
+//! | Context | Decay formula | Accuracy | Speed |
+//! |---------|--------------|----------|-------|
+//! | SIMD kernel (`fast_exp_simd`) | `exp(-dt/τ)` | ~1e-4 rel err | 8× f32x8 |
+//! | Scalar tail | `(-dt/τ).exp()` | exact | 1× scalar |
+//! | RL agent (`rl.rs`) | `1 - dt/τ` | ~0.5% at dt/τ=0.1 | 0 exp calls |
+//!
 //! Safe Rust wrappers over SIMD kernels (`kernels::stdp_update`,
 //! `kernels::stdp_homeostatic`, `kernels::dopamine_traces_step`,
 //! `kernels::dopamine_weight_update`).
@@ -101,11 +118,16 @@ impl DopamineSTDP {
             self.a_ltd,
         );
 
-        // Scalar tail (n & 7)
+        // Scalar tail (n & 7) — uses exact exponential decay to match SIMD kernel
         if n8 < n {
+            let dt = self.dt;
+            let tau_pre = self.tau_pre.max(1e-6);
+            let tau_post = self.tau_post.max(1e-6);
+            let tau_e = self.tau_e.max(1e-6);
+            let decay_pre = (-dt / tau_pre).exp();
+            let decay_post = (-dt / tau_post).exp();
+            let decay_e = (-dt / tau_e).exp();
             for i in n8..n {
-                let decay_pre = 1.0 - self.dt / self.tau_pre.max(1.0);
-                let decay_post = 1.0 - self.dt / self.tau_post.max(1.0);
                 self.trace_pre[i] *= decay_pre;
                 self.trace_post[i] *= decay_post;
                 if pre_spikes[i] != 0 { self.trace_pre[i] += 1.0; }
@@ -113,7 +135,6 @@ impl DopamineSTDP {
                 let ltp = if post_spikes[i] != 0 { self.a_ltp * self.trace_pre[i] } else { 0.0 };
                 let ltd = if pre_spikes[i] != 0 { self.a_ltd * self.trace_post[i] } else { 0.0 };
                 self.eligibility[i] += ltp - ltd;
-                let decay_e = 1.0 - self.dt / self.tau_e.max(1.0);
                 self.eligibility[i] *= decay_e;
             }
         }

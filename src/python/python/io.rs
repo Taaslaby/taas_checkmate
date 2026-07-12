@@ -174,6 +174,7 @@ pub fn py_thalamic_gate(
 
 /// T3 inverse Kuramoto: вычисляет драйв, обратный к динамике Курамото.
 ///
+/// Inverts Stuart-Landau: drive ≈ gain · (r − r_prev)/dt − drive · decay
 /// Используется для управления осцилляторами в обратную сторону.
 #[pyfunction]
 #[pyo3(name = "t3_inverse_kuramoto")]
@@ -185,12 +186,13 @@ pub fn py_t3_inverse_kuramoto(
     gain: f32,
     eps: f32,
     decay: f32,
+    dt: f32,
 ) -> PyResult<()> {
     io::t3_inverse_kuramoto(
         drive_out.readwrite().as_slice_mut()?,
         r.readonly().as_slice()?,
         r_prev.readonly().as_slice()?,
-        alpha, gain, eps, decay,
+        alpha, gain, eps, decay, dt,
     );
     Ok(())
 }

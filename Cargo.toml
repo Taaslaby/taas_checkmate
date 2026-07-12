@@ -8,6 +8,7 @@ members = [
     "crates/cpe",
     "crates/karmac",
     "crates/unity",
+    "crates/gpu-eval",
 ]
 
 [workspace.package]
@@ -43,7 +44,7 @@ name = "taas_checkmate"
 taas-kernels = { path = "crates/kernels" }
 taas-core = { path = "crates/core" }
 taas-train = { path = "crates/train" }
-taas-format = { path = "crates/taas-format" }
+taas-format = { path = "crates/taas-format", features = ["train"] }
 taas-cpe = { path = "crates/cpe" }
 
 # Internal crates (optional, behind features)
@@ -100,4 +101,3 @@ unity = ["dep:taas-unity", "connectome"]
 
 # Everything
 all = ["t3", "train", "connectome", "karmac", "cuda", "python", "unity"]
-

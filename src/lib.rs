@@ -59,7 +59,8 @@ pub use core::kuramoto::{
 pub use taas_kernels::spike_entropy;
 pub use core::neuron::{
     step_izhikevich, step_saw, step_psi_wave, step_lif, step_lif_at,
-    step_adex, stdp_update, stdp_homeostatic, DelayBuffer,
+    step_adex, step_fhn, step_wc,
+    stdp_update, stdp_homeostatic, DelayBuffer,
     intrinsic_plasticity, synaptic_normalization, SornNetwork,
     bsa_encode, bsa_kernel_hamming, phase_encode,
     TtfsEncoder, population_rate_decode,
@@ -83,8 +84,8 @@ pub use t3::{
     pst_features, pst_linear_features, pst_linear_dim,
     compute_pearson, normalize_features,
     PstControl, PstControlConfig,
-    Sparker, SpikeTrace, HologramEncoder, SpikeStats,
-    NormalizedSparker, HybridSparker,
+    Spiker, SpikeTrace, HologramEncoder, SpikeStats,
+    NormalizedSpiker, HybridSpiker,
 };
 
 #[cfg(all(feature = "t3", feature = "cuda"))]

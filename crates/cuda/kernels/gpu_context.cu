@@ -39,7 +39,18 @@ extern "C" int gpu_hh_upload_channels(void* vctx,
     int n_gates, int n_channels);
 extern "C" int gpu_connectome_csr_async(void* vctx);
 
-// ─── Create GPU context ──────────────────────────────────
+// ─── Get d_noise device pointer (allocates if NULL) ─────
+
+extern "C" unsigned int* gpu_context_get_d_noise(void* vctx) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    if (!ctx->d_noise) {
+        cudaError_t e = cudaMalloc(&ctx->d_noise, (size_t)ctx->n_neurons * sizeof(unsigned int));
+        if (e) return NULL;
+    }
+    return ctx->d_noise;
+}
+
+// ─── Create GPU context (minimal — lazy alloc in uploads/steps) ───
 
 extern "C" void* gpu_context_create(int n_neurons, int n_synapses, int n_decoders) {
     GpuCtx* ctx = (GpuCtx*)calloc(1, sizeof(GpuCtx));
@@ -47,106 +58,20 @@ extern "C" void* gpu_context_create(int n_neurons, int n_synapses, int n_decoder
     ctx->n_neurons = n_neurons;
     ctx->n_synapses = n_synapses;
     ctx->n_decoders = n_decoders;
-    ctx->n_t3 = n_neurons; // T3 uses same count by default
-
-    cudaError_t e = cudaStreamCreate(&ctx->stream);
-    if (e) { fprintf(stderr,"stream: %s\n",cudaGetErrorString(e)); free(ctx); return NULL; }
-
-    #define ALLOC(n,s) do { \
-        e = cudaMalloc(&ctx->n, (size_t)(s)); \
-        if (e) { fprintf(stderr,#n": %s\n",cudaGetErrorString(e)); goto fail; } \
-    } while(0)
-
-    ALLOC(d_v, n_neurons*sizeof(float)); ALLOC(d_u, n_neurons*sizeof(float));
-    ALLOC(d_trace, n_neurons*sizeof(float)); ALLOC(d_spikes, n_neurons*sizeof(int));
-    ALLOC(d_I, n_neurons*sizeof(float)); ALLOC(d_a, n_neurons*sizeof(float));
-    ALLOC(d_b, n_neurons*sizeof(float)); ALLOC(d_c, n_neurons*sizeof(float));
-    ALLOC(d_d, n_neurons*sizeof(float));
-    ALLOC(d_lif_params, (1+6*n_neurons)*sizeof(float));
-    ALLOC(d_weights, n_synapses*sizeof(float));
-    ALLOC(d_traces_pre, n_neurons*sizeof(float)); ALLOC(d_traces_post, n_neurons*sizeof(float));
-    ALLOC(d_phases, n_neurons*sizeof(float)); ALLOC(d_omegas, n_neurons*sizeof(float));
-    ALLOC(d_coupling, n_neurons*sizeof(float)); ALLOC(d_cos_buf, n_neurons*sizeof(float));
-    ALLOC(d_sin_buf, n_neurons*sizeof(float)); ALLOC(d_phases_prev, n_neurons*sizeof(float));
-    ALLOC(d_gate_out, n_neurons*sizeof(float));
-    ALLOC(d_decoder_w, n_decoders*sizeof(float)); ALLOC(d_decoder_bias, sizeof(float));
-    ALLOC(d_decoder_cov, n_decoders*sizeof(float));
-    ALLOC(d_echo_buf, n_neurons*DELAY_LEN*sizeof(float));
-    // T3 arrays
-    ALLOC(d_amplitudes, n_neurons*sizeof(float));
-    ALLOC(d_drives, n_neurons*sizeof(float));
-    ALLOC(d_refractory, n_neurons*sizeof(float));
-    ALLOC(d_t3_prev_amps, n_neurons*sizeof(float));
-    ALLOC(d_adex_w, n_neurons*sizeof(float));
-    // CSR connectome arrays (allocated but uploaded separately)
-    ALLOC(d_row_ptr, (n_neurons+1)*sizeof(int));
-    ALLOC(d_col_indices, n_synapses*sizeof(int));
-    ALLOC(d_csr_values, n_synapses*sizeof(float));
-    ALLOC(d_nt_types, n_neurons*sizeof(float));
-    ALLOC(d_external_I, n_neurons*sizeof(float));
-    ALLOC(d_psi_v, n_neurons*sizeof(float));
-    ALLOC(d_psi_u, n_neurons*sizeof(float));
-    ALLOC(d_psi_h_real, n_neurons*sizeof(float));
-    ALLOC(d_psi_h_imag, n_neurons*sizeof(float));
-    ALLOC(d_psi_drive, n_neurons*sizeof(float));
-    ALLOC(d_aber_real, n_neurons*sizeof(float));
-    ALLOC(d_aber_imag, n_neurons*sizeof(float));
-    ALLOC(d_aber_collapsed, n_neurons*sizeof(int));
-    // HH arrays (allocated on demand via upload_hh_state, set to NULL here)
-    // GPU uses direct __expf() computation — no LUTs needed.
-    ctx->d_hh_gates = NULL;
-    ctx->d_hh_I_syn = NULL;
-    ctx->d_hh_spike_buf = NULL;
+    ctx->n_t3 = n_neurons;
     ctx->n_hh_spike_buf_capacity = 0;
-    ctx->d_hh_g_leak = NULL;
-    ctx->d_hh_E_leak = NULL;
-    ctx->d_hh_C_m = NULL;
-    ctx->d_hh_E_rev_arr = NULL;
-    ctx->d_hh_g_max_arr = NULL;
-    ctx->d_hh_powers = NULL;
-    ctx->d_hh_n_gates_per_ch = NULL;
     ctx->n_hh_gates = 0;
     ctx->n_hh_channels = 0;
     ctx->n_csr_synapses = n_synapses;
 
-    // Zero-initialize key state
-    #define ZERO(n,s) do { \
-        e = cudaMemsetAsync(ctx->n, 0, (size_t)(s), ctx->stream); \
-        if (e) goto fail; \
-    } while(0)
-    ZERO(d_v,n_neurons*sizeof(float)); ZERO(d_u,n_neurons*sizeof(float));
-    ZERO(d_trace,n_neurons*sizeof(float)); ZERO(d_spikes,n_neurons*sizeof(int));
-    ZERO(d_I,n_neurons*sizeof(float));
-    ZERO(d_weights,n_synapses*sizeof(float)); ZERO(d_phases,n_neurons*sizeof(float));
-    ZERO(d_cos_buf,n_neurons*sizeof(float)); ZERO(d_sin_buf,n_neurons*sizeof(float));
-    ZERO(d_amplitudes,n_neurons*sizeof(float)); ZERO(d_drives,n_neurons*sizeof(float));
-    ZERO(d_t3_prev_amps,n_neurons*sizeof(float));    ZERO(d_refractory, n_neurons*sizeof(float));
-    ZERO(d_adex_w, n_neurons*sizeof(float));
-    ZERO(d_row_ptr, (n_neurons+1)*sizeof(int));
-    ZERO(d_col_indices, n_synapses*sizeof(int));
-    ZERO(d_csr_values, n_synapses*sizeof(float));
-    ZERO(d_nt_types, n_neurons*sizeof(float));
-    ZERO(d_external_I, n_neurons*sizeof(float));
-    ZERO(d_psi_v, n_neurons*sizeof(float));
-    ZERO(d_psi_u, n_neurons*sizeof(float));
-    ZERO(d_psi_h_real, n_neurons*sizeof(float));
-    ZERO(d_psi_h_imag, n_neurons*sizeof(float));
-    ZERO(d_psi_drive, n_neurons*sizeof(float));
-    ZERO(d_aber_real, n_neurons*sizeof(float));
-    ZERO(d_aber_imag, n_neurons*sizeof(float));
-    ZERO(d_aber_collapsed, n_neurons*sizeof(int));
+    cudaError_t e = cudaStreamCreate(&ctx->stream);
+    if (e) { fprintf(stderr,"stream: %s\n",cudaGetErrorString(e)); free(ctx); return NULL; }
 
     ctx->psi_graph_captured = 0;
     ctx->psi_graph_dt = 0;
     ctx->psi_graph_hbar = 0;
 
-    e = cudaStreamSynchronize(ctx->stream);
-    if (e) goto fail;
     return ctx;
-
-fail:
-    gpu_context_destroy(ctx);
-    return NULL;
 }
 
 // ─── Destroy GPU context ─────────────────────────────────
@@ -162,10 +87,10 @@ extern "C" void gpu_context_destroy(void* vctx) {
     F(d_a);F(d_b);F(d_c);F(d_d);F(d_lif_params);
     F(d_weights);F(d_traces_pre);F(d_traces_post);
     F(d_phases);F(d_omegas);F(d_coupling);F(d_cos_buf);F(d_sin_buf);F(d_phases_prev);
-    F(d_gate_out);F(d_decoder_w);F(d_decoder_bias);F(d_decoder_cov);    F(d_echo_buf);
+    F(d_gate_out);F(d_decoder_w);F(d_decoder_bias);F(d_decoder_cov);
     F(d_amplitudes);F(d_drives);F(d_refractory);F(d_t3_prev_amps);    F(d_row_ptr); F(d_col_indices); F(d_csr_values); F(d_nt_types); F(d_external_I);
     F(d_psi_v); F(d_psi_u); F(d_psi_h_real); F(d_psi_h_imag); F(d_psi_drive);
-    F(d_aber_real); F(d_aber_imag); F(d_aber_collapsed);
+    F(d_aber_real); F(d_aber_imag); F(d_aber_collapsed); F(d_noise);
     F(d_hh_gates); F(d_hh_g_leak); F(d_hh_E_leak); F(d_hh_C_m);
     F(d_hh_E_rev_arr); F(d_hh_g_max_arr);
     F(d_hh_powers); F(d_hh_n_gates_per_ch);
@@ -178,6 +103,7 @@ extern "C" void gpu_context_destroy(void* vctx) {
 
 extern "C" int gpu_context_upload_I(void* vctx, const float* I, int n) {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_I, ctx->n_neurons*sizeof(float));
     cudaError_t e = cudaMemcpyAsync(ctx->d_I, I, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     cudaStreamSynchronize(ctx->stream);
     return (int)e;
@@ -187,6 +113,7 @@ extern "C" int gpu_context_upload_I(void* vctx, const float* I, int n) {
 
 extern "C" int gpu_context_upload_v_only(void* vctx, const float* v, int n) {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_v, ctx->n_neurons*sizeof(float));
     cudaError_t e = cudaMemcpyAsync(ctx->d_v, v, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     cudaStreamSynchronize(ctx->stream);
     return (int)e;
@@ -223,6 +150,8 @@ extern "C" int gpu_hh_upload_state(void* vctx,
     cudaError_t e;
 
     // Upload v and I (reuse standard d_v, d_I)
+    ENSURE_ALLOC(d_v, ctx->n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_I, ctx->n_neurons*sizeof(float));
     e = cudaMemcpyAsync(ctx->d_v, v, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     if (e) goto fail;
     e = cudaMemcpyAsync(ctx->d_I, Ii, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
@@ -235,9 +164,22 @@ extern "C" int gpu_hh_upload_state(void* vctx,
         if (e) goto fail;
         ctx->n_hh_gates = n_gates;
     }
-    e = cudaMemcpyAsync(ctx->d_hh_gates, gates, (size_t)n * n_gates * sizeof(float),
-        cudaMemcpyHostToDevice, ctx->stream);
-    if (e) goto fail;
+    // Convert AOS → SOA: host gates[n * n_gates] → tmp[n_gates * n]
+    // SOA layout: gates[gate_idx * n + neuron_idx] for coalesced GPU access.
+    // Use a separate scope to avoid goto-bypass-init error (C++ rule).
+    {
+        float* h_tmp = (float*)malloc((size_t)n * n_gates * sizeof(float));
+        if (!h_tmp) { e = (cudaError_t)1; goto fail; }
+        for (int ni = 0; ni < n; ni++) {
+            for (int gi = 0; gi < n_gates; gi++) {
+                h_tmp[gi * n + ni] = gates[ni * n_gates + gi];
+            }
+        }
+        e = cudaMemcpyAsync(ctx->d_hh_gates, h_tmp, (size_t)n * n_gates * sizeof(float),
+            cudaMemcpyHostToDevice, ctx->stream);
+        free(h_tmp);
+        if (e) goto fail;
+    }
 
     // Allocate + upload per-neuron params
     #define ALLOC_AND_UPLOAD(field) do { \
@@ -324,6 +266,13 @@ extern "C" int gpu_context_upload_neurons(void* vctx,
     const float* c, const float* d, int n)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    int n_neurons = ctx->n_neurons;
+    ENSURE_ALLOC(d_v, n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_u, n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_a, n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_b, n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_c, n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_d, n_neurons*sizeof(float));
     int err = 0;
     err |= (int)cudaMemcpyAsync(ctx->d_v, v, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     err |= (int)cudaMemcpyAsync(ctx->d_u, u, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
@@ -339,6 +288,10 @@ extern "C" int gpu_context_upload_kuramoto(void* vctx,
     const float* phases, const float* omegas, const float* coupling, int n)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_phases, nn*sizeof(float));
+    ENSURE_ALLOC(d_omegas, nn*sizeof(float));
+    ENSURE_ALLOC(d_coupling, nn*sizeof(float));
     int err = 0;
     err |= (int)cudaMemcpyAsync(ctx->d_phases, phases, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     err |= (int)cudaMemcpyAsync(ctx->d_omegas, omegas, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
@@ -369,9 +322,13 @@ extern "C" int gpu_context_upload_connectome(void* vctx,
     cudaError_t e;
     int err = 0;
 
-    // Reallocate CSR arrays if synapse count changed (e.g. HH path
-    // constructs context with 0 synapses, then uploads connectome later).
-    if (n_synapses > ctx->n_csr_synapses) {
+    // Ensure row_ptr + nt_types + external_I allocated
+    ENSURE_ALLOC(d_row_ptr, (ctx->n_neurons+1)*sizeof(int));
+    ENSURE_ALLOC(d_nt_types, ctx->n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_external_I, ctx->n_neurons*sizeof(float));
+
+    // Reallocate CSR arrays if synapse count changed or first time
+    if (n_synapses > ctx->n_csr_synapses || !ctx->d_col_indices) {
         if (ctx->d_col_indices) cudaFree(ctx->d_col_indices);
         if (ctx->d_csr_values) cudaFree(ctx->d_csr_values);
         if (ctx->d_weights) cudaFree(ctx->d_weights);
@@ -430,6 +387,7 @@ extern "C" int gpu_context_download_adex_w(void* vctx, float* host_w, int n) {
 
 extern "C" int gpu_context_upload_adex_w(void* vctx, const float* host_w, int n) {
     GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_adex_w, ctx->n_neurons*sizeof(float));
     cudaError_t e = cudaMemcpyAsync(ctx->d_adex_w, host_w, n*sizeof(float), cudaMemcpyHostToDevice, ctx->stream);
     cudaStreamSynchronize(ctx->stream);
     return (int)e;
@@ -444,6 +402,59 @@ extern "C" int gpu_context_download_weights(void* vctx, float* host_w, int n) {
 
 extern "C" int gpu_context_sync(void* vctx) {
     return (int)cudaStreamSynchronize(((GpuCtx*)vctx)->stream);
+}
+
+// ─── Pre-allocate all arrays (for graph capture path) ─────
+// CUDA graph capture forbids cudaMalloc, so we must ensure
+// all arrays exist before calling gpu_graph_begin_capture.
+extern "C" int gpu_context_ensure_all(void* vctx) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    int n = ctx->n_neurons;
+    int ns = ctx->n_synapses;
+    int nd = ctx->n_decoders;
+    ENSURE_ALLOC(d_v, n*sizeof(float));
+    ENSURE_ALLOC(d_u, n*sizeof(float));
+    ENSURE_ALLOC(d_trace, n*sizeof(float));
+    ENSURE_ALLOC(d_spikes, n*sizeof(int));
+    ENSURE_ALLOC(d_I, n*sizeof(float));
+    ENSURE_ALLOC(d_a, n*sizeof(float));
+    ENSURE_ALLOC(d_b, n*sizeof(float));
+    ENSURE_ALLOC(d_c, n*sizeof(float));
+    ENSURE_ALLOC(d_d, n*sizeof(float));
+    ENSURE_ALLOC(d_lif_params, (1+6*n)*sizeof(float));
+    ENSURE_ALLOC(d_weights, ns*sizeof(float));
+    ENSURE_ALLOC(d_traces_pre, n*sizeof(float));
+    ENSURE_ALLOC(d_traces_post, n*sizeof(float));
+    ENSURE_ALLOC(d_phases, n*sizeof(float));
+    ENSURE_ALLOC(d_omegas, n*sizeof(float));
+    ENSURE_ALLOC(d_coupling, n*sizeof(float));
+    ENSURE_ALLOC(d_cos_buf, n*sizeof(float));
+    ENSURE_ALLOC(d_sin_buf, n*sizeof(float));
+    ENSURE_ALLOC(d_phases_prev, n*sizeof(float));
+    ENSURE_ALLOC(d_gate_out, n*sizeof(float));
+    ENSURE_ALLOC(d_decoder_w, nd*sizeof(float));
+    ENSURE_ALLOC(d_decoder_bias, sizeof(float));
+    ENSURE_ALLOC(d_decoder_cov, nd*sizeof(float));
+    ENSURE_ALLOC(d_amplitudes, n*sizeof(float));
+    ENSURE_ALLOC(d_drives, n*sizeof(float));
+    ENSURE_ALLOC(d_refractory, n*sizeof(float));
+    ENSURE_ALLOC(d_t3_prev_amps, n*sizeof(float));
+    ENSURE_ALLOC(d_adex_w, n*sizeof(float));
+    ENSURE_ALLOC(d_noise, n*sizeof(unsigned int));
+    ENSURE_ALLOC(d_row_ptr, (n+1)*sizeof(int));
+    ENSURE_ALLOC(d_col_indices, ns*sizeof(int));
+    ENSURE_ALLOC(d_csr_values, ns*sizeof(float));
+    ENSURE_ALLOC(d_nt_types, n*sizeof(float));
+    ENSURE_ALLOC(d_external_I, n*sizeof(float));
+    ENSURE_ALLOC(d_psi_v, n*sizeof(float));
+    ENSURE_ALLOC(d_psi_u, n*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_real, n*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_imag, n*sizeof(float));
+    ENSURE_ALLOC(d_psi_drive, n*sizeof(float));
+    ENSURE_ALLOC(d_aber_real, n*sizeof(float));
+    ENSURE_ALLOC(d_aber_imag, n*sizeof(float));
+    ENSURE_ALLOC(d_aber_collapsed, n*sizeof(int));
+    return (int)cudaStreamSynchronize(ctx->stream);
 }
 
 // ─── Batch LIF steps with GPU spike accumulation ──────────
@@ -475,6 +486,9 @@ extern "C" int gpu_context_batch_lif_steps(
     GpuCtx* ctx = (GpuCtx*)vctx;
     cudaError_t e;
     int n = ctx->n_neurons;
+
+    ENSURE_ALLOC(d_external_I, n*sizeof(float));
+    ENSURE_ALLOC(d_I, n*sizeof(float));
 
     // 1. Update external baseline (d_external_I) + working I (d_I)
     //    This fixes the stale external_I bug — baseline is now current.
@@ -547,6 +561,9 @@ extern "C" int gpu_context_batch_izhikevich_steps(
     GpuCtx* ctx = (GpuCtx*)vctx;
     cudaError_t e;
     int n = ctx->n_neurons;
+
+    ENSURE_ALLOC(d_external_I, n*sizeof(float));
+    ENSURE_ALLOC(d_I, n*sizeof(float));
 
     // 1. Update external baseline + working I
     e = cudaMemcpyAsync(ctx->d_external_I, external_I, n_external * sizeof(float),

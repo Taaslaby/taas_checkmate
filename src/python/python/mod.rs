@@ -85,6 +85,8 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(neurons, neuron::py_step_psi_wave);
     add_fn!(neurons, neuron::py_step_lif);
     add_fn!(neurons, neuron::py_step_adex);
+    add_fn!(neurons, neuron::py_step_fhn);
+    add_fn!(neurons, neuron::py_step_wc);
     add_fn!(neurons, neuron::py_stdp_update);
     add_fn!(neurons, neuron::py_stdp_homeostatic);
 
@@ -105,11 +107,11 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(kuramoto, kuramoto::py_ring_synthesis);
     add_fn!(kuramoto, kuramoto::py_winding_matrix);
     #[cfg(feature = "cuda")]
-    add_fn!(kuramoto, kuramoto::py_ring_synthesis_cuda);
-    #[cfg(feature = "cuda")]
-    add_fn!(kuramoto, kuramoto::py_interference_matrix_cuda);
-    #[cfg(feature = "cuda")]
-    add_fn!(kuramoto, kuramoto::py_band_energy_cuda);
+    {
+        add_fn!(kuramoto, kuramoto::py_ring_synthesis_cuda);
+        add_fn!(kuramoto, kuramoto::py_interference_matrix_cuda);
+        add_fn!(kuramoto, kuramoto::py_band_energy_cuda);
+    }
 
     // ─── io ────────────────────────────────────────────
     let io = make_sub(m.py(), m, "io")?;
@@ -147,26 +149,26 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, t3, t3::PyTriOscillator);
     export_class!(m, t3, t3::PyNlmsDecoder);
     export_class!(m, t3, t3::PyKalmanDecoder);
-    export_class!(m, t3, t3::PyT2SpigradTrajectory);
+    export_class!(m, t3, t3::PyT2SpikeGradTrajectory);
     export_class!(m, t3, t3::PyPstControl);
-    export_class!(m, t3, t3::PySparker);
+    export_class!(m, t3, t3::PySpiker);
     export_class!(m, t3, t3::PyHologramEncoder);
-    export_class!(m, t3, t3::PyNormalizedSparker);
-    export_class!(m, t3, t3::PySpigradBridge);
+    export_class!(m, t3, t3::PyNormalizedSpiker);
+    export_class!(m, t3, t3::PySpikeGradBridge);
     add_fn!(t3, t3::py_pst_features);
     add_fn!(t3, t3::py_pst_linear_features);
     add_fn!(t3, t3::py_pst_linear_dim);
     add_fn!(t3, t3::py_pst_fast_dim);
     add_fn!(t3, t3::py_compute_pearson);
     add_fn!(t3, t3::py_normalize_features);
-    add_fn!(t3, t3::py_t2spigrad_forward);
-    add_fn!(t3, t3::py_t2spigrad_backward);
-    add_fn!(t3, t3::py_t2spigrad_pst_matrix);
-    add_fn!(t3, t3::py_t2spigrad_pst_fast_matrix);
+    add_fn!(t3, t3::py_t2spike_grad_forward);
+    add_fn!(t3, t3::py_t2spike_grad_backward);
+    add_fn!(t3, t3::py_t2spike_grad_pst_matrix);
+    add_fn!(t3, t3::py_t2spike_grad_pst_fast_matrix);
     #[cfg(feature = "cuda")]
-    add_fn!(t3, t3::py_t2spigrad_forward_cuda);
+    add_fn!(t3, t3::py_t2spike_grad_forward_cuda);
     #[cfg(feature = "cuda")]
-    add_fn!(t3, t3::py_t2spigrad_backward_cuda);
+    add_fn!(t3, t3::py_t2spike_grad_backward_cuda);
     #[cfg(feature = "connectome")]
     add_fn!(t3, t3::py_train_connectome_chase);
 
@@ -257,9 +259,9 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // ─── hh ─────────────────────────────────────────────
     let hh = make_sub(m.py(), m, "hh")?;
-    export_class!(m, hh, hh::PyHHLUT);
+    export_class!(m, hh, hh::PyHhLut);
     #[cfg(feature = "cuda")]
-    export_class!(m, hh, hh_gpu::PyGpuHHLUT);
+    export_class!(m, hh, hh_gpu::PyGpuHhLut);
 
     // ─── hologram ─────────────────────────────────────────
     let hologram = make_sub(m.py(), m, "hologram")?;

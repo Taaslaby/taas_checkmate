@@ -40,7 +40,7 @@ pub(crate) unsafe fn t3_complex_decoder(
         let mut vdot = f32x8::splat(0.0);
         let mut i = 0;
         while i < n8 {
-            vdot = vdot + load8(amplitudes, i) * load8(cos_buf, i) * load8(weights, row + i);
+            vdot += load8(amplitudes, i) * load8(cos_buf, i) * load8(weights, row + i);
             i += 8;
         }
         let arr: [f32; 8] = vdot.to_array();
@@ -104,7 +104,7 @@ pub(crate) unsafe fn nlms_train(
     let n8 = n & !7;
     let mut ns = f32x8::splat(0.0);
     let mut i = 0;
-    while i < n8 { ns = ns + load8(states, i) * load8(states, i); i += 8; }
+    while i < n8 { ns += load8(states, i) * load8(states, i); i += 8; }
     let arr: [f32; 8] = ns.to_array();
     let mut norm_sq: f32 = arr.iter().sum();
     for j in i..n { let s = *states.add(j); norm_sq += s * s; }
@@ -122,22 +122,12 @@ pub(crate) unsafe fn nlms_train(
 
 /// Kalman filter update: w += K·error, cov -= K·states·cov.
 ///
-/// # Important: `s` must be the innovation covariance
-///
-/// ```text
-/// s = R + Σᵢ(cov[i] · states[i]²)
-/// ```
-///
-/// where `R` is the measurement noise covariance and `Σ(cov·states²)` is the
-/// projection of the state covariance onto the measurement space.
-///
-/// If `s` is incorrect (e.g. just a constant), the Kalman gain will be wrong:
+/// Simple Kalman gain (matching ScalarBackend exactly):
 ///   K[i] = cov[i] · states[i] / s
 ///   w[i] += K[i] · error
 ///   cov[i] -= K[i] · states[i] · cov[i]
 ///
-/// `s` is NOT computed inside this kernel because it requires a global reduction
-/// over ALL elements — the kernel operates on independent SIMD chunks.
+/// `s` is the pre-computed innovation covariance: `s = R + Σᵢ(cov[i] · states[i]²)`.
 /// Compute `s` in the caller, then pass it here.
 ///
 /// # Safety
@@ -146,19 +136,17 @@ pub(crate) unsafe fn kalman_update(
     weights: *mut f32, cov: *mut f32,
     states: *const f32, error: f32, s: f32, n: usize,
 ) {
-    debug_assert!(s > 0.0, "kalman_update: s = R + Σ(cov·states²) must be > 0, got {}", s);
+    debug_assert!(s > 0.0, "kalman_update: s must be > 0, got {}", s);
     let s2 = f32x8::splat(s + 1e-8);
     let err_s = f32x8::splat(error);
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
-        let mut w = load8(weights, off);
-        let mut c = load8(cov, off);
+        let w = load8(weights, off);
+        let c = load8(cov, off);
         let st = load8(states, off);
-        let k = (c * st) / (st * st * c + s2);
-        w = w + k * err_s;
-        c = (c - k * st * c).max(f32x8::splat(1e-12));
-        store8(weights, off, w);
-        store8(cov, off, c);
+        let k = c * st / s2;
+        store8(weights, off, w + k * err_s);
+        store8(cov, off, (c - k * c).max(f32x8::splat(1e-12)));
     }
     if n8 < n {
         let w = std::slice::from_raw_parts_mut(weights, n);
@@ -166,10 +154,9 @@ pub(crate) unsafe fn kalman_update(
         let st = std::slice::from_raw_parts(states, n);
         let s2 = s + 1e-8;
         for i in n8..n {
-            let k = c[i] * st[i] / (st[i] * st[i] * c[i] + s2);
+            let k = c[i] * st[i] / s2;
             w[i] += k * error;
-            c[i] -= k * st[i] * c[i];
-            c[i] = c[i].max(1e-12);
+            c[i] = (c[i] - k * c[i]).max(1e-12);
         }
     }
 }
@@ -200,7 +187,7 @@ pub(crate) unsafe fn adam_train(
         mm = b1 * mm + b1_c * g;                // m = β₁·m + (1-β₁)·g
         vv = b2 * vv + b2_c * g * g;            // v = β₂·v + (1-β₂)·g²
         let mut w = load8(weights, off);
-        w = w - lr_s * mm / (vv.sqrt() + eps_s); // w -= lr·m̂/(√v̂ + ε)
+        w -= lr_s * mm / (vv.sqrt() + eps_s); // w -= lr·m̂/(√v̂ + ε)
         store8(weights, off, w);
         store8(m, off, mm);
         store8(v, off, vv);

@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════
 # TaasLab yakutia \\ ТаасЛаб якутия \\
-# ═════════════════════════════════════
+# ═══════════════════════════════
 
 # 🧠 taas-checkmate — Pure Rust SIMD Neural Engine
 
@@ -9,118 +9,139 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)]()
 [![CI](https://github.com/anomalyco/taas-checkmate/actions/workflows/ci.yml/badge.svg)]()
 
-> **Pure Rust wavelet neural engine** 
+> **Pure Rust spiking neural engine** — SIMD kernels, Kuramoto oscillators, FlyWire connectome, cognitive architecture
 
 ## 🏗 Architecture
 
 ```
 Python (PyO3)  ⇄  Rust safe wrappers  ⇄  pure Rust SIMD kernels (wide::f32x8)
                                                        ↕
-                                             AVX2 / NEON / WASM SIMD
+                                             AVX2 / NEON / WASM SIMD / CUDA
 ```
 
-
-## 📦 Module Structure (60+ source files)
-
-```
-taas_checkmate/src/
-├── lib.rs                ← re-exports + missing_docs lint
-│
-├── core/                 ← core AI types   [feature = "autograd"]
-│   ├── tensor.rs         ← Tensor (nd-array, matmul, broadcasting)
-│   └── autograd.rs       ← Var + backward (w/ computational graph)
-│
-├── models/               ← neural models
-│   ├── neuron/           ← 12 files (см. ниже)
-│   ├── nn.rs             ← Dense, Softmax, Dropout, BatchNorm   [autograd]
-│   └── kuramoto.rs       ← Kuramoto, interference, coherence
-│
-├── ops/                  ← operations
-│   ├── sparse.rs         ← CSR matrix, spike propagation, Hamiltonian
-│   └── koit.rs           ← XOR attention, hardware RNG
-│
-├── training/             ← training utilities
-│   ├── optim.rs          ← SGD, Adam optimizer   [autograd]
-│   ├── loss.rs           ← CrossEntropy, MSE     [autograd]
-│   └── rl.rs             ← Actor-Critic agent w/ dopamine-STDP
-│
-├── kernels/              ← SIMD kernels (all models)
-│   ├── signal.rs         ← linear_decoder, load8/store8
-│   ├── neuron.rs         ← izhikevich, lif, adex, saw, eprop, stdp, stp
-│   ├── decode.rs         ← decoders (kalman, nlms, adam)
-│   ├── attention.rs      ← sparse attention
-│   ├── phase.rs          ← phase wrapping
-│   ├── rng.rs            ← fast RNG
-│   └── measure.rs        ← performance counters
-│
-├── t3/                   ← T3 oscillator engine
-│   ├── oscillator.rs     ← TriOscillator<B: T3Backend>
-│   ├── backend.rs        ← Avx2Backend, ScalarBackend
-│   ├── backend_cuda.rs   ← CudaBackend   [cuda]
-│   ├── phase_gate.rs     ← sigmoid gate
-│   ├── pst.rs            ← PST features
-│   ├── cochlea.rs        ← biquad filter bank
-│   ├── trajectory.rs     ← ring buffer
-│   └── decoders.rs       ← Nlms, Kalman, Stdp, Pst, Hybrid
-│
-├── bindings/python/      ← PyO3 bindings   [feature = "python"]
-│   ├── neuron.rs         ← step_izhikevich, saw, lif, adex, stdp
-│   ├── kuramoto.rs       ← kuramoto, t3, kalman, nlms, coherence
-│   ├── io.rs             ← gates, encoders, decoders
-│   ├── sparse.rs         ← CSR ops + sim_step
-│   ├── koit.rs           ← XOR attention, rdrand
-│   ├── t3.rs             ← PyTriOsc, PyNlmsDec, PyKalmanDec + PST
-│   ├── snn.rs            ← PyLifNeuron, SORN, TTFS + plasticity
-│   ├── eprop.rs          ← PyEPropLIF, surrogate, eprop_update
-│   ├── poisson_stp.rs    ← Poisson, STP, LFP
-│   ├── rl_agent.rs       ← ActorCriticAgent
-│   └── taas_format.rs    ← save/load .taas
-│
-├── io.rs                 ← PWM encoder, gates, safety clamp
-└── taas_format.rs        ← binary .taas snapshot format
-```
-
-### 🧬 neuron/ — 12 model files
+## 📦 Workspace (12 crates, 90+ source files)
 
 ```
-models/neuron/
-├── mod.rs           ← re-exports + constants (I_CLAMP, DEFAULT_TAU_REF)
-├── izhikevich.rs    ← Izhikevich, EPropIzhikevich, EPropIzhikevichMulti
-├── lif.rs           ← LIF, LIF-AT, EPropLIF
-├── adex.rs          ← AdEx, EPropAdExMulti
-├── saw.rs           ← SAW, ψ-wave, EPropSaw
-├── stdp.rs          ← STDP, homeostatic STDP, DopamineSTDP
-├── stp.rs           ← Short-Term Plasticity (Tsodyks-Markram), LFP
-├── sorn.rs          ← SORN, intrinsic plasticity, synaptic normalization
-├── encoding.rs      ← BSA, Phase, TTFS spike encoding
-├── poisson.rs       ← PoissonGenerator
-├── delay.rs         ← DelayBuffer (circular)
-├── stats.rs         ← SpikeRaster, firing rates, ISI, CV
-└── eprop.rs         ← surrogate_gradient, eprop_update (free fn)
+taas_checkmate/
+├── Cargo.toml              ← workspace root (lib = cdylib + lib)
+├── src/
+│   ├── lib.rs              ← re-exports all crates
+│   ├── io.rs               ← PWM encoder, gates, safety clamp
+│   └── python/             ← PyO3 bindings   [feature = "python"]
+│
+├── crates/
+│   ├── kernels/            ← SIMD kernels (raw, unsafe)           19 files
+│   │   └── src/neuron/     ← izhikevich, lif, adex, saw, hh, stp, dopamine, fused
+│   │
+│   ├── core/               ← Safe wrappers + neuron models        20 files
+│   │   └── src/neuron/     ← 16 files: models + encoding + stats + eprop + autotune
+│   │
+│   ├── t3/                 ← T3 oscillator engine (Kuramoto + Stuart-Landau)  12 files
+│   │   └── src/            ← oscillator, backends, decoders, pst, cochlea, spiker
+│   │
+│   ├── train/              ← RL + BPTT + SPIGRAD                  11 files
+│   │   └── src/spike/      ← forward, backward, pst_jacobian, trajectory
+│   │
+│   ├── connectome/         ← FlyWire connectome simulator          5 files
+│   │
+│   ├── karmac/             ← Cognitive architecture (GNW, BasalGanglia, LOD)  6 files
+│   │
+│   ├── connectome-gpt/     ← Graph VAE + decoder for connectome    7 files
+│   │
+│   ├── cpe/                ← Coherence, Dopamine, STDP, Hybrid     6 files
+│   │
+│   ├── taas-format/        ← Binary .taas snapshot format          6 files
+│   │
+│   ├── cuda-kernels/       ← CUDA backend                         1 file
+│   │
+│   ├── unity/              ← C ABI for Unity                       1 file
+│   │
+│   └── gpu-eval/           ← GPU evaluation                        1 file
+│
+├── tests/                  ← Integration tests (Rust + Python)
+├── benches/                ← Criterion benchmarks
+├── examples/rust/          ← 7 examples (MNIST, connectome, hologram)
+├── examples/python/        ← 9 Python examples (ψ-resonance, VNC, FlyWire)
+└── docs/                   ← 10 documentation files
 ```
 
 ## 🔧 Features
 
-| Feature    | Description | Dependencies |
-|:-----------|:------------|:-------------|
-| `autograd` | Tensor + Var + backward + nn + optim + loss | `rand` |
-| `python`   | PyO3 + numpy zero-copy bindings | `pyo3`, `numpy` |
-| `cuda`     | CUDA backend for T3 engine | `cuda-kernels` (local) |
+| Feature | Description | Dependencies |
+|:--------|:------------|:-------------|
+| `t3` | T3 oscillator engine (default) | `taas-t3` |
+| `train` | BPTT, SPIGRAD, connectome chase | `taas-train/t3` |
+| `connectome` | Connectome LIF brain simulator | `taas-connectome`, `taas-train/connectome` |
+| `karmac` | Cognitive architecture (GNW, LOD, Basal) | `karmac` |
+| `cuda` | GPU acceleration (implies t3 + connectome) | `cuda-kernels` + CUDA backends |
+| `python` | PyO3 + numpy zero-copy bindings | `pyo3`, `numpy` |
+| `unity` | C ABI for Unity (implies connectome) | `taas-unity` |
+| `all` | Everything | all of the above |
 
 ```bash
-# Minimal: just SIMD kernels + neuron models
+# Minimal: just SIMD kernels + T3 oscillator
 cargo build --no-default-features
 
-# With autograd (Tensor + backprop)
-cargo build --features autograd
+# With training
+cargo build --features train
+
+# Connectome brain simulator
+cargo build --features connectome
 
 # Full stack
-cargo build --features autograd,python,cuda
+cargo build --features all
 ```
+
+## 🔬 Spiking Neuron Models
+
+### SIMD Kernels (`crates/kernels/src/neuron/`) — 10 files
+
+| File | Models | Integration | SIMD |
+|:-----|:-------|:------------|:-----|
+| `izhikevich.rs` | `izhikevich_step`, `eprop_izhikevich_step`, `eprop_izhikevich_step_multi` | Forward Euler (quadratic v²) | f32x8 |
+| `lif.rs` | `lif_step`, `lif_at_step`, `eprop_lif_step` | Exponential Euler (exact for const I) | f32x8 |
+| `adex.rs` | `adex_step`, `eprop_adex_step_multi` | Forward Euler + fast_exp | f32x8 |
+| `saw.rs` | `saw_step`, `eprop_saw_step`, `psi_wave_step` | Forward Euler + noise / unit circle | f32x8 |
+| `hh.rs` | `hh_lut_step` (scalar + SIMD) | LUT-interpolated exponential Euler | f32x8 |
+| `fused.rs` | `fused_hidden_izhikevich_step`, `fused_output_lif_step`, `poisson_fused_hidden_step` | Fused: RNG → weights → dynamics in 1 pass | f32x8 |
+| `dopamine.rs` | `dopamine_traces_step`, `dopamine_weight_update` | 3-factor STDP × dopamine (Izhikevich 2007) | f32x8 |
+| `stp.rs` | `stp_step`, `stdp_update`, `stdp_homeostatic` | Tsodyks-Markram STP + homeostatic STDP | f32x8 |
+| `delay.rs` | `delay_buffer_circular`, `delay_buffer_multi_tap` | Circular buffer for delays | f32x8 |
+
+### Safe Wrappers (`crates/core/src/neuron/`) — 16 files
+
+| File | Models |
+|:-----|:-------|
+| `izhikevich.rs` | `step_izhikevich`, `EPropIzhikevich`, `EPropIzhikevichMulti` |
+| `lif.rs` | `step_lif`, `step_lif_at`, `EPropLIF` |
+| `adex.rs` | `step_adex`, `EPropAdExMulti` |
+| `saw.rs` | `step_saw`, `step_psi_wave`, `EPropSaw` |
+| `hh.rs` | `HhLutConfig`, `HhState`, `step_hh_lut` |
+| `stdp.rs` | `DopamineSTDP` — 3-factor plasticity |
+| `stp.rs` | `ShortTermPlasticity`, `compute_lfp` |
+| `sorn.rs` | `SornNetwork` — intrinsic plasticity + synaptic normalization |
+| `encoding.rs` | BSA, Phase, TTFS spike encoders |
+| `poisson.rs` | `PoissonGenerator` |
+| `delay.rs` | `DelayBuffer` (circular) |
+| `stats.rs` | SpikeRaster, firing rates, ISI, CV |
+| `eprop.rs` | `surrogate_gradient`, `eprop_update` |
+| `autotune.rs` | `probe_fr`, `suggest_config` |
+| `trainer.rs` | `EPropTrainer` |
+
+### Plasticity Rules
+
+| Rule | Description |
+|:-----|:------------|
+| STDP | Spike-timing dependent plasticity (`stdp_update`, `stdp_homeostatic`) |
+| Dopamine-STDP | 3-factor: STDP × dopamine reward signal (Izhikevich 2007) |
+| STP | Tsodyks-Markram short-term (facilitation + depression) |
+| E-Prop | Eligibility traces + surrogate gradient for LIF, Izhikevich, SAW, AdEx |
+| Intrinsic Plasticity | Adaptive thresholds for target firing rate |
+| Synaptic Normalization | Weight normalization to target sum |
 
 ## 🤖 Spiking Actor-Critic RL Agent
 
-Pure Rust spiking Actor-Critic with dopamine-modulated STDP (3-factor plasticity).  
+Pure Rust spiking Actor-Critic with dopamine-modulated STDP (3-factor plasticity).
 Based on Izhikevich (2007) *"Solving the distal reward problem through linkage of STDP and dopamine signaling"*.
 
 ```rust
@@ -146,10 +167,10 @@ let td_error = agent.learn(1.0, 0.95, false);
 
 | Step | Optimization | act() | Speedup |
 |:-----|:------------|:-----:|:-------:|
-| 0 | Baseline | 417 µs | 1.0× |
-| 1 | Fused weight→Izhikevich SIMD kernel | 289 µs | 1.44× |
-| 2 | Poisson RNG fused into SIMD pass | 260 µs | 1.60× |
-| 3 | Fast-exp in softmax | 254 µs | **1.64×** |
+| 0 | Baseline | 417 us | 1.0x |
+| 1 | Fused weight→Izhikevich SIMD kernel | 289 us | 1.44x |
+| 2 | Poisson RNG fused into SIMD pass | 260 us | 1.60x |
+| 3 | Fast-exp in softmax | 254 us | **1.64x** |
 
 ### Fused SIMD Kernels
 
@@ -157,44 +178,8 @@ let td_error = agent.learn(1.0, 0.95, false);
 |:-------|:--------|
 | `poisson_fused_hidden_step` | LCG RNG → weights → Izhikevich in 1 pass |
 | `fused_output_lif_step` | hidden spikes → weights → LIF in 1 pass |
-| `dopamine_weight_update` | Δw = η·δ·e with SIMD clamp |
-
-## 🔬 Spiking Neuron Models
-
-All neuron models are split by family — each file contains the step function + E-Prop variants:
-
-| Model | File | Type | SIMD Kernel |
-|:------|:-----|:----:|:-----------:|
-| Izhikevich | `izhikevich.rs` | Regular spiking, bursting, chattering | `izhikevich_step` |
-| SAW | `saw.rs` | Spike-Adaptive-Width | `saw_step` |
-| ψ-wave | `saw.rs` | Schrödinger-like wave neuron | `psi_wave_step` |
-| LIF | `lif.rs` | Leaky Integrate-and-Fire | `lif_step` |
-| LIF-AT | `lif.rs` | LIF + adaptive threshold | `lif_at_step` |
-| AdEx | `adex.rs` | Adaptive Exponential | `adex_step` |
-
-### Plasticity
-
-| Rule | Description |
-|:-----|:------------|
-| STDP | Spike-timing dependent plasticity (stdp_update, stdp_homeostatic) |
-| Dopamine-STDP | 3-factor: STDP × dopamine reward signal |
-| STP | Tsodyks-Markram short-term (facilitation + depression) |
-| E-Prop | LIF, Izhikevich, SAW, AdEx with eligibility traces |
-
-## ⚡ SIMD Kernels (20+)
-
-All kernels use `wide::f32x8` for 8-wide portable SIMD:
-
-| Kernel | SIMD ops |
-|:-------|:---------|
-| `izhikevich_step` | dv/dt, du/dt, spike detect, trace, refractory |
-| `lif_step` | RC dynamics, spike detect |
-| `lif_at_step` | RC + adaptive θ, β update |
-| `adex_step` | fast_exp approximation, dv/dt, dw/dt |
-| `stdp_update` | weight update + clamp |
-| `kalman_update` | K-gain + covariance update |
-| `nlms_train` | norm² + weight update |
-| `dopamine_traces_step` | pre/post traces + eligibility |
+| `fused_hidden_izhikevich_step` | input spikes → weights → Izhikevich in 1 pass |
+| `dopamine_weight_update` | Dw = n*D*e with SIMD clamp |
 
 ## 🚀 T3 Super-module (PhaseFlow)
 
@@ -210,6 +195,26 @@ tri.step(0.001);
 let fv = pst_linear_features(&tri);
 let mut dec = NlmsDecoder::new(fv.len(), 0.01, 1e-8);
 let output = dec.predict(&fv);
+```
+
+## 🧠 Cognitive Architecture (karmac)
+
+| Module | Description |
+|:-------|:------------|
+| `gnw.rs` | Global Neuronal Workspace — conscious ignition |
+| `basal_ganglia.rs` | Action selection via competitive inhibition |
+| `working_memory.rs` | Persistent activity working memory |
+| `lod.rs` | Level of Description — multi-scale interface |
+| `semantic_pointer.rs` | Semantic Pointer Hypothesis (SPAUN-like) |
+
+## 🧬 Connectome Brain Simulator
+
+FlyWire connectome simulation with LIF neurons and spike propagation.
+
+```rust
+use taas_checkmate::connectome;
+
+// Load FlyWire connectome, run simulation
 ```
 
 ## 🐍 Python Bridge
@@ -231,7 +236,7 @@ snn.step(I, spikes)
 ## 🐍 Python API (Русский)
 
 Подробная документация Python API на русском с примерами для каждого под-модуля:
-👉 **[PYTHON_API_RU.md](PYTHON_API_RU.md)**
+👉 **[PYTHON_API_RU.md](docs/PYTHON_API_RU.md)**
 
 ```python
 from taas_checkmate.neurons import step_psi_wave
@@ -245,22 +250,38 @@ agent.weights # свойство вместо copy_weights(out)
 
 | Pipeline | Speed |
 |:---------|:-----:|
-| 3 × 64 oscillators + PST + NLMS | **388× realtime** @ 48kHz |
-| 3 × 128 oscillators + Kalman | **240× realtime** @ 44.1kHz |
-| Izhikevich 8K neurons | **1M neur/s** (×5 faster than NEST) |
-| Sigmoid (Phase Gate) 8K | **8.2 ns/elem** (×3 faster than scipy) |
+| 3 x 64 oscillators + PST + NLMS | **388x realtime** @ 48kHz |
+| 3 x 128 oscillators + Kalman | **240x realtime** @ 44.1kHz |
+| Izhikevich 8K neurons | **1M neur/s** (x5 faster than NEST) |
+| Sigmoid (Phase Gate) 8K | **8.2 ns/elem** (x3 faster than scipy) |
 
 Benchmarks: `cargo bench --no-default-features` generates HTML reports in `target/criterion/`.
 
-## 🔧 Quick Start
+## 📚 Documentation
+
+| File | Description |
+|:-----|:------------|
+| [T3 Architecture](docs/T3_ARCHITECTURE.md) | T3 oscillator engine internals |
+| [Mathematical Audit](docs/MATHEMATICAL_AUDIT.md) | Equation verification |
+| [API Reference](docs/API_REFERENCE.md) | Full API docs |
+| [Python API (RU)](docs/PYTHON_API_RU.md) | Python bindings documentation |
+| [RL API](docs/RL_API.md) | Reinforcement learning API |
+| [VNC Ring Oscillator](docs/VNC_RING_OSCILLATOR.md) | VNC ring oscillator design |
+| [GPT Inspector](docs/GPT_INSPECTOR.md) | Connectome-GPT analysis |
+| [ArXiv Paper](docs/ARXIV_PAPER.md) | Research paper draft |
+
+## 🚀 Quick Start
 
 ```bash
 # Clone + build
 cd taas_checkmate
-cargo build --features autograd
+cargo build --no-default-features
 
 # Run tests
-cargo test --features autograd
+cargo test --no-default-features
+
+# With features
+cargo build --features t3,train,connectome
 
 # Benchmarks
 cargo bench --no-default-features
@@ -268,13 +289,6 @@ cargo bench --no-default-features
 # Documentation
 cargo doc --no-deps --open
 ```
-
-## 📖 Documentation
-
-- [T3 Architecture](docs/T3_ARCHITECTURE.md)
-- [Mathematical Audit](docs/MATHEMATICAL_AUDIT.md)
-- [API Reference](docs/API_REFERENCE.md)
-- `cargo doc --no-deps --open`
 
 ## 📜 License
 

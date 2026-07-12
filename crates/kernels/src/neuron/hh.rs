@@ -17,29 +17,8 @@
 
 #![allow(non_snake_case)]
 use wide::f32x8;
-
-// ═══════════════════════════════════════════════════════
-//  Helpers (same as mod.rs: load8, store8, ...)
-// ═══════════════════════════════════════════════════════
-
-#[inline(always)]
-unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
-    let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3), *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
-}
-#[inline(always)]
-unsafe fn load8_i32(ptr: *const i32, off: usize) -> f32x8 {
-    let p = ptr.add(off);
-    f32x8::from([*p as f32, *p.add(1) as f32, *p.add(2) as f32, *p.add(3) as f32,
-                 *p.add(4) as f32, *p.add(5) as f32, *p.add(6) as f32, *p.add(7) as f32])
-}
-#[inline(always)]
-unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
-    let a = v.to_array();
-    let p = ptr.add(off);
-    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
-    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
-}
+use wide::CmpLt;
+use super::{load8, store8, fast_exp, fast_exp_simd};
 
 // ═══════════════════════════════════════════════════════
 //  LUT Generation (call at init, offline)
@@ -50,7 +29,7 @@ pub type RateFn = fn(f32) -> f32;
 
 /// A single gate (e.g. Na-m, Na-h, K-n) with its LUT.
 #[derive(Debug, Clone)]
-pub struct GateLUT {
+pub struct GateLut {
     pub m_inf: Vec<f32>,   // [N_BINS] steady-state
     pub decay: Vec<f32>,   // [N_BINS] exp(-dt / τ(V))
 }
@@ -73,8 +52,7 @@ pub struct GateSpec {
 }
 
 /// Precompute LUTs for all channels at a given dt and V-range.
-pub fn build_luts(channels: &[ChannelSpec], dt: f32,
-                  v_min: f32, v_max: f32, n_bins: usize) -> Vec<Vec<GateLUT>> {
+pub fn build_luts(channels: &[ChannelSpec], dt: f32,                   v_min: f32, v_max: f32, n_bins: usize) -> Vec<Vec<GateLut>> {
     channels.iter().map(|ch| {
         ch.gates.iter().map(|g| {
             let mut m_inf = Vec::with_capacity(n_bins + 1);
@@ -89,7 +67,7 @@ pub fn build_luts(channels: &[ChannelSpec], dt: f32,
                 m_inf.push(minf);
                 decay.push((-dt / tau).exp());
             }
-            GateLUT { m_inf, decay }
+            GateLut { m_inf, decay }
         }).collect()
     }).collect()
 }
@@ -181,6 +159,285 @@ pub fn steady_state_gates(v: f32, channels: &[ChannelSpec]) -> Vec<f32> {
         }
     }
     gates
+}
+
+// ═══════════════════════════════════════════════════════
+//  Polynomial HH: fast_exp_simd for rate functions (no LUT)
+// ═══════════════════════════════════════════════════════
+//
+// Replaces LUT gather with direct α(V)/β(V) computation via fast_exp_simd.
+// No gather, no precomputation, pure FMA arithmetic.
+// ~8× wider than scalar f32::exp(), no cache misses from LUT.
+
+/// SIMD α/β computation helpers (inlined)
+
+/// Compute NaV m-gate α(V) and β(V) using fast_exp_simd.
+/// α = 0.1·(v+40) / (1 − exp(−(v+40)/10)), β = 4.0·exp(−(v+65)/18)
+#[inline(always)]
+unsafe fn na_m_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
+    let vp40 = v + f32x8::splat(40.0);
+    let one = f32x8::splat(1.0);
+    // α: handle vp40 ≈ 0 via blend (avoid 0/0)
+    let exp_arg = -vp40 / f32x8::splat(10.0);
+    let clamp_min = f32x8::splat(-10.0);
+    let clamp_max = f32x8::splat(10.0);
+    let exp_val = fast_exp_simd((-vp40 / f32x8::splat(10.0)).max(clamp_min).min(clamp_max));
+    let denom = one - exp_val;
+    let alpha_num = f32x8::splat(0.1) * vp40;
+    let small_mask = vp40.abs().cmp_lt(f32x8::splat(1e-6));
+    // denom < 0 для vp40 > 0, denom > 0 для vp40 < 0. Без clamping — small_mask
+    // обрабатывает vp40 ≈ 0 через blend. Для |vp40| ≥ 1e-6 denom ≠ 0 всегда.
+    let alpha = small_mask.blend(f32x8::splat(1.0), alpha_num / denom);
+    let beta = f32x8::splat(4.0) * fast_exp_simd((-(v + f32x8::splat(65.0)) / f32x8::splat(18.0)).max(clamp_min).min(clamp_max));
+    (alpha, beta)
+}
+
+/// Compute NaV h-gate α(V) and β(V) using fast_exp_simd.
+/// α = 0.07·exp(−(v+65)/20), β = 1/(1 + exp(−(v+35)/10))
+#[inline(always)]
+unsafe fn na_h_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
+    let one = f32x8::splat(1.0);
+    let clamp_min = f32x8::splat(-10.0);
+    let clamp_max = f32x8::splat(10.0);
+    let alpha = f32x8::splat(0.07) * fast_exp_simd((-(v + f32x8::splat(65.0)) / f32x8::splat(20.0)).max(clamp_min).min(clamp_max));
+    let exp_arg = (-(v + f32x8::splat(35.0)) / f32x8::splat(10.0)).max(clamp_min).min(clamp_max);
+    let beta = one / (one + fast_exp_simd(exp_arg));
+    (alpha, beta)
+}
+
+/// Compute KV n-gate α(V) and β(V) using fast_exp_simd.
+/// α = 0.01·(v+55) / (1 − exp(−(v+55)/10)), β = 0.125·exp(−(v+65)/80)
+#[inline(always)]
+unsafe fn k_n_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
+    let vp55 = v + f32x8::splat(55.0);
+    let one = f32x8::splat(1.0);
+    let clamp_min = f32x8::splat(-10.0);
+    let clamp_max = f32x8::splat(10.0);
+    let exp_val = fast_exp_simd((-vp55 / f32x8::splat(10.0)).max(clamp_min).min(clamp_max));
+    let denom = one - exp_val;
+    let alpha_num = f32x8::splat(0.01) * vp55;
+    let small_mask = vp55.abs().cmp_lt(f32x8::splat(1e-6));
+    // Без sign-preserving clamp — denom ≠ 0 для |vp55| ≥ 1e-6, small_mask
+    // обрабатывает vp55 ≈ 0.
+    let alpha = small_mask.blend(f32x8::splat(0.1), alpha_num / denom);
+    let beta = f32x8::splat(0.125) * fast_exp_simd((-(v + f32x8::splat(65.0)) / f32x8::splat(80.0)).max(clamp_min).min(clamp_max));
+    (alpha, beta)
+}
+
+/// Compute CaT c-gate α(V) and β(V) using fast_exp_simd.
+/// α = m_inf / 0.6, β = (1 − m_inf) / 0.6
+/// where m_inf = 1/(1 + exp(−(v+56)/6.2))
+#[inline(always)]
+unsafe fn cat_c_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
+    let one = f32x8::splat(1.0);
+    let clamp_min = f32x8::splat(-10.0);
+    let clamp_max = f32x8::splat(10.0);
+    let m_inf = one / (one + fast_exp_simd((-(v + f32x8::splat(56.0)) / f32x8::splat(6.2)).max(clamp_min).min(clamp_max)));
+    let tau_inv = f32x8::splat(1.0 / 0.6);
+    (m_inf * tau_inv, (one - m_inf) * tau_inv)
+}
+
+/// Channel gate index metadata (precomputed at init from ChannelSpec).
+pub struct ChannelMeta {
+    pub n_gates: usize,        // gates per channel
+    pub e_rev: f32,
+    pub g_max: f32,
+    pub powers: Vec<u32>,      // exponent per gate
+    pub gate_type: Vec<GateType>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GateType {
+    NaM, NaH, Kn, CatC,
+}
+
+/// Build ChannelMeta from standard ChannelSpec (for poly HH).
+pub fn build_channel_meta(channels: &[ChannelSpec]) -> Vec<ChannelMeta> {
+    channels.iter().map(|ch| {
+        let n_gates = ch.gates.len();
+        let mut powers = Vec::with_capacity(n_gates);
+        let mut gate_type = Vec::with_capacity(n_gates);
+        for g in &ch.gates {
+            powers.push(g.power);
+            gate_type.push(match g.label {
+                "m" => GateType::NaM,
+                "h" => GateType::NaH,
+                "n" => GateType::Kn,
+                "c" => GateType::CatC,
+                _ => GateType::NaM, // fallback
+            });
+        }
+        ChannelMeta { n_gates, e_rev: ch.E_rev, g_max: ch.g_max, powers, gate_type }
+    }).collect()
+}
+
+/// SIMD polynomial HH step — direct rate computation (no LUT).
+///
+/// For each 8-neuron SIMD block:
+///   1. Load V
+///   2. For each channel: compute m_inf(V), τ(V) via fast_exp_simd → gate update
+///   3. I_ion += g_ch · (V − E_rev)
+///   4. V += (I_ext − I_ion − I_leak) / C_m · dt
+///
+/// # Safety
+/// All pointers valid for n elements, non-overlapping.
+pub(crate) unsafe fn hh_poly_step_simd(
+    v: *mut f32, gates: *mut f32,
+    Ii: *const f32, g_leak: *const f32, E_leak: *const f32, C_m: *const f32,
+    n: usize,
+    channel_meta: &[ChannelMeta],
+    dt: f32,
+) {
+    let zero = f32x8::splat(0.0);
+    let one = f32x8::splat(1.0);
+    let eps = f32x8::splat(1e-12);
+    let dt_v = f32x8::splat(dt);
+
+    for i in (0..n).step_by(8) {
+        if i + 8 > n { break; }
+        let vi = unsafe { load8(v, i) };
+        let mut I_ion = zero;
+        let mut gi = 0;  // global gate index
+
+        for ch in channel_meta {
+            let e_rev_v = f32x8::splat(ch.e_rev);
+            let g_max_v = f32x8::splat(ch.g_max);
+            let mut g_ch = g_max_v;
+
+            for gate_idx in 0..ch.n_gates {
+                let power = ch.powers[gate_idx];
+                // Compute α(V), β(V) via fast_exp_simd
+                let (alpha, beta) = match ch.gate_type[gate_idx] {
+                    GateType::NaM => na_m_alpha_beta_simd(vi),
+                    GateType::NaH => na_h_alpha_beta_simd(vi),
+                    GateType::Kn => k_n_alpha_beta_simd(vi),
+                    GateType::CatC => cat_c_alpha_beta_simd(vi),
+                };
+
+                let sum = (alpha + beta).max(eps);
+                let m_inf = alpha / sum;
+                let tau = one / sum;
+                let decay = fast_exp_simd((-dt_v / tau).max(f32x8::splat(-10.0)).min(f32x8::splat(10.0)));
+
+                // Update gate: m(t+dt) = m_inf + (m − m_inf)·decay
+                let gi_ptr = gates.add(gi * n + i);
+                let gv = unsafe { load8(gi_ptr, 0) };
+                let new_gv = m_inf + (gv - m_inf) * decay;
+                unsafe { store8(gi_ptr, 0, new_gv); }
+
+                // g_ch *= m^power
+                if power == 1 {
+                    g_ch = g_ch * new_gv;
+                } else if power == 3 {
+                    let sq = new_gv * new_gv;
+                    g_ch = g_ch * sq * new_gv;
+                } else if power == 4 {
+                    let sq = new_gv * new_gv;
+                    g_ch = g_ch * sq * sq;
+                } else {
+                    g_ch = g_ch * new_gv.powf(power as f32);
+                }
+                gi += 1;
+            }
+            I_ion = I_ion + g_ch * (vi - e_rev_v);
+        }
+
+        let I_leak = unsafe { load8(g_leak, i) } * (vi - unsafe { load8(E_leak, i) });
+        let cm = unsafe { load8(C_m, i) };
+        let dV = (unsafe { load8(Ii, i) } - I_ion - I_leak) / cm;
+        unsafe { store8(v, i, vi + dV * dt_v); }
+    }
+}
+
+/// Scalar polynomial HH step — for remainder (n % 8 != 0).
+/// Uses scalar fast_exp for rate functions.
+///
+/// `n`: number of neurons in this chunk (remainder).
+/// `total_n`: total neurons in the original array (column-major stride for gates).
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn hh_poly_step_scalar(
+    v: *mut f32, gates: *mut f32,
+    Ii: *const f32, g_leak: *const f32, E_leak: *const f32, C_m: *const f32,
+    n: usize, total_n: usize,
+    channel_meta: &[ChannelMeta],
+    dt: f32,
+) {
+    for i in 0..n {
+        let vi = *v.add(i);
+        let mut I_ion = 0.0;
+        let mut gi = 0;
+
+        for ch in channel_meta {
+            let mut g_ch = ch.g_max;
+            for gate_idx in 0..ch.n_gates {
+                let power = ch.powers[gate_idx];
+                // Scalar α/β via fast_exp
+                let (alpha, beta) = match ch.gate_type[gate_idx] {
+                    GateType::NaM => {
+                        let vp40 = vi + 40.0;
+                        let a = if vp40.abs() < 1e-6 { 1.0 } else { 0.1 * vp40 / (1.0 - fast_exp(-vp40 / 10.0)) };
+                        let b = 4.0 * super::fast_exp(-(vi + 65.0) / 18.0);
+                        (a, b)
+                    },
+                    GateType::NaH => {
+                        let a = 0.07 * super::fast_exp(-(vi + 65.0) / 20.0);
+                        let b = 1.0 / (1.0 + super::fast_exp(-(vi + 35.0) / 10.0));
+                        (a, b)
+                    },
+                    GateType::Kn => {
+                        let vp55 = vi + 55.0;
+                        let a = if vp55.abs() < 1e-6 { 0.1 } else { 0.01 * vp55 / (1.0 - fast_exp(-vp55 / 10.0)) };
+                        let b = 0.125 * super::fast_exp(-(vi + 65.0) / 80.0);
+                        (a, b)
+                    },
+                    GateType::CatC => {
+                        let m_inf = 1.0 / (1.0 + super::fast_exp(-(vi + 56.0) / 6.2));
+                        (m_inf / 0.6, (1.0 - m_inf) / 0.6)
+                    },
+                };
+                let sum = alpha + beta;
+                let m_inf = if sum > 1e-12 { alpha / sum } else { 0.5 };
+                let tau = if sum > 1e-12 { 1.0 / sum } else { 1.0 };
+                let decay = fast_exp(-dt / tau);
+
+                // Gates are column-major: strides of total_n, not n
+                let p = gates.add(gi * total_n + i);
+                *p = m_inf + (*p - m_inf) * decay;
+                g_ch *= (*p).powi(power as i32);
+                gi += 1;
+            }
+            I_ion += g_ch * (vi - ch.e_rev);
+        }
+        let I_leak = *g_leak.add(i) * (vi - *E_leak.add(i));
+        let dV = (*Ii.add(i) - I_ion - I_leak) / *C_m.add(i);
+        *v.add(i) = vi + dV * dt;
+    }
+}
+
+/// Public polynomial HH step — auto-selects SIMD or scalar.
+///
+/// Replaces LUT-based `hh_lut_step` for architectures where SIMD gather is slow.
+/// Pure arithmetic: α(V), β(V) computed via `fast_exp` (minimax polynomial).
+pub unsafe fn hh_poly_step(
+    v: *mut f32, gates: *mut f32, Ii: *const f32,
+    g_leak: *const f32, E_leak: *const f32, C_m: *const f32,
+    n: usize,
+    channel_meta: &[ChannelMeta],
+    dt: f32,
+) {
+    if n >= 8 {
+        hh_poly_step_simd(v, gates, Ii, g_leak, E_leak, C_m,
+            n, channel_meta, dt);
+    }
+    let remainder = n % 8;
+    if remainder > 0 {
+        let simd_end = n - remainder;
+        // Pass total_n = n for column-major stride correction
+        hh_poly_step_scalar(
+            v.add(simd_end), gates.add(simd_end), Ii.add(simd_end),
+            g_leak.add(simd_end), E_leak.add(simd_end), C_m.add(simd_end),
+            remainder, n, channel_meta, dt);
+    }
 }
 
 /// HH with CaV-T (T-type calcium) for pacemaking.
@@ -309,7 +566,7 @@ pub(crate) unsafe fn hh_lut_step_simd(
                 let mut decay_a = [0.0f32; 8];
                 let idx_a = idx_f.to_array();
                 for k in 0..8 {
-                    let fi = (idx_a[k] as usize).min(n_bins as usize - 1);
+                    let fi = (idx_a[k] as usize).min(n_bins as usize);
                     m_inf_a[k] = *m_inf_arr.add(fi);
                     decay_a[k] = *decay_arr.add(fi);
                 }

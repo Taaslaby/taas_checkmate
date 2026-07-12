@@ -164,7 +164,7 @@ pub fn py_load_taas(path: &str, py: Python<'_>) -> PyResult<PyObject> {
 
 /// Save connectome (ConnectomeData) to .taas file.
 #[pyfunction]
-#[pyo3(name = "save_connectome")]
+#[pyo3(name = "save_connectome", signature = (path, connectome, metadata=None))]
 pub fn py_save_connectome(
     path: &str,
     connectome: &PyConnectomeData,
@@ -191,7 +191,7 @@ pub fn py_load_connectome(path: &str) -> PyResult<PyConnectomeData> {
 
 /// Save full model (connectome + bridge + decoder) to a single .taas file.
 #[pyfunction]
-#[pyo3(name = "save_model")]
+#[pyo3(name = "save_model", signature = (path, connectome, bridge_weights, bridge_bias, decoder_weights, decoder_bias, metadata=None))]
 pub fn py_save_model(
     path: &str,
     connectome: &super::connectome_brain::PyConnectomeData,

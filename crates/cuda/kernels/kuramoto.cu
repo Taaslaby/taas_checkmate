@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <math.h>
+#include "gpu_context.h"
 
 extern "C" __global__ void kuramoto_prepare_kernel(
     const float* phases, float* cos_out, float* sin_out, int n) {
@@ -82,14 +83,22 @@ extern "C" int cuda_batch_coherence_sweep(
 
 extern "C" int gpu_kuramoto_prepare_async(void* vctx) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_phases, nn*sizeof(float));
+    ENSURE_ALLOC(d_cos_buf, nn*sizeof(float));
+    ENSURE_ALLOC(d_sin_buf, nn*sizeof(float));
+    int bs = 256, n = nn;
     kuramoto_prepare_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(ctx->d_phases, ctx->d_cos_buf, ctx->d_sin_buf, n);
     return (int)cudaGetLastError();
 }
 
 extern "C" int gpu_kuramoto_update_async(void* vctx, float dt) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_phases, nn*sizeof(float));
+    ENSURE_ALLOC(d_omegas, nn*sizeof(float));
+    ENSURE_ALLOC(d_coupling, nn*sizeof(float));
+    int bs = 256, n = nn;
     kuramoto_update_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(ctx->d_phases, ctx->d_omegas, ctx->d_coupling, dt, n);
     return (int)cudaGetLastError();
 }

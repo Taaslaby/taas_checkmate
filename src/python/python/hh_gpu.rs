@@ -26,7 +26,6 @@ use pyo3::exceptions::PyValueError;
 #[cfg(feature = "cuda")]
 use crate::cuda::GpuContext;
 use crate::core::neuron::hh::{HhLutConfig, standard_config, build_config_from_channels};
-use crate::core::sparse;
 
 /// GPU-accelerated Hodgkin-Huxley simulator.
 ///
@@ -35,8 +34,8 @@ use crate::core::sparse;
 ///
 /// Standard channels: NaV (m³h) + KV (n⁴).
 /// Optional: CaV-T (T-type calcium) for pacemaking.
-#[pyclass(name = "GpuHHLUT")]
-pub struct PyGpuHHLUT {
+#[pyclass(name = "GpuHhLut", module = "taas_checkmate.hh")]
+pub struct PyGpuHhLut {
     ctx: GpuContext,
     n: usize,
     n_gates: usize,
@@ -46,7 +45,7 @@ pub struct PyGpuHHLUT {
 }
 
 #[pymethods]
-impl PyGpuHHLUT {
+impl PyGpuHhLut {
     #[new]
     #[pyo3(signature = (n, dt, pacemaking=None, tau_ref=None))]
     pub fn new(n: usize, dt: f32, pacemaking: Option<bool>, tau_ref: Option<f32>) -> PyResult<Self> {
@@ -56,7 +55,7 @@ impl PyGpuHHLUT {
 
         #[cfg(not(feature = "cuda"))]
         { let _ = pacemaking; return Err(PyValueError::new_err(
-            "GpuHHLUT requires CUDA — rebuild with --features cuda"
+            "GpuHhLut requires CUDA — rebuild with --features cuda"
         )); }
 
         #[cfg(feature = "cuda")]
@@ -91,7 +90,7 @@ impl PyGpuHHLUT {
                 cpu_cfg.n_gates, cpu_cfg.n_channels,
             ).map_err(|e| PyValueError::new_err(format!("hh_upload_channels: {e}")))?;
 
-            Ok(PyGpuHHLUT {
+            Ok(PyGpuHhLut {
                 ctx,
                 n,
                 n_gates: cpu_cfg.n_gates,

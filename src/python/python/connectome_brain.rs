@@ -18,13 +18,12 @@
 
 #![allow(non_snake_case)]
 
-use numpy::{PyArray1, PyArray2, PyArrayMethods, IntoPyArray, PyArray};
+use numpy::{PyArray1, PyArray2, PyArrayMethods, IntoPyArray};
 use pyo3::prelude::*;
-use pyo3::types::PyType;
 
 use crate::connectome::{
     self as conn,
-    ConnectomeData, BrainState, NeuronModel,
+    ConnectomeData, NeuronModel,
     LifParams, IzhikevichParams, RateParams, PsiParams,
 };
 
@@ -34,7 +33,7 @@ use crate::connectome::{
 ///
 /// Can be built from any source (FlyWire, MANC, synthetic, etc.)
 /// and then passed to ``BrainSimulator.step_batch()``.
-#[pyclass(name = "ConnectomeData", module = "taas_checkmate")]
+#[pyclass(name = "ConnectomeData", module = "taas_checkmate.connectome_brain")]
 pub struct PyConnectomeData {
     pub inner: ConnectomeData,
 }
@@ -126,7 +125,7 @@ impl PyConnectomeData {
 /// sim = tcm.BrainSimulator(conn.n_neurons, "lif")
 /// spike_buf = sim.step_batch(conn, n_steps=50, dt_ms=0.5, external_I=...)
 /// ```
-#[pyclass(name = "BrainSimulator", module = "taas_checkmate")]
+#[pyclass(name = "BrainSimulator", module = "taas_checkmate.connectome_brain")]
 pub struct PyBrainSimulator {
     state: conn::BrainState,
     model: NeuronModel,
@@ -167,7 +166,7 @@ impl PyBrainSimulator {
     ///
     /// Returns:
     ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None))]
+    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, scale=1.0))]
     pub fn step_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -175,6 +174,7 @@ impl PyBrainSimulator {
         n_steps: usize,
         dt_ms: f32,
         external_I: Option<Bound<'_, PyArray1<f32>>>,
+        scale: f32,
     ) -> PyResult<Bound<'py, PyArray1<i32>>> {
         let conn_data = &connectome.inner;
         let n = self.n_neurons;
@@ -194,10 +194,10 @@ impl PyBrainSimulator {
             NeuronModel::LIF => {
                 let tau_m = vec![20.0f32; n];
                 let v_rest = vec![-70.0f32; n];
-                let v_thresh = vec![-52.0f32; n];
+                let v_thresh = vec![-58.0f32; n];
                 let v_reset = vec![-70.0f32; n];
                 let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                conn::sim_lif(conn_data, &mut self.state, &params, &ext_I, n_steps)
+                conn::sim_lif(conn_data, &mut self.state, &params, &ext_I, n_steps, scale)
             }
             NeuronModel::Izhikevich => {
                 let params = IzhikevichParams {
@@ -423,7 +423,7 @@ impl PyBrainSimulator {
 /// rates = recorder.record_group(spike_buf, n_steps=50, dt_ms=0.5,
 ///                                indices=dn_list, max_rate=100.0)
 /// ```
-#[pyclass(name = "SpikeRecorder", module = "taas_checkmate")]
+#[pyclass(name = "SpikeRecorder", module = "taas_checkmate.connectome_brain")]
 pub struct PySpikeRecorder {
     inner: conn::SpikeRecorder,
 }

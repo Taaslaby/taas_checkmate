@@ -15,7 +15,7 @@ use crate::train::rl;
 ///     td_error = agent.learn(reward, next_value, done)
 ///
 /// Геттеры/сеттеры: gamma, lr_actor, lr_critic, tau_trace, tau_e, a_ltp, a_ltd
-#[pyclass(name = "ActorCriticAgent")]
+#[pyclass(name = "ActorCriticAgent", module = "taas_checkmate.rl")]
 pub struct PyActorCriticAgent {
     pub inner: rl::ActorCriticAgent,
 }

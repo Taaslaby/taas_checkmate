@@ -20,19 +20,19 @@ use crate::core::neuron::hh::{HhLutConfig, step_hh_lut, standard_config};
 ///
 /// Usage:
 /// ```python
-/// sim = HHLUT(128, 0.01)       # 128 neurons, dt=0.01ms
+/// sim = HhLut(128, 0.01)       # 128 neurons, dt=0.01ms
 /// sim.Ii[:] = 10.0             # inject current
 /// for _ in range(1000):
 ///     spikes = sim.step()      # returns spike count
 ///     print(sim.v[:3])         # first 3 membrane potentials
 /// ```
-#[pyclass(name = "HHLUT")]
-pub struct PyHHLUT {
+#[pyclass(name = "HhLut", module = "taas_checkmate.hh")]
+pub struct PyHhLut {
     cfg: HhLutConfig,
 }
 
 #[pymethods]
-impl PyHHLUT {
+impl PyHhLut {
     /// Create HH simulator.
     ///
     /// Args:
@@ -53,22 +53,15 @@ impl PyHHLUT {
             standard_config(n, dt)
         };
 
-        Ok(PyHHLUT { cfg })
+        Ok(PyHhLut { cfg })
     }
 
     /// Step all neurons by one timestep.
-    /// Returns: total spike count (int)
+    /// Returns: total spike count (int), via reverse zero-crossing detection
     pub fn step(&mut self) -> usize {
-        let v_before = self.cfg.v.clone();
-        step_hh_lut(&mut self.cfg);
-
-        let mut count = 0;
-        for i in 0..self.cfg.n {
-            if self.cfg.v[i] > 0.0 && v_before[i] <= 0.0 {
-                count += 1;
-            }
-        }
-        count
+        let mut spikes = vec![0i32; self.cfg.n];
+        step_hh_lut(&mut self.cfg, &mut spikes);
+        spikes.iter().map(|&s| s as usize).sum()
     }
 
     /// Membrane potentials.
@@ -126,14 +119,14 @@ impl PyHHLUT {
     /// Reset all neurons to resting state (correct steady-state gates).
     pub fn reset(&mut self) {
         self.cfg.v.fill(-65.0);
-        for i in 0..self.cfg.n {
-            let s = i * self.cfg.n_gates;
-            let g = &self.cfg.init_gates;
-            for j in 0..self.cfg.n_gates {
-                self.cfg.gates[s + j] = g[j];
-            }
-        }
+        self.cfg.v_prev.fill(-65.0);
         self.cfg.Ii.fill(0.0);
+        // Restore steady-state gates
+        let n_gates = self.cfg.n_gates;
+        for i in 0..self.cfg.n {
+            let s = i * n_gates;
+            self.cfg.gates[s..s + n_gates].copy_from_slice(&self.cfg.init_gates);
+        }
     }
 
     /// Set input current for a single neuron.

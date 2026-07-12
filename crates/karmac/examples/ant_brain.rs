@@ -11,7 +11,7 @@ fn bench_tanh() {
     let (n, ws, internal, sc, mc, steps) = (512, 32, 5, 27, 8, 200_000);
     let mut rng = rand::thread_rng();
 
-    let gnw = GlobalWorkspace::new(n, ws);
+    let mut gnw = GlobalWorkspace::new(n, ws);
     let sensor_w: Vec<f32> = (0..sc * 30).map(|_| rng.gen::<f32>() * 0.2 - 0.1).collect();
     let motor_w: Vec<f32> = (0..mc * n).map(|_| rng.gen::<f32>() * 0.1).collect();
     let w: Vec<f32> = (0..n * n).map(|_| rng.gen::<f32>() * 0.1 - 0.05).collect();
@@ -101,7 +101,7 @@ fn bench_hh() {
     let m_inf_p: Vec<*const f32> = m_inf.iter().map(|v| v.as_ptr()).collect();
     let decay_p: Vec<*const f32> = decay.iter().map(|v| v.as_ptr()).collect();
 
-    let gnw = GlobalWorkspace::new(n, ws);
+    let mut gnw = GlobalWorkspace::new(n, ws);
     let sensor_w: Vec<f32> = (0..sc * 30).map(|_| rng.gen::<f32>() * 0.2 - 0.1).collect();
     let motor_w: Vec<f32> = (0..mc * n).map(|_| rng.gen::<f32>() * 0.1).collect();
 

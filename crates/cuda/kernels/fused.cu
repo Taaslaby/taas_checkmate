@@ -74,14 +74,29 @@ extern "C" int gpu_fused_izhikevich_stdp_async(void* vctx,
     float lr_ltd, float lr_ltp, float w_min, float w_max)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
-    fused_izhikevich_stdp_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(
+    int nn = ctx->n_neurons;
+    int ns = ctx->n_synapses;
+    ENSURE_ALLOC(d_v, nn*sizeof(float));
+    ENSURE_ALLOC(d_u, nn*sizeof(float));
+    ENSURE_ALLOC(d_trace, nn*sizeof(float));
+    ENSURE_ALLOC(d_a, nn*sizeof(float));
+    ENSURE_ALLOC(d_b, nn*sizeof(float));
+    ENSURE_ALLOC(d_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_spikes, nn*sizeof(int));
+    ENSURE_ALLOC(d_c, nn*sizeof(float));
+    ENSURE_ALLOC(d_d, nn*sizeof(float));
+    ENSURE_ALLOC(d_refractory, nn*sizeof(float));
+    ENSURE_ALLOC(d_weights, ns*sizeof(float));
+    ENSURE_ALLOC(d_traces_pre, nn*sizeof(float));
+    ENSURE_ALLOC(d_traces_post, nn*sizeof(float));
+    int bs = 256;
+    fused_izhikevich_stdp_kernel<<<gs(nn,bs), bs, 0, ctx->stream>>>(
         ctx->d_v, ctx->d_u, ctx->d_trace,
         ctx->d_a, ctx->d_b, ctx->d_I, dt, trace_decay,
         ctx->d_spikes, ctx->d_c, ctx->d_d,
         ctx->d_refractory, 3.0f,
         ctx->d_weights, ctx->d_traces_pre, ctx->d_traces_post,
-        lr_ltd, lr_ltp, w_min, w_max, n);
+        lr_ltd, lr_ltp, w_min, w_max, ns);
     return (int)cudaGetLastError();
 }
 
@@ -224,7 +239,15 @@ extern "C" int gpu_count_spikes_async(void* vctx, int* d_total_spikes) {
 extern "C" int gpu_connectome_csr_plastic_async(void* vctx)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_spikes, nn*sizeof(int));
+    ENSURE_ALLOC(d_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_external_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_row_ptr, (nn+1)*sizeof(int));
+    ENSURE_ALLOC(d_col_indices, ctx->n_csr_synapses*sizeof(int));
+    ENSURE_ALLOC(d_weights, ctx->n_csr_synapses*sizeof(float));
+    ENSURE_ALLOC(d_nt_types, nn*sizeof(float));
+    int bs = 256, n = nn;
     int gs_n = gs(n, bs);
 
     reset_I_kernel<<<gs_n, bs, 0, ctx->stream>>>(
@@ -246,7 +269,15 @@ extern "C" int gpu_connectome_csr_plastic_async(void* vctx)
 extern "C" int gpu_connectome_csr_async(void* vctx)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_spikes, nn*sizeof(int));
+    ENSURE_ALLOC(d_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_external_I, nn*sizeof(float));
+    ENSURE_ALLOC(d_row_ptr, (nn+1)*sizeof(int));
+    ENSURE_ALLOC(d_col_indices, ctx->n_csr_synapses*sizeof(int));
+    ENSURE_ALLOC(d_csr_values, ctx->n_csr_synapses*sizeof(float));
+    ENSURE_ALLOC(d_nt_types, nn*sizeof(float));
+    int bs = 256, n = nn;
     int gs_n = gs(n, bs);
 
     // 1. Reset I to external baseline
@@ -337,6 +368,9 @@ extern "C" int gpu_context_batch_hh_steps(
     GpuCtx* ctx = (GpuCtx*)vctx;
     cudaError_t e;
     int n = ctx->n_neurons;
+
+    ENSURE_ALLOC(d_external_I, n*sizeof(float));
+    ENSURE_ALLOC(d_I, n*sizeof(float));
 
     // Allocate d_hh_I_syn on first use
     if (ctx->d_hh_I_syn == NULL) {

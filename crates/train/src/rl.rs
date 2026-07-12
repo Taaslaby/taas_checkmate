@@ -87,6 +87,7 @@ pub struct ActorCriticAgent {
     // ─── Pre-allocated scratch buffers (zero-alloc hot path) ─
     rates_buf: Vec<f32>,    // [PADDED(n_input)] for Poisson rates
     rates_out_buf: Vec<f32>,// [n_actions_real] for softmax
+    active_buf: Vec<usize>, // pre-allocated active list (avoids per-step Vec creation)
 
     // ─── Last value for TD ─────────────────────────────
     pub last_value: f32,
@@ -155,10 +156,11 @@ impl ActorCriticAgent {
             trace_hidden: vec![0.0; nh],
             trace_output: vec![0.0; na],
             trace_critic_val: vec![0.0; 8],
-            // Pre-allocated scratch (critic + zero-alloc act)
+            // Pre-allocated scratch (critic + zero-alloc act + fused kernel active list)
             I_c_buf: vec![0.0; 8],
             rates_buf: vec![0.0; PADDED(ni)],
             rates_out_buf: vec![0.0; n_actions],
+            active_buf: Vec::with_capacity(ni.min(64)),
             // TD
             last_value: 0.0,
             // Params
@@ -216,6 +218,7 @@ impl ActorCriticAgent {
                 &mut self.input_spikes_pool,
                 dt, 0.5, tau_ref,
                 ni,
+                &mut self.active_buf,
             );
 
             // b. Fused kernel: hidden spikes → LIF (one SIMD pass, no I_o buffer)
@@ -343,10 +346,12 @@ impl ActorCriticAgent {
         self.trace_output.fill(0.0); self.trace_critic_val.fill(0.0);
     }
 
-    fn update_eligibility_ih(&mut self, ni: usize, nh: usize, dt: f32, tau_t: f32, tau_e: f32, a_ltp: f32, a_ltd: f32) {
-        let decay_t = 1.0 - dt / tau_t.max(1.0);
-        let decay_e = 1.0 - dt / tau_e.max(1.0);
-        for i in 0..ni { self.trace_input[i] *= decay_t; }
+    fn update_eligibility_ih(&mut self, ni: usize, nh: usize, dt: f32, tau_t: f32, tau_e: f32, a_ltp: f32, a_ltd: f32) {                // NOTE: uses Forward Euler (1 - dt/τ) NOT exp(-dt/τ).
+                // At dt/τ=0.1, diff is ~0.5% — intentional speed choice.
+                // See crates/core/src/neuron/stdp.rs for details.
+                let decay_t = 1.0 - dt / tau_t.max(1.0);
+                let decay_e = 1.0 - dt / tau_e.max(1.0);
+                for i in 0..ni { self.trace_input[i] *= decay_t; }
         for j in 0..nh { self.trace_hidden[j] *= decay_t; }
         for i in 0..ni { if self.input_spikes_pool[i] != 0 { self.trace_input[i] += 1.0; } }
         for j in 0..nh { if self.sp_h[j] != 0 { self.trace_hidden[j] += 1.0; } }

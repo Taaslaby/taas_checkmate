@@ -16,3 +16,10 @@ research/
 .python-version
 __pypackages__/
 Cargo.lock
+
+# Large model files (connectome-gpt, etc.)
+*.taas
+*.pt
+*.pth
+*.bin
+*.safetensors

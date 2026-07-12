@@ -49,7 +49,7 @@ pub(crate) unsafe fn interference_mean(
         let da: [f32; 8] = d.to_array();
         let mut cv = [0.0f32; 8];
         for j in 0..8 { cv[j] = da[j].cos(); }
-        sum = sum + f32x8::from(cv);
+        sum += f32x8::from(cv);
     }
     let arr: [f32; 8] = sum.to_array();
     let mut total: f32 = arr.iter().sum();
@@ -84,9 +84,9 @@ pub(crate) unsafe fn phase_coherence(
         let si = load8(sin_buf, off);
         let co = load8(cos_buf, off);
         let a = load8(amplitudes, off);
-        ss = ss + a * si;
-        cc = cc + a * co;
-        sa = sa + a;
+        ss += a * si;
+        cc += a * co;
+        sa += a;
     }
     let ss_a: [f32; 8] = ss.to_array();
     let cc_a: [f32; 8] = cc.to_array();
@@ -172,11 +172,11 @@ pub(crate) unsafe fn lazy_sincos_update(
         let mask = diff.cmp_gt(eps_s);
         // Compute sin/cos per element where mask is true
         let p_arr: [f32; 8] = p.to_array();
-        let mask_arr: [u32; 8] = core::mem::transmute(mask.to_array());
+        let mask_bits = mask.to_array().map(|x| x.to_bits());
         let mut si = [0.0f32; 8];
         let mut co = [0.0f32; 8];
         for j in 0..8 {
-            if mask_arr[j] != 0 {
+            if mask_bits[j] != 0 {
                 si[j] = p_arr[j].sin();
                 co[j] = p_arr[j].cos();
             }
@@ -239,7 +239,7 @@ pub(crate) unsafe fn spike_entropy(
                 hc[j] = p_arr[j] * p_arr[j].max(eps).ln() * log2e;
             }
         }
-        h_sum_simd = h_sum_simd - f32x8::from(hc);
+        h_sum_simd -= f32x8::from(hc);
     }
 
     let arr: [f32; 8] = h_sum_simd.to_array();
@@ -286,8 +286,8 @@ pub(crate) unsafe fn batch_coherence_sweep(
             let a = load8(areas, base_i + k);
             let s = load8(areas_sin, base_i + k);
             let c = load8(areas_cos, base_i + k);
-            ss_i = ss_i + a * s;
-            cc_i = cc_i + a * c;
+            ss_i += a * s;
+            cc_i += a * c;
             k += 8;
         }
         let mut sum_si: f32 = ss_i.to_array().iter().sum();
@@ -307,8 +307,8 @@ pub(crate) unsafe fn batch_coherence_sweep(
                 let a = load8(areas, base_j + k);
                 let s = load8(areas_sin, base_j + k);
                 let c = load8(areas_cos, base_j + k);
-                ss_j = ss_j + a * s;
-                cc_j = cc_j + a * c;
+                ss_j += a * s;
+                cc_j += a * c;
                 k += 8;
             }
             let mut sum_sj: f32 = ss_j.to_array().iter().sum();

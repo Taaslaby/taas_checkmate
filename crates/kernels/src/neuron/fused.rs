@@ -1,12 +1,13 @@
 #![allow(non_snake_case)]
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{load8, load8_mut, store8, spike_mask_to_i32, RNG_SCALE_24};
+use super::{fast_exp_simd, load8, load8_mut, store8, spike_mask_to_i32, RNG_SCALE_24};
 
 // ═══════════════════════════════════════════════════════
 //  Fused Izhikevich with weight accumulation (SIMD)
 // ═══════════════════════════════════════════════════════
 
 /// Fused kernel: accumulate input weights → Izhikevich step in one SIMD pass.
+/// Uses active pre-synapse list for sparse inputs (~5% firing rate).
 /// Eliminates the intermediate I_h buffer and memory round-trip.
 ///
 /// For each block of 8 hidden neurons:
@@ -15,6 +16,12 @@ use super::{load8, load8_mut, store8, spike_mask_to_i32, RNG_SCALE_24};
 ///
 /// All state updates happen in-register — no scalar accumulation loop,
 /// no intermediate buffer. ~3x faster than separate weight loop + izhikevich.
+///
+/// # Sparsity optimization
+/// Pre-builds a list of active (spiking) pre-synaptic indices. Instead of
+/// iterating ALL `ni` inputs and checking `if zi != 0`, we iterate only
+/// the active set. For 5% firing rate with ni=1000, this reduces loop
+/// iterations from 1000 to 50 per SIMD block.
 ///
 /// # Safety
 /// All pointers must be valid for the given dimensions. `nh` must be padded
@@ -27,6 +34,7 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
     input_spikes: *const i32,
     dt: f32, trace_decay: f32, tau_ref: f32,
     ni: usize, nh: usize,
+    active_buf: &mut Vec<usize>,    // pre-allocated, cleared on entry
 ) {
     let dt_s = f32x8::splat(dt);
     let td_s = f32x8::splat(trace_decay);
@@ -39,6 +47,16 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
     let scale10 = f32x8::splat(10.0);
     let tr_s = f32x8::splat(tau_ref);
 
+    // Build active pre-synapse list (sparse optimization) — reuse pre-allocated buffer.
+    // Caller provides &mut active_buf to avoid per-step Vec::with_capacity allocation.
+    active_buf.clear();
+    for i in 0..ni {
+        if *input_spikes.add(i) != 0 {
+            active_buf.push(i);
+        }
+    }
+    let active: &[usize] = &*active_buf;
+
     let n8 = nh & !7;
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
@@ -50,14 +68,11 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
         let cc = load8(c, off);
         let dd = load8(d, off);
 
-        // Accumulate currents from all active inputs directly in SIMD register
+        // Accumulate currents from active pre-synapses only
         let mut I_s = zero;
-        for i in 0..ni {
-            let zi = *input_spikes.add(i);
-            if zi != 0 {
-                let w = load8(weights, i * nh + off);
-                I_s = w.mul_add(scale10, I_s);  // I_s += w * 10.0
-            }
+        for &i in active {
+            let w = load8(weights, i * nh + off);
+            I_s = w.mul_add(scale10, I_s);  // I_s += w * 10.0
         }
 
         // Refractory mask: refr > 0 → skip dynamics
@@ -97,52 +112,47 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
         let sp8 = spikes.add(off);
         *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
         *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
-    }
-
-    // Scalar tail (should be empty since nh is padded to ×8)
-    if n8 < nh {
-        let v = std::slice::from_raw_parts_mut(v, nh);
-        let u = std::slice::from_raw_parts_mut(u, nh);
-        let trace = std::slice::from_raw_parts_mut(trace, nh);
-        let spikes = std::slice::from_raw_parts_mut(spikes, nh);
-        let refr_sl = std::slice::from_raw_parts_mut(refractory, nh);
-        let a_sl = std::slice::from_raw_parts(a, nh);
-        let b_sl = std::slice::from_raw_parts(b, nh);
-        let c_sl = std::slice::from_raw_parts(c, nh);
-        let d_sl = std::slice::from_raw_parts(d, nh);
-        for j in n8..nh {
-            // Accumulate current (scalar)
-            let mut I_val = 0.0f32;
-            for i in 0..ni {
-                let zi = *input_spikes.add(i);
-                if zi != 0 {
+    }        // Scalar tail (should be empty since nh is padded to ×8)
+        if n8 < nh {
+            let v = std::slice::from_raw_parts_mut(v, nh);
+            let u = std::slice::from_raw_parts_mut(u, nh);
+            let trace = std::slice::from_raw_parts_mut(trace, nh);
+            let spikes = std::slice::from_raw_parts_mut(spikes, nh);
+            let refr_sl = std::slice::from_raw_parts_mut(refractory, nh);
+            let a_sl = std::slice::from_raw_parts(a, nh);
+            let b_sl = std::slice::from_raw_parts(b, nh);
+            let c_sl = std::slice::from_raw_parts(c, nh);
+            let d_sl = std::slice::from_raw_parts(d, nh);
+            for j in n8..nh {
+                // Accumulate current from active pre-synapses only
+                let mut I_val = 0.0f32;
+                for &i in active {
                     I_val += *weights.add(i * nh + j) * 10.0;
                 }
-            }
 
-            if refr_sl[j] > 0.0 {
-                refr_sl[j] = (refr_sl[j] - dt).max(0.0);
-                spikes[j] = 0;
-                continue;
-            }
-            let orig_v = v[j];
-            let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[j] + I_val;
-            let du = a_sl[j] * (b_sl[j] * orig_v - u[j]);
-            v[j] += dt * dv;
-            u[j] += dt * du;
-            if v[j] >= 30.0 {
-                spikes[j] = 1;
-                v[j] = c_sl[j];
-                u[j] += d_sl[j];
-                refr_sl[j] = tau_ref;
-                trace[j] += trace_decay * (1.0 - trace[j]);
-            } else {
-                spikes[j] = 0;
-                trace[j] *= 1.0 - trace_decay;
+                if refr_sl[j] > 0.0 {
+                    refr_sl[j] = (refr_sl[j] - dt).max(0.0);
+                    spikes[j] = 0;
+                    continue;
+                }
+                let orig_v = v[j];
+                let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[j] + I_val;
+                let du = a_sl[j] * (b_sl[j] * orig_v - u[j]);
+                v[j] += dt * dv;
+                u[j] += dt * du;
+                if v[j] >= 30.0 {
+                    spikes[j] = 1;
+                    v[j] = c_sl[j];
+                    u[j] += d_sl[j];
+                    refr_sl[j] = tau_ref;
+                    trace[j] += trace_decay * (1.0 - trace[j]);
+                } else {
+                    spikes[j] = 0;
+                    trace[j] *= 1.0 - trace_decay;
+                }
             }
         }
     }
-}
 
 // ═══════════════════════════════════════════════════════
 //  Fused LIF with weight accumulation (SIMD)
@@ -192,12 +202,14 @@ pub(crate) unsafe fn fused_output_lif_step(
             }
         }
 
-        // LIF dynamics with refractory
+        // LIF dynamics with refractory — Exponential Euler
+        // v = v_rest + (v - v_rest)·exp(-dt/τ) + I·(1 - exp(-dt/τ))
         let refr_mask = refr.cmp_gt(zero);
         let mask_tau = tau_m_p.cmp_gt(zero);
-        let inv_tau = mask_tau.blend(one / tau_m_p, zero);
-        let dv = (v_rest_p - vv + I_s) * inv_tau * dt_s;
-        vv = vv + refr_mask.blend(zero, mask_tau.blend(dv, zero));
+        let decay = mask_tau.blend(fast_exp_simd(-dt_s / tau_m_p), zero);
+        let one_minus_decay = one - decay;
+        let new_v = v_rest_p + (vv - v_rest_p) * decay + I_s * one_minus_decay;
+        vv = refr_mask.blend(vv, mask_tau.blend(new_v, vv));
 
         let not_refr = !refr_mask;
         let sm = vv.cmp_ge(v_th_p) & not_refr;
@@ -246,7 +258,8 @@ pub(crate) unsafe fn fused_output_lif_step(
             let v_thresh = v_th_sl[k];
             let v_reset = v_reset_sl[k];
             if tau_m > 0.0 {
-                v[k] += (v_rest - v[k] + I_val) / tau_m * dt;
+                let decay = (-dt / tau_m).exp();
+                v[k] = v_rest + (v[k] - v_rest) * decay + I_val * (1.0 - decay);
             }
             if v[k] >= v_thresh {
                 spikes[k] = 1;
@@ -291,6 +304,7 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
     dt: f32,                    // ms (Poisson uses dt/1000 for probability)
     trace_decay: f32, tau_ref: f32,
     ni: usize, nh: usize,
+    active_buf: &mut Vec<usize>,    // pre-allocated, cleared on entry
 ) {
     let dt_sec = dt / 1000.0;  // ms → sec for Poisson probability
     let dt_s = f32x8::splat(dt);
@@ -315,7 +329,16 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
         *input_spikes_out.add(i) = if r < p { 1 } else { 0 };
     }
 
-    // Step 2: Fused Izhikevich (same as fused_hidden_izhikevich_step)
+    // Step 2: Build active pre-synapse list (sparse) — reuse pre-allocated buffer.
+    active_buf.clear();
+    for i in 0..ni {
+        if *input_spikes_out.add(i) != 0 {
+            active_buf.push(i);
+        }
+    }
+    let active: &[usize] = &*active_buf;
+
+    // Step 3: Fused Izhikevich (same as fused_hidden_izhikevich_step)
     let n8 = nh & !7;
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
@@ -327,13 +350,11 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
         let cc = load8(c, off);
         let dd = load8(d, off);
 
-        // Accumulate currents from all active inputs directly in SIMD register
+        // Accumulate currents from active pre-synapses only
         let mut I_s = zero;
-        for i in 0..ni {
-            if *input_spikes_out.add(i) != 0 {
-                let w = load8(weights, i * nh + off);
-                I_s = w.mul_add(scale10, I_s);
-            }
+        for &i in active {
+            let w = load8(weights, i * nh + off);
+            I_s = w.mul_add(scale10, I_s);
         }
 
         // Izhikevich dynamics (same as fused_hidden_izhikevich_step)
@@ -380,11 +401,10 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
         let c_sl = std::slice::from_raw_parts(c, nh);
         let d_sl = std::slice::from_raw_parts(d, nh);
         for j in n8..nh {
+            // Accumulate current from active pre-synapses only
             let mut I_val = 0.0f32;
-            for i in 0..ni {
-                if *input_spikes_out.add(i) != 0 {
-                    I_val += *weights.add(i * nh + j) * 10.0;
-                }
+            for &i in active {
+                I_val += *weights.add(i * nh + j) * 10.0;
             }
             if refr_sl[j] > 0.0 {
                 refr_sl[j] = (refr_sl[j] - dt).max(0.0);

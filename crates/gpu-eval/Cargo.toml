@@ -1,0 +1,12 @@
+[package]
+name = "gpu-eval"
+version.workspace = true
+edition = "2021"
+description = "GPU-accelerated LIF connectome evaluator — C ABI for Python ctypes"
+
+[lib]
+crate-type = ["cdylib"]
+name = "gpu_lif"
+
+[dependencies]
+cuda-kernels = { path = "../cuda" }

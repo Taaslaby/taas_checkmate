@@ -6,7 +6,7 @@ pub mod rl;
 pub mod spike;
 
 #[cfg(feature = "t3")]
-pub mod spigrad;
+pub mod spike_grad;
 
 #[cfg(all(feature = "t3", feature = "cuda"))]
 pub mod spike_cuda;

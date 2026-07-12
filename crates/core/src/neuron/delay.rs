@@ -23,16 +23,28 @@ impl DelayBuffer {
         self.pos = (self.pos + data.len()) % self.n;
     }
 
-    pub fn read(&self, delay: usize) -> [f32; 8] {
-        let mut out = [0.0f32; 8];
+    pub fn read(&self, delay: usize) -> Vec<f32> {
+        let n_out = self.n.min(8);
+        let mut out = vec![0.0f32; n_out];
         let read_pos = (self.pos + self.n - delay % self.n) % self.n;
-        kernels::delay_buffer_circular(&mut out[..], &self.buf[..self.n], read_pos);
+        // Manual copy with wrap-around.
+        // Note: delay_buffer_circular requires output.len() == buffer.len(),
+        // but we want a smaller output. So we copy manually.
+        for i in 0..n_out {
+            let idx = (read_pos + i) % self.n;
+            out[i] = self.buf[idx];
+        }
         out
     }
 
-    pub fn read_multi(&self, delays: &[i32; 8]) -> [f32; 8] {
-        let mut out = [0.0f32; 8];
-        kernels::delay_buffer_multi_tap(&mut out[..], &self.buf[..self.n], delays);
+    pub fn read_multi(&self, delays: &[i32]) -> Vec<f32> {
+        let n_taps = delays.len().min(self.n).min(8);
+        let mut out = vec![0.0f32; n_taps];
+        let wrapped: Vec<i32> = delays.iter().map(|&d| {
+            let abs_d = d.unsigned_abs() as usize % self.n;
+            if d < 0 { -(abs_d as i32) } else { abs_d as i32 }
+        }).collect();
+        kernels::delay_buffer_multi_tap(&mut out, &self.buf[..self.n], &wrapped);
         out
     }
 }

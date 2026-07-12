@@ -52,7 +52,11 @@ extern "C" int gpu_stdp_update_async(void* vctx,
     float lr_ltd, float lr_ltp, float w_min, float w_max)
 {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_synapses;
+    int ns = ctx->n_synapses;
+    ENSURE_ALLOC(d_weights, ns*sizeof(float));
+    ENSURE_ALLOC(d_traces_pre, ctx->n_neurons*sizeof(float));
+    ENSURE_ALLOC(d_traces_post, ctx->n_neurons*sizeof(float));
+    int bs = 256, n = ns;
     stdp_update_kernel<<<gs(n,bs), bs, 0, ctx->stream>>>(
         ctx->d_weights, ctx->d_traces_pre, ctx->d_traces_post,
         lr_ltd, lr_ltp, w_min, w_max, n);

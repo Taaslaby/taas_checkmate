@@ -29,6 +29,7 @@ fn main() {
         "hh.cu",
         "csr_spmv_tanh.cu",
         "stdp_dopamine.cu",
+        "t3_fused_forward_bptt.cu",
     ];
     let mut obj_files = Vec::new();
     let nvcc = which_nvcc();

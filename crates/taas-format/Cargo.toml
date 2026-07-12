@@ -8,11 +8,13 @@ description = ".taas format — universal snapshot for SNN models and oscillator
 taas-core = { path = "../core" }
 taas-connectome = { path = "../connectome" }
 taas-t3 = { path = "../t3" }
-taas-train = { path = "../train" }
+taas-train = { path = "../train", optional = true }
 cuda-kernels = { path = "../cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 
 [features]
+default = ["train"]
 cuda = ["cuda-kernels"]
+train = ["dep:taas-train"]

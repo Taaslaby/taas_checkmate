@@ -52,7 +52,7 @@ use karmac::semantic_pointer::SemanticPointer;
 /// Python-доступная SPAUN pipeline.
 ///
 /// Чистый CPU (SIMD+rayon). Все внутренние состояния доступны как numpy массивы.
-#[pyclass(name = "SpaunPipeline", module = "taas_checkmate")]
+#[pyclass(name = "SpaunPipeline", module = "taas_checkmate.spaun")]
 pub struct PySpaunPipeline {
     // ── Core components ──
     gnw: GlobalWorkspace,

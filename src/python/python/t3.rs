@@ -39,7 +39,7 @@ use crate::t3::Decoder;
 ///     ph1 = tri.phases(1)                        # фазы популяции 1
 ///
 /// PST фичи: 18n+12 размерность (sin/cos, скорости, r, порядок, cross-order)
-#[pyclass(name = "TriOscillator")]
+#[pyclass(name = "TriOscillator", module = "taas_checkmate.t3")]
 pub struct PyTriOscillator {
     pub inner: crate::t3::TriOscillator,
     _fv: Vec<f32>,
@@ -108,8 +108,7 @@ impl PyTriOscillator {
             self.set_drive(d)?;
         }
         self.inner.step(dt);
-        let fv = crate::t3::pst_linear_features(&self.inner);
-        self._fv[..fv.len()].copy_from_slice(&fv);
+        crate::t3::pst_linear_features_into(&self.inner, &mut self._fv);
         Python::with_gil(|py| {
             Ok(PyArray1::from_vec(py, self._fv.clone()).into())
         })
@@ -130,8 +129,8 @@ impl PyTriOscillator {
         let mut buf = Vec::with_capacity(steps * dim);
         for _ in 0..steps {
             self.inner.step(dt);
-            let fv = crate::t3::pst_linear_features(&self.inner);
-            buf.extend_from_slice(&fv);
+            // step() уже заполняет self._fv — просто копируем
+            buf.extend_from_slice(&self._fv);
         }
         Python::with_gil(|py| {
             let arr = PyArray2::from_vec2(py, &buf.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>())
@@ -144,7 +143,8 @@ impl PyTriOscillator {
 
     /// PST-фичи текущего состояния T3 как np.ndarray (18n+12,).
     fn pst(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
-        let fv = crate::t3::pst_linear_features(&self.inner);
+        let mut fv = self._fv.clone();
+        crate::t3::pst_linear_features_into(&self.inner, &mut fv);
         PyArray1::from_vec(py, fv).into()
     }
 
@@ -203,7 +203,7 @@ impl PyTriOscillator {
 ///     prediction = dec.predict(features)
 ///     dec.train(features, target)
 ///     weights = dec.weights()
-#[pyclass(name = "NlmsDecoder")]
+#[pyclass(name = "NlmsDecoder", module = "taas_checkmate.t3")]
 pub struct PyNlmsDecoder {
     pub inner: crate::t3::NlmsDecoder,
 }
@@ -244,7 +244,7 @@ impl PyNlmsDecoder {
 ///     dec = KalmanDecoder(pst_dim, q=1.0, r=0.1)
 ///     prediction = dec.predict(features)
 ///     dec.train(features, target)
-#[pyclass(name = "KalmanDecoder")]
+#[pyclass(name = "KalmanDecoder", module = "taas_checkmate.t3")]
 pub struct PyKalmanDecoder {
     pub inner: crate::t3::KalmanDecoder,
 }
@@ -298,7 +298,8 @@ pub fn py_pst_features(
 #[pyfunction]
 #[pyo3(name = "pst_linear_features")]
 pub fn py_pst_linear_features(tri: &PyTriOscillator, py: Python<'_>) -> Py<PyArray1<f32>> {
-    let fv = crate::t3::pst_linear_features(&tri.inner);
+    let mut fv = vec![0.0; crate::t3::pst_linear_dim(tri.inner.n)];
+    crate::t3::pst_linear_features_into(&tri.inner, &mut fv);
     PyArray1::from_vec(py, fv).into()
 }
 
@@ -322,20 +323,19 @@ pub fn py_pst_fast_dim(n: usize) -> usize {
 //  T2SpigradTrajectory — Python class
 // ═══════════════════════════════════════════════════════════
 
-/// T2-SPIGRAD trajectory — хранит траекторию T3 для backward pass.
+/// T2-SPIKE-GRAD trajectory — хранит траекторию T3 для backward pass.
 ///
-/// Создаётся функцией t2spigrad_forward(), передаётся в t2spigrad_backward().
+/// Создаётся функцией t2spike_grad_forward(), передаётся в t2spike_grad_backward().
 /// Содержит все фазы, амплитуды, coupling и драйвы на каждом шаге.
-#[pyclass(name = "T2SpigradTrajectory")]
-// (Rust struct PyT2SpigradTrajectory — Python видит как T2SpigradTrajectory)
-pub struct PyT2SpigradTrajectory {
+#[pyclass(name = "T2SpikeGradTrajectory", module = "taas_checkmate.t3")]
+pub struct PyT2SpikeGradTrajectory {
     inner: crate::train::spike::T3SpikeTrajectory,
 }
 
 #[pymethods]
-impl PyT2SpigradTrajectory {
+impl PyT2SpikeGradTrajectory {
     fn __repr__(&self) -> String {
-        format!("T2SpigradTrajectory(n_osc={}, n_steps={})", self.inner.n_osc, self.inner.n_steps)
+        format!("T2SpikeGradTrajectory(n_osc={}, n_steps={})", self.inner.n_osc, self.inner.n_steps)
     }
 
     fn n_osc(&self) -> usize { self.inner.n_osc }
@@ -350,34 +350,28 @@ impl PyT2SpigradTrajectory {
     fn w13(&self) -> f32 { self.inner.w13 }
     fn w23(&self) -> f32 { self.inner.w23 }
 
-    fn omega1(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.omega1.clone()).into() }
-    fn omega2(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.omega2.clone()).into() }
-    fn omega3(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.omega3.clone()).into() }
-    fn th1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th1_pre.clone()).into() }
-    fn th2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th2_pre.clone()).into() }
-    fn th3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th3_pre.clone()).into() }
-    fn r1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r1_pre.clone()).into() }
-    fn r2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r2_pre.clone()).into() }
-    fn r3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r3_pre.clone()).into() }
+    fn th1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th1_pre().to_vec()).into() }
+    fn th2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th2_pre().to_vec()).into() }
+    fn th3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th3_pre().to_vec()).into() }
+    fn r1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r1_pre().to_vec()).into() }
+    fn r2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r2_pre().to_vec()).into() }
+    fn r3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r3_pre().to_vec()).into() }
     fn th1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th1_final.clone()).into() }
     fn th2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th2_final.clone()).into() }
     fn th3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th3_final.clone()).into() }
     fn r1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r1_final.clone()).into() }
     fn r2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r2_final.clone()).into() }
     fn r3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r3_final.clone()).into() }
-    fn coupling1(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.coupling1.clone()).into() }
-    fn coupling2(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.coupling2.clone()).into() }
-    fn coupling3(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.coupling3.clone()).into() }
-    fn drive1(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive1.clone()).into() }
-    fn drive2(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive2.clone()).into() }
-    fn drive3(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive3.clone()).into() }
+    fn drive1(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive1().to_vec()).into() }
+    fn drive2(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive2().to_vec()).into() }
+    fn drive3(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive3().to_vec()).into() }
 }
 
 // ═══════════════════════════════════════════════════════════
 //  T2-SPIGRAD — T3-SPIKE GRADient
 // ═══════════════════════════════════════════════════════════
 
-/// T2-SPIGRAD forward: драйвы → T3 (N шагов) → PST фичи + траектория.
+/// T2-SPIKE-GRAD forward: драйвы → T3 (N шагов) → PST фичи + траектория.
 ///
 /// Градиентный движок для T3. Вычисляет forward pass и сохраняет
 /// траекторию для последующего backward pass (BPTT).
@@ -393,10 +387,10 @@ impl PyT2SpigradTrajectory {
 ///     drives: np.ndarray (n_steps, 3*n_osc) — драйвы для всех шагов
 ///
 /// Returns:
-///     (pst, trajectory) — PST фичи и объект T2SpigradTrajectory для backward
+///     (pst, trajectory) — PST фичи и объект T2SpikeGradTrajectory для backward
 #[pyfunction]
-#[pyo3(name = "t2spigrad_forward", signature = (n_osc, n_steps, dt, drive_gain, alpha, freq_min, freq_max, coupling_w12, coupling_w13, coupling_w23, drives))]
-pub fn py_t2spigrad_forward(
+#[pyo3(name = "t2spike_grad_forward", signature = (n_osc, n_steps, dt, drive_gain, alpha, freq_min, freq_max, coupling_w12, coupling_w13, coupling_w23, drives))]
+pub fn py_t2spike_grad_forward(
     n_osc: usize,
     n_steps: usize,
     dt: f32,
@@ -419,32 +413,32 @@ pub fn py_t2spigrad_forward(
         &drives_data,
     );
 
-    let py_traj = PyT2SpigradTrajectory { inner: traj };
+    let py_traj = PyT2SpikeGradTrajectory { inner: traj };
     let pst_arr = PyArray1::from_vec(py, pst);
     let tuple = PyTuple::new(py, &[pst_arr.into_py(py), py_traj.into_py(py)])?.unbind();
     Ok(tuple.into())
 }
 
-/// T2-SPIGRAD backward: градиент PST → BPTT → градиент драйвов.
+/// T2-SPIKE-GRAD backward: градиент PST → BPTT → градиент драйвов.
 ///
 /// Вычисляет градиент драйвов по градиенту PST фичей
 /// через Backpropagation Through Time (BPTT).
 ///
 /// Args:
 ///     grad_pst: np.ndarray (pst_dim,) — градиент потерь по PST
-///     traj: T2SpigradTrajectory — траектория из forward
+///     traj: T2SpikeGradTrajectory — траектория из forward
 ///     per_step_grad_pst: optional np.ndarray (n_steps, pst_dim) — градиент потерь
 ///         по PST для КАЖДОГО шага. Если передан, выполняет single-pass BPTT
-///         для полной траектории (SPIGRAD). Если None, использует только grad_pst
+///         для полной траектории (SPIKE-GRAD). Если None, использует только grad_pst
 ///         для финального шага.
 ///
 /// Returns:
 ///     np.ndarray (n_steps, 3*n_osc) — градиент потерь по драйвам
 #[pyfunction]
-#[pyo3(name = "t2spigrad_backward", signature = (grad_pst, traj, per_step_grad_pst=None))]
-pub fn py_t2spigrad_backward(
+#[pyo3(name = "t2spike_grad_backward", signature = (grad_pst, traj, per_step_grad_pst=None))]
+pub fn py_t2spike_grad_backward(
     grad_pst: Bound<'_, PyArray1<f32>>,
-    traj: &PyT2SpigradTrajectory,
+    traj: &PyT2SpikeGradTrajectory,
     per_step_grad_pst: Option<Bound<'_, PyArray2<f32>>>,
     py: Python<'_>,
 ) -> PyResult<Py<PyArray2<f32>>> {
@@ -480,25 +474,25 @@ fn ensure_cuda_device() -> Result<(), String> {
     CUDA_INIT.get_or_init(|| crate::cuda::set_device(0)).clone()
 }
 
-/// T2-SPIGRAD backward на GPU (CUDA).
+/// T2-SPIKE-GRAD backward на GPU (CUDA).
 ///
 /// Требует сборки с --features cuda.
 /// GPU контекст кэшируется — нет переаллокации при повторных вызовах.
 ///
 /// Args:
 ///     grad_pst: np.ndarray (pst_dim,) — градиент потерь по PST
-///     traj: T2SpigradTrajectory — траектория из forward
+///     traj: T2SpikeGradTrajectory — траектория из forward
 ///     per_step_grad_pst: optional np.ndarray (n_steps, pst_dim) — градиент потерь
-///         по PST для КАЖДОГО шага. Single-pass BPTT для полной траектории (SPIGRAD).
+///         по PST для КАЖДОГО шага. Single-pass BPTT для полной траектории (SPIKE-GRAD).
 ///
 /// Returns:
 ///     np.ndarray (n_steps, 3*n_osc) — градиент потерь по драйвам
 #[cfg(feature = "cuda")]
 #[pyfunction]
-#[pyo3(name = "t2spigrad_backward_cuda", signature = (grad_pst, traj, per_step_grad_pst=None))]
-pub fn py_t2spigrad_backward_cuda(
+#[pyo3(name = "t2spike_grad_backward_cuda", signature = (grad_pst, traj, per_step_grad_pst=None))]
+pub fn py_t2spike_grad_backward_cuda(
     grad_pst: Bound<'_, PyArray1<f32>>,
-    traj: &PyT2SpigradTrajectory,
+    traj: &PyT2SpikeGradTrajectory,
     per_step_grad_pst: Option<Bound<'_, PyArray2<f32>>>,
     py: Python<'_>,
 ) -> PyResult<Py<PyArray2<f32>>> {
@@ -549,15 +543,15 @@ pub fn py_t2spigrad_backward_cuda(
     Ok(arr.into())
 }
 
-/// T2-SPIGRAD forward на GPU (CUDA).
+/// T2-SPIKE-GRAD forward на GPU (CUDA).
 ///
 /// Требует сборки с --features cuda.
 ///
-/// Returns: (pst, trajectory) — PST фичи и T2SpigradTrajectory для backward.
+/// Returns: (pst, trajectory) — PST фичи и T2SpikeGradTrajectory для backward.
 #[cfg(feature = "cuda")]
 #[pyfunction]
-#[pyo3(name = "t2spigrad_forward_cuda", signature = (n_osc, n_steps, dt, drive_gain, alpha, freq_min, freq_max, coupling_w12, coupling_w13, coupling_w23, drives))]
-pub fn py_t2spigrad_forward_cuda(
+#[pyo3(name = "t2spike_grad_forward_cuda", signature = (n_osc, n_steps, dt, drive_gain, alpha, freq_min, freq_max, coupling_w12, coupling_w13, coupling_w23, drives))]
+pub fn py_t2spike_grad_forward_cuda(
     n_osc: usize,
     n_steps: usize,
     dt: f32,
@@ -588,7 +582,7 @@ pub fn py_t2spigrad_forward_cuda(
         &drives_data,
     );
 
-    let py_traj = PyT2SpigradTrajectory { inner: traj };
+    let py_traj = PyT2SpikeGradTrajectory { inner: traj };
     let pst_arr = PyArray1::from_vec(py, pst);
     let tuple = PyTuple::new(py, &[pst_arr.into_py(py), py_traj.into_py(py)])?.unbind();
     Ok(tuple.into())
@@ -597,10 +591,11 @@ pub fn py_t2spigrad_forward_cuda(
 /// Вычислить полную PST матрицу из траектории (один проход на Rust, без Python-накладок).
 ///
 /// Возвращает np.ndarray формы (n_steps, pst_dim) — PST фичи для каждого шага.
+/// Бывшая t2spigrad_pst_matrix (переименована в t2spike_grad_pst_matrix).
 #[pyfunction]
-#[pyo3(name = "t2spigrad_pst_matrix")]
-pub fn py_t2spigrad_pst_matrix(
-    traj: &PyT2SpigradTrajectory,
+#[pyo3(name = "t2spike_grad_pst_matrix")]
+pub fn py_t2spike_grad_pst_matrix(
+    traj: &PyT2SpikeGradTrajectory,
     py: Python<'_>,
 ) -> PyResult<Py<PyArray2<f32>>> {
     let result = crate::train::spike::t3spike_compute_pst_matrix(&traj.inner);
@@ -615,10 +610,11 @@ pub fn py_t2spigrad_pst_matrix(
 /// Быстрая PST матрица — sin(θ) + r для всех шагов (6N на шаг, 0 trig calls).
 ///
 /// Возвращает np.ndarray формы (n_steps, 6n).
+/// Бывшая t2spigrad_pst_fast_matrix (переименована в t2spike_grad_pst_fast_matrix).
 #[pyfunction]
-#[pyo3(name = "t2spigrad_pst_fast_matrix")]
-pub fn py_t2spigrad_pst_fast_matrix(
-    traj: &PyT2SpigradTrajectory,
+#[pyo3(name = "t2spike_grad_pst_fast_matrix")]
+pub fn py_t2spike_grad_pst_fast_matrix(
+    traj: &PyT2SpikeGradTrajectory,
     py: Python<'_>,
 ) -> PyResult<Py<PyArray2<f32>>> {
     let result = crate::train::spike::t3spike_compute_pst_fast_matrix(&traj.inner);
@@ -652,7 +648,7 @@ pub fn py_normalize_features(
     Ok(())
 }
 
-#[pyclass(name = "PstControl")]
+#[pyclass(name = "PstControl", module = "taas_checkmate.t3")]
 pub struct PyPstControl {
     inner: crate::t3::PstControl,
 }
@@ -762,25 +758,25 @@ impl PyPstControl {
 //  Sparker — спайки → trace → hologram
 // ═══════════════════════════════════════════════════════════════
 
-/// Спарковка: спайки → trace → hologram(3) для FM-драйва T³.
+/// Спайкер: спайки → trace → hologram(3) для FM-драйва T³.
 ///
 /// Использование:
 ///     positions = np.array([[x1,y1], [x2,y2], ...])  # (N, 2)
-///     sparker = Sparker(positions, tau_ms=50.0)
-///     h = sparker.feed(spikes)      # np.ndarray (3,) — голограмма
-///     h = sparker.hologram()        # текущая голограмма без feed
-#[pyclass(name = "Sparker")]
-pub struct PySparker {
-    inner: crate::t3::Sparker,
+///     spiker = Spiker(positions, tau_ms=50.0)
+///     h = spiker.feed(spikes)      # np.ndarray (3,) — голограмма
+///     h = spiker.hologram()        # текущая голограмма без feed
+#[pyclass(name = "Spiker", module = "taas_checkmate.t3")]
+pub struct PySpiker {
+    inner: crate::t3::Spiker,
 }
 
 #[pymethods]
-impl PySparker {
+impl PySpiker {
     #[new]
     fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32) -> PyResult<Self> {
         let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
             .chunks(2).map(|c| [c[0], c[1]]).collect();
-        Ok(Self { inner: crate::t3::Sparker::new(&pos, tau_ms, dt_ms) })
+        Ok(Self { inner: crate::t3::Spiker::new(&pos, tau_ms, dt_ms) })
     }
 
     /// Подать спайки и получить голограмму.
@@ -798,7 +794,7 @@ impl PySparker {
     }
 
     fn __repr__(&self) -> String {
-        format!("Sparker(n={})", self.inner.hologram().len())
+        format!("Spiker(n={})", self.inner.hologram().len())
     }
 }
 
@@ -807,7 +803,7 @@ impl PySparker {
 /// Использование:
 ///     enc = HologramEncoder(positions, k=3)
 ///     h = enc.encode(trace)      # np.ndarray (k,)
-#[pyclass(name = "HologramEncoder")]
+#[pyclass(name = "HologramEncoder", module = "taas_checkmate.t3")]
 pub struct PyHologramEncoder {
     inner: crate::t3::HologramEncoder,
 }
@@ -834,21 +830,21 @@ impl PyHologramEncoder {
     }
 }
 
-/// NormalizedSparker — Спарковка с online нормализацией.
+/// NormalizedSpiker — Спайкер с online нормализацией.
 ///
 /// Убирает DC-дрейф и масштабирует к target_std.
-#[pyclass(name = "NormalizedSparker")]
-pub struct PyNormalizedSparker {
-    inner: crate::t3::NormalizedSparker,
+#[pyclass(name = "NormalizedSpiker", module = "taas_checkmate.t3")]
+pub struct PyNormalizedSpiker {
+    inner: crate::t3::NormalizedSpiker,
 }
 
 #[pymethods]
-impl PyNormalizedSparker {
+impl PyNormalizedSpiker {
     #[new]
     fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32, target_std: f32) -> PyResult<Self> {
         let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
             .chunks(2).map(|c| [c[0], c[1]]).collect();
-        Ok(Self { inner: crate::t3::NormalizedSparker::new(&pos, tau_ms, dt_ms, target_std) })
+        Ok(Self { inner: crate::t3::NormalizedSpiker::new(&pos, tau_ms, dt_ms, target_std) })
     }
 
     fn feed(&mut self, spikes: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
@@ -865,26 +861,26 @@ impl PyNormalizedSparker {
     }
 
     fn __repr__(&self) -> String {
-        "NormalizedSparker(k=3)".into()
+        "NormalizedSpiker(k=3)".into()
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-//  SpigradBridge — Python class
+//  SpikeGradBridge — Python class
 // ═══════════════════════════════════════════════════════════
 
-/// SPIGRAD bridge: learnable spike-to-drive projection with BPTT through T3.
+/// SpikeGradBridge: learnable spike-to-drive projection with BPTT through T3.
 ///
 /// The bridge makes spiking networks differentiable:
 /// spikes → [W, b] → T3 drives → T3 → PST → decoder → behavior
 /// Gradient flows back through T3 physics (BPTT) to the bridge weights.
-#[pyclass(name = "SpigradBridge", module = "taas_checkmate")]
-pub struct PySpigradBridge {
-    pub inner: crate::train::spigrad::SpigradBridge,
+#[pyclass(name = "SpikeGradBridge", module = "taas_checkmate.t3")]
+pub struct PySpikeGradBridge {
+    pub inner: crate::train::spike_grad::SpikeGradBridge,
 }
 
 #[pymethods]
-impl PySpigradBridge {
+impl PySpikeGradBridge {
     #[new]
     #[pyo3(signature = (spike_dim, n_osc, dt=0.05, drive_gain=10.0, alpha=1.0, freq_min=0.5, freq_max=3.0, coupling_w12=0.3, coupling_w13=0.15, coupling_w23=0.08, zero_init=false))]
     fn new(
@@ -902,7 +898,7 @@ impl PySpigradBridge {
     ) -> Self {
         if zero_init {
             Self {
-                inner: crate::train::spigrad::SpigradBridge::new_zero(
+                inner: crate::train::spike_grad::SpikeGradBridge::new_zero(
                     spike_dim, n_osc, dt, drive_gain, alpha,
                     freq_min, freq_max,
                     coupling_w12, coupling_w13, coupling_w23,
@@ -910,7 +906,7 @@ impl PySpigradBridge {
             }
         } else {
             Self {
-                inner: crate::train::spigrad::SpigradBridge::new(
+                inner: crate::train::spike_grad::SpikeGradBridge::new(
                     spike_dim, n_osc, dt, drive_gain, alpha,
                     freq_min, freq_max,
                     coupling_w12, coupling_w13, coupling_w23,
@@ -939,7 +935,7 @@ impl PySpigradBridge {
         let w = weights.readonly().to_vec().expect("from_weights: weights");
         let b = bias.readonly().to_vec().expect("from_weights: bias");
         Self {
-            inner: crate::train::spigrad::SpigradBridge::from_weights(
+            inner: crate::train::spike_grad::SpikeGradBridge::from_weights(
                 spike_dim, n_osc, dt, drive_gain, alpha,
                 freq_min, freq_max,
                 coupling_w12, coupling_w13, coupling_w23,
@@ -975,7 +971,7 @@ impl PySpigradBridge {
             &pst_mat.chunks(pst_dim).map(|c| c.to_vec()).collect::<Vec<_>>(),
         ).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
 
-        let py_traj = PyT2SpigradTrajectory { inner: traj };
+        let py_traj = PyT2SpikeGradTrajectory { inner: traj };
         let tuple = PyTuple::new(py, &[pst_arr.into_py(py), py_traj.into_py(py)])?.unbind();
         Ok(tuple.into())
     }
@@ -994,7 +990,7 @@ impl PySpigradBridge {
     fn py_backward(
         &self,
         grad_pst: Bound<'_, PyArray1<f32>>,
-        traj: &PyT2SpigradTrajectory,
+        traj: &PyT2SpikeGradTrajectory,
         spikes: Bound<'_, PyArray2<f32>>,
         per_step_grad_pst: Option<Bound<'_, PyArray2<f32>>>,
         py: Python<'_>,
@@ -1057,12 +1053,12 @@ impl PySpigradBridge {
     fn n_osc(&self) -> usize { self.inner.n_osc }
 
     fn __repr__(&self) -> String {
-        format!("SpigradBridge(spike_dim={}, n_osc={}, drive_dim={})",
+        format!("SpikeGradBridge(spike_dim={}, n_osc={}, drive_dim={})",
             self.inner.spike_dim, self.inner.n_osc, self.inner.drive_dim)
     }
 }
 
-/// Train a SpigradBridge on connectome spikes to chase a moving target.
+/// Train a SpikeGradBridge on connectome spikes to chase a moving target.
 #[cfg(feature = "connectome")]
 #[pyfunction]
 #[pyo3(name = "train_connectome_chase")]
@@ -1089,7 +1085,7 @@ pub fn py_train_connectome_chase(
     v_thresh: f32,
     v_reset: f32,
     seed: u64,
-) -> PyResult<(PySpigradBridge, Vec<f32>, Vec<f32>, Vec<f32>)> {
+) -> PyResult<(PySpikeGradBridge, Vec<f32>, Vec<f32>, Vec<f32>)> {
     let config = crate::train::connectome_chase::ChaseConfig {
         n_osc,
         n_steps,
@@ -1133,7 +1129,7 @@ pub fn py_train_connectome_chase(
         seed,
     );
 
-    let py_bridge = PySpigradBridge { inner: result.bridge };
+    let py_bridge = PySpikeGradBridge { inner: result.bridge };
     Ok((py_bridge, result.decoder_w, result.decoder_b, result.loss_history))
 }
 

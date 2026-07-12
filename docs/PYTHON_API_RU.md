@@ -27,7 +27,7 @@ API организовано в под-модули. **Все функции т�
 | Модуль | Содержит |
 |--------|----------|
 | `taas_checkmate.neurons` | step_izhikevich, step_psi_wave, step_lif, stdp_update |
-| `taas_checkmate.t3` | PyTriOscillator, PyNlmsDecoder, PyKalmanDecoder, t2spigrad_* |
+| `taas_checkmate.t3` | PyTriOscillator, PyNlmsDecoder, PyKalmanDecoder, t2spike_grad_* |
 | `taas_checkmate.io` | safety_clamp, sigmoid_gate, t3_drive_encoder, echo_tap |
 | `taas_checkmate.sparse` | compute_hamiltonian, step_psi_wave_full, propagate_spikes |
 | `taas_checkmate.kuramoto` | kuramoto_step_sparse, phase_coherence, kalman_update |
@@ -167,10 +167,10 @@ pred = kf.predict(pst)
 kf.train(pst, 0.5)
 ```
 
-### T2-SPIGRAD — дифференцируемый T3 (BPTT)
+### T2-SPIKE-GRAD — дифференцируемый T3 (BPTT)
 
 ```python
-from taas_checkmate.t3 import t2spigrad_forward, t2spigrad_backward, pst_linear_dim
+from taas_checkmate.t3 import t2spike_grad_forward, t2spike_grad_backward, pst_linear_dim
 
 n_osc, n_steps = 64, 100
 pst_dim = pst_linear_dim(n_osc)
@@ -179,7 +179,7 @@ pst_dim = pst_linear_dim(n_osc)
 drives = np.random.randn(n_steps, 3 * n_osc).astype(np.float32)
 
 # Forward: драйвы → PST + траектория
-pst, traj = t2spigrad_forward(
+pst, traj = t2spike_grad_forward(
     n_osc, n_steps, 0.05, 10.0, 1.0,
     0.5, 3.0, 0.3, 0.15, 0.08,
     drives,
@@ -188,18 +188,18 @@ print(f"PST: {pst.shape}, traj: n_osc={traj.n_osc()}, n_steps={traj.n_steps()}")
 
 # Backward: градиент PST → градиент драйвов
 grad_pst = np.random.randn(pst_dim).astype(np.float32)
-grad_drives = t2spigrad_backward(grad_pst, traj)
+grad_drives = t2spike_grad_backward(grad_pst, traj)
 print(f"Grad drives: {grad_drives.shape}")  # (100, 192)
 ```
 
 ### GPU версия (требует --features cuda)
 
 ```python
-from taas_checkmate.t3 import t2spigrad_forward_cuda, t2spigrad_backward_cuda
+from taas_checkmate.t3 import t2spike_grad_forward_cuda, t2spike_grad_backward_cuda
 
-pst, traj = t2spigrad_forward_cuda(n_osc, n_steps, 0.05, 10.0, 1.0,
-                                    0.5, 3.0, 0.3, 0.15, 0.08, drives)
-grad_drives = t2spigrad_backward_cuda(grad_pst, traj)
+pst, traj = t2spike_grad_forward_cuda(n_osc, n_steps, 0.05, 10.0, 1.0,
+                                       0.5, 3.0, 0.3, 0.15, 0.08, drives)
+grad_drives = t2spike_grad_backward_cuda(grad_pst, traj)
 ```
 
 ---
@@ -491,6 +491,6 @@ spec = importlib.util.spec_from_file_location('taas_checkmate',
     'target/release/libtaas_checkmate.so')
 t3 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(t3)
-print('CUDA backward:', hasattr(t3, 't2spigrad_backward_cuda'))
+print('CUDA backward:', hasattr(t3, 't2spike_grad_backward_cuda'))
 "
 ```

@@ -12,13 +12,14 @@ pub fn population_rate_decode(
     window: usize,
 ) {
     let n_out = n_neurons.min(rates_out.len());
-    let n_steps = window.min(spike_buffer.len() / n_neurons);
+    let n_steps = window.min(spike_buffer.len() / n_neurons.max(1));
+    let divisor = n_steps.max(1) as f32;
     rates_out[..n_out].par_iter_mut().enumerate().for_each(|(i, rate)| {
         let mut count = 0;
         for t in 0..n_steps {
             if spike_buffer[t * n_neurons + i] != 0 { count += 1; }
         }
-        *rate = count as f32 / window as f32;
+        *rate = count as f32 / divisor;
     });
 }
 

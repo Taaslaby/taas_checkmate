@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SPIGRAD bridge: gradient check — multi-seed + per-population + cross_gate.
+"""SpikeGrad bridge: gradient check — multi-seed + per-population + cross_gate.
 
     cd taas_checkmate && python3 tests/test_spigrad_gradient.py
 """
@@ -19,7 +19,7 @@ print("═══ Multi-seed directional check ═══")
 all_ok = True
 for seed in [1, 42, 123, 999, 2024]:
     rng_seed = np.random.default_rng(seed)
-    bridge = tcm.SpigradBridge(
+    bridge = tcm.SpikeGradBridge(
         spike_dim=SPIKE_DIM, n_osc=N_OSC, dt=0.05,
         drive_gain=10.0, alpha=1.0, freq_min=0.5, freq_max=3.0,
         coupling_w12=0.3, coupling_w13=0.15, coupling_w23=0.08,
@@ -59,7 +59,7 @@ for seed in [1, 42, 123, 999, 2024]:
 print(f"\n═══ Per-population loss check ═══")
 rng = np.random.default_rng(42)
 for pop_idx, pop_name in enumerate(["θ", "r", "vel"]):
-    bridge = tcm.SpigradBridge(
+    bridge = tcm.SpikeGradBridge(
         spike_dim=SPIKE_DIM, n_osc=N_OSC, dt=0.05,
         drive_gain=10.0, alpha=1.0, freq_min=0.5, freq_max=3.0,
         coupling_w12=0.3, coupling_w13=0.15, coupling_w23=0.08,
@@ -108,7 +108,7 @@ for pop_idx, pop_name in enumerate(["θ", "r", "vel"]):
 # ─── 3. Cross-population gradient flow ─────────────────
 print(f"\n═══ Cross-population gradient flow ═══")
 rng = np.random.default_rng(42)
-bridge = tcm.SpigradBridge(
+bridge = tcm.SpikeGradBridge(
     spike_dim=SPIKE_DIM, n_osc=N_OSC, dt=0.05,
     drive_gain=10.0, alpha=1.0, freq_min=0.5, freq_max=3.0,
     coupling_w12=0.3, coupling_w13=0.15, coupling_w23=0.08,

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use wide::{f32x8, CmpGt};
-use super::{load8, load8_mut, load8_i32, store8};
+use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8};
 
 // ═══════════════════════════════════════════════════════
 //  Dopamine-Modulated STDP — 3-factor plasticity for RL
@@ -46,9 +46,11 @@ pub(crate) unsafe fn dopamine_traces_step(
     a_ltp: f32, a_ltd: f32, n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
-    let tau_pre_s = f32x8::splat(tau_pre.max(1.0));
-    let tau_post_s = f32x8::splat(tau_post.max(1.0));
-    let tau_e_s = f32x8::splat(tau_e.max(1.0));
+    // BUGFIX: clamp to EPSILON (was 1.0) — prevents div-by-zero without silently changing dynamics
+    let epsi = f32::EPSILON;
+    let tau_pre_s = f32x8::splat(tau_pre.max(epsi));
+    let tau_post_s = f32x8::splat(tau_post.max(epsi));
+    let tau_e_s = f32x8::splat(tau_e.max(epsi));
     let a_ltp_s = f32x8::splat(a_ltp);
     let a_ltd_s = f32x8::splat(a_ltd);
     let one = f32x8::splat(1.0);
@@ -62,9 +64,9 @@ pub(crate) unsafe fn dopamine_traces_step(
         let pre = load8_i32(pre_spikes, off);
         let post = load8_i32(post_spikes, off);
 
-        // Decay traces
-        let decay_pre = one - dt_s / tau_pre_s;
-        let decay_post = one - dt_s / tau_post_s;
+        // Decay traces (exponential Euler)
+        let decay_pre = fast_exp_simd(-dt_s / tau_pre_s);
+        let decay_post = fast_exp_simd(-dt_s / tau_post_s);
         tp = tp * decay_pre;
         tpo = tpo * decay_post;
 
@@ -79,8 +81,8 @@ pub(crate) unsafe fn dopamine_traces_step(
         let ltd_term = a_ltd_s * tpo * pre_mask.blend(one, zero);
         ee = ee + ltp_term - ltd_term;
 
-        // Eligibility decay
-        let decay_e = one - dt_s / tau_e_s;
+        // Eligibility decay (exponential Euler)
+        let decay_e = fast_exp_simd(-dt_s / tau_e_s);
         ee = ee * decay_e;
 
         store8(trace_pre, off, tp);
@@ -89,15 +91,17 @@ pub(crate) unsafe fn dopamine_traces_step(
     }
 
     // Scalar tail (n & 7)
+    // NOTE: must use same clamping as SIMD path (f32::EPSILON) to avoid SIMD/scalar mismatch
     if n8 < n {
+        let epsi = f32::EPSILON;
         let tp = std::slice::from_raw_parts_mut(trace_pre, n);
         let tpo = std::slice::from_raw_parts_mut(trace_post, n);
         let ee = std::slice::from_raw_parts_mut(eligibility, n);
         let pre = std::slice::from_raw_parts(pre_spikes, n);
         let post = std::slice::from_raw_parts(post_spikes, n);
         for i in n8..n {
-            let decay_pre = 1.0 - dt / tau_pre.max(1.0);
-            let decay_post = 1.0 - dt / tau_post.max(1.0);
+            let decay_pre = (-dt / tau_pre.max(epsi)).exp();
+            let decay_post = (-dt / tau_post.max(epsi)).exp();
             tp[i] *= decay_pre;
             tpo[i] *= decay_post;
             if pre[i] != 0 { tp[i] += 1.0; }
@@ -105,7 +109,7 @@ pub(crate) unsafe fn dopamine_traces_step(
             let ltp = if post[i] != 0 { a_ltp * tp[i] } else { 0.0 };
             let ltd = if pre[i] != 0 { a_ltd * tpo[i] } else { 0.0 };
             ee[i] += ltp - ltd;
-            let decay_e = 1.0 - dt / tau_e.max(1.0);
+            let decay_e = (-dt / tau_e.max(epsi)).exp();
             ee[i] *= decay_e;
         }
     }

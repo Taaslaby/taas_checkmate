@@ -161,13 +161,14 @@ pub fn t3_tact_generator(
 
 // ─── T3 Inverse Kuramoto ─────────────────────────────────
 
-/// Inverse Kuramoto: drive = gain * (r - r_prev) - decay * drive.
+/// Inverse Kuramoto: drive = gain * (r - r_prev) / dt - drive * decay.
+/// Inverts Stuart-Landau amplitude dynamics to estimate input drive.
 pub fn t3_inverse_kuramoto(
     drive_out: &mut [f32], r: &[f32], r_prev: &[f32],
-    alpha: f32, gain: f32, eps: f32, decay: f32,
+    alpha: f32, gain: f32, eps: f32, decay: f32, dt: f32,
 ) {
     let n = drive_out.len().min(r.len()).min(r_prev.len());
-    safe::t3_inverse_kuramoto(&mut drive_out[..n], &r[..n], &r_prev[..n], alpha, gain, eps, decay);
+    safe::t3_inverse_kuramoto(&mut drive_out[..n], &r[..n], &r_prev[..n], alpha, gain, eps, decay, dt);
 }
 
 // ─── Echo State Tap ──────────────────────────────────────

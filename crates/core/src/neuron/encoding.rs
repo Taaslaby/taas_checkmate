@@ -38,9 +38,12 @@ pub fn bsa_encode(
 
 /// Hamming window kernel for BSA encoding.
 pub fn bsa_kernel_hamming(len: usize) -> Vec<f32> {
+    if len == 0 { return vec![]; }
+    if len == 1 { return vec![1.0]; } // avoid 0/0 NaN
     let mut k = vec![0.0; len];
+    let inv = 1.0 / (len - 1) as f32;
     for i in 0..len {
-        k[i] = 0.54 - 0.46 * (2.0 * PI * i as f32 / (len - 1) as f32).cos();
+        k[i] = 0.54 - 0.46 * (2.0 * PI * i as f32 * inv).cos();
     }
     let sum: f32 = k.iter().sum();
     if sum > 1e-10 { for kk in k.iter_mut() { *kk /= sum; } }

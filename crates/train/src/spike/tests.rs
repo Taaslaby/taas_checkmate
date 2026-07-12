@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use crate::spike::{t3spike_backward, t3spike_forward, T3SpikeTrajectory};
 use crate::t3::pst_linear_dim;
 
@@ -389,14 +390,14 @@ fn test_theta_post_derivative() {
         0.5, 3.0, 0.3, 0.15, 0.08, &dp);
 
     // θ_post at step 3 = θ_pre at step 4
-    let th_p = tp.th1_pre[4 * n_osc + 0];
-    let th_m = tm.th1_pre[4 * n_osc + 0];
+    let th_p = tp.th1_pre()[4 * n_osc + 0];
+    let th_m = tm.th1_pre()[4 * n_osc + 0];
     let fd_dth = (th_p - th_m) / (2.0 * eps);
 
-    let r_pre = traj.r1_pre[3 * n_osc + 0];
-    let r_pre4 = traj.r1_pre[4 * n_osc + 0];
-    let th_pre3 = traj.th1_pre[3 * n_osc + 0];
-    let th_pre4 = traj.th1_pre[4 * n_osc + 0];
+    let r_pre = traj.r1_pre()[3 * n_osc + 0];
+    let r_pre4 = traj.r1_pre()[4 * n_osc + 0];
+    let th_pre3 = traj.th1_pre()[3 * n_osc + 0];
+    let th_pre4 = traj.th1_pre()[4 * n_osc + 0];
     println!("r_pre[3,0]={:.6} r_pre[4,0]={:.6} th_pre[3,0]={:.6} th_pre[4,0]={:.6}",
         r_pre, r_pre4, th_pre3, th_pre4);
 
@@ -449,9 +450,10 @@ fn test_gradient_survival_large_scale() {
         );
 
         // Check trajectory sanity
-        for i in 0..traj.r1_pre.len() {
-            assert!(traj.r1_pre[i].is_finite(), "r1_pre[{}] = {:?}", i, traj.r1_pre[i]);
-            assert!(traj.r1_pre[i] >= 0.0, "r1_pre[{}] = {} < 0", i, traj.r1_pre[i]);
+        let r1_pre = traj.r1_pre();
+        for i in 0..r1_pre.len() {
+            assert!(r1_pre[i].is_finite(), "r1_pre[{}] = {:?}", i, r1_pre[i]);
+            assert!(r1_pre[i] >= 0.0, "r1_pre[{}] = {} < 0", i, r1_pre[i]);
         }
 
         let pst_dim = pst_linear_dim(n_osc);

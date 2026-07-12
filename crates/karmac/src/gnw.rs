@@ -24,6 +24,8 @@ pub struct GlobalWorkspace {
     broadcast_w: Vec<f32>,
     n: usize,
     ws: usize,
+    /// Pre-allocated delta buffer — avoids heap alloc in hot path.
+    delta_buf: Vec<f32>,
 }
 
 impl GlobalWorkspace {
@@ -44,7 +46,7 @@ impl GlobalWorkspace {
             .map(|_| rng.gen::<f32>() * 2.0 * bc_scale - bc_scale)
             .collect();
 
-        Self { gate_w, broadcast_w, n: n_neurons, ws: workspace_size }
+        Self { gate_w, broadcast_w, n: n_neurons, ws: workspace_size, delta_buf: vec![0.0; n_neurons] }
     }
 
     /// Create GNW with explicit weight matrices.
@@ -53,12 +55,12 @@ impl GlobalWorkspace {
         let n = broadcast_w.len() / ws;
         assert_eq!(gate_w.len(), n * ws);
         assert_eq!(broadcast_w.len(), ws * n);
-        Self { gate_w, broadcast_w, n, ws }
+        Self { gate_w, broadcast_w, n, ws, delta_buf: vec![0.0; n] }
     }
 
     /// Forward pass: `r += broadcast(softmax(gate(r)))`
     /// `r` is mutated in-place.
-    pub fn forward(&self, r: &mut [f32]) {
+    pub fn forward(&mut self, r: &mut [f32]) {
         assert_eq!(r.len(), self.n);
 
         // gate: r (n) → gate_w (ws × n) → gates (ws)
@@ -83,18 +85,18 @@ impl GlobalWorkspace {
         }
 
         // broadcast: gates (ws) → broadcast_w (n × ws) → delta (n)
-        // delta = broadcast_w @ gates
-        let delta: Vec<f32> = (0..self.n)
-            .into_par_iter()
-            .map(|i| {
+        // delta = broadcast_w @ gates — pre-allocated buffer, no heap alloc
+        self.delta_buf
+            .par_chunks_exact_mut(1)
+            .enumerate()
+            .for_each(|(i, d)| {
                 let row_start = i * self.ws;
                 let row = &self.broadcast_w[row_start..row_start + self.ws];
-                row.iter().zip(gates.iter()).map(|(w, g)| w * g).sum()
-            })
-            .collect();
+                d[0] = row.iter().zip(gates.iter()).map(|(w, g)| w * g).sum();
+            });
 
         // residual: r += delta
-        for (r_i, d_i) in r.iter_mut().zip(delta.iter()) {
+        for (r_i, d_i) in r.iter_mut().zip(self.delta_buf.iter()) {
             *r_i += d_i;
         }
     }
@@ -112,7 +114,7 @@ mod tests {
 
     #[test]
     fn gnw_forward_shape() {
-        let gnw = GlobalWorkspace::new(512, 32);
+        let mut gnw = GlobalWorkspace::new(512, 32);
         let mut r = vec![0.1; 512];
         gnw.forward(&mut r);
         assert_eq!(r.len(), 512);
@@ -122,7 +124,7 @@ mod tests {
 
     #[test]
     fn gnw_forward_small() {
-        let gnw = GlobalWorkspace::new(4, 2);
+        let mut gnw = GlobalWorkspace::new(4, 2);
         let mut r = vec![0.5, -0.3, 0.1, 0.0];
         gnw.forward(&mut r);
         assert_eq!(r.len(), 4);

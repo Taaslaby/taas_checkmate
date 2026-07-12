@@ -9,6 +9,7 @@ name = "taas_connectome"
 
 [dependencies]
 taas-kernels = { path = "../kernels" }
+taas-core = { path = "../core" }
 cuda-kernels = { path = "../cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 

@@ -20,7 +20,7 @@ use crate::core::neuron;
 ///     n.step(I, spikes)
 ///     v = n.v        # свойство — мембранный потенциал
 ///     n.v = arr      # свойство — установить
-#[pyclass(name = "LifNeuron")]
+#[pyclass(name = "LifNeuron", module = "taas_checkmate.snn")]
 pub struct PyLifNeuron {
     v: Vec<f32>,
     theta: Vec<f32>,
@@ -141,7 +141,7 @@ pub fn py_synaptic_normalization(
 //  SORN network
 // ═══════════════════════════════════════════════════════════
 
-#[pyclass(name = "SornNetwork")]
+#[pyclass(name = "SornNetwork", module = "taas_checkmate.snn")]
 pub struct PySornNetwork {
     pub inner: neuron::SornNetwork,
 }
@@ -228,7 +228,7 @@ pub fn py_phase_encode(
 /// TTFS (Time-To-First-Spike) энкодер.
 ///
 /// Кодирует значение временем до первого спайка.
-#[pyclass]
+#[pyclass(name = "TtfsEncoder", module = "taas_checkmate.snn")]
 pub struct PyTtfsEncoder {
     inner: neuron::TtfsEncoder,
 }

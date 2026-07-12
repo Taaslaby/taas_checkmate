@@ -219,16 +219,16 @@ Note: For $n=64$, CPU is faster due to kernel launch overhead. GPU advantage app
 ### 4.5 PyTorch Integration
 
 ```python
-class T2SpigradFunction(torch.autograd.Function):
+class T2SpikeGradFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, drives, n_osc, n_steps, ...):
-        pst, traj = t2spigrad_forward(n_osc, n_steps, ..., drives_np)
+        pst, traj = t2spike_grad_forward(n_osc, n_steps, ..., drives_np)
         ctx.trajs = trajs
         return torch.tensor(pst)
 
     @staticmethod
     def backward(ctx, grad_pst):
-        grad_drives = t2spigrad_backward(grad_pst.numpy(), ctx.trajs)
+        grad_drives = t2spike_grad_backward(grad_pst.numpy(), ctx.trajs)
         return torch.tensor(grad_drives), None, None, ...
 ```
 

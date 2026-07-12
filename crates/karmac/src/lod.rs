@@ -255,38 +255,27 @@ impl CarmackBsp {
             return;
         }
 
-        let r_sq = self.lod_distances[2] * self.lod_distances[2];
+        // Для каждого нейрона храним минимальное расстояние² до любого спайка.
+        // f32::MAX = не затронут спайками (tick_demote).
+        let mut min_dist_sq = vec![f32::MAX; self.positions.len()];
 
-        // For each neuron, compute target LOD from nearest spike
-        // Use octree queries: for each spike, find neurons within max radius
-        let mut candidate = vec![false; self.positions.len()];
-
+        // Octree walk per spike: для каждого спайка находим нейроны в радиусе,
+        // вычисляем точную дистанцию прямо в листе. Это O(spikes × candidates_in_radius),
+        // но candidates_in_radius ≪ N (отсекается октри).
+        let max_r_sq = self.lod_distances[2] * self.lod_distances[2];
         for &(sx, sy, sz) in &spike_positions {
-            let mut buf = Vec::new();
-            self.octree_query_sphere(0, sx, sy, sz, r_sq, &mut buf);
-            for &ni in &buf {
-                candidate[ni] = true;
-            }
+            self.update_min_dist_from_spike(0, sx, sy, sz, max_r_sq, &mut min_dist_sq);
         }
 
+        // Обновляем LOD на основе минимальной дистанции
         for i in 0..self.positions.len() {
-            if !candidate[i] {
+            let d_sq = min_dist_sq[i];
+            if d_sq == f32::MAX {
                 self.tick_demote(i);
                 continue;
             }
 
-            // Compute exact min distance to any spike
-            let p = &self.positions[i];
-            let mut min_d_sq = f32::MAX;
-            for &(sx, sy, sz) in &spike_positions {
-                let dx = p.x - sx;
-                let dy = p.y - sy;
-                let dz = p.z - sz;
-                let d = dx * dx + dy * dy + dz * dz;
-                if d < min_d_sq { min_d_sq = d; }
-            }
-            let dist = min_d_sq.sqrt();
-
+            let dist = d_sq.sqrt();
             let target = if dist <= self.lod_distances[0] {
                 LodLevel::HhLut
             } else if dist <= self.lod_distances[1] {
@@ -298,35 +287,54 @@ impl CarmackBsp {
             };
 
             if target >= self.lod[i] {
-                // Promote or stay — set hold and upgrade
                 self.lod[i] = target;
                 self.hold[i] = self.lod_hold_steps[target as usize];
             } else if self.hold[i] == 0 {
-                // Demote (hold expired)
                 self.lod[i] = target;
                 self.hold[i] = self.lod_hold_steps[target as usize].max(1);
             }
-            // else: hold > 0, target lower → stay at current LOD
         }
 
         self.rebuild_indices();
     }
 
-    fn octree_query_sphere(&self, node_idx: usize, sx: f32, sy: f32, sz: f32, radius_sq: f32, out: &mut Vec<usize>) {
+    /// Octree walk: для спайка (sx,sy,sz) обновляем `min_dist_sq` у нейронов в радиусе.
+    /// Вычисляем точную дистанцию в листьях (O(1) на нейрон).
+    fn update_min_dist_from_spike(
+        &self,
+        node_idx: usize,
+        sx: f32,
+        sy: f32,
+        sz: f32,
+        max_r_sq: f32,
+        min_dist_sq: &mut [f32],
+    ) {
         let n = &self.octree.nodes[node_idx];
-        let d_sq = n.sphere_dist_sq(sx, sy, sz, radius_sq.sqrt());
-        if d_sq > radius_sq {
+        let d_sq = n.sphere_dist_sq(sx, sy, sz, max_r_sq.sqrt());
+        if d_sq > max_r_sq {
             return;
         }
 
         if let Some(children) = &n.children {
             for &ci in children {
-                self.octree_query_sphere(ci, sx, sy, sz, radius_sq, out);
+                self.update_min_dist_from_spike(ci, sx, sy, sz, max_r_sq, min_dist_sq);
             }
         } else {
-            out.extend_from_slice(&n.neurons);
+            // Leaf: вычисляем точную дистанцию для каждого нейрона в листе
+            for &ni in &n.neurons {
+                if ni >= self.positions.len() { continue; }
+                let p = &self.positions[ni];
+                let dx = p.x - sx;
+                let dy = p.y - sy;
+                let dz = p.z - sz;
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if d2 < min_dist_sq[ni] {
+                    min_dist_sq[ni] = d2;
+                }
+            }
         }
     }
+
 
     /// Decrement hold counter and demote one level when hold expires.
     /// Does nothing at Tanh (lowest LOD).

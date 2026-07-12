@@ -42,6 +42,9 @@ jobs:
       - name: Run tests (lib + integration)
         run: cargo test --no-default-features
 
+      - name: Build with python feature (static check)
+        run: cargo check --features python
+
       - name: Bench check (compilation only)
         run: cargo bench --no-default-features --bench bench -- --list
 

@@ -14,7 +14,7 @@ use crate::core::neuron::trainer::EPropTrainer;
 ///
 /// Call `train_batch(images, targets)` to train on multiple images
 /// in parallel, then `predict(image)` for inference.
-#[pyclass(name = "EPropTrainer")]
+#[pyclass(name = "EPropTrainer", module = "taas_checkmate.trainer")]
 pub struct PyEPropTrainer {
     inner: EPropTrainer,
 }

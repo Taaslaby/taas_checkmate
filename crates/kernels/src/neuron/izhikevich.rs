@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{load8, load8_mut, load8_i32, store8, spike_mask_to_i32, surrogate_gradient};
+use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i32, surrogate_gradient};
 
 // ═══════════════════════════════════════════════════════
 //  Izhikevich
@@ -128,6 +128,21 @@ pub(crate) unsafe fn izhikevich_step(
 // ═══════════════════════════════════════════════════════
 
 /// Step `n` E-Prop Izhikevich neurons with per-synapse eligibility traces.
+///
+/// **Dense (column-major) version** — рекомендуется для малых полносвязных
+/// слоёв (n < 10K). Хранит веса и eligibility плотно: `e[i·n + j]`.
+///
+/// # Dense vs Sparse E-Prop
+///
+/// | Версия | Расположение | Когда использовать |
+/// |--------|-------------|-------------------|
+/// | `eprop_izhikevich_step_multi` (эта) | Column-major dense | n < 10K, полносвязные |
+/// | `sim_izhikevich_eprop` (connectome) | CSR sparse | n > 10K, биологические |
+///
+/// **Dense cache warning:** при n > 10K column-major stride = n × 4 bytes.
+/// Для n=100K stride = 400KB — гарантированный L2/L3 cache miss на каждый
+/// пресинаптический нейрон. Для больших сетей используйте CSR-версию.
+///
 /// Column-major layout: `e[i * n + j]` = eligibility for pre-synapse `i`, post-neuron `j`.
 /// Same for `weights`.
 ///
@@ -170,6 +185,10 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
     let tau_sg_s = f32x8::splat(tau_sg);
     let n8 = n & !7;
     let mut total_spikes = 0usize;
+
+    // Precompute e_decay — constant across all SIMD blocks and neurons
+    let e_decay = fast_exp_simd(-dt_s / tau_e_s);
+    let one_minus_e_decay = one - e_decay;
 
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
@@ -216,15 +235,15 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
         store8(u, off, uu);
         store8(psi, off, ps);
 
-        // Per-synapse eligibility: e_ij = e_ij * (1 - dt/τ_e) + dt * ψ_j * z_pre[i]
-        let decay = one - dt_s / tau_e_s;
+        // Per-synapse eligibility: exponential Euler
+        // e_ij(t+dt) = e_ij·e_decay + ψ_j·z_pre·τ_e·(1 - e_decay)
         for i in 0..n_pre {
             let z = *z_pre.add(i) as f32;
             let mut e_simd = load8_mut(e, i * n + off);
             if z != 0.0 {
-                e_simd = e_simd * decay + ps * f32x8::splat(z * dt);
+                e_simd = e_simd * e_decay + ps * f32x8::splat(z) * tau_e_s * one_minus_e_decay;
             } else {
-                e_simd = e_simd * decay;
+                e_simd = e_simd * e_decay;
             }
             store8(e, i * n + off, e_simd);
         }
@@ -242,6 +261,9 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
         let psi_sl = std::slice::from_raw_parts_mut(psi, n);
         let i_sl = std::slice::from_raw_parts(I_ext, n);
         let sp_sl = std::slice::from_raw_parts_mut(spikes, n);
+        // Precompute scalar e_decay for the scalar tail
+        let e_decay_s = (-dt / tau_e).exp();
+        let one_minus_e_decay_s = 1.0 - e_decay_s;
         for j in n8..n {
             let mut vv = v_sl[j];
             let mut uu = u_sl[j];
@@ -262,11 +284,11 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
 
             psi_sl[j] = surrogate_gradient(vv, 30.0, tau_sg);
 
-            // Per-synapse eligibility
+            // Per-synapse eligibility (exponential Euler)
             for i in 0..n_pre {
                 let z = *z_pre.add(i) as f32;
                 let e_ptr = e.add(i * n + j);
-                *e_ptr += dt * (-*e_ptr / tau_e + psi_sl[j] * z);
+                *e_ptr = *e_ptr * e_decay_s + psi_sl[j] * z * tau_e * one_minus_e_decay_s;
             }
 
             if vv >= 30.0 {
@@ -287,14 +309,16 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
 }
 
 /// Step `n` E-Prop Izhikevich neurons with eligibility traces.
+/// Step `n` E-Prop Izhikevich neurons with eligibility traces.
 /// Uses `f32x8` SIMD for Izhikevich dynamics + eligibility + surrogate gradient.
 ///
-/// Izhikevich equations:
+/// Izhikevich equations (Forward Euler):
 ///   dv/dt = 0.04·v² + 5·v + 140 − u + I
 ///   du/dt = a·(b·v − u)
 ///   if v ≥ 30: v = c, u += d
 ///
-/// E-Prop: de/dt = −e/τ_e + ψ·z_pre
+/// E-Prop eligibility (Exponential Euler):
+///   e(t+dt) = e·exp(-dt/τ_e) + ψ·z_pre·τ_e·(1 - exp(-dt/τ_e))
 ///   ψ = surrogate gradient = 1 / (1 + |v − 30|/τ)²
 ///
 /// # Returns
@@ -324,6 +348,10 @@ pub(crate) unsafe fn eprop_izhikevich_step(
     let n8 = n & !7;
     let mut total_spikes = 0usize;
 
+    // Precompute e_decay — constant across all SIMD blocks and neurons
+    let e_decay = fast_exp_simd(-dt_s / tau_e_s);
+    let one_minus_e_decay = one - e_decay;
+
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
         let mut uu = load8_mut(u, off);
@@ -345,10 +373,10 @@ pub(crate) unsafe fn eprop_izhikevich_step(
         let one_plus_diff = one + diff;
         let ps = one / (one_plus_diff * one_plus_diff);
 
-        // Eligibility trace: de/dt = -e/τ_e + ψ · z_pre
+        // Eligibility trace: exponential Euler
+        // de/dt = -e/τ_e + ψ · z_pre → e(t+dt) = e·decay + ψ·z_pre·τ_e·(1 - decay)
         let z_pre = pre.cmp_gt(zero).blend(one, zero); // 1 if pre[i] != 0
-        let de = -ee / tau_e_s + ps * z_pre;
-        ee = ee + de * dt_s;
+        ee = ee * e_decay + ps * z_pre * tau_e_s * one_minus_e_decay;
 
         // Spike detection: v ≥ 30
         let sm = vv.cmp_ge(v_th);
@@ -381,6 +409,8 @@ pub(crate) unsafe fn eprop_izhikevich_step(
         let i_sl = std::slice::from_raw_parts(Ii, n);
         let sp_sl = std::slice::from_raw_parts_mut(spikes, n);
         let pre_sl = std::slice::from_raw_parts(pre_spikes, n);
+        let e_decay_s = (-dt / tau_e).exp();
+        let one_minus_e_decay_s = 1.0 - e_decay_s;
         for i in n8..n {
             let vv = v_sl[i];
             let dv = (0.04 * vv + 5.0) * vv + 140.0 - u_sl[i] + i_sl[i];
@@ -389,7 +419,7 @@ pub(crate) unsafe fn eprop_izhikevich_step(
             u_sl[i] += dt * du;
             psi_sl[i] = surrogate_gradient(v_sl[i], 30.0, tau_sg);
             let z_pre = if pre_sl[i] != 0 { 1.0 } else { 0.0 };
-            e_sl[i] += dt * (-e_sl[i] / tau_e + psi_sl[i] * z_pre);
+            e_sl[i] = e_sl[i] * e_decay_s + psi_sl[i] * z_pre * tau_e * one_minus_e_decay_s;
             if v_sl[i] >= 30.0 {
                 sp_sl[i] = 1;
                 total_spikes += 1;

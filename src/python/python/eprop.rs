@@ -13,7 +13,7 @@ use crate::core::neuron;
 ///     eprop = EPropLIF(256, dt=1.0, tau_m=10.0, tau_e=20.0)
 ///     n_spikes = eprop.step(I, spikes_out, pre_spikes)
 ///     eprop.update_weights(weights, learning_signals, lr=0.01)
-#[pyclass(name = "EPropLIF")]
+#[pyclass(name = "EPropLIF", module = "taas_checkmate.eprop")]
 pub struct PyEPropLIF {
     pub inner: neuron::EPropLIF,
 }
@@ -87,7 +87,7 @@ impl PyEPropLIF {
 /// Step computes: I_total_j = I_ext_j + Σ_i weights[i·n+j] · z_pre[i]
 /// Then Izhikevich dynamics + per-synapse eligibility:
 ///   de_ij/dt = -e_ij/τ_e + ψ_j · z_pre_i
-#[pyclass(name = "EPropIzhikevichMulti")]
+#[pyclass(name = "EPropIzhikevichMulti", module = "taas_checkmate.eprop")]
 pub struct PyEPropIzhikevichMulti {
     inner: neuron::EPropIzhikevichMulti,
 }

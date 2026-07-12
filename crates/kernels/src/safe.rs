@@ -6,7 +6,7 @@
 //! are satisfied by the calling convention.
 
 use super::{attention, decode, measure, phase, signal};
-use super::neuron::{adex, delay, dopamine, fused, izhikevich, lif, saw, stp};
+use super::neuron::{adex, delay, dopamine, fhn, fused, hh, izhikevich, lif, saw, stp, wc};
 
 // ═══════════════════════════════════════════════════════════
 //  signal
@@ -82,11 +82,15 @@ pub fn echo_tap(output: &mut [f32], buffer: &[f32], delay_len: usize, delay_idx:
 }
 
 /// T3 inverse Kuramoto: estimate drive from amplitude changes over time.
-pub fn t3_inverse_kuramoto(drive_out: &mut [f32], r: &[f32], r_prev: &[f32], alpha: f32, gain: f32, eps: f32, decay: f32) {
+///
+/// Inverts Stuart-Landau dynamics:
+///   r' = r + dt · ((α − r²)·r + gain·drive − decay·r)
+/// → drive ≈ gain · (r − r_prev)/dt − drive · decay
+pub fn t3_inverse_kuramoto(drive_out: &mut [f32], r: &[f32], r_prev: &[f32], alpha: f32, gain: f32, eps: f32, decay: f32, dt: f32) {
     let n = drive_out.len();
     assert_eq!(r.len(), n, "t3_inverse_kuramoto: r length mismatch");
     assert_eq!(r_prev.len(), n, "t3_inverse_kuramoto: r_prev length mismatch");
-    unsafe { signal::t3_inverse_kuramoto(drive_out.as_mut_ptr(), r.as_ptr(), r_prev.as_ptr(), alpha, gain, eps, decay, n) }
+    unsafe { signal::t3_inverse_kuramoto(drive_out.as_mut_ptr(), r.as_ptr(), r_prev.as_ptr(), alpha, gain, eps, decay, dt, n) }
 }
 
 /// Elementwise ReLU: `x = max(0, x)` using SIMD `f32x8`.
@@ -299,6 +303,23 @@ pub fn kuramoto_update(phases: &mut [f32], omegas: &[f32], coupling: &[f32], dt:
     unsafe { phase::kuramoto_update(phases.as_mut_ptr(), omegas.as_ptr(), coupling.as_ptr(), dt, n) }
 }
 
+/// Viscous Kuramoto update: `φ += dt·(ω + coupling + η·(mean(φ) − φ))`
+///
+/// Добавляет вязкое демпфирование к стандартному Kuramoto:
+///   dφ_i/dt = ω_i + coupling_i + η·(⟨φ⟩ − φ_i)
+///
+/// Вязкий член η·(⟨φ⟩ − φ_i) стягивает фазы к среднему, подавляя
+/// хаотические фазовые переключения. При η → ∞ все фазы синхронизуются.
+/// При η = 0 эквивалентно `kuramoto_update`.
+///
+/// Reference: Kuramoto (1984) "Chemical Oscillations, Waves, and Turbulence"
+pub fn kuramoto_update_viscous(phases: &mut [f32], omegas: &[f32], coupling: &[f32], eta: f32, dt: f32) {
+    let n = phases.len();
+    assert_eq!(omegas.len(), n, "kuramoto_update_viscous: omegas length mismatch");
+    assert_eq!(coupling.len(), n, "kuramoto_update_viscous: coupling length mismatch");
+    unsafe { phase::kuramoto_update_viscous(phases.as_mut_ptr(), omegas.as_ptr(), coupling.as_ptr(), eta, dt, n) }
+}
+
 /// Combined Kuramoto phase + Stuart-Landau amplitude step with external drive.
 pub fn t3_update(phases: &mut [f32], amplitudes: &mut [f32], omegas: &[f32], coupling: &[f32], drives: &[f32], dt: f32, decay: f32, alpha: f32, gain: f32) {
     let n = phases.len();
@@ -332,9 +353,11 @@ pub fn rdrand_fill(buf: &mut [f32]) {
 // ═══════════════════════════════════════════════════════════
 
 /// Izhikevich neuron step: `dv/dt = 0.04v²+5v+140−u+I; du/dt = a(bv−u)`.
+///
+/// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
 pub fn izhikevich_step(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32],
-    a: &[f32], b: &[f32], ii: &[f32],
+    a: &[f32], b: &[f32], ii: &mut [f32],
     dt: f32, trace_decay: f32,
     spikes: &mut [i32], c: &[f32], d: &[f32],
     refractory: &mut [f32], tau_ref: f32,
@@ -349,6 +372,7 @@ pub fn izhikevich_step(
     assert_eq!(c.len(), n, "izhikevich_step: c length mismatch");
     assert_eq!(d.len(), n, "izhikevich_step: d length mismatch");
     assert_eq!(refractory.len(), n, "izhikevich_step: refractory length mismatch");
+    safety_clamp(ii, -100.0, 100.0);
     unsafe { izhikevich::izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ii.as_ptr(), dt, trace_decay, spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -394,12 +418,15 @@ pub fn eprop_izhikevich_step_multi(
 // ═══════════════════════════════════════════════════════════
 
 /// Leaky Integrate-and-Fire neuron step with exponential Euler integration.
+///
+/// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
 pub fn lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32) {
     let n = v.len();
     assert_eq!(ii.len(), n, "lif_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "lif_step: spikes length mismatch");
     assert_eq!(params.len(), n * 5, "lif_step: params length mismatch (expected {}*5={})", n, n * 5);
     assert_eq!(refractory.len(), n, "lif_step: refractory length mismatch");
+    safety_clamp(ii, -100.0, 100.0);
     unsafe { lif::lif_step(v.as_mut_ptr(), ii.as_mut_ptr(), spikes.as_mut_ptr(), params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -415,19 +442,22 @@ pub fn lif_at_step(v: &mut [f32], theta: &mut [f32], ii: &mut [f32], spikes: &mu
 }
 
 /// Eligibility-propagation LIF step: computes eligibility trace for online learning.
+/// Now includes refractory period (matches `lif_step` semantics).
 pub fn eprop_lif_step(
-    v: &mut [f32], theta: &mut [f32], eligibility: &mut [f32], psi: &mut [f32],
+    v: &mut [f32], eligibility: &mut [f32], psi: &mut [f32],
     ii: &[f32], spikes: &mut [i32], pre_spikes: &[i32],
-    dt: f32, tau_m: f32, tau_e: f32, v_rest: f32, v_thresh: f32, v_reset: f32, tau_sg: f32,
+    refractory: &mut [f32],
+    dt: f32, tau_m: f32, tau_e: f32, tau_ref: f32,
+    v_rest: f32, v_thresh: f32, v_reset: f32, tau_sg: f32,
 ) -> usize {
     let n = v.len();
-    assert_eq!(theta.len(), n, "eprop_lif_step: theta length mismatch");
     assert_eq!(eligibility.len(), n, "eprop_lif_step: eligibility length mismatch");
     assert_eq!(psi.len(), n, "eprop_lif_step: psi length mismatch");
     assert_eq!(ii.len(), n, "eprop_lif_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "eprop_lif_step: spikes length mismatch");
     assert_eq!(pre_spikes.len(), n, "eprop_lif_step: pre_spikes length mismatch");
-    unsafe { lif::eprop_lif_step(v.as_mut_ptr(), theta.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), dt, tau_m, tau_e, v_rest, v_thresh, v_reset, tau_sg, n) }
+    assert_eq!(refractory.len(), n, "eprop_lif_step: refractory length mismatch");
+    unsafe { lif::eprop_lif_step(v.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), refractory.as_mut_ptr(), dt, tau_m, tau_e, tau_ref, v_rest, v_thresh, v_reset, tau_sg, n) }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -525,6 +555,93 @@ pub fn eprop_adex_step_multi(
 }
 
 // ═══════════════════════════════════════════════════════════
+//  neuron / hh (Hodgkin-Huxley - polynomial)
+// ═══════════════════════════════════════════════════════════
+
+/// Build HH channel metadata from standard channel specs.
+///
+/// Создаёт `Vec<ChannelMeta>` из `[ChannelSpec]`, нужный для `hh_poly_step`.
+pub fn build_hh_channel_meta(channels: &[hh::ChannelSpec]) -> Vec<hh::ChannelMeta> {
+    hh::build_channel_meta(channels)
+}
+
+/// Hodgkin-Huxley step using polynomial rate functions (no LUT).
+///
+/// Использует `fast_exp_simd` для вычисления α(V)/β(V) напрямую, без
+/// предвычисленных LUT. Это устраняет SIMD gather из LUT и заменяет его
+/// цепочкой FMA — быстрее на архитектурах с медленным gather (AVX2).
+///
+/// `channel_meta` создаётся через `build_hh_channel_meta(channels)`.
+pub fn hh_poly_step(
+    v: &mut [f32], gates: &mut [f32], ii: &[f32],
+    g_leak: &[f32], e_leak: &[f32], c_m: &[f32],
+    channel_meta: &[hh::ChannelMeta],
+    dt: f32,
+) {
+    let n = v.len();
+    assert_eq!(gates.len(), {
+        let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
+        n_gates * n
+    }, "hh_poly_step: gates length mismatch");
+    assert_eq!(ii.len(), n, "hh_poly_step: Ii length mismatch");
+    assert_eq!(g_leak.len(), n, "hh_poly_step: g_leak length mismatch");
+    assert_eq!(e_leak.len(), n, "hh_poly_step: E_leak length mismatch");
+    assert_eq!(c_m.len(), n, "hh_poly_step: C_m length mismatch");
+    unsafe { hh::hh_poly_step(
+        v.as_mut_ptr(), gates.as_mut_ptr(), ii.as_ptr(),
+        g_leak.as_ptr(), e_leak.as_ptr(), c_m.as_ptr(),
+        n, channel_meta, dt,
+    )}
+}
+
+// ═══════════════════════════════════════════════════════════
+//  neuron / fhn (FitzHugh-Nagumo)
+// ═══════════════════════════════════════════════════════════
+
+/// FitzHugh-Nagumo neuron step: simplified Hodgkin-Huxley with cubic nullcline.
+///
+/// Equations:
+///   dv/dt = v - v³/3 - w + I_ext
+///   dw/dt = (v + a - b·w) / τ
+///
+/// Params layout: dt, tau_w, a, b (4 × n, column-major).
+pub fn fhn_step(v: &mut [f32], w: &mut [f32], ii: &[f32], spikes: &mut [i32], params: &[f32]) {
+    let n = v.len();
+    assert_eq!(w.len(), n, "fhn_step: w length mismatch");
+    assert_eq!(ii.len(), n, "fhn_step: Ii length mismatch");
+    assert_eq!(spikes.len(), n, "fhn_step: spikes length mismatch");
+    assert_eq!(params.len(), n * 4, "fhn_step: params length mismatch (expected {}*4={})", n, n * 4);
+    unsafe { fhn::fhn_step(v.as_mut_ptr(), w.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n) }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  neuron / wc (Wilson-Cowan)
+// ═══════════════════════════════════════════════════════════
+
+/// Wilson-Cowan population model step: excitatory-inhibitory rate dynamics.
+///
+/// Equations:
+///   τ_E · dE/dt = -E + sigmoid(w_EE·E - w_EI·I + I_E)
+///   τ_I · dI/dt = -I + sigmoid(w_IE·E - w_II·I + I_I)
+///
+/// Params layout: dt, tau_E, tau_I, w_EE, w_EI, w_IE, w_II, beta (8 × n, column-major).
+pub fn wc_step(
+    e: &mut [f32], i: &mut [f32],
+    i_e: &[f32], i_i: &[f32],
+    spikes_e: &mut [f32], spikes_i: &mut [f32],
+    params: &[f32],
+) {
+    let n = e.len();
+    assert_eq!(i.len(), n, "wc_step: i length mismatch");
+    assert_eq!(i_e.len(), n, "wc_step: i_e length mismatch");
+    assert_eq!(i_i.len(), n, "wc_step: i_i length mismatch");
+    assert_eq!(spikes_e.len(), n, "wc_step: spikes_e length mismatch");
+    assert_eq!(spikes_i.len(), n, "wc_step: spikes_i length mismatch");
+    assert_eq!(params.len(), n * 8, "wc_step: params length mismatch (expected {}*8={})", n, n * 8);
+    unsafe { wc::wc_step(e.as_mut_ptr(), i.as_mut_ptr(), i_e.as_ptr(), i_i.as_ptr(), spikes_e.as_mut_ptr(), spikes_i.as_mut_ptr(), params.as_ptr(), n) }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  neuron / stp
 // ═══════════════════════════════════════════════════════════
 
@@ -612,6 +729,8 @@ pub fn dopamine_weight_update(weights: &mut [f32], eligibility: &[f32], dopamine
 // ═══════════════════════════════════════════════════════════
 
 /// Fused hidden layer step: CSR spike propagation + Izhikevich dynamics in one kernel.
+///
+/// `active_buf`: pre-allocated buffer for active pre-synapse indices (avoids per-step Vec allocation).
 pub fn fused_hidden_izhikevich_step(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32], spikes: &mut [i32], refractory: &mut [f32],
     a: &[f32], b: &[f32], c: &[f32], d: &[f32],
@@ -619,6 +738,7 @@ pub fn fused_hidden_izhikevich_step(
     input_spikes: &[i32],
     dt: f32, trace_decay: f32, tau_ref: f32,
     ni: usize,
+    active_buf: &mut Vec<usize>,
 ) {
     let nh = v.len();
     assert_eq!(u.len(), nh, "fused_hidden_izhikevich_step: u length mismatch");
@@ -632,7 +752,7 @@ pub fn fused_hidden_izhikevich_step(
     assert_eq!(weights.len(), ni * nh, "fused_hidden_izhikevich_step: weights length mismatch");
     assert!(input_spikes.len() >= ni, "fused_hidden_izhikevich_step: input_spikes length {} < ni {}", input_spikes.len(), ni);
     assert!(nh % 8 == 0, "fused_hidden_izhikevich_step: nh must be multiple of 8, got {}", nh);
-    unsafe { fused::fused_hidden_izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), input_spikes.as_ptr(), dt, trace_decay, tau_ref, ni, nh) }
+    unsafe { fused::fused_hidden_izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), input_spikes.as_ptr(), dt, trace_decay, tau_ref, ni, nh, active_buf) }
 }
 
 /// Fused output layer step: CSR spike propagation + LIF dynamics in one kernel.
@@ -658,6 +778,8 @@ pub fn fused_output_lif_step(
 }
 
 /// Poisson fused hidden step: Poisson input generation + CSR propagation + Izhikevich.
+///
+/// `active_buf`: pre-allocated buffer for active pre-synapse indices (avoids per-step Vec allocation).
 pub fn poisson_fused_hidden_step(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32], spikes: &mut [i32], refractory: &mut [f32],
     a: &[f32], b: &[f32], c: &[f32], d: &[f32],
@@ -667,6 +789,7 @@ pub fn poisson_fused_hidden_step(
     input_spikes_out: &mut [i32],
     dt: f32, trace_decay: f32, tau_ref: f32,
     ni: usize,
+    active_buf: &mut Vec<usize>,
 ) {
     let nh = v.len();
     assert_eq!(u.len(), nh, "poisson_fused_hidden_step: u length mismatch");
@@ -682,5 +805,5 @@ pub fn poisson_fused_hidden_step(
     assert!(rates.len() >= ni, "poisson_fused_hidden_step: rates length {} < ni {}", rates.len(), ni);
     assert!(input_spikes_out.len() >= ni, "poisson_fused_hidden_step: input_spikes_out length {} < ni {}", input_spikes_out.len(), ni);
     assert!(nh % 8 == 0, "poisson_fused_hidden_step: nh must be multiple of 8, got {}", nh);
-    unsafe { fused::poisson_fused_hidden_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), rng_states.as_mut_ptr(), rates.as_ptr(), input_spikes_out.as_mut_ptr(), dt, trace_decay, tau_ref, ni, nh) }
+    unsafe { fused::poisson_fused_hidden_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), rng_states.as_mut_ptr(), rates.as_ptr(), input_spikes_out.as_mut_ptr(), dt, trace_decay, tau_ref, ni, nh, active_buf) }
 }

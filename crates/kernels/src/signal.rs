@@ -260,22 +260,34 @@ pub(crate) unsafe fn echo_tap(
 
 /// T3 inverse Kuramoto: estimate drive from amplitude changes.
 ///
+/// Linearized inverse of Stuart-Landau amplitude dynamics:
+///   r' = r + dt · ((α − r²)·r + gain·drive − decay·r)
+///
+/// Simplified for linear regime (small dt), dropping the (α − r²)·r term:
+///   drive ≈ gain · (r' − r)/dt − drive_old · decay
+///
+/// The Stuart-Landau `alpha` parameter is accepted for API compatibility
+/// but not used in the linearized formula — the `(α − r²)·r` term is
+/// assumed negligible near steady-state amplitudes.
+///
 /// # Safety
 /// `drive_out`, `r`, `r_prev` must be valid for `n` elements.
 pub(crate) unsafe fn t3_inverse_kuramoto(
     drive_out: *mut f32, r: *const f32, r_prev: *const f32,
-    alpha: f32, gain: f32, eps: f32, decay: f32, n: usize,
+    alpha: f32, gain: f32, eps: f32, decay: f32,
+    dt: f32, n: usize,
 ) {
-    let alpha_s = f32x8::splat(alpha.max(eps));
+    let dt_inv = f32x8::splat(1.0 / dt.max(eps));
     let gain_s = f32x8::splat(gain);
     let decay_s = f32x8::splat(decay);
-    let eps_s = f32x8::splat(eps);
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
         let rr = load8(r, off);
         let rp = load8(r_prev, off);
         let mut dd = load8(drive_out, off);
-        let rdot = (rr - rp) / alpha_s.max(eps_s);
+        // r_dot = (r - r_prev) / dt  (finite difference, corrected from alpha)
+        let rdot = (rr - rp) * dt_inv;
+        // drive = gain · r_dot − drive · decay  (linearized inverse)
         dd = gain_s * rdot - dd * decay_s;
         store8(drive_out, off, dd);
     }
@@ -283,8 +295,9 @@ pub(crate) unsafe fn t3_inverse_kuramoto(
         let d = std::slice::from_raw_parts_mut(drive_out, n);
         let rr = std::slice::from_raw_parts(r, n);
         let rp = std::slice::from_raw_parts(r_prev, n);
+        let dt_inv_s = 1.0 / dt.max(eps);
         for i in n8..n {
-            let rdot = (rr[i] - rp[i]) / alpha.max(eps);
+            let rdot = (rr[i] - rp[i]) * dt_inv_s;
             d[i] = gain * rdot - d[i] * decay;
         }
     }

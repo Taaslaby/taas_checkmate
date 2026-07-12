@@ -15,7 +15,7 @@ pub mod vnc;
 // Re-export safe wrappers as the primary public API
 pub use safe::*;
 // Re-export safe utility functions from neuron module
-pub use neuron::{fast_exp, fast_exp_simd};
+pub use neuron::{fast_exp, fast_exp_simd, fast_sincos_simd};
 
 /// Wrap phase to [-π, π)
 #[inline(always)]
@@ -218,6 +218,7 @@ mod tests {
         let mut phases: Vec<f32> = (0..n).map(|i| i as f32 * 0.5).collect();
         let mut cos_out = vec![0.0f32; n];
         let mut sin_out = vec![0.0f32; n];
+        
         kuramoto_prepare(&mut phases, &mut cos_out, &mut sin_out);
         for i in 0..n {
             let expected_cos = phases[i].cos();

@@ -148,7 +148,12 @@ extern "C" int cuda_psi_step(
 /// Does NOT sync — caller must sync() or call gpu_psi_step_async.
 extern "C" int gpu_psi_hamiltonian_async(void* vctx) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_psi_v, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_u, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_real, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_imag, nn*sizeof(float));
+    int bs = 256, n = nn;
     int gs_n = gs(n, bs);
 
     // 1. Zero scratch buffers
@@ -169,7 +174,13 @@ extern "C" int gpu_psi_hamiltonian_async(void* vctx) {
 /// Applies external drive from d_psi_drive (uploaded via gpu_psi_upload_drive_async).
 extern "C" int gpu_psi_step_async(void* vctx, float dt, float hbar) {
     GpuCtx* ctx = (GpuCtx*)vctx;
-    int bs = 256, n = ctx->n_neurons;
+    int nn = ctx->n_neurons;
+    ENSURE_ALLOC(d_psi_v, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_u, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_real, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_h_imag, nn*sizeof(float));
+    ENSURE_ALLOC(d_psi_drive, nn*sizeof(float));
+    int bs = 256, n = nn;
     int gs_n = gs(n, bs);
 
     // d_psi_drive holds pre-uploaded external drive (or zeros if not set)

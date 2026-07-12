@@ -17,6 +17,8 @@ pub struct SpikeRecordings {
 pub struct SpikeRecorder {
     /// Buffer of spike counts per index [n_neurons] (temporary, reused).
     spike_counts: Vec<u32>,
+    /// Flag array: is_in_group[n] для cache-friendly linear pass в `record_group`.
+    is_in_group: Vec<bool>,
 }
 
 impl SpikeRecorder {
@@ -26,6 +28,7 @@ impl SpikeRecorder {
     pub fn new(n_neurons: usize) -> Self {
         Self {
             spike_counts: vec![0; n_neurons],
+            is_in_group: vec![false; n_neurons],
         }
     }
 
@@ -104,6 +107,7 @@ impl SpikeRecorder {
         max_rate: f32,
     ) -> Vec<f32> {
         self.spike_counts.fill(0);
+        self.is_in_group.fill(false);
         let n_neurons = self.spike_counts.len();
         let batch_time_s = n_steps as f32 * dt_ms / 1000.0;
         let rate_norm = if batch_time_s * max_rate > 0.0 {
@@ -112,13 +116,19 @@ impl SpikeRecorder {
             0.0
         };
 
+        // Build is_in_group flags (reuses pre-allocated Vec<bool>)
+        for &idx in indices {
+            if idx < self.is_in_group.len() {
+                self.is_in_group[idx] = true;
+            }
+        }
+
+        // Linear scan: cache-friendly sequential access, no strided jumps
         for step in 0..n_steps {
             let offset = step * n_neurons;
-            for i in 0..indices.len() {
-                let idx = indices[i];
-                let buf_idx = offset + idx;
-                if buf_idx < spike_buffer.len() && spike_buffer[buf_idx] != 0 {
-                    self.spike_counts[idx] += 1;
+            for i in 0..n_neurons.min(spike_buffer.len().saturating_sub(offset)) {
+                if spike_buffer[offset + i] != 0 && self.is_in_group[i] {
+                    self.spike_counts[i] += 1;
                 }
             }
         }
