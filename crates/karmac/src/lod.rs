@@ -286,10 +286,12 @@ impl CarmackBsp {
                 LodLevel::Tanh
             };
 
-            if target >= self.lod[i] {
+            if target < self.lod[i] {
+                // Promotion: higher fidelity (smaller LOD#) — immediate
                 self.lod[i] = target;
                 self.hold[i] = self.lod_hold_steps[target as usize];
-            } else if self.hold[i] == 0 {
+            } else if target > self.lod[i] && self.hold[i] == 0 {
+                // Demotion: lower fidelity (larger LOD#) — gradual via hold
                 self.lod[i] = target;
                 self.hold[i] = self.lod_hold_steps[target as usize].max(1);
             }

@@ -14,7 +14,6 @@
 //! ```
 
 use rand::Rng;
-use rayon::prelude::*;
 
 /// Global Neuronal Workspace.
 pub struct GlobalWorkspace {
@@ -50,11 +49,11 @@ impl GlobalWorkspace {
     }
 
     /// Create GNW with explicit weight matrices.
-    pub fn from_weights(gate_w: Vec<f32>, broadcast_w: Vec<f32>) -> Self {
-        let ws = gate_w.len() / broadcast_w.len();
-        let n = broadcast_w.len() / ws;
-        assert_eq!(gate_w.len(), n * ws);
-        assert_eq!(broadcast_w.len(), ws * n);
+    /// `n` = number of neurons, `ws` = workspace size.
+    /// `gate_w` must be `[ws × n]`, `broadcast_w` must be `[n × ws]`.
+    pub fn from_weights(gate_w: Vec<f32>, broadcast_w: Vec<f32>, n: usize, ws: usize) -> Self {
+        assert_eq!(gate_w.len(), ws * n, "gate_w must be [ws × n] = {} × {}", ws, n);
+        assert_eq!(broadcast_w.len(), n * ws, "broadcast_w must be [n × ws] = {} × {}", n, ws);
         Self { gate_w, broadcast_w, n, ws, delta_buf: vec![0.0; n] }
     }
 
@@ -86,14 +85,12 @@ impl GlobalWorkspace {
 
         // broadcast: gates (ws) → broadcast_w (n × ws) → delta (n)
         // delta = broadcast_w @ gates — pre-allocated buffer, no heap alloc
-        self.delta_buf
-            .par_chunks_exact_mut(1)
-            .enumerate()
-            .for_each(|(i, d)| {
-                let row_start = i * self.ws;
-                let row = &self.broadcast_w[row_start..row_start + self.ws];
-                d[0] = row.iter().zip(gates.iter()).map(|(w, g)| w * g).sum();
-            });
+        // Serial loop: parallelizing chunk-size-1 has overwhelming rayon overhead
+        for i in 0..self.n {
+            let row_start = i * self.ws;
+            let row = &self.broadcast_w[row_start..row_start + self.ws];
+            self.delta_buf[i] = row.iter().zip(gates.iter()).map(|(w, g)| w * g).sum();
+        }
 
         // residual: r += delta
         for (r_i, d_i) in r.iter_mut().zip(self.delta_buf.iter()) {

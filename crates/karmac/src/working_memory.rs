@@ -56,6 +56,8 @@ pub struct WorkingMemory {
     pub recurrent_gain: f32,
     /// Step counter.
     step: u64,
+    /// Pre-allocated delta buffer — avoids heap alloc in hot path.
+    delta_buf: Vec<f32>,
 }
 
 impl WorkingMemory {
@@ -85,6 +87,7 @@ impl WorkingMemory {
             gate_threshold: 0.1,
             recurrent_gain: 0.01,
             step: 0,
+            delta_buf: vec![0.0; n_slots * dim],
         }
     }
 
@@ -165,23 +168,23 @@ impl WorkingMemory {
 
         // Recurrent excitation: for each slot, apply W_rec
         // This maintains attractor dynamics (Hopfield-like)
-        let mut delta = vec![0.0f32; n * dim];
+        self.delta_buf.fill(0.0);
         for slot in 0..n {
             let off = slot * dim;
             let slot_state = &self.buffer[off..off + dim];
             for j in 0..dim {
                 let row_start = j * dim;
-                delta[off + j] = self.w_rec[row_start..row_start + dim]
+                self.delta_buf[off + j] = self.w_rec[row_start..row_start + dim]
                     .iter()
                     .zip(slot_state.iter())
                     .map(|(w, s)| w * s)
                     .sum::<f32>()
-                    * self.recurrent_gain; // configurable recurrent gain
+                    * self.recurrent_gain;
             }
         }
 
         // Add recurrent delta
-        for (x, d) in self.buffer.iter_mut().zip(delta.iter()) {
+        for (x, d) in self.buffer.iter_mut().zip(self.delta_buf.iter()) {
             *x += d;
         }
     }
