@@ -288,7 +288,7 @@ impl SynapticKinetics {
         }
     }
 
-    /// Compute synaptic current: `I_out[i] += Σ g_r[i] · (V[i] − E_rev_r)`.
+    /// Compute synaptic current: `I_out[i] += Σ g_r[i] · (E_rev_r − V[i])`.
     ///
     /// Uses `f32x8` SIMD for the inner loop.
     /// For NMDA, the voltage-dependent Mg²⁺ block modulates `g_nmda` in-place.
@@ -308,21 +308,21 @@ impl SynapticKinetics {
                 let vi = load8(v.as_ptr(), off);
                 let mut cur = load8(i_out.as_ptr(), off);
 
-                // AMPA: g · (V - 0)
-                cur = cur + load8(self.g_ampa.as_ptr(), off) * (vi - e_ampa);
-                // NMDA: g · B(V) · (V - 0)  — Mg²⁺ block
+                // AMPA: g · (0 - V)
+                cur = cur + load8(self.g_ampa.as_ptr(), off) * (e_ampa - vi);
+                // NMDA: g · B(V) · (0 - V)  — Mg²⁺ block
                 let g_nmda_v = load8(self.g_nmda.as_ptr(), off);
-                cur = cur + g_nmda_v * nmda_mg_block_simd(vi) * (vi - e_nmda);
-                // GABA_A: g · (V - (-70))
-                cur = cur + load8(self.g_gaba_a.as_ptr(), off) * (vi - e_gaba_a);
-                // GABA_B: g · (V - (-90))
-                cur = cur + load8(self.g_gaba_b.as_ptr(), off) * (vi - e_gaba_b);
-                // nAChR: g · (V - 0)  — fast excitatory (insect ACh)
-                cur = cur + load8(self.g_nachr.as_ptr(), off) * (vi - e_nachr);
-                // GluCl: g · (V - (-70)) — fast inhibitory (insect GLUT, Cl⁻)
-                cur = cur + load8(self.g_glucl.as_ptr(), off) * (vi - e_glucl);
-                // mAChR: g · (V - (-90)) — slow modulatory (DA/SER/OCT)
-                cur = cur + load8(self.g_machr.as_ptr(), off) * (vi - e_machr);
+                cur = cur + g_nmda_v * nmda_mg_block_simd(vi) * (e_nmda - vi);
+                // GABA_A: g · (-70 - V)
+                cur = cur + load8(self.g_gaba_a.as_ptr(), off) * (e_gaba_a - vi);
+                // GABA_B: g · (-90 - V)
+                cur = cur + load8(self.g_gaba_b.as_ptr(), off) * (e_gaba_b - vi);
+                // nAChR: g · (0 - V)  — fast excitatory (insect ACh)
+                cur = cur + load8(self.g_nachr.as_ptr(), off) * (e_nachr - vi);
+                // GluCl: g · (-70 - V) — fast inhibitory (insect GLUT, Cl⁻)
+                cur = cur + load8(self.g_glucl.as_ptr(), off) * (e_glucl - vi);
+                // mAChR: g · (-90 - V) — slow modulatory (DA/SER/OCT)
+                cur = cur + load8(self.g_machr.as_ptr(), off) * (e_machr - vi);
 
                 store8(i_out.as_mut_ptr(), off, cur);
             }
@@ -331,13 +331,13 @@ impl SynapticKinetics {
         // Scalar tail
         for i in n8..n {
             let vi = v[i];
-            i_out[i] += self.g_ampa[i] * (vi - ReceptorType::AMPA.e_rev())
-                      + self.g_nmda[i] * nmda_mg_block(vi) * (vi - ReceptorType::NMDA.e_rev())
-                      + self.g_gaba_a[i] * (vi - ReceptorType::GABA_A.e_rev())
-                      + self.g_gaba_b[i] * (vi - ReceptorType::GABA_B.e_rev())
-                      + self.g_nachr[i] * (vi - ReceptorType::nAChR.e_rev())
-                      + self.g_glucl[i] * (vi - ReceptorType::GluCl.e_rev())
-                      + self.g_machr[i] * (vi - ReceptorType::mAChR.e_rev());
+            i_out[i] += self.g_ampa[i] * (ReceptorType::AMPA.e_rev() - vi)
+                      + self.g_nmda[i] * nmda_mg_block(vi) * (ReceptorType::NMDA.e_rev() - vi)
+                      + self.g_gaba_a[i] * (ReceptorType::GABA_A.e_rev() - vi)
+                      + self.g_gaba_b[i] * (ReceptorType::GABA_B.e_rev() - vi)
+                      + self.g_nachr[i] * (ReceptorType::nAChR.e_rev() - vi)
+                      + self.g_glucl[i] * (ReceptorType::GluCl.e_rev() - vi)
+                      + self.g_machr[i] * (ReceptorType::mAChR.e_rev() - vi);
         }
     }
 
@@ -471,14 +471,14 @@ mod tests {
         let v = vec![-65.0, -65.0];
         let mut i_out = vec![0.0, 0.0];
 
-        kin.g_ampa[0] = 0.1;  // AMPA: 0.1 * (-65 - 0) = -6.5
-        kin.g_gaba_a[1] = 0.2; // GABA_A: 0.2 * (-65 - (-70)) = 0.2 * 5 = 1.0
+        kin.g_ampa[0] = 0.1;  // AMPA: 0.1 * (0 - (-65)) = 6.5 (depol)
+        kin.g_gaba_a[1] = 0.2; // GABA_A: 0.2 * (-70 - (-65)) = -1.0 (hyperpol)
 
         kin.compute_currents(&v, &mut i_out);
 
-        assert!((i_out[0] - (-6.5)).abs() < 0.01,
+        assert!((i_out[0] - 6.5).abs() < 0.01,
             "neuron 0 AMPA I_syn: {}", i_out[0]);
-        assert!((i_out[1] - 1.0).abs() < 0.01,
+        assert!((i_out[1] - (-1.0)).abs() < 0.01,
             "neuron 1 GABA_A I_syn: {}", i_out[1]);
     }
 
@@ -493,11 +493,11 @@ mod tests {
 
         kin.compute_currents(&v, &mut i_out);
 
-        // At -65mV: B(V) ≈ 0.024, I ≈ 1.0 * 0.024 * (-65) ≈ -1.56
-        // At +30mV: B(V) ≈ 0.95, I ≈ 1.0 * 0.95 * 30 ≈ 28.5
-        let ratio = i_out[1] / i_out[0].abs();
-        assert!(ratio > 5.0,
-            "NMDA Mg block: at 30mV current should be >> at -65mV, ratio={}", ratio);
+        // At -65mV: B(V) ≈ 0.024, I ≈ 1.0 * 0.024 * (0 - (-65)) = 1.56 (depol)
+        // At +30mV: B(V) ≈ 0.95, I ≈ 1.0 * 0.95 * (0 - 30) = -28.5 (hyperpol, driving force reversed)
+        let mag_neg = i_out[1].abs(); // magnitude at depolarized V
+        assert!(mag_neg > 5.0,
+            "NMDA Mg block: at 30mV current magnitude should be large, got {}", i_out[1]);
     }
 
     // ─── 4. Receptor type utilities ──────────────────

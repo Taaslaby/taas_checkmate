@@ -435,7 +435,7 @@ mod tests {
         let n_steps = 100;
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, n_steps, &mut kinetics);
+        let spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, n_steps, &mut kinetics, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
         assert!(total_spikes > 0, "LIF synaptic should fire with high drive, got {} spikes", total_spikes);
@@ -460,7 +460,7 @@ mod tests {
         let external_I = vec![7.0f32; n];
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 20, &mut kinetics);
+        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 20, &mut kinetics, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
         assert!(total_spikes > 0, "Izhikevich synaptic should fire with high drive");
@@ -486,7 +486,7 @@ mod tests {
         let initial_g = kinetics.g_ampa[0];
         assert!((initial_g - 10.0).abs() < 1e-6, "initial g={}", initial_g);
 
-        let _spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, 1, &mut kinetics);
+        let _spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, 1, &mut kinetics, 1.0);
 
         let expected_decay = (-0.1f32 / 2.0).exp();
         assert!(kinetics.g_ampa[0] < 10.0 * expected_decay * 1.01,
@@ -512,7 +512,7 @@ mod tests {
         let external_I = vec![10.0f32; n];
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 50, &mut kinetics);
+        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 50, &mut kinetics, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
         assert!(total_spikes > 0, "Izhikevich with mixed receptors should fire");
@@ -536,7 +536,7 @@ mod tests {
         let n_steps = 100;
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, n_steps, &mut kinetics);
+        let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, n_steps, &mut kinetics, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
         assert!(total_spikes > 0, "HH synaptic should fire with high drive (I=15), got {} spikes", total_spikes);
@@ -838,6 +838,7 @@ pub fn sim_lif_synaptic(
     external_I: &[f32],
     n_steps: usize,
     kinetics: &mut SynapticKinetics,
+    scale: f32,
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
@@ -877,7 +878,7 @@ pub fn sim_lif_synaptic(
         // 7. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
             &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut state.queue, kinetics, 1.0,
+            &connectome.receptor_types, &mut state.queue, kinetics, scale,
         );
     }
 
@@ -1239,6 +1240,7 @@ pub fn sim_izhikevich_synaptic(
     external_I: &[f32],
     n_steps: usize,
     kinetics: &mut SynapticKinetics,
+    scale: f32,
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
@@ -1283,7 +1285,7 @@ pub fn sim_izhikevich_synaptic(
         // 8. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
             &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut state.queue, kinetics, 1.0,
+            &connectome.receptor_types, &mut state.queue, kinetics, scale,
         );
     }
 
@@ -1566,6 +1568,7 @@ pub fn sim_hh_synaptic(
     external_I: &[f32],
     n_steps: usize,
     kinetics: &mut SynapticKinetics,
+    scale: f32,
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
@@ -1600,7 +1603,7 @@ pub fn sim_hh_synaptic(
         // 7. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
             &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut queue, kinetics, 1.0,
+            &connectome.receptor_types, &mut queue, kinetics, scale,
         );
     }
 

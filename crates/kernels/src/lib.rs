@@ -293,14 +293,14 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let I = vec![30.0f32; n];
+        let mut I = vec![30.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..200 {
-            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
+            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "Expected spikes with I=30");
@@ -314,14 +314,14 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let I = vec![-20.0f32; n];
+        let mut I = vec![-20.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..100 {
-            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
+            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert_eq!(total_spikes, 0, "No spikes with I=-20");

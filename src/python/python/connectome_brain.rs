@@ -124,6 +124,23 @@ impl PyConnectomeData {
         self.inner.build_receptor_types();
     }
 
+    /// Build per-synapse receptor_types with Drosophila-appropriate FlyWire NT mapping.
+    ///
+    /// ``nt_map`` must be ``[n_neurons]`` float32 array with FlyWire NT codes:
+    ///   +1.0 = ACh → nAChR (fast exc)
+    ///   -1.0 = GABA → GABA_A (fast inh)
+    ///   +2.0 = GLUT → GluCl (fast inh, Cl⁻ — insect-specific!)
+    ///   -2.0 = DA/SER/OCT → mAChR (slow mod)
+    ///   0.0  = None/gap → AMPA (exc fallback)
+    ///
+    /// For Princeton baked data with +1/-1 nt_types, pass ``nt_types`` as nt_map.
+    pub fn build_receptor_types_flywire(&mut self, nt_map: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = nt_map.readonly();
+        let sl = ro.as_slice()?;
+        self.inner.build_receptor_types_flywire(sl);
+        Ok(())
+    }
+
     /// Raw receptor_types (read-only copy) — per synapse, maps to ReceptorType.
     pub fn receptor_types<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<u8>>> {
         if self.inner.receptor_types.is_empty() {
@@ -260,10 +277,11 @@ impl PyBrainSimulator {
     ///     n_steps: number of simulation steps.
     ///     dt_ms: timestep in milliseconds (default 0.5).
     ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
+    ///     scale: synaptic weight multiplier (default 1e10 for FAFB baked weights).
     ///
     /// Returns:
     ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None))]
+    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, scale=1e10))]
     pub fn step_batch_synaptic<'py>(
         &mut self,
         py: Python<'py>,
@@ -271,6 +289,7 @@ impl PyBrainSimulator {
         n_steps: usize,
         dt_ms: f32,
         external_I: Option<Bound<'_, PyArray1<f32>>>,
+        scale: f32,
     ) -> PyResult<Bound<'py, PyArray1<i32>>> {
         if connectome.inner.receptor_types.is_empty() {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -306,7 +325,7 @@ impl PyBrainSimulator {
                 let v_thresh = vec![-58.0f32; n];
                 let v_reset = vec![-70.0f32; n];
                 let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics)
+                conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
             }
             NeuronModel::Izhikevich => {
                 let params = IzhikevichParams {
@@ -317,7 +336,7 @@ impl PyBrainSimulator {
                     dt_ms,
                     tau_ref: 2.0,
                 };
-                conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics)
+                conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
             }
             _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                 format!("Synaptic mode not supported for model {:?}", self.model)
