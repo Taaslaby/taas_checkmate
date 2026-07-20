@@ -6,14 +6,21 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 use taas_connectome::ConnectomeData;
 
+/// Resolve a path under `examples/data/` (works from any cwd via CARGO_MANIFEST_DIR).
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
+
 const FAFB_CSV: &str = "/home/taaslab/Проекты/asm_engines/MEIIgpt/experiments/datasets/fafb_v783_princeton_synapse_table.csv.gz";
-const FAFB_TAAS: &str = "fafb.taas";
 const PRINCETON_CSV: &str = "/home/taaslab/Проекты/asm_engines/MEIIgpt/experiments/datasets/connections_princeton.csv.gz";
-const PRINCETON_TAAS: &str = "princeton.taas";
 
 /// Stream through zcat, calling `f` on each parsed line.
 fn stream_csv<F>(path: &str, n_fields: usize, f: F)
@@ -87,17 +94,18 @@ fn bake_fafb() {
     // Save to .taas
     let t2 = Instant::now();
     let conn = ConnectomeData::new(row_ptr, col_indices, values, nt_types, vec![]);
-    let mut f = File::create(FAFB_TAAS).unwrap();
+    let fafb_path = data("fafb.taas");
+    let mut f = File::create(&fafb_path).unwrap();
     conn.save_baked(&mut f).unwrap();
     drop(f);
 
-    let file_size = std::fs::metadata(FAFB_TAAS).unwrap().len();
-    println!("   Saved to {FAFB_TAAS} ({:.1}MB) in {:.1}s",
-             file_size as f64 / 1_048_576.0, t2.elapsed().as_secs_f64());
+    let file_size = std::fs::metadata(&fafb_path).unwrap().len();
+    println!("   Saved to {} ({:.1}MB) in {:.1}s",
+             fafb_path.display(), file_size as f64 / 1_048_576.0, t2.elapsed().as_secs_f64());
 
     // Verify round-trip
     let t3 = Instant::now();
-    let mut f = File::open(FAFB_TAAS).unwrap();
+    let mut f = File::open(&fafb_path).unwrap();
     let loaded = ConnectomeData::load_baked(&mut f).unwrap();
     assert_eq!(loaded.n_neurons, conn.n_neurons);
     assert_eq!(loaded.n_synapses, conn.n_synapses);
@@ -171,13 +179,14 @@ fn bake_princeton() {
 
     let t2 = Instant::now();
     let conn = ConnectomeData::new(row_ptr, col_indices, values, nt_types, vec![]);
-    let mut f = File::create(PRINCETON_TAAS).unwrap();
+    let princeton_path = data("princeton.taas");
+    let mut f = File::create(&princeton_path).unwrap();
     conn.save_baked(&mut f).unwrap();
     drop(f);
 
-    let file_size = std::fs::metadata(PRINCETON_TAAS).unwrap().len();
-    println!("   Saved to {PRINCETON_TAAS} ({:.1}MB) in {:.1}s",
-             file_size as f64 / 1_048_576.0, t2.elapsed().as_secs_f64());
+    let file_size = std::fs::metadata(&princeton_path).unwrap().len();
+    println!("   Saved to {} ({:.1}MB) in {:.1}s",
+             princeton_path.display(), file_size as f64 / 1_048_576.0, t2.elapsed().as_secs_f64());
     println!("   Total bake time: {:.1}s", t0.elapsed().as_secs_f64());
 }
 
@@ -194,7 +203,7 @@ fn main() {
     println!("\nDone in {:.1}s total.", t_all.elapsed().as_secs_f64());
     println!("Use: load via `ConnectomeData::load_baked(&mut file)`");
 
-    let total_mb = std::fs::metadata(FAFB_TAAS).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0)
-        + std::fs::metadata(PRINCETON_TAAS).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0);
+    let total_mb = std::fs::metadata(data("fafb.taas")).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0)
+        + std::fs::metadata(data("princeton.taas")).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0);
     println!("Total disk: {total_mb:.0}MB");
 }

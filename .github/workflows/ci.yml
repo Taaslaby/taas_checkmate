@@ -33,17 +33,26 @@ jobs:
       - name: Format check
         run: cargo fmt --check
 
-      - name: Clippy
+      - name: Clippy (no features)
         run: cargo clippy --no-default-features -- -D warnings
+
+      - name: Clippy (all features)
+        run: cargo clippy --all-features 2>&1 | grep -E 'error' | head -10 && exit 1 || echo 'No errors'
 
       - name: Build (no features)
         run: cargo build --no-default-features
 
-      - name: Run tests (lib + integration)
+      - name: Build (all features)
+        run: cargo build --all-features
+
+      - name: Run tests (no features)
         run: cargo test --no-default-features
 
-      - name: Build with python feature (static check)
-        run: cargo check --features python
+      - name: Run tests (all features)
+        run: cargo test --all-features
+
+      - name: Run kernel progonator tests (integration)
+        run: cargo test -p taas-kernels --test kernel_progon
 
       - name: Bench check (compilation only)
         run: cargo bench --no-default-features --bench bench -- --list

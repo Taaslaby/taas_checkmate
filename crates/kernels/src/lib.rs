@@ -25,7 +25,7 @@ pub fn wrap_phase(p: f32) -> f32 {
 }
 
 /// Clamp amplitude with floor (совпадает с TriOscillator::step clamp)
-#[inline(always)]
+#[inline]
 pub fn clamp_amp(a: f32) -> f32 {
     a.max(0.001).min(10.0)
 }

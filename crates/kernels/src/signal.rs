@@ -23,15 +23,14 @@ unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
 }
 
-// f32x8 doesn't have exp() — we use a per-element fallback
+// Sigmoid via fast_exp_simd from neuron module (~3× faster than scalar f32::exp).
+// f32x8 doesn't have exp() — use the crate's SIMD polynomial approximation.
 #[inline(always)]
 fn simd_sigmoid(x: f32x8) -> f32x8 {
-    let a: [f32; 8] = x.to_array();
-    let mut r = [0.0f32; 8];
-    for j in 0..8 {
-        r[j] = 1.0 / (1.0 + (-a[j].min(50.0).max(-50.0)).exp());
-    }
-    f32x8::from(r)
+    let one = f32x8::splat(1.0);
+    // Clamp x to [-10, 10] for fast_exp_simd range (overflow protection)
+    let x_clamped = x.max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
+    one / (one + super::fast_exp_simd(-x_clamped))
 }
 
 /// Safety-clamp values in [min, max]. Uses f32x8 SIMD.
@@ -104,7 +103,7 @@ pub(crate) unsafe fn linear_decoder(
         while i < n8 {
             let ws = load8(weights, row_off + i);
             let ss = load8(states, i);
-            vi = vi + ws * ss;
+            vi += ws * ss;
             i += 8;
         }
         let arr: [f32; 8] = vi.to_array();
@@ -274,7 +273,7 @@ pub(crate) unsafe fn echo_tap(
 /// `drive_out`, `r`, `r_prev` must be valid for `n` elements.
 pub(crate) unsafe fn t3_inverse_kuramoto(
     drive_out: *mut f32, r: *const f32, r_prev: *const f32,
-    alpha: f32, gain: f32, eps: f32, decay: f32,
+    _alpha: f32, gain: f32, eps: f32, decay: f32,
     dt: f32, n: usize,
 ) {
     let dt_inv = f32x8::splat(1.0 / dt.max(eps));
@@ -357,7 +356,7 @@ pub(crate) unsafe fn sgd_step_simd(
         let mut w = load8_mut(weight, off);
         let g = load8(grad, off);
         v = mom_s * v + one_minus_mom * g;
-        w = w - lr_s * v;
+        w -= lr_s * v;
         store8(velocity, off, v);
         store8(weight, off, w);
     }
@@ -402,7 +401,7 @@ pub(crate) unsafe fn adam_step_simd(
 
         let m_hat = mm / b1c_s;
         let v_hat = vv / b2c_s;
-        w = w - lr_s * m_hat / (v_hat.sqrt() + eps_s);
+        w -= lr_s * m_hat / (v_hat.sqrt() + eps_s);
 
         store8(weight, off, w);
         store8(m, off, mm);

@@ -93,6 +93,39 @@ pub fn t3_inverse_kuramoto(drive_out: &mut [f32], r: &[f32], r_prev: &[f32], alp
     unsafe { signal::t3_inverse_kuramoto(drive_out.as_mut_ptr(), r.as_ptr(), r_prev.as_ptr(), alpha, gain, eps, decay, dt, n) }
 }
 
+/// Hebbian plasticity on CSR weights using slow states.
+///
+/// `dW = η · m_pre · m_post − α · W · dt`, clamped to [-1, 1].
+///
+/// `values` — CSR synaptic weights (mutated in-place).
+/// `m` — slow state per neuron (from [`izhikevich_dual_step`]).
+pub fn hebbian_csr_step(
+    values: &mut [f32],
+    col_indices: &[i32],
+    row_ptr: &[i32],
+    m: &[f32],
+    n_neurons: usize,
+    lr: f32,
+    decay: f32,
+    dt: f32,
+) {
+    let n_synapses = values.len();
+    assert_eq!(col_indices.len(), n_synapses, "hebbian_csr_step: col_indices length mismatch");
+    assert!(row_ptr.len() > n_neurons, "hebbian_csr_step: row_ptr too short");
+    assert!(m.len() >= n_neurons, "hebbian_csr_step: m too short");
+    unsafe { izhikevich::hebbian_csr_step(
+        values.as_mut_ptr(),
+        col_indices.as_ptr(),
+        row_ptr.as_ptr(),
+        m.as_ptr(),
+        n_neurons,
+        n_synapses,
+        lr,
+        decay,
+        dt,
+    ) }
+}
+
 /// Elementwise ReLU: `x = max(0, x)` using SIMD `f32x8`.
 pub fn relu_simd(data: &mut [f32]) {
     let n = data.len();
@@ -390,6 +423,52 @@ pub fn eprop_izhikevich_step(
     assert_eq!(spikes.len(), n, "eprop_izhikevich_step: spikes length mismatch");
     assert_eq!(pre_spikes.len(), n, "eprop_izhikevich_step: pre_spikes length mismatch");
     unsafe { izhikevich::eprop_izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), dt, tau_e, a, b, c, d, tau_sg, n) }
+}
+
+/// Izhikevich dual memory step: fast Izhikevich dynamics + slow memory state.
+///
+/// Extends `izhikevich_step` with a per-neuron slow state `m` that accumulates
+/// recent spiking activity and modulates input current:
+///
+/// ```text
+/// m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t-1]
+/// I += w_m · m[t-1]
+/// ```
+///
+/// The slow state gives neurons a "memory" of recent activity, enabling
+/// bistable dynamics and context-dependent behavior (Sun et al. 2026).
+///
+/// Clamps `ii` to [-100, 100] to prevent saturation.
+pub fn izhikevich_dual_step(
+    v: &mut [f32], u: &mut [f32], trace: &mut [f32],
+    a: &[f32], b: &[f32], ii: &mut [f32],
+    dt: f32, trace_decay: f32,
+    spikes: &mut [i32], c: &[f32], d: &[f32],
+    refractory: &mut [f32], tau_ref: f32,
+    m: &mut [f32],       // slow state per neuron
+    tau_m: f32,          // slow state time constant (0..1, higher = slower)
+    w_m: f32,            // memory-to-current weight
+) {
+    let n = v.len();
+    assert_eq!(u.len(), n, "izhikevich_dual_step: u length mismatch");
+    assert_eq!(trace.len(), n, "izhikevich_dual_step: trace length mismatch");
+    assert_eq!(a.len(), n, "izhikevich_dual_step: a length mismatch");
+    assert_eq!(b.len(), n, "izhikevich_dual_step: b length mismatch");
+    assert_eq!(ii.len(), n, "izhikevich_dual_step: Ii length mismatch");
+    assert_eq!(spikes.len(), n, "izhikevich_dual_step: spikes length mismatch");
+    assert_eq!(c.len(), n, "izhikevich_dual_step: c length mismatch");
+    assert_eq!(d.len(), n, "izhikevich_dual_step: d length mismatch");
+    assert_eq!(refractory.len(), n, "izhikevich_dual_step: refractory length mismatch");
+    assert_eq!(m.len(), n, "izhikevich_dual_step: m (slow state) length mismatch");
+    safety_clamp(ii, -100.0, 100.0);
+    unsafe { izhikevich::izhikevich_dual_step(
+        v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+        a.as_ptr(), b.as_ptr(), ii.as_ptr(),
+        dt, trace_decay,
+        spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
+        refractory.as_mut_ptr(), tau_ref,
+        m.as_mut_ptr(), tau_m, w_m, n,
+    ) }
 }
 
 /// Multi-input eprop Izhikevich: like `eprop_izhikevich_step` but with weighted sum of pre-synaptic spikes.
@@ -751,7 +830,7 @@ pub fn fused_hidden_izhikevich_step(
     assert_eq!(d.len(), nh, "fused_hidden_izhikevich_step: d length mismatch");
     assert_eq!(weights.len(), ni * nh, "fused_hidden_izhikevich_step: weights length mismatch");
     assert!(input_spikes.len() >= ni, "fused_hidden_izhikevich_step: input_spikes length {} < ni {}", input_spikes.len(), ni);
-    assert!(nh % 8 == 0, "fused_hidden_izhikevich_step: nh must be multiple of 8, got {}", nh);
+    assert!(nh.is_multiple_of(8), "fused_hidden_izhikevich_step: nh must be multiple of 8, got {}", nh);
     unsafe { fused::fused_hidden_izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), input_spikes.as_ptr(), dt, trace_decay, tau_ref, ni, nh, active_buf) }
 }
 
@@ -773,7 +852,7 @@ pub fn fused_output_lif_step(
     assert_eq!(v_reset.len(), na, "fused_output_lif_step: v_reset length mismatch");
     assert_eq!(weights.len(), nh * na, "fused_output_lif_step: weights length mismatch");
     assert!(hidden_spikes.len() >= nh, "fused_output_lif_step: hidden_spikes length {} < nh {}", hidden_spikes.len(), nh);
-    assert!(na % 8 == 0, "fused_output_lif_step: na must be multiple of 8, got {}", na);
+    assert!(na.is_multiple_of(8), "fused_output_lif_step: na must be multiple of 8, got {}", na);
     unsafe { fused::fused_output_lif_step(v.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), tau_m.as_ptr(), v_rest.as_ptr(), v_th.as_ptr(), v_reset.as_ptr(), weights.as_ptr(), hidden_spikes.as_ptr(), dt, tau_ref, nh, na) }
 }
 
@@ -804,6 +883,6 @@ pub fn poisson_fused_hidden_step(
     assert!(rng_states.len() >= ni, "poisson_fused_hidden_step: rng_states length {} < ni {}", rng_states.len(), ni);
     assert!(rates.len() >= ni, "poisson_fused_hidden_step: rates length {} < ni {}", rates.len(), ni);
     assert!(input_spikes_out.len() >= ni, "poisson_fused_hidden_step: input_spikes_out length {} < ni {}", input_spikes_out.len(), ni);
-    assert!(nh % 8 == 0, "poisson_fused_hidden_step: nh must be multiple of 8, got {}", nh);
+    assert!(nh.is_multiple_of(8), "poisson_fused_hidden_step: nh must be multiple of 8, got {}", nh);
     unsafe { fused::poisson_fused_hidden_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), spikes.as_mut_ptr(), refractory.as_mut_ptr(), a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(), weights.as_ptr(), rng_states.as_mut_ptr(), rates.as_ptr(), input_spikes_out.as_mut_ptr(), dt, trace_decay, tau_ref, ni, nh, active_buf) }
 }

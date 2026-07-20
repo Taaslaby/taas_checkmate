@@ -59,23 +59,23 @@ pub(crate) unsafe fn adex_step(
         let mask_tm = tau_m.cmp_gt(zero);
         let inv_tm = mask_tm.blend(one / tau_m, zero);
         let dv = (v_rest - vv + exp_term - uu + ii) * inv_tm * dt_s;
-        vv = vv + refr_mask.blend(zero, mask_tm.blend(dv, zero));
+        vv += refr_mask.blend(zero, mask_tm.blend(dv, zero));
 
         // Adaptation current (still decays during refractory)
         let mask_tw = tau_w.cmp_gt(zero);
         let inv_tw = mask_tw.blend(one / tau_w, zero);
         let dw = (aa * (vv - v_rest) - uu) * inv_tw * dt_s;
-        uu = uu + mask_tw.blend(dw, zero);
+        uu += mask_tw.blend(dw, zero);
 
         // Spike detection (only non-refractory)
         let nan_mask = vv.cmp_ne(vv);
         let not_refr = !refr_mask;
         let sm = (vv.cmp_ge(v_th) | nan_mask) & not_refr;
         vv = refr_mask.blend(vv, sm.blend(v_reset, vv));
-        uu = uu + sm.blend(bb, zero);
+        uu += sm.blend(bb, zero);
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr = refr - dt_s;  // Always decrement
+        refr -= dt_s;  // Always decrement
         refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
         refr = refr.max(zero);
 
@@ -221,8 +221,8 @@ pub(crate) unsafe fn eprop_adex_step_multi(
 
         let dv = (v_rest_s - vv + exp_term - ww + I_s) / tau_m_s * dt_s;
         let dw = (a_s * (vv - v_rest_s) - ww) / tau_w_s * dt_s;
-        vv = vv + dv;
-        ww = ww + dw;
+        vv += dv;
+        ww += dw;
 
         // Surrogate gradient
         let diff = (vv - v_th_s).abs() / tau_sg_s;
@@ -233,12 +233,11 @@ pub(crate) unsafe fn eprop_adex_step_multi(
         let nan_mask = vv.cmp_ne(vv);
         let sm = vv.cmp_ge(v_th_s) | nan_mask;
         vv = sm.blend(v_reset_s, vv);
-        ww = ww + sm.blend(b_s, zero);
+        ww += sm.blend(b_s, zero);
 
         // Count spikes
-        let sp_arr: [f32; 8] = sm.to_array();
-        for i in 0..8 {
-            if sp_arr[i].to_bits() != 0 { total_spikes += 1; }
+        for &val in sm.to_array().iter() {
+            if val.to_bits() != 0 { total_spikes += 1; }
         }
 
         store8(v, off, vv);
@@ -253,7 +252,7 @@ pub(crate) unsafe fn eprop_adex_step_multi(
             if z != 0.0 {
                 e_simd = e_simd * e_decay + ps * f32x8::splat(z) * tau_e_s * one_minus_e_decay;
             } else {
-                e_simd = e_simd * e_decay;
+                e_simd *= e_decay;
             }
             store8(e, i * n + off, e_simd);
         }

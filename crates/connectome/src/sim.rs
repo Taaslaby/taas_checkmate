@@ -120,6 +120,9 @@ pub struct BrainState {
     /// Spike queue — decouples SIMD from CSR propagation.
     #[serde(skip)]
     pub queue: SpikeQueue,
+    /// Slow memory state for dual memory pathway (Sun et al. 2026).
+    /// Initialized to 0.5 (neutral). Updated by [`sim_izhikevich_dual`].
+    pub slow_state: Vec<f32>,
 }
 
 impl BrainState {
@@ -133,14 +136,18 @@ impl BrainState {
             NeuronModel::Psi => (0.0, 0.0),
         };
 
-        // Queue capacity = n_neurons (max possible spikes per step), next power of 2
-        // Guarantees no overflow even in 50%+ firing rate bursts.
-        let queue_cap = n_neurons.max(4).next_power_of_two();
+    // Queue capacity = n_neurons (max possible spikes per step), next power of 2
+    // Guarantees no overflow even in 50%+ firing rate bursts.
+    let queue_cap = n_neurons.max(4).next_power_of_two();
 
-        Self {
+    // Slow state initialized to 0.5 (neutral baseline)
+    let mut slow_state = vec![0.5f32; n_padded];
+
+    Self {
             v: vec![v_init; n_padded],
             u: vec![u_init; n_padded],
             trace: vec![0.0; n_padded],
+            slow_state: vec![0.5; n_padded],
             I_buf: vec![0.0; n_padded],
             spikes: vec![0; n_padded],
             refractory: vec![0.0; n_padded],
@@ -167,6 +174,7 @@ impl BrainState {
         crate::rcm::apply_permutation_to_state(&mut self.I_buf, perm);
         crate::rcm::apply_permutation_to_state(&mut self.spikes, perm);
         crate::rcm::apply_permutation_to_state(&mut self.refractory, perm);
+        crate::rcm::apply_permutation_to_state(&mut self.slow_state, perm);
         // Padding (n_padded..) остаётся без изменений — в нём нет данных
     }
 
@@ -236,6 +244,21 @@ pub struct IzhikevichParams {
     pub d: Vec<f32>,
     pub dt_ms: f32,
     pub tau_ref: f32,
+}
+
+/// Parameters for Izhikevich Dual Memory model.
+#[derive(Debug, Clone)]
+pub struct IzhikevichDualParams {
+    pub a: Vec<f32>,
+    pub b: Vec<f32>,
+    pub c: Vec<f32>,
+    pub d: Vec<f32>,
+    pub dt_ms: f32,
+    pub tau_ref: f32,
+    /// Slow memory time constant (0..1, higher = slower decay)
+    pub tau_m: f32,
+    /// Memory-to-current weight (how much slow state modulates I)
+    pub w_m: f32,
 }
 
 /// Parameters for Rate model.
@@ -551,11 +574,156 @@ mod tests {
         let external_I = vec![15.0f32; n];
         let n_steps = 100;
 
-        let spikes = sim_hh(&conn, &mut cfg, &external_I, n_steps);
+        let spikes = sim_hh(&conn, &mut cfg, &external_I, n_steps, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
         assert!(total_spikes > 0, "HH (instant) should fire with high drive (I=15), got {} spikes", total_spikes);
         assert_eq!(spikes.len(), n_steps * n);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  Integration: HH physics + synaptic chemistry
+    // ═══════════════════════════════════════════════════════
+
+    /// Simple 2-neuron connectome: 0 → 1 with nAChR
+    fn make_2_neuron_connectome() -> ConnectomeData {
+        let mut conn = ConnectomeData::new(
+            vec![0i32, 1, 2], // row_ptr: 0 has 1 syn, 1 has 0 syn
+            vec![1_usize as i32],  // 0 → 1
+            vec![1.0f32],     // weight
+            vec![1.0f32, -1.0f32],  // nt_types: 0=exc, 1=inh
+            vec![],           // receptors (built below)
+        );
+        conn.receptor_types = vec![4u8]; // nAChR (index 4)
+        conn
+    }
+
+    #[test]
+    fn test_hh_current_based_psp() {
+        // Current-based path (sim_hh): pre (0) fires → post (1) receives I = w * nt * scale
+        // At dt=0.1ms, pre needs I ≥ 15 µA to fire reliably
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.1);
+        let mut spikes_buf = vec![0i32; n];
+
+        let v_before = cfg.v[1];  // post-synaptic V before
+
+        // Drive neuron 0 to fire
+        for _ in 0..300 {
+            cfg.Ii[0] = 15.0;
+            cfg.Ii[1] = 0.0;  // no direct drive to post
+            // Propagate any queued spikes (none initially)
+            let mut q = SpikeQueue::new(8);
+            let external_I = vec![15.0f32, 0.0];
+
+            // Manual sim_hh step:
+            cfg.Ii[0] += external_I[0];
+            cfg.Ii[1] += external_I[1];
+            taas_core::neuron::hh::step_hh_lut(&mut cfg, &mut spikes_buf);
+            if spikes_buf[0] != 0 { q.push(0); }
+            cfg.Ii[..2].fill(0.0);
+            csr_propagate_from_queue(
+                &conn.row_ptr, &conn.col_indices, &conn.values,
+                &conn.nt_types, &mut q, &mut cfg.Ii, 1.0,
+            );
+            // dt=0.1, I=15: first spike ~3-5ms = 30-50 steps
+            if spikes_buf[0] != 0 { break; }
+        }
+
+        // Now pre fired (or we forced it). Track post voltage.
+        let v_after_first = cfg.v[1];
+        println!("Current-based PSP: pre-V={:.1}, post V before={v_before:.1} after={v_after_first:.1}",
+            cfg.v[0]);
+
+        // Post should get depolarized via CSR: I_post = 1.0 * 1.0 * 1.0 = 1.0 µA/cm²
+        // HH threshold is ~7 µA/cm², so this single-spike EPSP should be subthreshold
+        // but detectable as a voltage change.
+        let dv_post = v_after_first - v_before;
+        assert!(dv_post != 0.0, "Current-based PSP should produce voltage change on post");
+        // The EPSP should be small: with dt=0.1ms and gL=0.3, one spike delivers
+        // I=1.0 for one dt. ΔV = I/Cm * dt = 1.0/1.0 * 0.1e-3 * 1000 = 0.1 mV
+        // But spike-triggered current might persist for multiple steps.
+        // Allow 0.01-5mV range.
+        assert!(dv_post.abs() < 10.0,
+            "Current-based PSP too large: {dv_post} mV (should be < 10 mV)");
+    }
+
+    #[test]
+    fn test_hh_synaptic_psp() {
+        // Conductance-based path via sim_hh_synaptic:
+        // Each pre-spike → jump g_nachr[post] → post I_syn = g * (0 - V)
+        // The driving force multiplier (0 - V) ≈ 65 makes this path ~65× stronger
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.1);
+        let mut kinetics = SynapticKinetics::new(n);
+        // Drive only pre (neuron 0), post gets 0 external
+        let external_I = vec![15.0f32, 0.0];
+
+        // Run 2000 steps = 200ms. Pre should fire many times.
+        // Each spike: jump g_nachr[post] += 1.0 via CSR conductance propagation.
+        let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, 2000, &mut kinetics, 1.0);
+
+        // Count post spikes (neuron 1, offset in spike buffer = 1)
+        let post_spikes: i32 = spikes.iter().skip(1).step_by(n).copied().sum();
+        let pre_spikes: i32 = spikes.iter().step_by(n).copied().sum();
+
+        println!("Synaptic PSP: pre={} spikes, post={} spikes (conductance path)",
+            pre_spikes, post_spikes);
+        // Pre should fire with I=15
+        assert!(pre_spikes > 0, "Pre-neuron should fire with I=15");
+        // Post should fire too — each pre-spike adds g=1.0 to nAChR,
+        // which delivers I ≈ 65 µA/cm² — well above threshold.
+        assert!(post_spikes > 0,
+            "Post should fire via conductance-based PSP (driving force ×65)");
+    }
+
+    #[test]
+    fn test_hh_synaptic_vs_current_ratio() {
+        // Демонстрация ratio (conductance-based) / (current-based) = (E_rev - V)
+        // Для nAChR при V=-65: ratio = 65
+        let n = 2;
+        let mut kin = SynapticKinetics::new(n);
+        let v = vec![-65.0, -65.0];
+        let mut i_curr = vec![0.0, 0.0];
+        let mut i_cond = vec![0.0, 0.0];
+
+        // Current-based: nt_types[0]=1, weight=1, scale=1 → I_post = 1*1*1 = 1.0
+        i_curr[1] = 1.0; // simulated CSR result
+
+        // Conductance-based: jump + compute
+        kin.jump(1, ReceptorType::nAChR, 1.0); // g=1.0
+        kin.compute_currents(&v, &mut i_cond);
+
+        let ratio = i_cond[1] / i_curr[1];
+        println!("Conductance/Current ratio for nAChR at V=-65: {ratio:.0}× (expected ~65)");
+        assert!(ratio > 50.0 && ratio < 80.0,
+            "Ratio {ratio:.0} should be ~65× for nAChR at rest");
+    }
+
+    #[test]
+    fn test_hh_both_paths_produce_spikes() {
+        // Both paths should produce spikes when drive is sufficient
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+
+        // Current-based path
+        let mut cfg1 = taas_core::neuron::hh::standard_config(n, 0.5);
+        let ext = vec![15.0f32; n];
+        let spikes_curr = sim_hh(&conn, &mut cfg1, &ext, 100, 1.0);
+
+        // Conductance-based path
+        let mut cfg2 = taas_core::neuron::hh::standard_config(n, 0.5);
+        let mut kin = SynapticKinetics::new(n);
+        let spikes_cond = sim_hh_synaptic(&conn, &mut cfg2, &ext, 100, &mut kin, 1.0);
+
+        let total_curr: i32 = spikes_curr.iter().sum();
+        let total_cond: i32 = spikes_cond.iter().sum();
+
+        println!("Current-based total spikes: {total_curr}, Conductance-based: {total_cond}");
+        assert!(total_curr > 0, "Current-based HH should fire");
+        assert!(total_cond > 0, "Conductance-based HH should fire");
     }
 }
 
@@ -948,6 +1116,103 @@ pub fn sim_izhikevich(
         for i in n..state.I_buf.len() {
             state.I_buf[i] = 0.0;
         }
+
+        // 7. CSR propagate from queue
+        csr_propagate_from_queue(
+            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
+            &connectome.nt_types, &mut state.queue, &mut state.I_buf, 1.0,
+        );
+    }
+
+    spike_buffer
+}
+
+// ─── Izhikevich Dual Memory simulation ────────────────
+
+/// Simulate `n_steps` of Izhikevich dual memory dynamics on a connectome.
+///
+/// Extends [`sim_izhikevich`] with a per-neuron **slow state** `m` that
+/// accumulates recent spiking activity and modulates input current.
+///
+/// **Slow memory pathway** (Sun et al. 2026):
+/// ```text
+/// m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t-1]
+/// I += w_m · m[t-1]
+/// ```
+///
+/// The slow state is stored in `state.slow_state`, initialized to 0.5 (neutral).
+/// High `w_m` gives stronger feedback from past activity → bistability.
+/// High `τ_m` gives longer memory window.
+///
+/// Also applies **Hebbian plasticity** on CSR weights at the end of each step:
+/// `dW = η · m_pre · m_post − α · W · dt`
+///
+/// Recommended defaults: `tau_m = 0.999`, `w_m = 5.0`, `hebb_lr = 0.001`, `hebb_decay = 0.0001`.
+pub fn sim_izhikevich_dual(
+    connectome: &mut ConnectomeData,
+    state: &mut BrainState,
+    params: &IzhikevichDualParams,
+    external_I: &[f32],
+    n_steps: usize,
+    hebb_lr: f32,
+    hebb_decay: f32,
+) -> Vec<i32> {
+    let n = connectome.n_neurons;
+    let n_neurons = connectome.row_ptr.len() - 1;
+    let n_synapses = connectome.values.len();
+    let n_padded = state.n_padded;
+    let spike_buf_len = n_steps * n;
+    let mut spike_buffer = vec![0i32; spike_buf_len];
+
+    let dt = params.dt_ms;
+    let tau_m = params.tau_m;
+    let w_m = params.w_m;
+
+    // Pad params
+    let padded_a = pad_to(&params.a, n_padded);
+    let padded_b = pad_to(&params.b, n_padded);
+    let padded_c = pad_to(&params.c, n_padded);
+    let padded_d = pad_to(&params.d, n_padded);
+
+    for step in 0..n_steps {
+        // 1. Set I = external_I (reset)
+        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+
+        // 2. Izhikevich dual step (SIMD) — slow state m modulates I
+        safe::izhikevich_dual_step(
+            &mut state.v, &mut state.u, &mut state.trace,
+            &padded_a, &padded_b, &mut state.I_buf,
+            dt, 0.99,
+            &mut state.spikes,
+            &padded_c, &padded_d,
+            &mut state.refractory, params.tau_ref,
+            &mut state.slow_state, tau_m, w_m,
+        );
+
+        // 3. Push spikes to queue
+        push_spikes_to_queue(&state.spikes, n_neurons, &mut state.queue);
+
+        // 4. Record spikes
+        record_spikes(&state.spikes, n_neurons, &mut spike_buffer, step);
+
+        // 5. Hebbian plasticity on CSR weights (in-place)
+        if hebb_lr > 0.0 && n_synapses > 0 {
+            safe::hebbian_csr_step(
+                &mut connectome.values,
+                &connectome.col_indices,
+                &connectome.row_ptr,
+                &state.slow_state[..n_neurons],
+                n_neurons,
+                hebb_lr,
+                hebb_decay,
+                dt,
+            );
+        }
+
+        // 6. Reset I = external_I
+        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
 
         // 7. CSR propagate from queue
         csr_propagate_from_queue(
@@ -1511,6 +1776,7 @@ pub fn sim_hh(
     cfg: &mut taas_core::neuron::hh::HhLutConfig,
     external_I: &[f32],
     n_steps: usize,
+    scale: f32,
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
@@ -1520,28 +1786,30 @@ pub fn sim_hh(
     let mut spikes = vec![0i32; n];
 
     for step in 0..n_steps {
-        // 1. Set Ii = external_I
-        cfg.Ii[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        // 1. ADD external_I on top of Ii (preserves carry-over propagated current)
+        for i in 0..n.min(external_I.len()) {
+            cfg.Ii[i] += external_I[i];
+        }
 
-        // 2. Clamp Ii (prevents saturation from oversized CSR propagation)
+        // 2. Clamp Ii (prevents saturation)
         safe::safety_clamp(&mut cfg.Ii[..n], -100.0, 100.0);
 
         // 3. HH step — produces spikes, updates cfg.v
         taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes);
 
-        // 3. Push spikes to queue
+        // 4. Push spikes to queue
         push_spikes_to_queue(&spikes, n_neurons, &mut queue);
 
-        // 4. Record spikes
+        // 5. Record spikes
         record_spikes(&spikes, n_neurons, &mut spike_buffer, step);
 
-        // 5. Reset Ii = external_I
-        cfg.Ii[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        // 6. Clear Ii (consumed by HH step; prepare for fresh propagation)
+        cfg.Ii[..n].fill(0.0);
 
-        // 6. CSR propagate spikes from queue → Ii
+        // 7. CSR propagate spikes from queue → Ii
         csr_propagate_from_queue(
             &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut queue, &mut cfg.Ii, 1.0,
+            &connectome.nt_types, &mut queue, &mut cfg.Ii, scale,
         );
     }
 

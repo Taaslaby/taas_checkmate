@@ -1,4 +1,4 @@
-#![allow(unused_doc_comments, dead_code, improper_ctypes, non_snake_case)]
+#![allow(unused_doc_comments, dead_code, improper_ctypes, non_snake_case, clippy::not_unsafe_ptr_arg_deref)]
 
 //! CUDA kernels for neuron-engine — максималочка GPU.
 //!
@@ -70,6 +70,43 @@ extern "C" {
         lr_ltd: c_float, lr_ltp: c_float, w_min: c_float, w_max: c_float) -> c_int;
     fn gpu_kuramoto_prepare_async(ctx: *mut GpuCtx) -> c_int;
     fn gpu_kuramoto_update_async(ctx: *mut GpuCtx, dt: c_float) -> c_int;
+    fn gpu_kuramoto_csr_coupling_async(ctx: *mut GpuCtx) -> c_int;
+    fn gpu_bptt_loss_grad_async(ctx: *mut GpuCtx,
+        d_phases_traj: *mut c_float, d_coupling_traj: *mut c_float,
+        d_dtheta: *mut c_float, coherence_start: c_int,
+        coherence_weight: c_float, temporal_scale: c_float, dt: c_float,
+        n_steps: c_int) -> c_int;
+    fn gpu_bptt_step_async(ctx: *mut GpuCtx,
+        d_grad_weights: *mut c_float, d_dtheta: *mut c_float,
+        d_dtheta_next: *const c_float, d_phases: *const c_float,
+        dt: c_float, n_synapses: c_int) -> c_int;
+
+    // Trajectory D2D copy (async — enqueues on stream)
+    fn gpu_context_copy_phases_to_traj_async(ctx: *mut GpuCtx, d_traj: *mut c_float, step: c_int) -> c_int;
+    fn gpu_context_copy_coupling_to_traj_async(ctx: *mut GpuCtx, d_traj: *mut c_float, step: c_int) -> c_int;
+
+    // GPU weight optimizer (async)
+    fn gpu_zero_grad_weights_async(ctx: *mut GpuCtx, d_grad: *mut c_float, n: c_int) -> c_int;
+    fn gpu_weight_update_async(ctx: *mut GpuCtx,
+        d_grad_weights: *const c_float,
+        lr: c_float, sparsity_scale: c_float, homeostasis_scale: c_float,
+        weight_clamp: c_float) -> c_int;
+    // Gradient norm + clipping (async, fully on GPU)
+    fn gpu_grad_norm_async(ctx: *mut GpuCtx,
+        d_grad: *const c_float, d_norm: *mut c_float, d_partial: *mut c_float,
+        n: c_int) -> c_int;
+    fn gpu_grad_clip_async(ctx: *mut GpuCtx,
+        d_grad: *mut c_float, d_norm: *const c_float,
+        max_norm: c_float, n: c_int) -> c_int;
+    // Fused BPTT epoch (all kernels — forward + loss + BPTT + clip)
+    fn gpu_bptt_epoch_async(ctx: *mut GpuCtx,
+        d_phases_traj: *mut c_float, d_coupling_traj: *mut c_float,
+        d_dtheta_traj: *mut c_float, d_grad_weights: *mut c_float,
+        d_grad_norm: *mut c_float, d_grad_norm_partial: *mut c_float,
+        n_steps: c_int, dt: c_float, coherence_start: c_int,
+        coherence_weight: c_float, temporal_weight: c_float,
+        grad_clip_norm: c_float) -> c_int;
+
     fn gpu_safety_clamp_async(ctx: *mut GpuCtx, min_val: c_float, max_val: c_float) -> c_int;
 
     // Fused kernels
@@ -136,6 +173,7 @@ extern "C" {
     fn gpu_context_upload_v_only(ctx: *mut GpuCtx, v: *const c_float, n: c_int) -> c_int;
     fn gpu_context_download_v(ctx: *mut GpuCtx, v: *mut c_float, n: c_int) -> c_int;
     fn gpu_context_download_u(ctx: *mut GpuCtx, u: *mut c_float, n: c_int) -> c_int;
+    fn gpu_context_download_phases(ctx: *mut GpuCtx, phases: *mut c_float, n: c_int) -> c_int;
     fn gpu_context_download_adex_w(ctx: *mut GpuCtx, w: *mut c_float, n: c_int) -> c_int;
     fn gpu_context_upload_adex_w(ctx: *mut GpuCtx, w: *const c_float, n: c_int) -> c_int;
     fn gpu_context_download_weights(ctx: *mut GpuCtx, w: *mut c_float, n: c_int) -> c_int;
@@ -231,6 +269,56 @@ impl GpuContext {
         ok_or(unsafe { gpu_kuramoto_update_async(self.ctx, dt) }, "kuramoto_update")
     }
 
+    /// Compute CSR Kuramoto coupling on GPU: coupling[i] = Σ_j W_ij · sin(θⱼ - θᵢ).
+    /// Uses d_cos_buf/d_sin_buf (from kuramoto_prepare), d_row_ptr/d_col_indices/d_csr_values (from upload_connectome).
+    /// Writes result to d_coupling.
+    /// Requires upload_connectome() and kuramoto_prepare() to have been called first.
+    pub fn kuramoto_csr_coupling(&self) -> Result<(), String> {
+        ok_or(unsafe { gpu_kuramoto_csr_coupling_async(self.ctx) }, "kuramoto_csr_coupling")
+    }
+
+    /// BPTT: compute loss gradient (coherence + temporal) entirely on GPU.
+    /// Requires trajectory buffers to be pre-allocated on device.
+    pub fn bptt_loss_grad(&self,
+        d_phases_traj: *mut c_float, d_coupling_traj: *mut c_float,
+        d_dtheta: *mut c_float,
+        coherence_start: usize, coherence_weight: f32,
+        temporal_weight: f32, dt: f32, n_steps: usize) -> Result<(), String>
+    {
+        let temporal_scale = temporal_weight / ((n_steps - 1).max(1) * self.n_neurons) as f32;
+        ok_or(unsafe {
+            gpu_bptt_loss_grad_async(self.ctx, d_phases_traj, d_coupling_traj,
+                d_dtheta, coherence_start as c_int, coherence_weight,
+                temporal_scale, dt, n_steps as c_int)
+        }, "bptt_loss_grad")
+    }
+
+    /// BPTT: one backward step (weight gradients + diagonal + cross-term backprop) on GPU.
+    pub fn bptt_step(&self,
+        d_grad_weights: *mut c_float, d_dtheta: *mut c_float,
+        d_dtheta_next: *const c_float, d_phases: *const c_float,
+        dt: f32) -> Result<(), String>
+    {
+        let n_syn = self.n_synapses as c_int;
+        ok_or(unsafe {
+            gpu_bptt_step_async(self.ctx, d_grad_weights, d_dtheta,
+                d_dtheta_next, d_phases, dt, n_syn)
+        }, "bptt_step")
+    }
+
+    /// Upload CSR values (synaptic weights) to GPU (without re-uploading entire connectome).
+    /// Copies host `values` into `d_csr_values` on device.
+    pub fn upload_csr_values(&self, values: &[f32]) -> Result<(), String> {
+        let n = values.len().min(self.n_synapses) as c_int;
+        ok_or(unsafe { cuda_upload_csr_values(self.ctx, values.as_ptr(), n) }, "upload_csr_values")
+    }
+
+    /// Download CSR values (synaptic weights) from GPU to host.
+    pub fn download_csr_values(&self, values: &mut [f32]) -> Result<(), String> {
+        let n = values.len().min(self.n_synapses) as c_int;
+        ok_or(unsafe { cuda_download_csr_values(self.ctx, values.as_mut_ptr(), n) }, "download_csr_values")
+    }
+
     // ─── T3 async operations ──────────────────────────
 
     /// Upload T3 oscillator state to GPU.
@@ -317,6 +405,113 @@ impl GpuContext {
     }
 
     /// Safety clamp membrane potentials (async).
+    // ═══════════════════════════════════════════════════════
+    //  GPU trajectory + weight optimizer for Kuramoto BPTT
+    // ═══════════════════════════════════════════════════════
+
+    /// D2D copy: ctx.d_phases → d_traj[step * n] (async).
+    /// Call after kuramoto_update() to save phase trajectory on GPU.
+    pub fn copy_phases_to_traj_async(&self, d_traj: *mut c_float, step: usize) -> Result<(), String> {
+        ok_or(unsafe {
+            gpu_context_copy_phases_to_traj_async(self.ctx, d_traj, step as c_int)
+        }, "copy_phases_to_traj")
+    }
+
+    /// D2D copy: ctx.d_coupling → d_traj[step * n] (async).
+    /// Call after kuramoto_csr_coupling() (BEFORE kuramoto_update overwrites coupling).
+    pub fn copy_coupling_to_traj_async(&self, d_traj: *mut c_float, step: usize) -> Result<(), String> {
+        ok_or(unsafe {
+            gpu_context_copy_coupling_to_traj_async(self.ctx, d_traj, step as c_int)
+        }, "copy_coupling_to_traj")
+    }
+
+    /// Zero out grad_weights buffer on GPU (async).
+    pub fn zero_grad_weights_async(&self, d_grad: *mut c_float) -> Result<(), String> {
+        let n = self.n_synapses as c_int;
+        ok_or(unsafe { gpu_zero_grad_weights_async(self.ctx, d_grad, n) }, "zero_grad_weights")
+    }
+
+    /// Apply weight update on GPU: SGD + sparsity + homeostasis + clamp (async).
+    /// Updates ctx.d_csr_values in-place.
+    pub fn weight_update_async(&self,
+        d_grad_weights: *const c_float,
+        lr: f32, sparsity_scale: f32, homeostasis_scale: f32,
+        weight_clamp: f32) -> Result<(), String>
+    {
+        ok_or(unsafe {
+            gpu_weight_update_async(self.ctx, d_grad_weights,
+                lr, sparsity_scale, homeostasis_scale, weight_clamp)
+        }, "weight_update")
+    }
+
+    /// Compute gradient L2 norm via two-pass reduction (async, fully on GPU).
+    ///
+    /// Pass 1 (many blocks): each block computes sum(g²) for its slice.
+    /// Pass 2 (single block): reduces partials → sqrt → writes to d_norm[0].
+    ///
+    /// d_partial must be pre-allocated with at least ((n_synapses + 255) / 256) floats.
+    /// After this, call sync() then use d_norm value for clipping.
+    pub fn grad_norm_async(&self,
+        d_grad: *const c_float, d_norm: *mut c_float,
+        d_partial: *mut c_float) -> Result<(), String>
+    {
+        let n = self.n_synapses as c_int;
+        ok_or(unsafe {
+            gpu_grad_norm_async(self.ctx, d_grad, d_norm, d_partial, n)
+        }, "grad_norm")
+    }
+
+    /// Clip gradients by norm: if d_norm[0] > max_norm, scale g *= max_norm / norm (async).
+    /// Reads d_norm from GPU memory — no D2H transfer needed.
+    /// Must call sync() before weight_update_async to ensure clipping is applied.
+    pub fn grad_clip_async(&self,
+        d_grad: *mut c_float, d_norm: *const c_float,
+        max_norm: f32) -> Result<(), String>
+    {
+        let n = self.n_synapses as c_int;
+        ok_or(unsafe {
+            gpu_grad_clip_async(self.ctx, d_grad, d_norm, max_norm, n)
+        }, "grad_clip")
+    }
+
+    /// Run one BPTT epoch as a CUDA Graph (first call captures, subsequent replays).
+    ///
+    /// Does: forward → loss grad → BPTT backward → grad clip (if enabled).
+    /// Weight update is NOT included — must be called separately after sync().
+    ///
+    /// After this returns, call sync() then weight_update_async() + sync().
+    pub fn bptt_epoch_graph_replay(&self,
+        d_phases_traj: *mut c_float,
+        d_coupling_traj: *mut c_float,
+        d_dtheta_traj: *mut c_float,
+        d_grad_weights: *mut c_float,
+        d_grad_norm: *mut c_float,
+        d_grad_norm_partial: *mut c_float,
+        n_steps: usize, dt: f32,
+        coherence_start: usize, coherence_weight: f32,
+        temporal_weight: f32, grad_clip_norm: f32) -> Result<(), String>
+    {
+        let has_graph = unsafe { gpu_graph_is_captured(self.ctx) } != 0;
+        if !has_graph {
+            // Capture the epoch as a CUDA Graph
+            self.graph_begin_capture()?;
+            unsafe {
+                let err = gpu_bptt_epoch_async(self.ctx,
+                    d_phases_traj, d_coupling_traj, d_dtheta_traj,
+                    d_grad_weights, d_grad_norm, d_grad_norm_partial,
+                    n_steps as c_int, dt,
+                    coherence_start as c_int, coherence_weight,
+                    temporal_weight, grad_clip_norm);
+                if err != 0 {
+                    return Err(format!("CUDA bptt_epoch_async: error {err}"));
+                }
+            }
+            self.graph_end_capture()?;
+        }
+        // Replay the graph (kernels execute with current d_phases, d_csr_values, etc.)
+        ok_or(unsafe { gpu_graph_replay(self.ctx) }, "bptt_epoch_replay")
+    }
+
     pub fn safety_clamp(&self, min_val: f32, max_val: f32) -> Result<(), String> {
         ok_or(unsafe { gpu_safety_clamp_async(self.ctx, min_val, max_val) }, "safety_clamp")
     }
@@ -365,6 +560,12 @@ impl GpuContext {
                 n_neurons,
             )
         }, "batch_izhikevich_steps")
+    }
+
+    /// Download Kuramoto phases from GPU.
+    pub fn download_phases(&self, phases: &mut [f32]) -> Result<(), String> {
+        let n = phases.len().min(self.n_neurons);
+        ok_or(unsafe { gpu_context_download_phases(self.ctx, phases.as_mut_ptr(), n as c_int) }, "download_phases")
     }
 
     /// Download membrane potentials from GPU.
@@ -1015,6 +1216,25 @@ extern "C" {
         sin_out: *mut c_float, n: c_int) -> c_int;
     fn cuda_kuramoto_update(phases: *mut c_float, omegas: *const c_float,
         coupling: *const c_float, dt: c_float, n: c_int) -> c_int;
+    fn cuda_kuramoto_csr_coupling(
+        coupling: *mut c_float,
+        sin_buf: *const c_float, cos_buf: *const c_float,
+        row_ptr: *const c_int, col_indices: *const c_int, values: *const c_float,
+        n_neurons: c_int) -> c_int;
+    fn cuda_upload_csr_values(ctx: *mut GpuCtx, values: *const c_float, n: c_int) -> c_int;
+    fn cuda_download_csr_values(ctx: *mut GpuCtx, values: *mut c_float, n: c_int) -> c_int;
+    fn cuda_kuramoto_bptt_loss_grad(
+        phases_traj: *const c_float, coupling_traj: *const c_float,
+        omegas: *const c_float, dtheta: *mut c_float,
+        coherence_start: c_int, coherence_weight: c_float,
+        temporal_scale: c_float, dt: c_float,
+        n_neurons: c_int, n_steps: c_int) -> c_int;
+    fn cuda_kuramoto_bptt_step(
+        grad_weights: *mut c_float, dtheta: *mut c_float,
+        dtheta_next: *const c_float, phases: *const c_float,
+        row_ptr: *const c_int, col_indices: *const c_int,
+        values: *const c_float, dt: c_float,
+        n_neurons: c_int, n_synapses: c_int) -> c_int;
     fn cuda_safety_clamp(data: *mut c_float, min_val: c_float, max_val: c_float, n: c_int) -> c_int;
     fn cuda_stochastic_encoder(target_I: *mut c_float, inputs: *const c_float,
         noise: *const c_float, threshold: c_float, spike_val: c_float, n: c_int) -> c_int;
@@ -1250,6 +1470,61 @@ pub fn kuramoto_prepare(phases: &[f32], cos_out: &mut [f32], sin_out: &mut [f32]
 pub fn kuramoto_update(phases: &mut [f32], omegas: &[f32], coupling: &[f32], dt: f32) -> Result<(), String> {
     let n = phases.len();
     ok_or(unsafe { cuda_kuramoto_update(phases.as_mut_ptr(), omegas.as_ptr(), coupling.as_ptr(), dt, n as c_int) }, "kuramoto_update")
+}
+
+pub fn kuramoto_bptt_loss_grad(
+    phases_traj: &[f32], coupling_traj: &[f32],
+    omegas: &[f32], dtheta: &mut [f32],
+    coherence_start: usize, coherence_weight: f32,
+    temporal_scale: f32, dt: f32,
+    n_steps: usize) -> Result<(), String>
+{
+    let n = phases_traj.len() / n_steps;
+    ok_or(unsafe {
+        cuda_kuramoto_bptt_loss_grad(
+            phases_traj.as_ptr(), coupling_traj.as_ptr(),
+            omegas.as_ptr(), dtheta.as_mut_ptr(),
+            coherence_start as c_int, coherence_weight,
+            temporal_scale, dt,
+            n as c_int, n_steps as c_int)
+    }, "kuramoto_bptt_loss_grad")
+}
+
+pub fn kuramoto_bptt_step(
+    grad_weights: &mut [f32], dtheta: &mut [f32],
+    dtheta_next: &[f32], phases: &[f32],
+    row_ptr: &[i32], col_indices: &[i32],
+    values: &[f32], dt: f32) -> Result<(), String>
+{
+    let n = phases.len();
+    let n_syn = grad_weights.len();
+    ok_or(unsafe {
+        cuda_kuramoto_bptt_step(
+            grad_weights.as_mut_ptr(), dtheta.as_mut_ptr(),
+            dtheta_next.as_ptr(), phases.as_ptr(),
+            row_ptr.as_ptr(), col_indices.as_ptr(), values.as_ptr(),
+            dt, n as c_int, n_syn as c_int)
+    }, "kuramoto_bptt_step")
+}
+
+pub fn kuramoto_csr_coupling(
+    coupling: &mut [f32],
+    sin_buf: &[f32], cos_buf: &[f32],
+    row_ptr: &[i32], col_indices: &[i32], values: &[f32],
+) -> Result<(), String> {
+    let n = coupling.len().min(sin_buf.len()).min(cos_buf.len());
+    let n_neurons = row_ptr.len() - 1;
+    let n_syn = col_indices.len().min(values.len());
+    // Validate sizes
+    assert!(n <= n_neurons, "coupling.len={} > n_neurons={}", n, n_neurons);
+    ok_or(unsafe {
+        cuda_kuramoto_csr_coupling(
+            coupling.as_mut_ptr(),
+            sin_buf.as_ptr(), cos_buf.as_ptr(),
+            row_ptr.as_ptr(), col_indices.as_ptr(), values.as_ptr(),
+            n as c_int,
+        )
+    }, "kuramoto_csr_coupling")
 }
 
 pub fn safety_clamp(data: &mut [f32], min_val: f32, max_val: f32) -> Result<(), String> {

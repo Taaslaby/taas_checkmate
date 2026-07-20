@@ -67,14 +67,14 @@ pub(crate) unsafe fn dopamine_traces_step(
         // Decay traces (exponential Euler)
         let decay_pre = fast_exp_simd(-dt_s / tau_pre_s);
         let decay_post = fast_exp_simd(-dt_s / tau_post_s);
-        tp = tp * decay_pre;
-        tpo = tpo * decay_post;
+        tp *= decay_pre;
+        tpo *= decay_post;
 
         // Spike-triggered trace increase
         let pre_mask = pre.cmp_gt(zero);
         let post_mask = post.cmp_gt(zero);
-        tp = tp + pre_mask.blend(one, zero);
-        tpo = tpo + post_mask.blend(one, zero);
+        tp += pre_mask.blend(one, zero);
+        tpo += post_mask.blend(one, zero);
 
         // STDP eligibility: e += A_ltp · tr_pre · post_spike − A_ltd · tr_post · pre_spike
         let ltp_term = a_ltp_s * tp * post_mask.blend(one, zero);
@@ -83,7 +83,7 @@ pub(crate) unsafe fn dopamine_traces_step(
 
         // Eligibility decay (exponential Euler)
         let decay_e = fast_exp_simd(-dt_s / tau_e_s);
-        ee = ee * decay_e;
+        ee *= decay_e;
 
         store8(trace_pre, off, tp);
         store8(trace_post, off, tpo);
@@ -146,7 +146,7 @@ pub(crate) unsafe fn dopamine_weight_update(
     for off in (0..n8).step_by(8) {
         let mut w = load8_mut(weights, off);
         let ee = load8(eligibility, off);
-        w = w + lr_dopa * ee;
+        w += lr_dopa * ee;
         w = w.min(wmax_s).max(wmin_s);
         store8(weights, off, w);
     }

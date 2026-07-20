@@ -71,6 +71,153 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "bench"
 harness = false
 
+[[bench]]
+name = "bench_all"
+harness = false
+
+# ═══════════════════════════════════════════════════════════
+#  Examples — organized by category
+# ═══════════════════════════════════════════════════════════
+
+# ── Core engine (no special features needed) ──
+[[example]]
+name = "bench_lif"
+path = "examples/core/bench_lif.rs"
+
+[[example]]
+name = "bench_connectome"
+path = "examples/core/bench_connectome.rs"
+
+[[example]]
+name = "learning_bench"
+path = "examples/core/learning_bench.rs"
+
+[[example]]
+name = "hologram_bridge"
+path = "examples/core/hologram_bridge.rs"
+
+# ── Core engine (requires CUDA) ──
+[[example]]
+name = "bench_cuda_lif"
+path = "examples/core/bench_cuda_lif.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "gpu_kuramoto_bench"
+path = "examples/core/gpu_kuramoto_bench.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "gpu_bptt_refine"
+path = "examples/core/gpu_bptt_refine.rs"
+required-features = ["cuda"]
+
+# ── Connectome utilities (requires connectome) ──
+[[example]]
+name = "rcm_vs_spectral"
+path = "examples/core/rcm_vs_spectral.rs"
+required-features = ["connectome"]
+
+# ── Hodgkin-Huxley (requires CUDA) ──
+[[example]]
+name = "hh_real"
+path = "examples/hh/hh_real.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "hh_self"
+path = "examples/hh/hh_self.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "hh_spike_diag"
+path = "examples/hh/hh_spike_diag.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "hh_viz"
+path = "examples/hh/hh_viz.rs"
+required-features = ["cuda"]
+
+# ── Hodgkin-Huxley calibration (requires connectome) ──
+[[example]]
+name = "calibrate_hh"
+path = "examples/hh/calibrate_hh.rs"
+required-features = ["connectome"]
+
+# ── Connectome brain simulator (requires connectome) ──
+[[example]]
+name = "bake_fafb"
+path = "examples/connectome/bake_fafb.rs"
+required-features = ["connectome"]
+
+[[example]]
+name = "bake_fafb_dros"
+path = "examples/connectome/bake_fafb_dros.rs"
+required-features = ["connectome"]
+
+[[example]]
+name = "fafb_nt"
+path = "examples/connectome/fafb_nt.rs"
+required-features = ["connectome"]
+
+[[example]]
+name = "biology_check"
+path = "examples/connectome/biology_check.rs"
+required-features = ["connectome"]
+
+# ── Connectome brain simulator (requires CUDA) ──
+[[example]]
+name = "bench_fly_brain"
+path = "examples/connectome/bench_fly_brain.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_fly_hh"
+path = "examples/connectome/bench_fly_hh.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_mouse_brain"
+path = "examples/connectome/bench_mouse_brain.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_princeton_connectome"
+path = "examples/connectome/bench_princeton_connectome.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "viz_fly_brain"
+path = "examples/connectome/viz_fly_brain.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "t2_vision"
+path = "examples/connectome/t2_vision.rs"
+required-features = ["cuda"]
+
+[[example]]
+name = "t3_bci_fly"
+path = "examples/connectome/t3_bci_fly.rs"
+required-features = ["cuda"]
+
+# ── MNIST training (requires train) ──
+[[example]]
+name = "mnist_eprop"
+path = "examples/mnist/mnist_eprop.rs"
+required-features = ["train"]
+
+[[example]]
+name = "mnist_t3"
+path = "examples/mnist/mnist_t3.rs"
+required-features = ["train"]
+
+[[example]]
+name = "mnist_train"
+path = "examples/mnist/mnist_train.rs"
+required-features = ["train"]
+
 [features]
 default = ["t3"]
 

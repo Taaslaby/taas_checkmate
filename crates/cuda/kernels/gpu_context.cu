@@ -371,6 +371,14 @@ extern "C" int gpu_context_download_v(void* vctx, float* host_v, int n) {
     return (int)e;
 }
 
+extern "C" int gpu_context_download_phases(void* vctx, float* host_phases, int n) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_phases, ctx->n_neurons*sizeof(float));
+    cudaError_t e = cudaMemcpyAsync(host_phases, ctx->d_phases, n*sizeof(float), cudaMemcpyDeviceToHost, ctx->stream);
+    cudaStreamSynchronize(ctx->stream);
+    return (int)e;
+}
+
 extern "C" int gpu_context_download_u(void* vctx, float* host_u, int n) {
     GpuCtx* ctx = (GpuCtx*)vctx;
     cudaError_t e = cudaMemcpyAsync(host_u, ctx->d_u, n*sizeof(float), cudaMemcpyDeviceToHost, ctx->stream);
@@ -398,6 +406,40 @@ extern "C" int gpu_context_download_weights(void* vctx, float* host_w, int n) {
     cudaError_t e = cudaMemcpyAsync(host_w, ctx->d_weights, n*sizeof(float), cudaMemcpyDeviceToHost, ctx->stream);
     cudaStreamSynchronize(ctx->stream);
     return (int)e;
+}
+
+extern "C" int cuda_upload_csr_values(void* vctx, const float* values, int n) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_csr_values, ctx->n_csr_synapses*sizeof(float));
+    cudaError_t e = cudaMemcpyAsync(ctx->d_csr_values, values, n*sizeof(float),
+        cudaMemcpyHostToDevice, ctx->stream);
+    cudaStreamSynchronize(ctx->stream);
+    return (int)e;
+}
+
+extern "C" int cuda_download_csr_values(void* vctx, float* values, int n) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    cudaError_t e = cudaMemcpyAsync(values, ctx->d_csr_values, n*sizeof(float),
+        cudaMemcpyDeviceToHost, ctx->stream);
+    cudaStreamSynchronize(ctx->stream);
+    return (int)e;
+}
+
+// ─── D2D copy: phases → trajectory buffer (after update step) ─────
+
+extern "C" int gpu_context_copy_phases_to_traj_async(void* vctx, float* d_traj, int step) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    return (int)cudaMemcpyAsync(d_traj + step * ctx->n_neurons, ctx->d_phases,
+        ctx->n_neurons * sizeof(float), cudaMemcpyDeviceToDevice, ctx->stream);
+}
+
+// ─── D2D copy: coupling → trajectory buffer (after CSR coupling, before update) ──
+
+extern "C" int gpu_context_copy_coupling_to_traj_async(void* vctx, float* d_traj, int step) {
+    GpuCtx* ctx = (GpuCtx*)vctx;
+    ENSURE_ALLOC(d_coupling, ctx->n_neurons*sizeof(float));
+    return (int)cudaMemcpyAsync(d_traj + step * ctx->n_neurons, ctx->d_coupling,
+        ctx->n_neurons * sizeof(float), cudaMemcpyDeviceToDevice, ctx->stream);
 }
 
 extern "C" int gpu_context_sync(void* vctx) {

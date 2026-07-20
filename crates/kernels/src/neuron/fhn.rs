@@ -63,8 +63,8 @@ pub(crate) unsafe fn fhn_step(
         let dw = (vv + aa - bb * ww) * inv_tau;
 
         // Forward Euler
-        vv = vv + dt_s * dv;
-        ww = ww + dt_s * dw;
+        vv += dt_s * dv;
+        ww += dt_s * dw;
 
         // Spike detection: v ≥ threshold
         let sm = vv.cmp_ge(v_thresh);

@@ -52,7 +52,7 @@
 //! int spikes = brain_step(brain, conn, I, 0.5f);
 //! ```
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::not_unsafe_ptr_arg_deref)]
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
@@ -351,6 +351,7 @@ pub extern "C" fn connectome_load(
         col_indices: ci,
         values: vl,
         nt_types: nt,
+        receptor_types: vec![],
         groups: vec![],
     };
 
@@ -1061,6 +1062,7 @@ mod tests {
                 col_indices: ci,
                 values: vals,
                 nt_types: nt,
+                receptor_types: vec![],
                 groups: vec![],
             },
         })

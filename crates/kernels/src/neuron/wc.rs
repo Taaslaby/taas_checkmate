@@ -29,19 +29,14 @@ use super::{load8, load8_mut, store8};
 //  of model neurons" — Biophysical Journal
 
 /// Sigmoid activation: f(x) = 1 / (1 + exp(-β·x))
-/// Uses SIMD fast-exp for speed.
+/// Uses fast_exp_simd (SIMD polynomial) — ~8× faster than scalar f32::exp().
 #[inline(always)]
 fn sigmoid_simd(x: f32x8, beta: f32x8) -> f32x8 {
-    let neg = f32x8::splat(0.0) - x * beta;
-    // Fast sigmoid approximation: 1 / (1 + |x|) is not accurate enough
-    // Use: f(x) ≈ 0.5 + 0.5·tanh(β·x/2) = 1/(1+exp(-β·x))
-    // For SIMD, compute exp via to_array + scalar (sigmoid is usually not the bottleneck)
-    let neg_arr: [f32; 8] = neg.to_array();
-    let mut out = [0.0f32; 8];
-    for i in 0..8 {
-        out[i] = 1.0 / (1.0 + neg_arr[i].exp());
-    }
-    f32x8::from(out)
+    let one = f32x8::splat(1.0);
+    let neg = (-x * beta)
+        .max(f32x8::splat(-10.0))
+        .min(f32x8::splat(10.0));
+    one / (one + super::fast_exp_simd(neg))
 }
 
 /// Step `n` Wilson-Cowan populations. Uses `f32x8` SIMD.
@@ -63,7 +58,6 @@ pub(crate) unsafe fn wc_step(
     let p = std::slice::from_raw_parts(params, n * 8);
     let dt_val = p[0];
     let dt_s = f32x8::splat(dt_val);
-    let one = f32x8::splat(1.0);
     let zero = f32x8::splat(0.0);
     let n8 = n & !7;
 
@@ -91,41 +85,19 @@ pub(crate) unsafe fn wc_step(
         let f_e = sigmoid_simd(input_e, beta);
         let f_i = sigmoid_simd(input_i, beta);
 
-        // Wilson-Cowan dynamics (exponential Euler):
-        // τ·dE/dt = -E + f(input)  →  E_new = E·exp(-dt/τ) + f(input)·(1 - exp(-dt/τ))
-        // For τ > 0, use exponential Euler (exact for constant input)
+        // Wilson-Cowan dynamics (Forward Euler):
+        // τ·dE/dt = -E + f(input)  →  E += (-E + f(input)) / τ · dt
+        // Forward Euler is stable for dt < 2·τ (typically dt << τ).
+        // Steady state E = f(input) is exact.
         let mask_te = tau_E.cmp_gt(zero);
-        let decay_e = mask_te.blend(
-            {
-                let r = f32x8::splat(1.0) / tau_E.max(f32x8::splat(1e-10));
-                let arg = -dt_s * r;
-                // fast exp via scalar fallback
-                let arr: [f32; 8] = arg.to_array();
-                let mut exp_arr = [0.0f32; 8];
-                for k in 0..8 { exp_arr[k] = arr[k].exp(); }
-                f32x8::from(exp_arr)
-            },
-            zero
-        );
-        let one_minus_decay_e = one - decay_e;
-        let new_e = ee * decay_e + f_e * one_minus_decay_e;
-        ee = mask_te.blend(new_e, ee);
+        let inv_tau_e = mask_te.blend(f32x8::splat(1.0) / tau_E.max(f32x8::splat(1e-10)), zero);
+        let de = (-ee + f_e) * inv_tau_e * dt_s;
+        ee = mask_te.blend(ee + de, ee);
 
         let mask_ti = tau_I.cmp_gt(zero);
-        let decay_i = mask_ti.blend(
-            {
-                let r = f32x8::splat(1.0) / tau_I.max(f32x8::splat(1e-10));
-                let arg = -dt_s * r;
-                let arr: [f32; 8] = arg.to_array();
-                let mut exp_arr = [0.0f32; 8];
-                for k in 0..8 { exp_arr[k] = arr[k].exp(); }
-                f32x8::from(exp_arr)
-            },
-            zero
-        );
-        let one_minus_decay_i = one - decay_i;
-        let new_i = ii * decay_i + f_i * one_minus_decay_i;
-        ii = mask_ti.blend(new_i, ii);
+        let inv_tau_i = mask_ti.blend(f32x8::splat(1.0) / tau_I.max(f32x8::splat(1e-10)), zero);
+        let di = (-ii + f_i) * inv_tau_i * dt_s;
+        ii = mask_ti.blend(ii + di, ii);
 
         // Output: rates (0 to 1 via sigmoid)
         store8(e, off, ee);
@@ -158,12 +130,10 @@ pub(crate) unsafe fn wc_step(
             let f_i = 1.0 / (1.0 + (-beta * input_i).exp());
 
             if tau_e > 0.0 {
-                let decay = (-dt_val / tau_e).exp();
-                e[idx] = e[idx] * decay + f_e * (1.0 - decay);
+                e[idx] += (-e[idx] + f_e) / tau_e * dt_val;
             }
             if tau_i > 0.0 {
-                let decay = (-dt_val / tau_i).exp();
-                i[idx] = i[idx] * decay + f_i * (1.0 - decay);
+                i[idx] += (-i[idx] + f_i) / tau_i * dt_val;
             }
 
             spikes_e[idx] = f_e;

@@ -31,6 +31,7 @@ use crate::connectome::{
     LifParams, IzhikevichParams, RateParams, PsiParams,
     SynapticKinetics,
 };
+use crate::core::neuron::hh::{HhLutConfig, standard_config};
 
 // ─── ConnectomeData ──────────────────────────────────
 
@@ -127,11 +128,10 @@ impl PyConnectomeData {
     /// Build per-synapse receptor_types with Drosophila-appropriate FlyWire NT mapping.
     ///
     /// ``nt_map`` must be ``[n_neurons]`` float32 array with FlyWire NT codes:
-    ///   +1.0 = ACh → nAChR (fast exc)
-    ///   -1.0 = GABA → GABA_A (fast inh)
-    ///   +2.0 = GLUT → GluCl (fast inh, Cl⁻ — insect-specific!)
-    ///   -2.0 = DA/SER/OCT → mAChR (slow mod)
-    ///   0.0  = None/gap → AMPA (exc fallback)
+    ///   +1.0 = ACh → nAChR (fast exc, E_rev=0)
+    ///   -1.0 = GABA → GABA_A (shunting inh, E_rev=-65, Cl⁻ shunt at rest)
+    ///   +2.0 = GLUT → GluCl (mildly depol, E_rev=-50, Drosophila Cl⁻ efflux)
+    ///   -2.0 = DA/SER/OCT → mAChR (slow mod, E_rev=-90)
     ///
     /// For Princeton baked data with +1/-1 nt_types, pass ``nt_types`` as nt_map.
     pub fn build_receptor_types_flywire(&mut self, nt_map: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
@@ -160,7 +160,7 @@ impl PyConnectomeData {
 
 /// Universal brain simulator for any CSR connectome.
 ///
-/// Supports models: ``"lif"``, ``"izhikevich"``, ``"rate"``, ``"psi"``.
+/// Supports models: ``"lif"``, ``"izhikevich"``, ``"rate"``, ``"psi"``, ``"hh"``.
 ///
 /// Usage:
 /// ```python
@@ -170,9 +170,23 @@ impl PyConnectomeData {
 #[pyclass(name = "BrainSimulator", module = "taas_checkmate.connectome_brain")]
 pub struct PyBrainSimulator {
     state: conn::BrainState,
-    model: NeuronModel,
+    model: conn::NeuronModel,
     n_neurons: usize,
     kinetics: Option<SynapticKinetics>,
+    hh_config: Option<(f32, HhLutConfig)>,  // (dt, config) — lazily created for "hh" model
+}
+
+impl PyBrainSimulator {
+    /// Ensure HH config exists for the given dt. Recreates if dt changed.
+    fn ensure_hh_config(&mut self, dt: f32) -> &mut HhLutConfig {
+        match &mut self.hh_config {
+            Some((stored_dt, _)) if *stored_dt == dt => {}
+            _ => {
+                self.hh_config = Some((dt, standard_config(self.n_neurons, dt)));
+            }
+        }
+        &mut self.hh_config.as_mut().unwrap().1
+    }
 }
 
 #[pymethods]
@@ -180,17 +194,18 @@ impl PyBrainSimulator {
     #[new]
     #[pyo3(signature = (n_neurons, model="lif".to_string()))]
     pub fn new(n_neurons: usize, model: String) -> PyResult<Self> {
-        let nm = match model.as_str() {
-            "lif" => NeuronModel::LIF,
-            "izhikevich" => NeuronModel::Izhikevich,
-            "rate" => NeuronModel::Rate,
-            "psi" => NeuronModel::Psi,
+        let (nm, hh_config) = match model.as_str() {
+            "lif" => (NeuronModel::LIF, None),
+            "izhikevich" => (NeuronModel::Izhikevich, None),
+            "rate" => (NeuronModel::Rate, None),
+            "psi" => (NeuronModel::Psi, None),
+            "hh" => (NeuronModel::LIF, Some((0.0, standard_config(n_neurons, 0.5)))),
             other => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Unknown model '{other}'. Use: lif, izhikevich, rate, psi")
+                format!("Unknown model '{other}'. Use: lif, izhikevich, rate, psi, hh")
             )),
         };
         let state = conn::BrainState::new(n_neurons, nm);
-        Ok(Self { state, model: nm, n_neurons, kinetics: None })
+        Ok(Self { state, model: nm, n_neurons, kinetics: None, hh_config })
     }
 
     /// Getter for n_neurons.
@@ -233,33 +248,38 @@ impl PyBrainSimulator {
             None => vec![0.0f32; n],
         };
 
-        let spike_buf = match self.model {
-            NeuronModel::LIF => {
-                let tau_m = vec![20.0f32; n];
-                let v_rest = vec![-70.0f32; n];
-                let v_thresh = vec![-58.0f32; n];
-                let v_reset = vec![-70.0f32; n];
-                let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                conn::sim_lif(conn_data, &mut self.state, &params, &ext_I, n_steps, scale)
-            }
-            NeuronModel::Izhikevich => {
-                let params = IzhikevichParams {
-                    a: vec![0.02f32; n],
-                    b: vec![0.2f32; n],
-                    c: vec![-65.0f32; n],
-                    d: vec![8.0f32; n],
-                    dt_ms,
-                    tau_ref: 2.0,
-                };
-                conn::sim_izhikevich(conn_data, &mut self.state, &params, &ext_I, n_steps)
-            }
-            NeuronModel::Rate => {
-                let params = RateParams { tau: 10.0, dt_ms };
-                conn::sim_rate(conn_data, &mut self.state, &params, &ext_I, n_steps)
-            }
-            NeuronModel::Psi => {
-                let params = PsiParams { hbar: 1.0, dt_ms };
-                conn::sim_psi(conn_data, &mut self.state, &params, &ext_I, n_steps)
+        let spike_buf = if self.hh_config.is_some() {
+            let cfg = self.ensure_hh_config(dt_ms);
+            conn::sim_hh(conn_data, cfg, &ext_I, n_steps, scale)
+        } else {
+            match self.model {
+                NeuronModel::LIF => {
+                    let tau_m = vec![20.0f32; n];
+                    let v_rest = vec![-70.0f32; n];
+                    let v_thresh = vec![-58.0f32; n];
+                    let v_reset = vec![-70.0f32; n];
+                    let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
+                    conn::sim_lif(conn_data, &mut self.state, &params, &ext_I, n_steps, scale)
+                }
+                NeuronModel::Izhikevich => {
+                    let params = IzhikevichParams {
+                        a: vec![0.02f32; n],
+                        b: vec![0.2f32; n],
+                        c: vec![-65.0f32; n],
+                        d: vec![8.0f32; n],
+                        dt_ms,
+                        tau_ref: 2.0,
+                    };
+                    conn::sim_izhikevich(conn_data, &mut self.state, &params, &ext_I, n_steps)
+                }
+                NeuronModel::Rate => {
+                    let params = RateParams { tau: 10.0, dt_ms };
+                    conn::sim_rate(conn_data, &mut self.state, &params, &ext_I, n_steps)
+                }
+                NeuronModel::Psi => {
+                    let params = PsiParams { hbar: 1.0, dt_ms };
+                    conn::sim_psi(conn_data, &mut self.state, &params, &ext_I, n_steps)
+                }
             }
         };
 
@@ -316,31 +336,45 @@ impl PyBrainSimulator {
         if self.kinetics.is_none() {
             self.kinetics = Some(SynapticKinetics::new(n));
         }
-        let kinetics = self.kinetics.as_mut().unwrap();
 
-        let spike_buf = match self.model {
-            NeuronModel::LIF => {
-                let tau_m = vec![20.0f32; n];
-                let v_rest = vec![-70.0f32; n];
-                let v_thresh = vec![-58.0f32; n];
-                let v_reset = vec![-70.0f32; n];
-                let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+        let spike_buf = if self.hh_config.is_some() {
+            // Ensure HH config matches requested dt
+            let recreate = match &self.hh_config {
+                Some((dt, _)) => *dt != dt_ms,
+                None => true,
+            };
+            if recreate {
+                self.hh_config = Some((dt_ms, standard_config(self.n_neurons, dt_ms)));
             }
-            NeuronModel::Izhikevich => {
-                let params = IzhikevichParams {
-                    a: vec![0.02f32; n],
-                    b: vec![0.2f32; n],
-                    c: vec![-65.0f32; n],
-                    d: vec![8.0f32; n],
-                    dt_ms,
-                    tau_ref: 2.0,
-                };
-                conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+            let cfg = &mut self.hh_config.as_mut().unwrap().1;
+            let kinetics = self.kinetics.as_mut().unwrap();
+            conn::sim_hh_synaptic(conn_data, cfg, &ext_I, n_steps, kinetics, scale)
+        } else {
+            let kinetics = self.kinetics.as_mut().unwrap();
+            match self.model {
+                NeuronModel::LIF => {
+                    let tau_m = vec![20.0f32; n];
+                    let v_rest = vec![-70.0f32; n];
+                    let v_thresh = vec![-58.0f32; n];
+                    let v_reset = vec![-70.0f32; n];
+                    let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
+                    conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+                }
+                NeuronModel::Izhikevich => {
+                    let params = IzhikevichParams {
+                        a: vec![0.02f32; n],
+                        b: vec![0.2f32; n],
+                        c: vec![-65.0f32; n],
+                        d: vec![8.0f32; n],
+                        dt_ms,
+                        tau_ref: 2.0,
+                    };
+                    conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+                }
+                _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("Synaptic mode not supported for model {:?}", self.model)
+                )),
             }
-            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Synaptic mode not supported for model {:?}", self.model)
-            )),
         };
 
         Ok(spike_buf.into_pyarray(py))
@@ -355,6 +389,9 @@ impl PyBrainSimulator {
 
     /// Reset brain state with small noise. Also resets synaptic conductances.
     pub fn reset(&mut self) {
+        if let Some((dt, _)) = &self.hh_config {
+            self.hh_config = Some((*dt, standard_config(self.n_neurons, *dt)));
+        }
         self.state = conn::BrainState::new(self.n_neurons, self.model);
         self.state.reset_with_noise(self.n_neurons);
         if let Some(k) = &mut self.kinetics {
@@ -367,8 +404,13 @@ impl PyBrainSimulator {
     pub fn set_v(&mut self, v_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = v_arr.readonly();
         let sl = ro.as_slice()?;
-        let n = sl.len().min(self.state.v.len());
-        self.state.v[..n].copy_from_slice(&sl[..n]);
+        if let Some((_, cfg)) = &mut self.hh_config {
+            let n = sl.len().min(cfg.v.len());
+            cfg.v[..n].copy_from_slice(&sl[..n]);
+        } else {
+            let n = sl.len().min(self.state.v.len());
+            self.state.v[..n].copy_from_slice(&sl[..n]);
+        }
         Ok(())
     }
 
@@ -384,12 +426,27 @@ impl PyBrainSimulator {
 
     /// Current membrane potentials (v) — read-only snapshot.
     pub fn v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        self.state.v[..self.n_neurons].to_vec().into_pyarray(py)
+        if let Some((_, cfg)) = &self.hh_config {
+            cfg.v[..self.n_neurons].to_vec().into_pyarray(py)
+        } else {
+            self.state.v[..self.n_neurons].to_vec().into_pyarray(py)
+        }
     }
 
     /// Current recovery variables (u) — read-only snapshot.
     pub fn u<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         self.state.u[..self.n_neurons].to_vec().into_pyarray(py)
+    }
+
+    /// Current input currents (Ii) — read-only snapshot.
+    /// For HH: returns cfg.Ii (membrane input including synaptic).
+    /// For others: returns state.I_buf (accumulated synaptic + external).
+    pub fn Ii<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        if let Some((_, cfg)) = &self.hh_config {
+            cfg.Ii[..self.n_neurons].to_vec().into_pyarray(py)
+        } else {
+            self.state.I_buf[..self.n_neurons].to_vec().into_pyarray(py)
+        }
     }
 
     /// Run ψ-wave with time-varying external input, record (v, u) trajectory.

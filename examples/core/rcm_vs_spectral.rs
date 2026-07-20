@@ -141,6 +141,7 @@ fn generate_connectome(n: usize, n_remote_syn: usize) -> taas_connectome::Connec
         col_indices,
         values,
         nt_types: vec![1.0f32; n],
+        receptor_types: vec![],
         groups: vec![],
     }
 }

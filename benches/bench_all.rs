@@ -1,0 +1,481 @@
+//! Comprehensive benchmarks for ALL kernels — covers gaps in bench.rs.
+//!
+//! Each benchmark compares scalar (n=1) vs SIMD (n=8) throughput.
+//! Some kernels also include n=1024 batch size.
+//!
+//! Run: cargo bench --bench bench_all
+
+#![allow(non_snake_case)]
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use taas_checkmate::kernels;
+
+// ═══════════════════════════════════════════════════════════
+//  signal kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_sigmoid_gate(c: &mut Criterion) {
+    let mut g = c.benchmark_group("sigmoid_gate");
+    let input1 = vec![2.0f32];
+    let mut out1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::sigmoid_gate(&mut out1, &input1, 1.0, 0.0);
+        black_box(());
+    }));
+    let input8 = vec![2.0f32; 8];
+    let mut out8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::sigmoid_gate(&mut out8, &input8, 1.0, 0.0);
+        black_box(());
+    }));
+    let input1024 = vec![2.0f32; 1024];
+    let mut out1024 = vec![0.0f32; 1024];
+    g.throughput(Throughput::Elements(1024));
+    g.bench_function("simd_n1024", |b| b.iter(|| {
+        kernels::sigmoid_gate(&mut out1024, &input1024, 1.0, 0.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_thalamic_gate(c: &mut Criterion) {
+    let mut g = c.benchmark_group("thalamic_gate");
+    let src1 = vec![1.0f32];
+    let gate1 = vec![5.0f32];
+    let mut out1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::thalamic_gate(&mut out1, &src1, &gate1, 0.0, 1.0);
+        black_box(());
+    }));
+    let src8 = vec![1.0f32; 8];
+    let gate8 = vec![5.0f32; 8];
+    let mut out8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::thalamic_gate(&mut out8, &src8, &gate8, 0.0, 1.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_linear_decoder(c: &mut Criterion) {
+    let mut g = c.benchmark_group("linear_decoder");
+    // n_in=8, n_out=2
+    let states1 = vec![1.0f32; 8];
+    let w1: Vec<f32> = (0..16).map(|i| i as f32 * 0.1).collect();
+    let biases1 = vec![0.5f32; 2];
+    let mut out1 = vec![0.0f32; 2];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("scalar_n8in", |b| b.iter(|| {
+        kernels::linear_decoder(&mut out1, &states1, &w1, &biases1);
+        black_box(());
+    }));
+    // n_in=64, n_out=8
+    let states8 = vec![1.0f32; 64];
+    let w8: Vec<f32> = (0..64*8).map(|i| i as f32 * 0.01).collect();
+    let biases8 = vec![0.5f32; 8];
+    let mut out8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(64));
+    g.bench_function("simd_n64in_x8out", |b| b.iter(|| {
+        kernels::linear_decoder(&mut out8, &states8, &w8, &biases8);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_phase_gate(c: &mut Criterion) {
+    let mut g = c.benchmark_group("phase_gate");
+    let input1 = vec![1.0f32];
+    let r1 = vec![2.0f32];
+    let mut out1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::phase_gate_apply(&mut out1, &input1, &r1, 4.0, 1.0);
+        black_box(());
+    }));
+    let input8 = vec![1.0f32; 8];
+    let r8 = vec![2.0f32; 8];
+    let mut out8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::phase_gate_apply(&mut out8, &input8, &r8, 4.0, 1.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_relu_simd(c: &mut Criterion) {
+    let mut g = c.benchmark_group("relu_simd");
+    let mut d1 = vec![-3.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| { kernels::relu_simd(&mut d1); black_box(()); }));
+    let mut d8 = vec![-3.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| { kernels::relu_simd(&mut d8); black_box(()); }));
+    let mut d1024 = vec![-3.0f32; 1024];
+    g.throughput(Throughput::Elements(1024));
+    g.bench_function("simd_n1024", |b| b.iter(|| { kernels::relu_simd(&mut d1024); black_box(()); }));
+    g.finish();
+}
+
+fn bench_add_simd(c: &mut Criterion) {
+    let mut g = c.benchmark_group("add_simd");
+    let mut a1 = vec![1.0f32];
+    let b1 = vec![0.5f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| { kernels::add_simd(&mut a1, &b1); black_box(()); }));
+    let mut a8 = vec![1.0f32; 8];
+    let b8 = vec![0.5f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| { kernels::add_simd(&mut a8, &b8); black_box(()); }));
+    g.finish();
+}
+
+fn bench_sgd_step(c: &mut Criterion) {
+    let mut g = c.benchmark_group("sgd_step");
+    let mut vel1 = vec![0.0f32];
+    let mut w1 = vec![0.5f32];
+    let g1 = vec![0.1f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::sgd_step_simd(&mut vel1, &mut w1, &g1, 0.01, 0.9);
+        black_box(());
+    }));
+    let mut vel8 = vec![0.0f32; 8];
+    let mut w8 = vec![0.5f32; 8];
+    let g8 = vec![0.1f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::sgd_step_simd(&mut vel8, &mut w8, &g8, 0.01, 0.9);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_t3_drive_encoder(c: &mut Criterion) {
+    let mut g = c.benchmark_group("t3_drive_encoder");
+    let mut drives1 = vec![0.0f32];
+    let input1 = vec![1.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::t3_drive_encoder(&mut drives1, &input1, 10.0);
+        black_box(());
+    }));
+    let mut drives8 = vec![0.0f32; 8];
+    let input8 = vec![1.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::t3_drive_encoder(&mut drives8, &input8, 10.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_stochastic_encoder(c: &mut Criterion) {
+    let mut g = c.benchmark_group("stochastic_encoder");
+    let mut i1 = vec![5.0f32];
+    let in1 = vec![3.0f32];
+    let n1 = vec![0.1f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::stochastic_encoder(&mut i1, &in1, &n1, 0.5, 1.0);
+        black_box(());
+    }));
+    let mut i8 = vec![5.0f32; 8];
+    let in8 = vec![3.0f32; 8];
+    let n8 = vec![0.1f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::stochastic_encoder(&mut i8, &in8, &n8, 0.5, 1.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  phase kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_kuramoto_prepare(c: &mut Criterion) {
+    let mut g = c.benchmark_group("kuramoto_prepare");
+    let mut ph1 = vec![1.0f32];
+    let mut c1 = vec![0.0f32];
+    let mut s1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::kuramoto_prepare(&mut ph1, &mut c1, &mut s1);
+        black_box(());
+    }));
+    let mut ph8 = vec![1.0f32; 8];
+    let mut c8 = vec![0.0f32; 8];
+    let mut s8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::kuramoto_prepare(&mut ph8, &mut c8, &mut s8);
+        black_box(());
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  measure kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_interference(c: &mut Criterion) {
+    let mut g = c.benchmark_group("interference");
+    let pa = vec![1.0f32; 8];
+    let pb = vec![1.0f32; 8];
+    let mut out = vec![0.0f32; 8 * 8];
+    g.throughput(Throughput::Elements(64));
+    g.bench_function("simd_8x8", |b| b.iter(|| {
+        kernels::interference(&mut out, &pa, &pb);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_phase_coherence(c: &mut Criterion) {
+    let mut g = c.benchmark_group("phase_coherence");
+    let sin_buf = vec![0.5f32; 8];
+    let cos_buf = vec![0.5f32; 8];
+    let amps = vec![1.0f32; 8];
+    let mut out = 0.0f32;
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::phase_coherence(&mut out, &sin_buf, &cos_buf, &amps);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_spike_entropy(c: &mut Criterion) {
+    let mut g = c.benchmark_group("spike_entropy");
+    let counts = vec![10.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        let (h, hp) = kernels::spike_entropy(&counts, 80.0, 3.0);
+        black_box((h, hp));
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  decode kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_ring_synthesis(c: &mut Criterion) {
+    let mut g = c.benchmark_group("ring_synthesis");
+    let amps1 = vec![2.0f32];
+    let trig1 = vec![0.5f32];
+    let w1 = vec![1.0f32];
+    let mut out1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::ring_synthesis(&mut out1, &amps1, &trig1, &w1);
+        black_box(());
+    }));
+    let amps8 = vec![2.0f32; 8];
+    let trig8 = vec![0.5f32; 8];
+    let w8 = vec![1.0f32; 8];
+    let mut out8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::ring_synthesis(&mut out8, &amps8, &trig8, &w8);
+        black_box(());
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  attention kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_rdrand_fill(c: &mut Criterion) {
+    let mut g = c.benchmark_group("rdrand_fill");
+    let mut buf8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::rdrand_fill(&mut buf8);
+        black_box(());
+    }));
+    let mut buf1024 = vec![0.0f32; 1024];
+    g.throughput(Throughput::Elements(1024));
+    g.bench_function("simd_n1024", |b| b.iter(|| {
+        kernels::rdrand_fill(&mut buf1024);
+        black_box(());
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  neuron kernels
+// ═══════════════════════════════════════════════════════════
+
+fn bench_stp_step(c: &mut Criterion) {
+    let mut g = c.benchmark_group("stp_step");
+    let mut x1 = vec![1.0f32];
+    let mut u1 = vec![0.2f32];
+    let pre1 = vec![1i32];
+    let td1 = vec![200.0f32];
+    let tf1 = vec![500.0f32];
+    let u01 = vec![0.2f32];
+    let a1 = vec![1.0f32];
+    let mut i1 = vec![0.0f32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::stp_step(&mut x1, &mut u1, &pre1, &td1, &tf1, &u01, &a1, &mut i1, 1.0);
+        black_box(());
+    }));
+    let mut x8 = vec![1.0f32; 8];
+    let mut u8 = vec![0.2f32; 8];
+    let pre8 = vec![1i32; 8];
+    let td8 = vec![200.0f32; 8];
+    let tf8 = vec![500.0f32; 8];
+    let u08 = vec![0.2f32; 8];
+    let a8 = vec![1.0f32; 8];
+    let mut i8 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::stp_step(&mut x8, &mut u8, &pre8, &td8, &tf8, &u08, &a8, &mut i8, 1.0);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_dopamine_traces(c: &mut Criterion) {
+    let mut g = c.benchmark_group("dopamine_traces");
+    let mut tr_pre1 = vec![0.0f32];
+    let mut tr_post1 = vec![0.0f32];
+    let mut e1 = vec![0.0f32];
+    let pre_s1 = vec![1i32];
+    let post_s1 = vec![1i32];
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::dopamine_traces_step(&mut tr_pre1, &mut tr_post1, &mut e1, &pre_s1, &post_s1, 1.0, 20.0, 20.0, 200.0, 0.01, 0.01);
+        black_box(());
+    }));
+    let mut tr_pre8 = vec![0.0f32; 8];
+    let mut tr_post8 = vec![0.0f32; 8];
+    let mut e8 = vec![0.0f32; 8];
+    let pre_s8 = vec![1i32; 8];
+    let post_s8 = vec![1i32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::dopamine_traces_step(&mut tr_pre8, &mut tr_post8, &mut e8, &pre_s8, &post_s8, 1.0, 20.0, 20.0, 200.0, 0.01, 0.01);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_fhn_step(c: &mut Criterion) {
+    let mut g = c.benchmark_group("fhn_step");
+    let (mut v1, mut w1, i1, mut sp1, p1) = (vec![-65.0f32], vec![0.0f32], vec![10.0f32], vec![0i32], pack_fhn(&[0.5, 10.0, 0.7, 0.8]));
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::fhn_step(&mut v1, &mut w1, &i1, &mut sp1, &p1);
+        black_box(());
+    }));
+    let (mut v8, mut w8, i8, mut sp8, p8) = (vec![-65.0f32; 8], vec![0.0f32; 8], vec![10.0f32; 8], vec![0i32; 8], pack_fhn_n(&[0.5, 10.0, 0.7, 0.8], 8));
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::fhn_step(&mut v8, &mut w8, &i8, &mut sp8, &p8);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_wc_step(c: &mut Criterion) {
+    let mut g = c.benchmark_group("wc_step");
+    let p_wc = pack_wc(&[0.5, 10.0, 10.0, 5.0, 2.0, 3.0, 2.0, 0.5]);
+    let (mut e1, mut i1, ie1, ii1, mut se1, mut si1) = (vec![0.3f32], vec![0.3f32], vec![1.0f32], vec![1.0f32], vec![0.0f32], vec![0.0f32]);
+    g.throughput(Throughput::Elements(1));
+    g.bench_function("scalar_n1", |b| b.iter(|| {
+        kernels::wc_step(&mut e1, &mut i1, &ie1, &ii1, &mut se1, &mut si1, &p_wc);
+        black_box(());
+    }));
+    let p_wc8 = pack_wc_n(&[0.5, 10.0, 10.0, 5.0, 2.0, 3.0, 2.0, 0.5], 8);
+    let (mut e8, mut i8, ie8, ii8, mut se8, mut si8) = (vec![0.3f32; 8], vec![0.3f32; 8], vec![1.0f32; 8], vec![1.0f32; 8], vec![0.0f32; 8], vec![0.0f32; 8]);
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("simd_n8", |b| b.iter(|| {
+        kernels::wc_step(&mut e8, &mut i8, &ie8, &ii8, &mut se8, &mut si8, &p_wc8);
+        black_box(());
+    }));
+    g.finish();
+}
+
+fn bench_delay_buffer(c: &mut Criterion) {
+    let mut g = c.benchmark_group("delay_buffer");
+    let buf1 = vec![1.0f32; 8];
+    let mut out1 = vec![0.0f32; 8];
+    g.throughput(Throughput::Elements(8));
+    g.bench_function("circular_n8", |b| b.iter(|| {
+        kernels::delay_buffer_circular(&mut out1, &buf1, 3);
+        black_box(());
+    }));
+    let buf_multi = vec![1.0f32; 16];
+    let delays = vec![0i32, 3, 7, 11, 15];
+    let mut out_multi = vec![0.0f32; 5];
+    g.throughput(Throughput::Elements(5));
+    g.bench_function("multi_tap_5taps", |b| b.iter(|| {
+        kernels::delay_buffer_multi_tap(&mut out_multi, &buf_multi, &delays);
+        black_box(());
+    }));
+    g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════
+
+fn pack_fhn(vals: &[f32]) -> Vec<f32> {
+    let mut p = Vec::with_capacity(4);
+    for &v in vals { p.push(v); }
+    p
+}
+
+fn pack_fhn_n(vals: &[f32], n: usize) -> Vec<f32> {
+    let mut p = Vec::with_capacity(vals.len() * n);
+    for &v in vals { for _ in 0..n { p.push(v); } }
+    p
+}
+
+fn pack_wc(vals: &[f32]) -> Vec<f32> {
+    pack_fhn_n(vals, 1)
+}
+
+fn pack_wc_n(vals: &[f32], n: usize) -> Vec<f32> {
+    pack_fhn_n(vals, n)
+}
+
+criterion_group!(benches_all,
+    // signal
+    bench_sigmoid_gate,
+    bench_thalamic_gate,
+    bench_linear_decoder,
+    bench_phase_gate,
+    bench_relu_simd,
+    bench_add_simd,
+    bench_sgd_step,
+    bench_t3_drive_encoder,
+    bench_stochastic_encoder,
+    // phase
+    bench_kuramoto_prepare,
+    // measure
+    bench_interference,
+    bench_phase_coherence,
+    bench_spike_entropy,
+    // decode
+    bench_ring_synthesis,
+    // attention
+    bench_rdrand_fill,
+    // neuron
+    bench_stp_step,
+    bench_dopamine_traces,
+    bench_fhn_step,
+    bench_wc_step,
+    bench_delay_buffer,
+);
+criterion_main!(benches_all);

@@ -44,8 +44,8 @@ pub(crate) unsafe fn saw_step(
         let v_sq = vv * vv;
         let dv = f32x8::splat(0.04).mul_add(v_sq, f32x8::splat(5.0) * vv) + f32x8::splat(140.0) - uu + ii;
         let du = aa * (bb * vv - uu);
-        vv = vv + refr_mask.blend(zero, dt_s * dv);
-        uu = uu + refr_mask.blend(zero, dt_s * du);
+        vv += refr_mask.blend(zero, dt_s * dv);
+        uu += refr_mask.blend(zero, dt_s * du);
 
         // Spike detection only for non-refractory
         let not_refr = !refr_mask;
@@ -62,7 +62,7 @@ pub(crate) unsafe fn saw_step(
         uu = refr_mask.blend(uu, uu + sm.blend(u_add, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr = refr - dt_s;  // Always decrement
+        refr -= dt_s;  // Always decrement
         refr = sm.blend(tr_s_, refr);  // Set to tau_ref on spike
         refr = refr.max(zero);
 
@@ -172,8 +172,8 @@ pub(crate) unsafe fn eprop_saw_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + ii;
         let du = a_s * (b_s * vv - uu);
-        vv = vv + dt_s * dv;
-        uu = uu + dt_s * du;
+        vv += dt_s * dv;
+        uu += dt_s * du;
 
         // Surrogate gradient
         let diff = (vv - v_th).abs() / tau_sg_s;
@@ -190,12 +190,11 @@ pub(crate) unsafe fn eprop_saw_step(
         // Spike detection: v ≥ 30 → hardcoded reset
         let sm = vv.cmp_ge(v_th);
         vv = sm.blend(v_reset, vv);
-        uu = uu + sm.blend(u_add, zero);
+        uu += sm.blend(u_add, zero);
 
         // Count spikes
-        let sp_arr: [f32; 8] = sm.to_array();
-        for i in 0..8 {
-            if sp_arr[i].to_bits() != 0 { total_spikes += 1; }
+        for &val in sm.to_array().iter() {
+            if val.to_bits() != 0 { total_spikes += 1; }
         }
 
         store8(v, off, vv);
@@ -270,8 +269,8 @@ pub(crate) unsafe fn psi_wave_step(
 
         let dv = hr - hi * sp + ie;
         let du = hi + hr * sp;
-        vv = vv + dt_s * dv / hbar_s;
-        uu = uu + dt_s * du / hbar_s;
+        vv += dt_s * dv / hbar_s;
+        uu += dt_s * du / hbar_s;
 
         // Normalize: keep on unit circle
         let nrm = (vv * vv + uu * uu + f32x8::splat(1e-9)).sqrt();

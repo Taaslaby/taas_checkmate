@@ -14,7 +14,7 @@ fn bench_izhikevich(c: &mut Criterion) {
     g.bench_function("scalar_n1", |b| b.iter(|| {
         kernels::izhikevich_step(
             &mut v1, &mut u1, &mut tr1,
-            &a1, &b1, &I1,
+            &a1, &b1, &mut I1,
             0.5, 0.01, &mut sp1, &c1, &d1,
             &mut refr1, 3.0,
         );
@@ -29,7 +29,7 @@ fn bench_izhikevich(c: &mut Criterion) {
     g.bench_function("simd_n8", |b| b.iter(|| {
         kernels::izhikevich_step(
             &mut v8, &mut u8, &mut tr8,
-            &a8, &b8, &I8,
+            &a8, &b8, &mut I8,
             0.5, 0.01, &mut sp8, &c8, &d8,
             &mut refr8, 3.0,
         );

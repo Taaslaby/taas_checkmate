@@ -18,11 +18,16 @@
 #[cfg(feature = "connectome")]
 mod inner {
     use std::fs::File;
+    use std::path::PathBuf;
     use std::time::Instant;
     use taas_connectome::ConnectomeData;
 
-    const FAFB_TAAS: &str = "fafb.taas";
-    const FAFB_NEW_TAAS: &str = "fafb_rt.taas";
+    fn data(name: &str) -> PathBuf {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("examples/data");
+        p.push(name);
+        p
+    }
 
     pub fn run() {
         let t0 = Instant::now();
@@ -30,8 +35,9 @@ mod inner {
         // ─── 1. Load old format ────────────────────────
         println!("╔═══ FAFB receptor_types test ═══╗");
         println!();
-        println!("1. Loading {} (old format) ...", FAFB_TAAS);
-        let mut f = File::open(FAFB_TAAS).expect("fafb.taas not found");
+        let fafb_path = data("fafb.taas");
+        println!("1. Loading {} (old format) ...", fafb_path.display());
+        let mut f = File::open(&fafb_path).expect("fafb.taas not found");
         let mut conn = ConnectomeData::load_baked(&mut f).unwrap();
         drop(f);
 
@@ -71,18 +77,19 @@ mod inner {
         println!("   build_receptor_types(): OK");
 
         // ─── 3. Save to new format ─────────────────────
-        println!("3. Saving to new format ({FAFB_NEW_TAAS}) ...");
-        let mut out = File::create(FAFB_NEW_TAAS).expect("create fafb_rt.taas");
+        let new_path = data("fafb_rt.taas");
+        println!("3. Saving to new format ({}) ...", new_path.display());
+        let mut out = File::create(&new_path).expect("create fafb_rt.taas");
         conn.save_baked(&mut out).unwrap();
         drop(out);
 
-        let file_size = std::fs::metadata(FAFB_NEW_TAAS).unwrap().len();
+        let file_size = std::fs::metadata(&new_path).unwrap().len();
         println!("   ✓ Saved: {:.1}MB", file_size as f64 / 1_048_576.0);
         assert!(file_size > 0, "file should not be empty");
 
         // ─── 4. Load back and verify roundtrip ─────────
         println!("4. Loading back (roundtrip verification) ...");
-        let mut f2 = File::open(FAFB_NEW_TAAS).expect("open fafb_rt.taas");
+        let mut f2 = File::open(&new_path).expect("open fafb_rt.taas");
         let loaded = ConnectomeData::load_baked(&mut f2).unwrap();
         drop(f2);
 
@@ -107,8 +114,8 @@ mod inner {
         // ─── Summary ───────────────────────────────────
         println!();
         println!("╔═══ Summary ═══════════════════════════════════╗");
-        println!("║  File:        {FAFB_TAAS}");
-        println!("║  New format:  {FAFB_NEW_TAAS}");
+        println!("║  File:        {}", fafb_path.display());
+        println!("║  New format:  {}", new_path.display());
         println!("║  Size:        {:.1}MB", file_size as f64 / 1_048_576.0);
         println!("║  Neurons:     {n}");
         println!("║  Synapses:    {n_syn}");

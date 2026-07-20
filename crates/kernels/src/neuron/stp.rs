@@ -62,11 +62,11 @@ pub(crate) unsafe fn stp_step(
         xx = xx + dt_s * (one - xx) / td;
 
         // Facilitation on spike: + u0·(1-u_old)  (uses pre-decay u)
-        uu = uu + s_one * u0v * (one - uu0);
+        uu += s_one * u0v * (one - uu0);
         // Depression on spike: − u_new · x_old  (uses new u, pre-decay x)
-        xx = xx + s_one * (-uu * xx0);
+        xx += s_one * (-uu * xx0);
         // Synaptic current: + A·u_new·x_new where spike
-        io = io + s_one * av * uu * xx;
+        io += s_one * av * uu * xx;
 
         store8(x, off, xx);
         store8(u, off, uu);
@@ -164,14 +164,16 @@ pub(crate) unsafe fn stdp_homeostatic(
     // Compute sum via SIMD reduction
     let n8 = n & !7;
     let mut sum = 0.0f32;
-    let w_slc = std::slice::from_raw_parts(weights, n);
-    for off in (0..n8).step_by(8) {
-        let wv = load8(weights, off);
-        let a: [f32; 8] = wv.to_array();
-        sum += a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7];
-    }
-    for i in n8..n {
-        sum += w_slc[i];
+    {
+        let w_slc = std::slice::from_raw_parts(weights, n);
+        for off in (0..n8).step_by(8) {
+            let wv = load8(weights, off);
+            let a: [f32; 8] = wv.to_array();
+            sum += a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7];
+        }
+        for &val in w_slc[n8..].iter() {
+            sum += val;
+        }
     }
 
     let ltd = f32x8::splat(lr_ltd);

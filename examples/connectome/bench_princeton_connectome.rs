@@ -162,13 +162,13 @@ fn main() {
     );
 
     // Warmup
-    let _ = sim_lif(&conn, &mut state, &lif_params, &external_I, 10);
+    let _ = sim_lif(&conn, &mut state, &lif_params, &external_I, 10, 1.0);
 
     let mut cpu_t_avg = 0.0;
     for _ in 0..N_SAMPLE {
         let mut s = BrainState::new(n, NeuronModel::LIF);
         let t0 = Instant::now();
-        let _ = sim_lif(&conn, &mut s, &lif_params, &external_I, N_STEPS);
+        let _ = sim_lif(&conn, &mut s, &lif_params, &external_I, N_STEPS, 1.0);
         cpu_t_avg += t0.elapsed().as_secs_f64();
     }
     cpu_t_avg /= N_SAMPLE as f64;

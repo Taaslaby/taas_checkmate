@@ -41,6 +41,8 @@ pub mod hologram;
 pub mod spaun;
 #[cfg(feature = "cuda")]
 pub mod spaun_gpu;
+#[cfg(feature = "cuda")]
+pub mod gpu_refiner;
 
 use pyo3::prelude::*;
 use pyo3::types::PyCFunction;
@@ -276,6 +278,14 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     {
         let spaun_gpu = make_sub(m.py(), m, "spaun_gpu")?;
         export_class!(m, spaun_gpu, spaun_gpu::PySpaunPipelineGPU);
+    }
+
+    // ─── gpu_refiner ────────────────────────────────────
+    #[cfg(feature = "cuda")]
+    {
+        let gpu_refiner = make_sub(m.py(), m, "gpu_refiner")?;
+        export_class!(m, gpu_refiner, gpu_refiner::PyGpuConnectomeRefiner);
+        export_class!(m, gpu_refiner, gpu_refiner::PyRefinerHistory);
     }
 
     Ok(())

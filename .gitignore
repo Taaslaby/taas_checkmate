@@ -15,11 +15,25 @@ research/
 .idea/
 .python-version
 __pypackages__/
-Cargo.lock
 
-# Large model files (connectome-gpt, etc.)
+# Cargo.lock IS tracked: this crate ships as cdylib (Python extension) + lib,
+# so reproducible builds matter. Do NOT ignore it.
+
+# Large model / binary snapshot files (regenerated from data/)
 *.taas
 *.pt
 *.pth
-*.bin
 *.safetensors
+
+# Generated binary data dumps (kept under examples/data/ when needed for examples)
+/*.dat
+/*.bin
+/nt_map*.bin
+/photo_map.bin
+
+# Generated data CSVs at repo root (example outputs / scratch)
+/*.csv
+
+# Data-file indices at repo root (regenerated from connectome .taas)
+/*_indices.txt
+/*_indices_*.txt

@@ -19,6 +19,7 @@ pub fn save_brain_state(state: &taas_connectome::sim::BrainState, writer: &mut T
     writer.add_f32("brain_Ibuf", "BrainState", &state.I_buf);
     writer.add_i32("brain_spikes", "BrainState", &state.spikes);
     writer.add_f32("brain_refractory", "BrainState", &state.refractory);
+    writer.add_f32("brain_slow_state", "BrainState", &state.slow_state);
 }
 
 /// Load CPU brain state from a .taas reader.
@@ -26,6 +27,11 @@ pub fn load_brain_state(reader: &TaasReader) -> Result<taas_connectome::sim::Bra
     let n_padded = reader.metadata().get("n_neurons_padded")
         .and_then(|s| s.parse::<usize>().ok())
         .ok_or_else(|| "n_neurons_padded not found".to_string())?;
+    // slow_state: backwards-compatible — old archives (pre slow_state) lack this
+    // component; reconstruct it from n_padded as 0.5 (neutral baseline, matches
+    // BrainState::new()). See BrainState::slow_state doc.
+    let slow_state = reader.get_f32("brain_slow_state")
+        .unwrap_or_else(|_| vec![0.5; n_padded]);
     let state = taas_connectome::sim::BrainState {
         v: reader.get_f32("brain_v")?,
         u: reader.get_f32("brain_u")?,
@@ -33,6 +39,7 @@ pub fn load_brain_state(reader: &TaasReader) -> Result<taas_connectome::sim::Bra
         I_buf: reader.get_f32("brain_Ibuf")?,
         spikes: reader.get_i32("brain_spikes")?,
         refractory: reader.get_f32("brain_refractory")?,
+        slow_state,
         n_padded,
         n_neurons: 0,
         queue: Default::default(),
@@ -120,6 +127,7 @@ pub fn load_brain_io(reader: &TaasReader) -> Result<taas_connectome::BrainIO, St
 /// - `col_indices` (i32[]) — CSR column indices
 /// - `values` (f32[]) — synaptic weights
 /// - `nt_types` (f32[]) — neurotransmitter types (+1 exc, −1 inh)
+/// - `receptor_types` (u8[]) — per-synapse receptor (optional; empty if unset)
 /// - `groups_json` (metadata) — groups serialised as JSON
 pub fn save_connectome(conn: &taas_connectome::ConnectomeData, writer: &mut TaasWriter) {
     writer.add_metadata("type", "Connectome");
@@ -129,6 +137,7 @@ pub fn save_connectome(conn: &taas_connectome::ConnectomeData, writer: &mut Taas
     writer.add_i32("col_indices", "Connectome", &conn.col_indices);
     writer.add_f32("values", "Connectome", &conn.values);
     writer.add_f32("nt_types", "Connectome", &conn.nt_types);
+    writer.add_u8("receptor_types", "Connectome", &conn.receptor_types);
     // Serialize groups as JSON in metadata
     let groups_json = serde_json::to_string(&conn.groups).unwrap_or_else(|_| "[]".to_string());
     writer.add_metadata("groups", &groups_json);
@@ -143,6 +152,9 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
     let col_indices = reader.get_i32("col_indices")?;
     let values = reader.get_f32("values")?;
     let nt_types = reader.get_f32("nt_types")?;
+    // receptor_types is optional — old archives (pre receptor_types) lack it,
+    // returning an empty Vec (matches ConnectomeData::new default).
+    let receptor_types = reader.get_u8("receptor_types").unwrap_or_default();
     let groups: Vec<taas_connectome::NeuronGroup> = reader.metadata()
         .get("groups")
         .and_then(|g| serde_json::from_str(g).ok())
@@ -150,7 +162,9 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
     let group_refs: Vec<(&str, Vec<usize>)> = groups.iter()
         .map(|g| (g.name.as_str(), g.indices.clone()))
         .collect();
-    Ok(taas_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs))
+    let mut conn = taas_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs);
+    conn.receptor_types = receptor_types;
+    Ok(conn)
 }
 
 // ─── TriOscillator ──────────────────────────────────────

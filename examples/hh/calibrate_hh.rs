@@ -111,7 +111,7 @@ mod inner {
             let external_I = vec![i_ext; n];
 
             let t1 = Instant::now();
-            let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics);
+            let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics, 1.0);
             let sim_time = t1.elapsed().as_secs_f64();
 
             let counts = count_spikes(&raster, n);
@@ -168,13 +168,11 @@ mod inner {
                 let mut cfg = standard_config(n, DT_MS);
                 add_heterogeneity_to_cfg(&mut cfg);
                 let mut kinetics = SynapticKinetics::new(n);
-                let external_I = vec![i_ext; n];
-
-                let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics);
-                let counts = count_spikes(&raster, n);
-                let (mean, max_rate, cv, n_active) = firing_stats(&counts, N_STEPS, DT_MS);
-                let active_pct = n_active as f64 / n as f64 * 100.0;
-                let elapsed = t1.elapsed().as_secs_f64();
+                let external_I = vec![i_ext; n];let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics, 1.0);
+            let counts = count_spikes(&raster, n);
+            let (mean, max_rate, cv, n_active) = firing_stats(&counts, N_STEPS, DT_MS);
+            let active_pct = n_active as f64 / n as f64 * 100.0;
+            let elapsed = t1.elapsed().as_secs_f64();
 
                 // Score: distance from ideal (1-5 Hz mean, 10-30% active, CV > 0.5)
                 let mean_err = if mean >= 0.5 && mean <= 10.0 {
@@ -218,7 +216,7 @@ mod inner {
             add_heterogeneity_to_cfg(&mut cfg);
             let mut kinetics = SynapticKinetics::new(n);
             let external_I = vec![best_combo.1; n];
-            let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics);
+            let raster = sim_hh_synaptic(&conn_scaled, &mut cfg, &external_I, N_STEPS, &mut kinetics, 1.0);
             let counts = count_spikes(&raster, n);
             let (mean, max_rate, cv, n_active) = firing_stats(&counts, N_STEPS, DT_MS);
             let active_pct = n_active as f64 / n as f64 * 100.0;

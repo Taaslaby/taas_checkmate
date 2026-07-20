@@ -52,6 +52,10 @@ pub struct GateSpec {
 }
 
 /// Precompute LUTs for all channels at a given dt and V-range.
+///
+/// # Safety
+/// The channels must have valid alpha/beta rate functions that are defined
+/// for the entire voltage range [v_min, v_max].
 pub fn build_luts(channels: &[ChannelSpec], dt: f32,                   v_min: f32, v_max: f32, n_bins: usize) -> Vec<Vec<GateLut>> {
     channels.iter().map(|ch| {
         ch.gates.iter().map(|g| {
@@ -73,7 +77,7 @@ pub fn build_luts(channels: &[ChannelSpec], dt: f32,                   v_min: f3
 }
 
 /// Quantize voltage to LUT index, clamped.
-#[inline(always)]
+#[inline]
 pub fn v_to_idx(v: f32, v_min: f32, inv_dv: f32, n_bins: usize) -> usize {
     let idx = ((v - v_min) * inv_dv) as isize;
     idx.clamp(0, n_bins as isize) as usize
@@ -178,7 +182,7 @@ unsafe fn na_m_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
     let vp40 = v + f32x8::splat(40.0);
     let one = f32x8::splat(1.0);
     // α: handle vp40 ≈ 0 via blend (avoid 0/0)
-    let exp_arg = -vp40 / f32x8::splat(10.0);
+    let _exp_arg = -vp40 / f32x8::splat(10.0);
     let clamp_min = f32x8::splat(-10.0);
     let clamp_max = f32x8::splat(10.0);
     let exp_val = fast_exp_simd((-vp40 / f32x8::splat(10.0)).max(clamp_min).min(clamp_max));
@@ -327,7 +331,7 @@ pub(crate) unsafe fn hh_poly_step_simd(
 
                 // g_ch *= m^power
                 if power == 1 {
-                    g_ch = g_ch * new_gv;
+                    g_ch *= new_gv;
                 } else if power == 3 {
                     let sq = new_gv * new_gv;
                     g_ch = g_ch * sq * new_gv;
@@ -335,11 +339,11 @@ pub(crate) unsafe fn hh_poly_step_simd(
                     let sq = new_gv * new_gv;
                     g_ch = g_ch * sq * sq;
                 } else {
-                    g_ch = g_ch * new_gv.powf(power as f32);
+                    g_ch *= new_gv.powf(power as f32);
                 }
                 gi += 1;
             }
-            I_ion = I_ion + g_ch * (vi - e_rev_v);
+            I_ion += g_ch * (vi - e_rev_v);
         }
 
         let I_leak = unsafe { load8(g_leak, i) } * (vi - unsafe { load8(E_leak, i) });
@@ -354,6 +358,10 @@ pub(crate) unsafe fn hh_poly_step_simd(
 ///
 /// `n`: number of neurons in this chunk (remainder).
 /// `total_n`: total neurons in the original array (column-major stride for gates).
+///
+/// # Safety
+/// All pointer args (`v`, `gates`, `Ii`, `g_leak`, `E_leak`, `C_m`) must be valid
+/// for `n` elements. `channel_meta` must be valid for its length.
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn hh_poly_step_scalar(
     v: *mut f32, gates: *mut f32,
@@ -480,6 +488,12 @@ pub fn pacemaking_channels() -> Vec<ChannelSpec> {
 /// Scalar HH step using LUTs.
 /// Channels are interleaved in params: for each channel (E_rev, g_max, n_gates_in_ch).
 /// gates array: column-major, [gate_0(nrn 0..n), gate_1(nrn 0..n), ...]
+///
+/// # Safety
+/// All pointer args (`v`, `gates`, `Ii`, `g_leak`, `E_leak`, `C_m`, `m_inf_luts`,
+/// `decay_luts`, `E_rev_arr`, `g_max_arr`, `powers`, `n_gates_per_ch`) must be
+/// valid for their respective lengths.
+#[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn hh_lut_step_scalar(
     v: *mut f32, gates: *mut f32,
     Ii: *const f32, g_leak: *const f32, E_leak: *const f32, C_m: *const f32,

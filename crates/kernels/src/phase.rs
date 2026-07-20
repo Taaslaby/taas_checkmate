@@ -83,7 +83,7 @@ pub(crate) unsafe fn kuramoto_update(
         let mut pv = load8(phases, off);
         let ov = load8(omegas, off);
         let cv = load8(coupling, off);
-        pv = pv + dt_s * (ov + cv);
+        pv += dt_s * (ov + cv);
         // Wrap phase
         pv = pv - tau_s * (pv / tau_s).round();
         store8(phases, off, pv);
@@ -154,7 +154,7 @@ pub(crate) unsafe fn kuramoto_update_viscous(
         let cv = load8(coupling, off);
 
         let viscous = eta_s * (mean_s - pv);
-        pv = pv + dt_s * (ov + cv + viscous);
+        pv += dt_s * (ov + cv + viscous);
         pv = pv - tau_s * (pv / tau_s).round();
         store8(phases, off, pv);
     }
@@ -207,13 +207,13 @@ pub(crate) unsafe fn t3_update(
         // Kuramoto phase FIRST (uses OLD r — matches ScalarBackend):
         // θ += dt · (ω + c + gain·drive / (r + ε))
         let drive_phase = gain_s * dv / (av + eps_s);
-        pv = pv + dt_s * (ov + cv + drive_phase);
+        pv += dt_s * (ov + cv + drive_phase);
         pv = pv - tau_s * (pv / tau_s).round();
 
         // Stuart-Landau amplitude SECOND: r += dt · ((α − r²)·r + gain·drive − decay·r)
         let r2 = av * av;
         let r_dot = (alpha_s - r2) * av + gain_s * dv - decay_s * av;
-        av = av + dt_s * r_dot;
+        av += dt_s * r_dot;
         av = av.max(min_amp).min(max_amp);
 
         store8(phases, off, pv);

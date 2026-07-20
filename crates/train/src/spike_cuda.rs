@@ -602,7 +602,7 @@ pub fn t3spike_fused_forward_backward_cuda(
     let freq_spread = freq_max - freq_min;
     let mut omega = vec![0.0f32; 3 * n_osc];
     for i in 0..n_osc {
-        omega[0 * n_osc + i] = freq_min + freq_spread * (i as f32 / n_osc as f32);
+        omega[i] = freq_min + freq_spread * (i as f32 / n_osc as f32);
         omega[1 * n_osc + i] = freq_min + freq_spread * ((i + n_osc / 3) as f32 / n_osc as f32);
         omega[2 * n_osc + i] = freq_min + freq_spread * ((i + 2 * n_osc / 3) as f32 / n_osc as f32);
     }

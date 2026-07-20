@@ -6,10 +6,10 @@
 //! |----------|--------|---------|-------|-----|
 //! | AMPA     | Fast exc (mammalian) | 2 ms  | 0 mV  | Na⁺ |
 //! | NMDA     | Slow exc | 50 ms | 0 mV  | Ca²⁺ (Mg²⁺ block) |
-//! | GABA_A   | Fast inh | 10 ms | -70 mV | Cl⁻ |
+//! | GABA_A   | Shunting inh (insect) | 10 ms | -65 mV | Cl⁻ |
 //! | GABA_B   | Slow inh | 200 ms| -90 mV | G-protein |
 //! | nAChR    | Fast exc (insect ACh) | 3 ms | 0 mV  | Na⁺/K⁺ |
-//! | GluCl    | Fast inh (insect GLUT) | 5 ms | -70 mV | Cl⁻ |
+//! | GluCl    | Mildly depol (insect GLUT) | 5 ms | -50 mV | Cl⁻ |
 //! | mAChR    | Slow mod (DA/SER/OCT) | 150 ms | -90 mV | GPCR |
 //!
 //! # Usage
@@ -40,28 +40,30 @@ use wide::f32x8;
 /// |------|----------|--------|---------|-------|-----|
 /// | 0 | AMPA | Fast exc (mammalian fallback) | 2ms | 0mV | default exc |
 /// | 1 | NMDA | Slow exc (Ca²⁺, Mg²⁺ block) | 50ms | 0mV | — |
-/// | 2 | GABA_A | Fast inh (Cl⁻) | 10ms | -70mV | GABA |
-/// | 3 | GABA_B | Slow inh (G-protein) | 200ms | -90mV | — |
-/// | 4 | nAChR | Fast exc (insect ACh) | 3ms | 0mV | ACh |
-/// | 5 | GluCl | Fast inh (insect GLUT, Cl⁻) | 5ms | -70mV | GLUT |
-/// | 6 | mAChR | Slow mod (GPCR, DA/SER/OCT) | 150ms | -90mV | DA/SER/OCT |
+    /// | 2 | GABA_A | Shunting inh (insect) | 10ms | -65mV | GABA |
+    /// | 3 | GABA_B | Slow inh (G-protein) | 200ms | -90mV | — |
+    /// | 4 | nAChR | Fast exc (insect ACh) | 3ms | 0mV | ACh |
+    /// | 5 | GluCl | Mildly depol (insect GLUT, Cl⁻) | 5ms | -50mV | GLUT |
+    /// | 6 | mAChR | Slow mod (GPCR, DA/SER/OCT) | 150ms | -90mV | DA/SER/OCT |
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
+#[allow(non_camel_case_types)]
 pub enum ReceptorType {
     /// AMPA-like: fast excitatory, Na⁺ influx, τ=2ms, E_rev=0mV (mammalian default)
     AMPA = 0,
     /// NMDA-like: slow excitatory, Ca²⁺ influx, τ=50ms, E_rev=0mV
     /// Has voltage-dependent Mg²⁺ block (see [`nmda_mg_block`]).
     NMDA = 1,
-    /// GABA_A-like: fast inhibitory, Cl⁻ influx, τ=10ms, E_rev=-70mV
+    /// GABA_A-like: shunting inhibition (insect), Cl⁻, τ=10ms, E_rev=-65mV
+    /// At V_rest=-65, driving force is 0 → pure conductance shunt.
     GABA_A = 2,
     /// GABA_B-like: slow inhibitory, G-protein coupled, τ=200ms, E_rev=-90mV
     GABA_B = 3,
     /// nAChR: fast excitatory (insect ACh), Na⁺/K⁺ influx, τ=3ms, E_rev=0mV
     /// Main excitatory receptor in Drosophila CNS.
     nAChR = 4,
-    /// GluCl: fast inhibitory (insect glutamate), Cl⁻ influx, τ=5ms, E_rev=-70mV
-    /// Glutamate-gated chloride channel — inhibitory in arthropods!
+    /// GluCl: mildly depolarizing (insect glutamate), Cl⁻ efflux, τ=5ms, E_rev=-50mV
+    /// Glutamate-gated chloride channel — depolarizing in Drosophila (Cl⁻ efflux).
     GluCl = 5,
     /// mAChR-like: slow modulatory (DA/SER/OCT), G-protein coupled, τ=150ms, E_rev=-90mV
     /// Muscarinic-like receptors for biogenic amines in insects.
@@ -92,10 +94,10 @@ impl ReceptorType {
         match self {
             ReceptorType::AMPA => 0.0,
             ReceptorType::NMDA => 0.0,
-            ReceptorType::GABA_A => -70.0,
+            ReceptorType::GABA_A => -65.0,
             ReceptorType::GABA_B => -90.0,
             ReceptorType::nAChR => 0.0,
-            ReceptorType::GluCl => -70.0,
+            ReceptorType::GluCl => -50.0,
             ReceptorType::mAChR => -90.0,
         }
     }
@@ -225,7 +227,7 @@ pub struct SynapticKinetics {
 impl SynapticKinetics {
     /// Allocate conductance buffers for `n_neurons` (internally padded to %8).
     pub fn new(n_neurons: usize) -> Self {
-        let n_padded = (n_neurons + 7) / 8 * 8;
+        let n_padded = n_neurons.div_ceil(8) * 8;
         Self {
             n: n_neurons,
             n_padded,
@@ -296,10 +298,10 @@ impl SynapticKinetics {
         let n = self.n.min(v.len()).min(i_out.len());
         let e_ampa = f32x8::splat(ReceptorType::AMPA.e_rev());     // 0
         let e_nmda = f32x8::splat(ReceptorType::NMDA.e_rev());     // 0
-        let e_gaba_a = f32x8::splat(ReceptorType::GABA_A.e_rev()); // -70
-        let e_gaba_b = f32x8::splat(ReceptorType::GABA_B.e_rev()); // -90
+        let e_gaba_a = f32x8::splat(ReceptorType::GABA_A.e_rev()); // -65
+        let e_gaba_b = f32x8::splat(ReceptorType::GABA_B.e_rev());
         let e_nachr = f32x8::splat(ReceptorType::nAChR.e_rev());   // 0
-        let e_glucl = f32x8::splat(ReceptorType::GluCl.e_rev());   // -70
+        let e_glucl = f32x8::splat(ReceptorType::GluCl.e_rev());   // -50
         let e_machr = f32x8::splat(ReceptorType::mAChR.e_rev());   // -90
         let n8 = n & !7;
 
@@ -309,20 +311,20 @@ impl SynapticKinetics {
                 let mut cur = load8(i_out.as_ptr(), off);
 
                 // AMPA: g · (0 - V)
-                cur = cur + load8(self.g_ampa.as_ptr(), off) * (e_ampa - vi);
+                cur += load8(self.g_ampa.as_ptr(), off) * (e_ampa - vi);
                 // NMDA: g · B(V) · (0 - V)  — Mg²⁺ block
                 let g_nmda_v = load8(self.g_nmda.as_ptr(), off);
-                cur = cur + g_nmda_v * nmda_mg_block_simd(vi) * (e_nmda - vi);
-                // GABA_A: g · (-70 - V)
-                cur = cur + load8(self.g_gaba_a.as_ptr(), off) * (e_gaba_a - vi);
+                cur += g_nmda_v * nmda_mg_block_simd(vi) * (e_nmda - vi);
+                // GABA_A: g · (-65 - V) — shunting inhibition (insect)
+                cur += load8(self.g_gaba_a.as_ptr(), off) * (e_gaba_a - vi);
                 // GABA_B: g · (-90 - V)
-                cur = cur + load8(self.g_gaba_b.as_ptr(), off) * (e_gaba_b - vi);
+                cur += load8(self.g_gaba_b.as_ptr(), off) * (e_gaba_b - vi);
                 // nAChR: g · (0 - V)  — fast excitatory (insect ACh)
-                cur = cur + load8(self.g_nachr.as_ptr(), off) * (e_nachr - vi);
-                // GluCl: g · (-70 - V) — fast inhibitory (insect GLUT, Cl⁻)
-                cur = cur + load8(self.g_glucl.as_ptr(), off) * (e_glucl - vi);
+                cur += load8(self.g_nachr.as_ptr(), off) * (e_nachr - vi);
+                // GluCl: g · (-50 - V) — mildly depolarizing (Drosophila Cl⁻ efflux)
+                cur += load8(self.g_glucl.as_ptr(), off) * (e_glucl - vi);
                 // mAChR: g · (-90 - V) — slow modulatory (DA/SER/OCT)
-                cur = cur + load8(self.g_machr.as_ptr(), off) * (e_machr - vi);
+                cur += load8(self.g_machr.as_ptr(), off) * (e_machr - vi);
 
                 store8(i_out.as_mut_ptr(), off, cur);
             }
@@ -471,15 +473,15 @@ mod tests {
         let v = vec![-65.0, -65.0];
         let mut i_out = vec![0.0, 0.0];
 
-        kin.g_ampa[0] = 0.1;  // AMPA: 0.1 * (0 - (-65)) = 6.5 (depol)
-        kin.g_gaba_a[1] = 0.2; // GABA_A: 0.2 * (-70 - (-65)) = -1.0 (hyperpol)
+        kin.g_ampa[0] = 0.1;  // AMPA E_rev=0: 0.1 * (0 - (-65)) = 6.5 (depol)
+        kin.g_gaba_a[1] = 0.2; // GABA_A E_rev=-65: 0.2 * (-65 - (-65)) = 0.0 (shunt)
 
         kin.compute_currents(&v, &mut i_out);
 
         assert!((i_out[0] - 6.5).abs() < 0.01,
             "neuron 0 AMPA I_syn: {}", i_out[0]);
-        assert!((i_out[1] - (-1.0)).abs() < 0.01,
-            "neuron 1 GABA_A I_syn: {}", i_out[1]);
+        assert!(i_out[1].abs() < 0.01,
+            "neuron 1 GABA_A I_syn at V_rest: {} (should be 0, shunt)", i_out[1]);
     }
 
     #[test]
@@ -500,7 +502,213 @@ mod tests {
             "NMDA Mg block: at 30mV current magnitude should be large, got {}", i_out[1]);
     }
 
-    // ─── 4. Receptor type utilities ──────────────────
+    // ─── 5. PSP: single synapse produces correct current direction ──
+
+    #[test]
+    fn test_synapse_ampa_excitatory() {
+        // AMPA (E_rev=0): при V=-65 ток = g · (0 - (-65)) = g · 65 > 0 (возбуждающий)
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-65.0];
+        let mut i_out = vec![0.0];
+        kin.g_ampa[0] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+        assert!(i_out[0] > 0.0, "AMPA I_syn={} should be >0 at V=-65", i_out[0]);
+        assert!((i_out[0] - 65.0).abs() < 0.1, "AMPA I_syn={} should be ~65", i_out[0]);
+    }
+
+    #[test]
+    fn test_synapse_ampa_reversal() {
+        // AMPA при V=0: I_syn = g · (0 - 0) = 0 (reversal potential)
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![0.0];
+        let mut i_out = vec![0.0];
+        kin.g_ampa[0] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+        assert!(i_out[0].abs() < 1e-6, "AMPA I_syn={} at V=0 should be 0", i_out[0]);
+    }
+
+    #[test]
+    fn test_synapse_gabaa_shunting() {
+        // GABA_A (E_rev=-65): при V=-65 ток = g · (-65 - (-65)) = 0 (shunt)
+        let mut kin = SynapticKinetics::new(2);
+        let v = vec![-65.0, -50.0];
+        let mut i_out = vec![0.0, 0.0];
+        kin.g_gaba_a[0] = 1.0;
+        kin.g_gaba_a[1] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+
+        // At rest: no current
+        assert!(i_out[0].abs() < 1e-6, "GABA_A I_syn={} at V=-65 should be 0 (shunt)", i_out[0]);
+        // Depolarized: I = g · (-65 - (-50)) = -15 (inhibitory, outward current)
+        assert!((i_out[1] - (-15.0)).abs() < 0.1,
+            "GABA_A I_syn={} at V=-50 should be ~-15 (inhibitory)", i_out[1]);
+    }
+
+    #[test]
+    fn test_synapse_gabab_inhibitory() {
+        // GABA_B (E_rev=-90): при V=-65 ток = g · (-90 - (-65)) = -25 (гиперполяризующий)
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-65.0];
+        let mut i_out = vec![0.0];
+        kin.g_gaba_b[0] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+        assert!((i_out[0] - (-25.0)).abs() < 0.1,
+            "GABA_B I_syn={} at V=-65 should be ~-25 (hyperpolarizing)", i_out[0]);
+    }
+
+    #[test]
+    fn test_synapse_nachr_excitatory() {
+        // nAChR (E_rev=0): как AMPA, при V=-65 ток = g · 65
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-65.0];
+        let mut i_out = vec![0.0];
+        kin.g_nachr[0] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+        assert!((i_out[0] - 65.0).abs() < 0.1,
+            "nAChR I_syn={} at V=-65 should be ~65 (excitatory)", i_out[0]);
+    }
+
+    #[test]
+    fn test_synapse_glucl_depolarizing() {
+        // GluCl (E_rev=-50): при V=-65 ток = g · (-50 - (-65)) = g · 15 > 0 (деполяризующий!)
+        // У Drosophila Cl⁻ efflux — GluCl слабо деполяризует.
+        let mut kin = SynapticKinetics::new(2);
+        let v = vec![-65.0, -30.0];
+        let mut i_out = vec![0.0, 0.0];
+        kin.g_glucl[0] = 1.0;
+        kin.g_glucl[1] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+
+        assert!((i_out[0] - 15.0).abs() < 0.1,
+            "GluCl I_syn={} at V=-65 should be ~15 (depolarizing)", i_out[0]);
+        // At V=-30: I = g · (-50 - (-30)) = -20 (inhibitory at depolarized V)
+        assert!((i_out[1] - (-20.0)).abs() < 0.1,
+            "GluCl I_syn={} at V=-30 should be ~-20 (inhibitory)", i_out[1]);
+    }
+
+    #[test]
+    fn test_synapse_machr_slow_inhibitory() {
+        // mAChR (E_rev=-90): при V=-65 ток = -25 (гиперполяризующий)
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-65.0];
+        let mut i_out = vec![0.0];
+        kin.g_machr[0] = 1.0;
+        kin.compute_currents(&v, &mut i_out);
+        assert!((i_out[0] - (-25.0)).abs() < 0.1,
+            "mAChR I_syn={} at V=-65 should be ~-25", i_out[0]);
+    }
+
+    // ─── 6. Synaptic summation ──────────────────────────
+
+    #[test]
+    fn test_synapse_linear_summation() {
+        // Два независимых AMPA входа: I = g1·65 + g2·65 = (g1+g2)·65
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-65.0];
+        let mut i_out = vec![0.0];
+        kin.g_ampa[0] = 0.3;
+        // Первый compute
+        kin.compute_currents(&v, &mut i_out);
+        let i1 = i_out[0];
+
+        // Второй спайк: jump + compute
+        kin.jump(0, ReceptorType::AMPA, 0.3);
+        i_out[0] = 0.0;
+        kin.compute_currents(&v, &mut i_out);
+        let i2 = i_out[0];
+
+        // i2 ≈ 2 * i1 (с учётом decay между шагами)
+        assert!(i2 > i1, "Second spike should increase current: {i1} → {i2}");
+        // Without decay (dt=0): i2 should be 2× i1
+        // After decay: i2 should be > i1 but < 2×i1
+        assert!(i2 < i1 * 2.1, "I2={i2} should be < 2.1 × I1={i1}");
+        println!("Summation: I1={i1:.4}, I2={i2:.4}, ratio={:.4}", i2/i1);
+    }
+
+    #[test]
+    fn test_synapse_multi_receptor_summation() {
+        // AMPA (возб.) + GABA_A (торм.) на одном нейроне
+        let mut kin = SynapticKinetics::new(1);
+        let v = vec![-50.0]; // depolarized — GABA_A активен
+        let mut i_out = vec![0.0];
+
+        kin.g_ampa[0] = 0.5;
+        kin.g_gaba_a[0] = 0.3;
+        kin.compute_currents(&v, &mut i_out);
+
+        // AMPA: 0.5 * (0 - (-50)) = 25
+        // GABA_A: 0.3 * (-65 - (-50)) = -4.5
+        // Total: 20.5
+        assert!((i_out[0] - 20.5).abs() < 0.1,
+            "AMPA+GABA_A I_syn={} should be ~20.5 at V=-50", i_out[0]);
+    }
+
+    // ─── 7. Synaptic decay time constants ─────────────
+
+    #[test]
+    fn test_synapse_decay_time_constants() {
+        let dt = 0.5; // ms
+        let factors = DecayFactors::new(dt);
+
+        // All decay factors in (0, 1)
+        for (name, decay) in [("AMPA", factors.ampa), ("NMDA", factors.nmda),
+                              ("GABA_A", factors.gaba_a), ("GABA_B", factors.gaba_b),
+                              ("nAChR", factors.nachr), ("GluCl", factors.glucl),
+                              ("mAChR", factors.machr)] {
+            assert!(decay > 0.0 && decay < 1.0,
+                "{name} decay={decay:.6} out of (0, 1)");
+        }
+
+        // Slow receptors decay slower: NMDA > GABA_A > AMPA
+        assert!(factors.nmda > factors.gaba_a,
+            "NMDA decay {:.6} should be > GABA_A decay {:.6} (slower)",
+            factors.nmda, factors.gaba_a);
+        assert!(factors.gaba_a > factors.ampa,
+            "GABA_A decay {:.6} should be > AMPA decay {:.6} (slower)",
+            factors.gaba_a, factors.ampa);
+
+        // nAChR (τ=3ms) decays faster than GluCl (τ=5ms)
+        assert!(factors.nachr < factors.glucl,
+            "nAChR decay {:.6} should be < GluCl decay {:.6} (faster)",
+            factors.nachr, factors.glucl);
+
+        println!("Decay factors (dt={dt}ms): AMPA={:.4}, NMDA={:.4}, GABA_A={:.4}, GABA_B={:.4}, nAChR={:.4}, GluCl={:.4}, mAChR={:.4}",
+            factors.ampa, factors.nmda, factors.gaba_a, factors.gaba_b,
+            factors.nachr, factors.glucl, factors.machr);
+    }
+
+    // ─── 8. NMDA Mg²⁺ voltage dependence ─────────────
+
+    #[test]
+    fn test_nmda_mg_block_voltage_profile() {
+        // Mg²⁺ block снимается при деполяризации
+        let v_test = [-80.0, -65.0, -40.0, -20.0, 0.0, 20.0, 40.0];
+        let mut kin = SynapticKinetics::new(7);
+        let mut i_out = vec![0.0; 7];
+
+        for (i, &v_val) in v_test.iter().enumerate() {
+            kin.g_nmda[i] = 1.0;
+        }
+        kin.compute_currents(&v_test, &mut i_out);
+
+        // At -80 mV: nearly blocked ~0.02 * (0 - (-80)) ≈ 1.6
+        // At 0 mV: fully open ~0.75 * (0 - 0) = 0 (driving force 0)
+        // At +20 mV: open ~0.9 * (0 - 20) = -18
+        let b_m80 = i_out[0];
+        let b_0 = i_out[4];
+        let b_p20 = i_out[5];
+
+        println!("NMDA I_syn: V=-80mV → {b_m80:.2}, V=0mV → {b_0:.2}, V=+20mV → {b_p20:.2}");
+
+        // At -80: small current (blocked)
+        assert!(b_m80 < 5.0, "NMDA at -80 should be blocked: {b_m80}");
+        // At 0: zero current (E_rev = V)
+        assert!(b_0.abs() < 1.0, "NMDA at 0 should be ~0: {b_0}");
+        // At +20: large negative current (open + negative driving force)
+        assert!(b_p20 < -5.0, "NMDA at +20 should be strongly negative: {b_p20}");
+    }
+
+    // ─── 9. Receptor type utilities ──────────────────
 
     #[test]
     fn test_receptor_type_defaults() {

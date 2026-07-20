@@ -8,8 +8,17 @@
 ///   5. DN readout (descending neurons for behavior)
 use std::fs::File;
 use std::io::{Write, BufWriter, Read, BufReader, BufRead};
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
 use rand::prelude::*;
+
+/// Resolve a path under `examples/data/` (works from any cwd via CARGO_MANIFEST_DIR).
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const DT: f32 = 0.01;
 const TAU_REF: f32 = 2.0;
@@ -27,7 +36,7 @@ const RATE_TO_CURRENT: f32 = 0.08;  // Hz → uA/cm²
 const N_OMMATIDIA: usize = 721;     // ommatidia per eye
 const BAR_SPEED: f32 = 16.7;        // retina sweep per second
 
-fn load_indices(path: &str) -> Vec<usize> {
+fn load_indices(path: impl AsRef<std::path::Path>) -> Vec<usize> {
     let f = File::open(path).unwrap();
     let reader = BufReader::new(f);
     reader.lines().filter_map(|l| l.ok().and_then(|s| s.trim().parse().ok())).collect()
@@ -88,14 +97,14 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     // ─── Load 80M FAFB connectome ───
-    let mut f = File::open("fafb.taas").unwrap();
+    let mut f = File::open(data("fafb.taas")).unwrap();
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;
     let n_syn = conn.col_indices.len();
     println!("Connectome: {n} neurons, {n_syn} synapses");
 
     // ─── Load T2 indices ───
-    let t2_all = load_indices("t2_indices_80m.txt");
+    let t2_all = load_indices(&data("t2_indices_80m.txt"));
     println!("T2/T2a neurons: {}", t2_all.len());
 
     // Split by left/right (from annotations: first 1649 ≈ left, rest ≈ right)
@@ -106,12 +115,12 @@ fn main() {
     println!("  Left: {}, Right: {}", t2_left.len(), t2_right.len());
 
     // ─── Load DN indices ───
-    let dn_p9 = load_indices("P6_8P9_indices.txt");
-    let dn_dna01 = load_indices("DNa01_indices.txt");
-    let dn_dna02 = load_indices("DNa02_indices.txt");
-    let dn_mdn = load_indices("MDN_indices.txt");
-    let dn_lplc2 = load_indices("LPLC2_indices.txt");
-    let dn_lc4 = load_indices("LC4_indices.txt");
+    let dn_p9 = load_indices(&data("P6_8P9_indices.txt"));
+    let dn_dna01 = load_indices(&data("DNa01_indices.txt"));
+    let dn_dna02 = load_indices(&data("DNa02_indices.txt"));
+    let dn_mdn = load_indices(&data("MDN_indices.txt"));
+    let dn_lplc2 = load_indices(&data("LPLC2_indices.txt"));
+    let dn_lc4 = load_indices(&data("LC4_indices.txt"));
     println!("DNs: P9={}, DNa01={}, DNa02={}, MDN={}, LPLC2={}, LC4={}",
              dn_p9.len(), dn_dna01.len(), dn_dna02.len(), dn_mdn.len(),
              dn_lplc2.len(), dn_lc4.len());

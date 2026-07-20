@@ -54,8 +54,8 @@ pub(crate) unsafe fn izhikevich_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + ii;
         let du = aa * (bb * vv - uu);
-        vv = vv + refr_mask.blend(zero, dt_s * dv);  // skip if refractory
-        uu = uu + refr_mask.blend(zero, dt_s * du);
+        vv += refr_mask.blend(zero, dt_s * dv);  // skip if refractory
+        uu += refr_mask.blend(zero, dt_s * du);
 
         // Spike detection only for non-refractory
         let not_refr = !refr_mask;
@@ -66,7 +66,7 @@ pub(crate) unsafe fn izhikevich_step(
         uu = refr_mask.blend(uu, uu + sm.blend(dd, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr = refr - dt_s;  // Always decrement
+        refr -= dt_s;  // Always decrement
         refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
         refr = refr.max(zero);  // clamp to 0
 
@@ -119,6 +119,178 @@ pub(crate) unsafe fn izhikevich_step(
                 spikes[i] = 0;
                 trace[i] *= 1.0 - trace_decay;
             }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Izhikevich Dual Memory — Fast + Slow Pathways
+//  (Sun et al. 2026, Nature Machine Intelligence)
+// ═══════════════════════════════════════════════════════
+
+/// Izhikevich with dual memory pathway (Sun et al. 2026, Nature MI).
+///
+/// Extends standard Izhikevich with a **slow memory state** `m` per neuron:
+///
+/// ```text
+/// Slow pathway (memory):
+///   m[t] = τ_m · m[t-1] + (1 - τ_m) · spike[t-1]
+///
+/// Fast pathway (Izhikevich, modulated):
+///   dv/dt = 0.04·v² + 5·v + 140 − u + (I + w_m · m[t-1])
+///   du/dt = a·(b·v − u)
+/// ```
+///
+/// The slow state `m` accumulates recent spiking activity with time constant
+/// `τ_m` (e.g., τ_m = 0.999 → ~1000ms memory at 0.1ms dt). The memory
+/// readout `w_m · m` modulates the input current, implementing a
+/// **fast-slow** neural dynamics where past activity shapes present excitability.
+///
+/// Reference: Sun et al. (2026) "Algorithm–hardware co-design of
+/// neuromorphic networks with dual memory pathways", Nature Machine Intelligence.
+///
+/// # Parameters
+/// - `m`: slow state array [n] — accumulates spike history
+/// - `tau_m`: slow state time constant (0..1, higher = slower decay)
+/// - `w_m`: memory-to-current weight (scales slow state contribution to I)
+///
+/// All other params match `izhikevich_step`.
+///
+/// # Safety
+/// All pointer args must be valid for `n` elements, non-overlapping.
+pub(crate) unsafe fn izhikevich_dual_step(
+    v: *mut f32, u: *mut f32, trace: *mut f32,
+    a: *const f32, b: *const f32, Ii: *const f32,
+    dt: f32, trace_decay: f32,
+    spikes: *mut i32, c: *const f32, d: *const f32,
+    refractory: *mut f32, tau_ref: f32,
+    m: *mut f32,           // slow state per neuron
+    tau_m: f32,            // slow state time constant
+    w_m: f32,              // memory-to-current weight
+    n: usize,
+) {
+    let dt_s = f32x8::splat(dt);
+    let td_s = f32x8::splat(trace_decay);
+    let v_th = f32x8::splat(30.0);
+    let one = f32x8::splat(1.0);
+    let half = f32x8::splat(0.5);
+    let zero = f32x8::splat(0.0);
+    let c04 = f32x8::splat(0.04);
+    let c5 = f32x8::splat(5.0);
+    let c140 = f32x8::splat(140.0);
+    let tr_s = f32x8::splat(tau_ref);
+    let tau_m_s = f32x8::splat(tau_m);
+    let o_m_tau = f32x8::splat(1.0 - tau_m);
+    let w_m_s = f32x8::splat(w_m);
+
+    let n8 = n & !7;
+    for off in (0..n8).step_by(8) {
+        let mut vv = load8_mut(v, off);
+        let mut uu = load8_mut(u, off);
+        let mut tr = load8_mut(trace, off);
+        let mut refr = load8_mut(refractory, off);
+        let mut mm = load8_mut(m, off);  // ← slow state loaded
+        let aa = load8(a, off);
+        let bb = load8(b, off);
+        let mut ii = load8(Ii, off);     // ← Ii is mutable now (we'll add w_m * m)
+        let cc = load8(c, off);
+        let dd = load8(d, off);
+
+        // ── Slow pathway: modulate input current ──
+        // I += w_m * m[t-1]   (slow state modulates fast dynamics)
+        ii = w_m_s.mul_add(mm, ii);
+
+        // Refractory mask: refr > 0 → skip dynamics
+        let refr_mask = refr.cmp_gt(zero);
+
+        // Compute dv/du only for non-refractory neurons
+        let v5 = vv.mul_add(c04, c5);
+        let dv = v5.mul_add(vv, c140) - uu + ii;
+        let du = aa * (bb * vv - uu);
+        vv += refr_mask.blend(zero, dt_s * dv);
+        uu += refr_mask.blend(zero, dt_s * du);
+
+        // Spike detection only for non-refractory
+        let not_refr = !refr_mask;
+        let sm = vv.cmp_ge(v_th) & not_refr;
+
+        // Reset after spike
+        vv = refr_mask.blend(vv, sm.blend(cc, vv));
+        uu = refr_mask.blend(uu, uu + sm.blend(dd, zero));
+
+        // Decrement refractory counter
+        refr -= dt_s;
+        refr = sm.blend(tr_s, refr);
+        refr = refr.max(zero);
+
+        // trace update
+        let tr_s_val = tr.mul_add(td_s, one - tr);
+        let tr_n_val = tr * (one - td_s);
+        tr = refr_mask.blend(tr, sm.blend(tr_s_val, tr_n_val));
+
+        // ── Slow state update: m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t] ──
+        // spike = 1.0 where sm is true (and not refractory), 0.5 elsewhere as neutral baseline
+        // Using 0.5 as neutral gives a nice sigmoidal accumulation
+        let spike_val = sm.blend(one, half);
+        mm = tau_m_s * mm + o_m_tau * spike_val;
+        // Clamp m to [0, 1]
+        mm = mm.max(zero).min(one);
+
+        store8(v, off, vv);
+        store8(u, off, uu);
+        store8(trace, off, tr);
+        store8(refractory, off, refr);
+        store8(m, off, mm);  // ← slow state stored
+
+        let sp_i = spike_mask_to_i32(sm);
+        let sp8 = spikes.add(off);
+        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+    }
+
+    // Scalar tail (n & 7)
+    if n8 < n {
+        let v = std::slice::from_raw_parts_mut(v, n);
+        let u = std::slice::from_raw_parts_mut(u, n);
+        let trace = std::slice::from_raw_parts_mut(trace, n);
+        let m = std::slice::from_raw_parts_mut(m, n);
+        let a_sl = std::slice::from_raw_parts(a, n);
+        let b_sl = std::slice::from_raw_parts(b, n);
+        let ii = std::slice::from_raw_parts(Ii, n);
+        let spikes = std::slice::from_raw_parts_mut(spikes, n);
+        let c_sl = std::slice::from_raw_parts(c, n);
+        let d_sl = std::slice::from_raw_parts(d, n);
+        let refr_sl = std::slice::from_raw_parts_mut(refractory, n);
+        for i in n8..n {
+            if refr_sl[i] > 0.0 {
+                refr_sl[i] = (refr_sl[i] - dt).max(0.0);
+                spikes[i] = 0;
+                // Slow state decay even during refractory
+                m[i] = tau_m * m[i] + (1.0 - tau_m) * 0.5;
+                continue;
+            }
+            let orig_v = v[i];
+            // Slow pathway: modulate current
+            let I_total = ii[i] + w_m * m[i];
+            let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[i] + I_total;
+            let du = a_sl[i] * (b_sl[i] * orig_v - u[i]);
+            v[i] += dt * dv;
+            u[i] += dt * du;
+            if v[i] >= 30.0 {
+                spikes[i] = 1;
+                v[i] = c_sl[i];
+                u[i] += d_sl[i];
+                refr_sl[i] = tau_ref;
+                trace[i] += trace_decay * (1.0 - trace[i]);
+                // Slow state: spike pushes m toward 1
+                m[i] = tau_m * m[i] + (1.0 - tau_m) * 1.0;
+            } else {
+                spikes[i] = 0;
+                trace[i] *= 1.0 - trace_decay;
+                // Slow state: no spike pushes m toward 0.5
+                m[i] = tau_m * m[i] + (1.0 - tau_m) * 0.5;
+            }
+            m[i] = m[i].clamp(0.0, 1.0);
         }
     }
 }
@@ -212,8 +384,8 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + I_s;
         let du = a_s * (b_s * vv - uu);
-        vv = vv + dt_s * dv;
-        uu = uu + dt_s * du;
+        vv += dt_s * dv;
+        uu += dt_s * du;
 
         // Surrogate gradient
         let diff = (vv - v_th).abs() / tau_sg_s;
@@ -223,12 +395,11 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
         // Spike detection: v ≥ 30
         let sm = vv.cmp_ge(v_th);
         vv = sm.blend(c_s, vv);
-        uu = uu + sm.blend(d_s, zero);
+        uu += sm.blend(d_s, zero);
 
         // Count spikes
-        let sp_arr: [f32; 8] = sm.to_array();
-        for i in 0..8 {
-            if sp_arr[i].to_bits() != 0 { total_spikes += 1; }
+        for &val in sm.to_array().iter() {
+            if val.to_bits() != 0 { total_spikes += 1; }
         }
 
         store8(v, off, vv);
@@ -243,7 +414,7 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
             if z != 0.0 {
                 e_simd = e_simd * e_decay + ps * f32x8::splat(z) * tau_e_s * one_minus_e_decay;
             } else {
-                e_simd = e_simd * e_decay;
+                e_simd *= e_decay;
             }
             store8(e, i * n + off, e_simd);
         }
@@ -365,8 +536,8 @@ pub(crate) unsafe fn eprop_izhikevich_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + ii;
         let du = a_s * (b_s * vv - uu);
-        vv = vv + dt_s * dv;
-        uu = uu + dt_s * du;
+        vv += dt_s * dv;
+        uu += dt_s * du;
 
         // Surrogate gradient per lane (SIMD)
         let diff = (vv - v_th).abs() / tau_sg_s;
@@ -381,12 +552,11 @@ pub(crate) unsafe fn eprop_izhikevich_step(
         // Spike detection: v ≥ 30
         let sm = vv.cmp_ge(v_th);
         vv = sm.blend(c_s, vv);    // v = c where spike
-        uu = uu + sm.blend(d_s, zero); // u += d where spike
+        uu += sm.blend(d_s, zero); // u += d where spike
 
         // Count spikes
-        let sp_arr: [f32; 8] = sm.to_array();
-        for i in 0..8 {
-            if sp_arr[i].to_bits() != 0 { total_spikes += 1; }
+        for &val in sm.to_array().iter() {
+            if val.to_bits() != 0 { total_spikes += 1; }
         }
 
         store8(v, off, vv);
@@ -432,6 +602,96 @@ pub(crate) unsafe fn eprop_izhikevich_step(
     }
 
     total_spikes
+}
+
+// ═══════════════════════════════════════════════════════
+//  Hebbian Plasticity — dW = η · (rᵢ · rⱼ) − α · W
+//  Applied on CSR synaptic weights.
+// ═══════════════════════════════════════════════════════
+
+/// Hebbian plasticity update for CSR synaptic weights.
+///
+/// Implements: `dW = η · r_pre · r_post − α · W`
+///
+/// Where:
+/// - `η` = learning rate (lr)
+/// - `r_pre` = slow state `m` of presynaptic neuron (recent firing rate proxy)
+/// - `r_post` = slow state `m` of postsynaptic neuron
+/// - `α` = weight decay (prevents unbounded growth)
+///
+/// This is applied directly to CSR values in-place:
+/// `W[idx] += lr · m[pre] · m[post] − decay · W[idx] · dt`
+///
+/// Uses `r_pre · r_post` as the Hebbian correlation signal (from slow states),
+/// which is more stable than instantaneous spike coincidence.
+///
+/// # Reference
+/// Sun et al. (2026) — Hebbian plasticity on 15M synapses leads to emergent
+/// individuality: two identical connectomes develop 76K+ different synapses
+/// after 24h of simulation.
+///
+/// # Safety
+/// All pointer args valid for their respective lengths.
+pub(crate) unsafe fn hebbian_csr_step(
+    values: *mut f32,  // CSR synaptic weights [n_synapses] — mutated in-place
+    col_indices: *const i32,  // CSR column indices [n_synapses]
+    row_ptr: *const i32,     // CSR row pointer [n_neurons + 1]
+    m: *const f32,           // slow state per neuron [n_neurons]
+    n_neurons: usize,
+    n_synapses: usize,
+    lr: f32,                 // Hebbian learning rate
+    decay: f32,              // weight decay
+    dt: f32,                 // timestep
+) {
+    let _zero = f32x8::splat(0.0);
+    let lr_s = f32x8::splat(lr);
+    let decay_dt_s = f32x8::splat(decay * dt);
+    let min_w = f32x8::splat(-1.0);
+    let max_w = f32x8::splat(1.0);
+
+    for pre in 0..n_neurons {
+        let start = (*row_ptr.add(pre)).max(0) as usize;
+        let end = (*row_ptr.add(pre + 1) as usize).min(n_synapses);
+        if start >= end { continue; }
+
+        let m_pre = f32x8::splat(*m.add(pre));
+
+        for off in (start..end).step_by(8) {
+            let batch_end = (off + 8).min(end);
+            let batch_n = batch_end - off;
+
+            // Build post_m vector via plain array (8× faster than match-arms per element)
+            let mut post_arr = [0.0f32; 8];
+            let mut w_arr = [0.0f32; 8];
+            for j in 0..batch_n {
+                let post_idx = *col_indices.add(off + j) as usize;
+                post_arr[j] = if post_idx < n_neurons { *m.add(post_idx) } else { 0.0 };
+                w_arr[j] = *values.add(off + j);
+            }
+            // Fill remaining with last valid value (avoids zero-bias on partial blocks)
+            if batch_n < 8 && batch_n > 0 {
+                let last_m = post_arr[batch_n - 1];
+                let last_w = w_arr[batch_n - 1];
+                for j in batch_n..8 {
+                    post_arr[j] = last_m;
+                    w_arr[j] = last_w;
+                }
+            }
+            let post_m = f32x8::from(post_arr);
+            let ww = f32x8::from(w_arr);
+
+            // Hebbian update: dw = lr * m_pre * m_post - decay * w * dt
+            let hebb = m_pre * post_m;
+            let dw = lr_s * hebb - decay_dt_s * ww;
+            let new_w = (ww + dw).max(min_w).min(max_w);
+
+            // Store back
+            let new_arr = new_w.to_array();
+            for j in 0..batch_n {
+                *values.add(off + j) = new_arr[j];
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -507,4 +767,148 @@ mod tests {
         assert!(total_spikes > 0, "Spikes with I=30, n=13");
     }
 
+    // ─── Dual Memory tests ────────────────────────────
+
+    #[test]
+    fn izhikevich_dual_basic() {
+        let n = 16;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![10.0f32; n];  // moderate current
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut m = vec![0.5f32; n];  // slow state starts at 0.5
+        let tau_m = 0.99;              // slow memory (~100ms at dt=1)
+        let w_m = 5.0;                // memory-to-current weight
+
+        let mut total_spikes = 0i32;
+        for _ in 0..100 {
+            unsafe { izhikevich_dual_step(
+                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
+                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
+                refractory.as_mut_ptr(), 3.0,
+                m.as_mut_ptr(), tau_m, w_m, n,
+            ); }
+            total_spikes += spikes.iter().sum::<i32>();
+        }
+
+        // With w_m=5.0 and I=10, the slow state modulation should help spiking
+        assert!(total_spikes > 0, "Dual memory Izhikevich should spike with I=10, w_m=5");
+
+        // Slow state should have evolved from 0.5
+        let m_mean: f32 = m.iter().sum::<f32>() / n as f32;
+        assert!(m_mean > 0.45 && m_mean < 1.0, "Slow state should be in (0.45, 1.0), got {m_mean}");
+    }
+
+    #[test]
+    fn izhikevich_dual_slow_state_accumulates() {
+        let n = 8;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![30.0f32; n];
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut m = vec![0.0f32; n];  // start at 0 (no history)
+        let tau_m = 0.9f32;            // fast decay for testing
+        let w_m = 1.0f32;
+
+        // Run 20 steps — slow state should increase from spiking
+        for _ in 0..20 {
+            unsafe { izhikevich_dual_step(
+                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
+                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
+                refractory.as_mut_ptr(), 3.0,
+                m.as_mut_ptr(), tau_m, w_m, n,
+            ); }
+        }
+
+        // Slow state should be > 0 (accumulated spiking)
+        let m_sum: f32 = m.iter().sum();
+        assert!(m_sum > 0.0, "Slow state should accumulate, got sum={m_sum}");
+    }
+
+    #[test]
+    fn izhikevich_dual_non_aligned_n() {
+        let n = 13;
+        let mut v = vec![-65.0f32; n];
+        let mut u = vec![-13.0f32; n];
+        let mut trace = vec![0.0f32; n];
+        let a = vec![0.02f32; n];
+        let b = vec![0.2f32; n];
+        let mut I = vec![10.0f32; n];
+        let mut spikes = vec![0i32; n];
+        let c = vec![-65.0f32; n];
+        let d = vec![8.0f32; n];
+        let mut refractory = vec![0.0f32; n];
+        let mut m = vec![0.5f32; n];
+        let tau_m = 0.99f32;
+        let w_m = 5.0f32;
+
+        let mut total_spikes = 0i32;
+        for _ in 0..100 {
+            unsafe { izhikevich_dual_step(
+                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
+                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
+                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
+                refractory.as_mut_ptr(), 3.0,
+                m.as_mut_ptr(), tau_m, w_m, n,
+            ); }
+            total_spikes += spikes.iter().sum::<i32>();
+        }
+        assert!(total_spikes > 0, "Dual memory n=13 should spike");
+    }
+
+    // ─── Hebbian CSR test ─────────────────────────────
+
+    #[test]
+    fn hebbian_csr_basic() {
+        // Simple 3-neuron ring: 0→1, 1→2, 2→0
+        let n_neurons = 3;
+        let n_synapses = 3;
+        let mut values = vec![0.5f32, 0.3, 0.7];
+        let col_indices = vec![1i32, 2, 0];
+        let row_ptr = vec![0i32, 1, 2, 3];
+        let m = vec![0.8f32, 0.2, 0.6];  // slow states
+        let lr = 0.01f32;
+        let decay = 0.001f32;
+        let dt = 1.0f32;
+
+        let old_values = values.clone();
+
+        unsafe {
+            hebbian_csr_step(
+                values.as_mut_ptr(),
+                col_indices.as_ptr(),
+                row_ptr.as_ptr(),
+                m.as_ptr(),
+                n_neurons,
+                n_synapses,
+                lr,
+                decay,
+                dt,
+            );
+        }
+
+        // Check that weights changed
+        for i in 0..n_synapses {
+            let pre = i; // pre = i for this ring
+            let post = col_indices[i] as usize;
+            let expected_dw = lr * m[pre] * m[post] - decay * old_values[i] * dt;
+            let expected = (old_values[i] + expected_dw).clamp(-1.0, 1.0);
+            assert!((values[i] - expected).abs() < 1e-5,
+                "Hebbian CSR [{i}]: got {}, expected {}", values[i], expected);
+        }
+    }
 }

@@ -26,16 +26,15 @@
 // ─── Internal crate re-exports ─────────────────────────
 pub use taas_kernels as kernels;
 pub use taas_core as core;
-pub use taas_train as train;
-pub use taas_format;
+pub use taas_train as train;    pub use taas_format;
 
 #[cfg(feature = "t3")]
 pub use taas_t3 as t3;
 
-#[cfg(feature = "python")]
+#[cfg(feature = "connectome")]
 pub use taas_connectome as connectome;
 
-#[cfg(all(feature = "python", feature = "cuda"))]
+#[cfg(feature = "cuda")]
 pub use cuda_kernels as cuda;
 
 // ─── Main crate modules ────────────────────────────────

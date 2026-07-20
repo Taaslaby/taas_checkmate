@@ -21,7 +21,6 @@ pub(crate) unsafe fn lif_step(
     let dt_val = p[0];  // dt is uniform across all neurons
     let dt_s = f32x8::splat(dt_val);
     let zero = f32x8::splat(0.0);
-    let one = f32x8::splat(1.0);
     let tr_s = f32x8::splat(tau_ref);
     let n8 = n & !7;
 
@@ -38,12 +37,11 @@ pub(crate) unsafe fn lif_step(
         let refr_mask = refr.cmp_gt(zero);
 
         // LIF dynamics (skip if refractory)
-        // Exponential Euler: v = v_rest + (v - v_rest) * exp(-dt/τ) + I * (1 - exp(-dt/τ))
+        // Forward Euler: v += (-(v - v_rest) + I) / τ · dt  (no exp!)
         let mask_tau = tau_m.cmp_gt(zero);
-        let decay = mask_tau.blend(fast_exp_simd(-dt_s / tau_m), zero);
-        let one_minus_decay = one - decay;
-        let new_v = v_rest + (vv - v_rest) * decay + ii * one_minus_decay;
-        vv = refr_mask.blend(vv, mask_tau.blend(new_v, vv));
+        let inv_tau = mask_tau.blend(f32x8::splat(1.0) / tau_m, zero);
+        let dv = (v_rest - vv + ii) * inv_tau * dt_s;
+        vv = refr_mask.blend(vv, mask_tau.blend(vv + dv, vv));
 
         // Spike detection (only non-refractory)
         let not_refr = !refr_mask;
@@ -51,7 +49,7 @@ pub(crate) unsafe fn lif_step(
         vv = refr_mask.blend(vv, sm.blend(v_reset, vv));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr = refr - dt_s;  // Always decrement
+        refr -= dt_s;  // Always decrement
         refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
         refr = refr.max(zero);
 
@@ -80,8 +78,7 @@ pub(crate) unsafe fn lif_step(
             let v_thresh = p[3 * n + i_idx];
             let v_reset = p[4 * n + i_idx];
             if tau_m > 0.0 {
-                let decay = (-dt_val / tau_m).exp();
-                v[i_idx] = v_rest + (v[i_idx] - v_rest) * decay + i_sl[i_idx] * (1.0 - decay);
+                v[i_idx] += (v_rest - v[i_idx] + i_sl[i_idx]) / tau_m * dt_val;
             }
             if v[i_idx] >= v_thresh {
                 spikes[i_idx] = 1;
@@ -113,7 +110,6 @@ pub(crate) unsafe fn lif_at_step(
     let dt_val = p[0];
     let dt_s = f32x8::splat(dt_val);
     let zero = f32x8::splat(0.0);
-    let one = f32x8::splat(1.0);
     let tr_s = f32x8::splat(tau_ref);
     let n8 = n & !7;
 
@@ -133,26 +129,25 @@ pub(crate) unsafe fn lif_at_step(
         let refr_mask = refr.cmp_gt(zero);
 
         // LIF dynamics (skip if refractory — theta still decays)
-        // Exponential Euler: v = v_rest + (v - v_rest) * exp(-dt/τ) + I * (1 - exp(-dt/τ))
+        // Forward Euler: v += (-(v - v_rest) + I) / τ · dt  (no exp!)
         let mask_tau = tau_m.cmp_gt(zero);
-        let decay = mask_tau.blend(fast_exp_simd(-dt_s / tau_m), zero);
-        let one_minus_decay = one - decay;
-        let new_v = v_rest + (vv - v_rest) * decay + ii * one_minus_decay;
-        vv = refr_mask.blend(vv, mask_tau.blend(new_v, vv));
+        let inv_tau = mask_tau.blend(f32x8::splat(1.0) / tau_m, zero);
+        let dv = (v_rest - vv + ii) * inv_tau * dt_s;
+        vv = refr_mask.blend(vv, mask_tau.blend(vv + dv, vv));
 
         // Adaptive threshold decay (exponential Euler: θ *= exp(-dt/τ_θ))
         let mask_tt = tau_th.cmp_gt(zero);
         let theta_decay = mask_tt.blend(fast_exp_simd(-dt_s / tau_th), zero);
-        th = th * theta_decay;
+        th *= theta_decay;
 
         // Spike detection (only non-refractory)
         let not_refr = !refr_mask;
         let sm = vv.cmp_ge(v_th + th) & not_refr;
         vv = refr_mask.blend(vv, sm.blend(v_reset, vv));
-        th = th + sm.blend(beta, zero);
+        th += sm.blend(beta, zero);
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr = refr - dt_s;  // Always decrement
+        refr -= dt_s;  // Always decrement
         refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
         refr = refr.max(zero);
 
@@ -191,8 +186,7 @@ pub(crate) unsafe fn lif_at_step(
             let tau_theta = p[5 * n + i_idx];
             let beta = p[6 * n + i_idx];
             if tau_m > 0.0 {
-                let decay = (-dt_val / tau_m).exp();
-                v[i_idx] = v_rest + (v[i_idx] - v_rest) * decay + i_sl[i_idx] * (1.0 - decay);
+                v[i_idx] += (v_rest - v[i_idx] + i_sl[i_idx]) / tau_m * dt_val;
             }
             if tau_theta > 0.0 {
                 theta[i_idx] *= (-dt_val / tau_theta).exp();
@@ -257,10 +251,9 @@ pub(crate) unsafe fn eprop_lif_step(
         let refr_mask = refr.cmp_gt(zero);
 
         // LIF dynamics (skip if refractory — eligibility/psi also frozen)
-        let decay_m = fast_exp_simd(-dt_s / tau_m_s);
-        let one_minus_decay_m = one - decay_m;
-        let new_v = v_rest_s + (vv - v_rest_s) * decay_m + ii * one_minus_decay_m;
-        vv = refr_mask.blend(vv, new_v);
+        // Forward Euler: v += (-(v - v_rest) + I) / τ · dt  (no exp!)
+        let dv = (v_rest_s - vv + ii) / tau_m_s * dt_s;
+        vv = refr_mask.blend(vv, vv + dv);
 
         // Surrogate gradient (only non-refractory)
         let diff = ((vv - v_thresh_s).abs() / tau_sg_s).max(f32x8::splat(1e-6));
@@ -280,14 +273,13 @@ pub(crate) unsafe fn eprop_lif_step(
         vv = refr_mask.blend(vv, sm.blend(v_reset_s, vv));
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr = refr - dt_s;
+        refr -= dt_s;
         refr = sm.blend(tr_s, refr);
         refr = refr.max(zero);
 
         // Count spikes
-        let sp_arr: [f32; 8] = sm.to_array();
-        for i in 0..8 {
-            if sp_arr[i].to_bits() != 0 { total_spikes += 1; }
+        for &val in sm.to_array().iter() {
+            if val.to_bits() != 0 { total_spikes += 1; }
         }
 
         store8(v, off, vv);
@@ -318,8 +310,7 @@ pub(crate) unsafe fn eprop_lif_step(
                 sp_sl[i] = 0;
                 continue;  // v, eligibility, psi frozen during refractory
             }
-            let decay_m = (-dt / tau_m).exp();
-            v_sl[i] = v_rest + (v_sl[i] - v_rest) * decay_m + i_sl[i] * (1.0 - decay_m);
+            v_sl[i] += (v_rest - v_sl[i] + i_sl[i]) / tau_m * dt;
             psi_sl[i] = surrogate_gradient(v_sl[i], v_thresh, tau_sg);
             let z_pre = if pre_sl[i] != 0 { 1.0 } else { 0.0 };
             e_sl[i] = e_sl[i] * e_decay_s + psi_sl[i] * z_pre * tau_e * one_minus_e_decay_s;

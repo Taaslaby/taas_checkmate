@@ -1,0 +1,14 @@
+# TaaS Engine clippy configuration
+#
+# This is a SIMD/GPU/HPC codebase where many "anti-patterns"
+# are intentional design choices for performance and clarity.
+
+# SIMD kernels and GPU wrappers routinely take 10-20 params (raw ptrs, params, etc.)
+too-many-arguments-threshold = 20
+
+# `vv = vv + SIMD_op(...)` is more readable than `vv += SIMD_op(...)`
+# in SIMD context where the operation is visually distinct
+# Disabled at workspace level — individual functions opt in with #[allow]
+# when the pattern is intentional.
+# We do NOT disable assign_op_pattern globally — it's useful for catching
+# unintentional manual impls in non-SIMD code.

@@ -225,7 +225,7 @@ impl MultiHybridDecoder {
 
         // PST linear features (0 alloc — пишем напрямую в self.fv)
         pst_linear_features_into(tri, &mut self.fv[..self.pst_dim]);
-        debug_assert_eq!(self.pst_dim, crate::t3::pst_linear_dim(self.n));
+        debug_assert_eq!(self.pst_dim, taas_checkmate::t3::pst_linear_dim(self.n));
         // fv[..self.pst_dim] уже заполнен
         self.fv[self.pst_dim] = ik_drive;
     }

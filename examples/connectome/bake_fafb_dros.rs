@@ -18,12 +18,19 @@ mod inner {
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::{BufRead, BufReader};
+    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::time::Instant;
     use taas_connectome::ConnectomeData;
 
+    fn data(name: &str) -> PathBuf {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("examples/data");
+        p.push(name);
+        p
+    }
+
     const PRINCETON_CSV: &str = "/home/taaslab/Проекты/asm_engines/MEIIgpt/experiments/datasets/connections_princeton.csv.gz";
-    const NEW_TAAS: &str = "princeton_dros.taas";
 
     /// Map NT label to Drosophila receptor type:
     ///   ACH  → nAChR (4, fast exc)
@@ -201,17 +208,18 @@ mod inner {
         };
 
         // ─── Step 6: Save ─────────────────────────────────────────────
-        println!("3. Saving to {NEW_TAAS} ...");
-        let mut f = File::create(NEW_TAAS).unwrap();
+        let out_path = data("princeton_dros.taas");
+        println!("3. Saving to {} ...", out_path.display());
+        let mut f = File::create(&out_path).unwrap();
         conn.save_baked(&mut f).unwrap();
         drop(f);
 
-        let file_size = std::fs::metadata(NEW_TAAS).unwrap().len();
+        let file_size = std::fs::metadata(&out_path).unwrap().len();
         println!("   ✓ Saved {:.1}MB", file_size as f64 / 1_048_576.0);
 
         // ─── Step 7: Round-trip ──────────────────────────────────────
         println!("4. Verifying round-trip ...");
-        let mut f = File::open(NEW_TAAS).unwrap();
+        let mut f = File::open(&out_path).unwrap();
         let loaded = ConnectomeData::load_baked(&mut f).unwrap();
         drop(f);
 
@@ -224,7 +232,7 @@ mod inner {
         let elapsed = t0.elapsed().as_secs_f64();
         println!();
         println!("╔═══ Summary ═══════════════════════════════════════╗");
-        println!("║  Output:  {NEW_TAAS}");
+        println!("║  Output:  {}", out_path.display());
         println!("║  Size:    {:.1}MB", file_size as f64 / 1_048_576.0);
         println!("║  Neurons: {n}");
         println!("║  Synapses: {n_syn}");
@@ -232,7 +240,7 @@ mod inner {
         println!("╚══════════════════════════════════════════════════╝");
         println!();
         println!("Run biology_check on it:");
-        println!("  cargo run --features connectome --example biology_check --release -- principeton_dros.taas");
+        println!("  cargo run --features connectome --example biology_check --release -- {}", out_path.display());
     }
 }
 

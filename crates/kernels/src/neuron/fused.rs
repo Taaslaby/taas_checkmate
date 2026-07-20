@@ -82,8 +82,8 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + I_s;
         let du = aa * (bb * vv - uu);
-        vv = vv + refr_mask.blend(zero, dt_s * dv);
-        uu = uu + refr_mask.blend(zero, dt_s * du);
+        vv += refr_mask.blend(zero, dt_s * dv);
+        uu += refr_mask.blend(zero, dt_s * du);
 
         // Spike detection only for non-refractory
         let not_refr = !refr_mask;
@@ -94,7 +94,7 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
         uu = refr_mask.blend(uu, uu + sm.blend(dd, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr = refr - dt_s;
+        refr -= dt_s;
         refr = sm.blend(tr_s, refr);
         refr = refr.max(zero);
 
@@ -216,7 +216,7 @@ pub(crate) unsafe fn fused_output_lif_step(
         vv = refr_mask.blend(vv, sm.blend(v_reset_p, vv));
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr = refr - dt_s;
+        refr -= dt_s;
         refr = sm.blend(tr_s, refr);
         refr = refr.max(zero);
 
@@ -362,15 +362,15 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + I_s;
         let du = aa * (bb * vv - uu);
-        vv = vv + refr_mask.blend(zero, dt_s * dv);
-        uu = uu + refr_mask.blend(zero, dt_s * du);
+        vv += refr_mask.blend(zero, dt_s * dv);
+        uu += refr_mask.blend(zero, dt_s * du);
 
         let not_refr = !refr_mask;
         let sm = vv.cmp_ge(v_th) & not_refr;
         vv = refr_mask.blend(vv, sm.blend(cc, vv));
         uu = refr_mask.blend(uu, uu + sm.blend(dd, zero));
 
-        refr = refr - dt_s;
+        refr -= dt_s;
         refr = sm.blend(tr_s, refr);
         refr = refr.max(zero);
 

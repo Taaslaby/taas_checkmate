@@ -3,8 +3,16 @@
 /// Запуск: cargo run --features cuda --example bench_fly_brain --release
 use std::fs::File;
 use std::time::Instant;
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
 use taas_connectome::{BrainState, ConnectomeData, LifParams, NeuronModel, sim_lif};
+
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const DT_MS: f32 = 0.1;
 const DT_S: f32 = 0.1e-3;
@@ -23,7 +31,7 @@ fn main() {
 
     // ─── Load baked connectome ───────────────────────────
     let t_load = Instant::now();
-    let mut f = File::open("fafb.taas").expect("fafb.taas not found — run `cargo run --example bake_fafb --release` first");
+    let mut f = File::open(data("fafb.taas")).expect("fafb.taas not found — run `cargo run --example bake_fafb --release` first");
     let conn = ConnectomeData::load_baked(&mut f).unwrap();
     println!("  Loaded .taas in {:.3}s", t_load.elapsed().as_secs_f64());
 
@@ -52,7 +60,7 @@ fn main() {
     for _ in 0..N_SAMPLE {
         let mut s = BrainState::new(n, NeuronModel::LIF);
         let t0 = Instant::now();
-        let _ = sim_lif(&conn, &mut s, &lif_params, &external_I, N_STEPS);
+        let _ = sim_lif(&conn, &mut s, &lif_params, &external_I, N_STEPS, 1.0);
         cpu_t_avg += t0.elapsed().as_secs_f64();
     }
     cpu_t_avg /= N_SAMPLE as f64;

@@ -82,6 +82,16 @@ impl TaasWriter {
         self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
     }
 
+    pub fn add_u8(&mut self, name: &str, component_type: &str, data: &[u8]) {
+        let offset = self.tensor_data.len() as u64;
+        let size = data.len() as u64;
+        self.components.push(ComponentEntry {
+            name: name.to_string(), component_type: component_type.to_string(),
+            dtype: "u8".to_string(), shape: vec![data.len()], offset, size,
+        });
+        self.tensor_data.extend_from_slice(data);
+    }
+
     pub fn add_scalar_f32(&mut self, name: &str, component_type: &str, value: f32) {
         self.add_f32(name, component_type, &[value]);
     }

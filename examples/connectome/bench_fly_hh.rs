@@ -5,7 +5,15 @@
 /// Требует: fafb.taas (запусти `cargo run --example bake_fafb --release` сначала)
 use std::fs::File;
 use std::time::Instant;
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
+
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const N_STEPS: usize = 200;
 const N_SAMPLE: usize = 3;
@@ -24,7 +32,7 @@ fn main() {
 
     // ─── Load baked connectome ───────────────────────────
     let t = Instant::now();
-    let mut f = File::open("fafb.taas")
+    let mut f = File::open(data("fafb.taas"))
         .expect("fafb.taas not found — run `cargo run --example bake_fafb --release`");
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;

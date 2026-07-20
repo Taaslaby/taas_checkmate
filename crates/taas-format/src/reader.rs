@@ -97,6 +97,13 @@ impl TaasReader {
         Ok(result)
     }
 
+    pub fn get_u8(&self, name: &str) -> Result<Vec<u8>, String> {
+        let entry = self.find_component(name)?;
+        if entry.dtype != "u8" { return Err(format!("Component '{name}' is not u8, got {}", entry.dtype)); }
+        let src = self.read_bytes(entry)?;
+        Ok(src.to_vec())
+    }
+
     pub fn get_scalar_f32(&self, name: &str) -> Result<f32, String> {
         let slice = self.get_f32(name)?;
         if slice.len() != 1 { return Err(format!("Component '{name}' is not scalar f32, len={}", slice.len())); }

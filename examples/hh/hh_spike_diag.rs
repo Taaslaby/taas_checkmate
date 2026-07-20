@@ -1,7 +1,15 @@
 /// HH realistic spiking: short pulse to trigger, then network dynamics
 use std::fs::File;
 use std::time::Instant;
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
+
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const DT: f32 = 0.01;
 const TAU_REF: f32 = 2.0;
@@ -15,7 +23,7 @@ fn run(ctx: &GpuContext, external_I: &[f32], n_steps: usize,
 }
 
 fn main() {
-    let mut f = File::open("fafb.taas").unwrap();
+    let mut f = File::open(data("fafb.taas")).unwrap();
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;
 

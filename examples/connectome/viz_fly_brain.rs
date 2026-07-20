@@ -1,6 +1,7 @@
 /// Visual stimulus → FAFB photoreceptors → HH brain
 use std::fs::File;
 use std::io::{Write, BufWriter, Read};
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
 use rand::prelude::*;
 
@@ -12,8 +13,16 @@ const BATCH: usize = 50;
 const TOTAL_STEPS: usize = 6000;
 const N_BATCHES: usize = TOTAL_STEPS / BATCH;
 
+/// Resolve a path under `examples/data/` (works from any cwd via CARGO_MANIFEST_DIR).
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
+
 /// Load photoreceptor map: `[n:u32] [idx:u32, x:f32, y:f32]×n`
-fn load_photo_map(path: &str) -> Vec<(usize, f32, f32)> {
+fn load_photo_map(path: impl AsRef<std::path::Path>) -> Vec<(usize, f32, f32)> {
     let mut f = File::open(path).unwrap();
     let mut buf4 = [0u8; 4];
     f.read_exact(&mut buf4).unwrap();
@@ -31,7 +40,7 @@ fn load_photo_map(path: &str) -> Vec<(usize, f32, f32)> {
 }
 
 /// Load indices from text file (one per line)
-fn load_indices(path: &str) -> Vec<usize> {
+fn load_indices(path: impl AsRef<std::path::Path>) -> Vec<usize> {
     let content = std::fs::read_to_string(path).unwrap();
     content.lines().filter_map(|l| l.trim().parse().ok()).collect()
 }
@@ -41,22 +50,22 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     // ─── Load connectome ───
-    let mut f = File::open("fafb.taas").unwrap();
+    let mut f = File::open(data("fafb.taas")).unwrap();
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;
     let n_syn = conn.col_indices.len();
     println!("Connectome: {n} neurons, {n_syn} synapses");
 
     // ─── Load photoreceptor map ───
-    let photo_map = load_photo_map("photo_map.bin");
+    let photo_map = load_photo_map(&data("photo_map.bin"));
     println!("Photoreceptors: {}", photo_map.len());
 
     // ─── Load monitor groups ───
-    let lamina = load_indices("lamina_indices.txt");
-    let t4 = load_indices("t4_indices.txt");
-    let t5 = load_indices("t5_indices.txt");
-    let medulla = load_indices("medulla_intrinsic_indices.txt");
-    let distal = load_indices("distal_medulla_indices.txt");
+    let lamina = load_indices(&data("lamina_indices.txt"));
+    let t4 = load_indices(&data("t4_indices.txt"));
+    let t5 = load_indices(&data("t5_indices.txt"));
+    let medulla = load_indices(&data("medulla_intrinsic_indices.txt"));
+    let distal = load_indices(&data("distal_medulla_indices.txt"));
     println!("Lamina: {}, T4: {}, T5: {}, Medulla: {}, Distal: {}",
              lamina.len(), t4.len(), t5.len(), medulla.len(), distal.len());
 

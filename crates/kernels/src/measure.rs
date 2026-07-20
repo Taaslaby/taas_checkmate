@@ -234,9 +234,9 @@ pub(crate) unsafe fn spike_entropy(
         let p = counts * f32x8::splat(inv_steps);
         let p_arr: [f32; 8] = p.to_array();
         let mut hc = [0.0f32; 8];
-        for j in 0..8 {
-            if p_arr[j] > 0.0 {
-                hc[j] = p_arr[j] * p_arr[j].max(eps).ln() * log2e;
+        for (j, &pj) in p_arr.iter().enumerate() {
+            if pj > 0.0 {
+                hc[j] = pj * pj.max(eps).ln() * log2e;
             }
         }
         h_sum_simd -= f32x8::from(hc);

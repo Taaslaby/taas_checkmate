@@ -200,7 +200,7 @@ mod inner {
         for _ in 0..N_SAMPLE {
             let mut state = BrainState::new(n, NeuronModel::LIF);
             let t1 = Instant::now();
-            let r = sim_lif(&conn_lif, &mut state, &lif_params, &external_lif, N_STEPS);
+            let r = sim_lif(&conn_lif, &mut state, &lif_params, &external_lif, N_STEPS, 1.0);
             t_lif += t1.elapsed().as_secs_f64();
             if raster_lif.is_empty() { raster_lif = r; }
         }
@@ -215,7 +215,7 @@ mod inner {
             let mut state = BrainState::new(n, NeuronModel::LIF);
             let mut kinetics = SynapticKinetics::new(n);
             let t1 = Instant::now();
-            let r = sim_lif_synaptic(&conn_lif, &mut state, &lif_params, &external_lif, N_STEPS, &mut kinetics);
+            let r = sim_lif_synaptic(&conn_lif, &mut state, &lif_params, &external_lif, N_STEPS, &mut kinetics, 1.0);
             t_syn += t1.elapsed().as_secs_f64();
             if raster_syn.is_empty() { raster_syn = r; }
         }
@@ -240,7 +240,7 @@ mod inner {
             let mut cfg = standard_config(n, DT_MS);
             add_hh_heterogeneity(&mut cfg);
             let t1 = Instant::now();
-            let r = sim_hh(&conn_hh, &mut cfg, &external_hh, N_STEPS);
+            let r = sim_hh(&conn_hh, &mut cfg, &external_hh, N_STEPS, 1.0);
             t_hh += t1.elapsed().as_secs_f64();
             if raster_hh.is_empty() { raster_hh = r; }
         }
@@ -256,7 +256,7 @@ mod inner {
             add_hh_heterogeneity(&mut cfg);
             let mut kinetics = SynapticKinetics::new(n);
             let t1 = Instant::now();
-            let r = sim_hh_synaptic(&conn_hh, &mut cfg, &external_hh, N_STEPS, &mut kinetics);
+            let r = sim_hh_synaptic(&conn_hh, &mut cfg, &external_hh, N_STEPS, &mut kinetics, 1.0);
             t_hh_syn += t1.elapsed().as_secs_f64();
             if raster_hh_syn.is_empty() { raster_hh_syn = r; }
         }

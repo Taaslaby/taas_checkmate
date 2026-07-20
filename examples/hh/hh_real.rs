@@ -1,8 +1,17 @@
 /// HH heterogeneous: E/I, random params, noise — realistic raster
 use std::fs::File;
 use std::io::{Write, BufWriter};
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
 use rand::prelude::*;
+
+/// Resolve a path under `examples/data/` (works from any cwd via CARGO_MANIFEST_DIR).
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const DT: f32 = 0.01;
 const TAU_REF: f32 = 2.0;
@@ -15,7 +24,7 @@ const N_BATCHES: usize = TOTAL_STEPS / BATCH;
 
 fn main() {
     let t0 = std::time::Instant::now();
-    let mut f = File::open("fafb.taas").unwrap();
+    let mut f = File::open(data("fafb.taas")).unwrap();
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;
     let n_syn = conn.col_indices.len();

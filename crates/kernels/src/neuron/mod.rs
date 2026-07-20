@@ -21,7 +21,8 @@
 use wide::f32x8;
 
 const RNG_SCALE_16: f32 = 1.0 / 65536.0;
-const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
+/// 24-bit scale: for Poisson spike generation (fused kernel uses state>>8)
+pub(super) const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
 
 /// Per-thread RNG state for deterministic noise sequences.
 /// Each thread gets its own independent LCG with the same initial seed,
@@ -29,7 +30,7 @@ const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
 /// and independent across threads.
 use core::cell::Cell;
 thread_local! {
-    static RNG_STATE: Cell<u32> = Cell::new(1);
+    static RNG_STATE: Cell<u32> = const { Cell::new(1) };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -118,10 +119,10 @@ pub fn fast_exp(x: f32) -> f32 {
     let f = t - n as f32;
 
     // 2^f: 4th-order minimax polynomial on [0, 1)
-    let c1 = 0.6930321207;
-    let c2 = 0.2413797629;
-    let c3 = 0.0520972777;
-    let c4 = 0.0093553389;
+    let c1 = 0.693_032_15;
+    let c2 = 0.241_379_77;
+    let c3 = 0.052_097_276;
+    let c4 = 0.009_355_339;
     let poly = ((c4 * f + c3) * f + c2) * f + c1;
     let exp2f = poly * f + 1.0;
 
@@ -169,10 +170,10 @@ pub fn fast_exp_simd(x: f32x8) -> f32x8 {
     let ff = t - n;                          // SIMD fractional  [0, 1)
 
     // 4th-order minimax polynomial for 2^f on [0, 1):
-    let c1 = f32x8::splat(0.6930321207);
-    let c2 = f32x8::splat(0.2413797629);
-    let c3 = f32x8::splat(0.0520972777);
-    let c4 = f32x8::splat(0.0093553389);
+    let c1 = f32x8::splat(0.693_032_15);
+    let c2 = f32x8::splat(0.241_379_77);
+    let c3 = f32x8::splat(0.052_097_276);
+    let c4 = f32x8::splat(0.009_355_339);
 
     // Horner: P(f) = (((c4·f + c3)·f + c2)·f + c1)·f + 1
     let poly = ff.mul_add(c4, c3);
@@ -219,9 +220,9 @@ pub fn fast_exp_simd(x: f32x8) -> f32x8 {
 /// Speed: ~4× faster than 8× sin() + 8× cos() via libm.
 #[inline(always)]
 pub fn fast_sincos_simd(x: f32x8) -> (f32x8, f32x8) {
-    use core::f32::consts::FRAC_PI_2;
+    use core::f32::consts::{FRAC_PI_2, FRAC_2_PI};
     let pi2 = f32x8::splat(FRAC_PI_2);
-    let rcp_pi2 = f32x8::splat(0.6366197723675814);
+    let rcp_pi2 = f32x8::splat(FRAC_2_PI);
 
     // 1. Range reduction: x = n·π/2 + r, r ∈ [-π/4, π/4]
     let t = x * rcp_pi2;
@@ -231,13 +232,13 @@ pub fn fast_sincos_simd(x: f32x8) -> (f32x8, f32x8) {
 
     // 2. sin(r) via Taylor: r - r³/6 + r⁵/120 - r⁷/5040
     //    Horner on r²: r * (((c6·r² + c4)·r² + c2)·r² + c0)
-    let sin_poly = r2.mul_add(f32x8::splat(-0.0001984090), f32x8::splat(0.0083333315));
-    let sin_poly = r2.mul_add(sin_poly, f32x8::splat(-0.1666666664));
+    let sin_poly = r2.mul_add(f32x8::splat(-0.000_198_409), f32x8::splat(0.008_333_332));
+    let sin_poly = r2.mul_add(sin_poly, f32x8::splat(-0.166_666_67));
     let sin_poly = r2.mul_add(sin_poly, f32x8::splat(1.0));
     let sin_val = r * sin_poly;
 
     // 3. cos(r) via Taylor: 1 - r²/2 + r⁴/24 - r⁶/720
-    let cos_poly = r2.mul_add(f32x8::splat(-0.0013888889), f32x8::splat(0.0416666667));
+    let cos_poly = r2.mul_add(f32x8::splat(-0.0013888889), f32x8::splat(0.041_666_668));
     let cos_poly = r2.mul_add(cos_poly, f32x8::splat(-0.5));
     let cos_poly = r2.mul_add(cos_poly, f32x8::splat(1.0));
     let cos_val = cos_poly;

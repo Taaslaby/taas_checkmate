@@ -1,7 +1,15 @@
 /// HH self-sustained: pacemaker neurons drive the connectome, no external current otherwise
 use std::fs::File;
 use std::io::{Write, BufWriter};
+use std::path::PathBuf;
 use cuda_kernels::GpuContext;
+
+fn data(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("examples/data");
+    p.push(name);
+    p
+}
 
 const DT: f32 = 0.01;
 const TAU_REF: f32 = 2.0;
@@ -9,7 +17,7 @@ const TAU_SYN: f32 = 5.0;
 const WEIGHT_SCALE: f32 = 0.01;
 
 fn main() {
-    let mut f = File::open("fafb.taas").unwrap();
+    let mut f = File::open(data("fafb.taas")).unwrap();
     let conn = taas_connectome::ConnectomeData::load_baked(&mut f).unwrap();
     let n = conn.n_neurons;
     let n_syn = conn.col_indices.len();
