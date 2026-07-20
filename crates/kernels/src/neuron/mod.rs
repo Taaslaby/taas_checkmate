@@ -285,5 +285,6 @@ pub mod synapse;
 pub mod dopamine;
 pub mod fused;
 pub mod delay;
+pub mod dendrite;
 
 

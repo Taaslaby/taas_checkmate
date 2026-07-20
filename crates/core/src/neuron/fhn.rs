@@ -50,7 +50,7 @@ pub fn step_fhn(
                 params[16 + j] = a[i + j];
                 params[24 + j] = b[i + j];
             }
-            kernels::fhn_step(v8, w8, I8, sp8, &params);
+            kernels::fhn_step(v8, w8, I8, sp8, &params, None);
         });
 }
 

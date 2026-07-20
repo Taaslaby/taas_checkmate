@@ -7,6 +7,10 @@
 //! - `working_memory`: Prefrontal cortex-like state retention
 //! - `semantic_pointer`: SPA operations (bind/unbind/superpose via FFT)
 
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod gnw;
 pub mod lod;
 pub mod basal_ganglia;

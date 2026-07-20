@@ -663,7 +663,7 @@ impl PySpikeRecorder {
         dt_ms: f32,
         group_names: Vec<String>,
         group_indices: Vec<Vec<usize>>,
-        max_rate: f32,
+        _max_rate: f32,
     ) -> PyResult<Vec<Vec<f32>>> {
         if group_names.len() != group_indices.len() {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(

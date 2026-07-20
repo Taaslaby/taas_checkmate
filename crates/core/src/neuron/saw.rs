@@ -41,6 +41,7 @@ pub fn step_saw(
                 dt, trace_decay, noise_amp,
                 sp8,
                 refr8, tau_ref,
+                None,
             );
         });
 }
@@ -126,6 +127,7 @@ impl EPropSaw {
                     v8, u8, e8, ps8,
                     I8, sp8, pre8,
                     self.dt, self.tau_e, self.a, self.b, self.tau_surrogate,
+                    None,
                 )
             })
             .sum();

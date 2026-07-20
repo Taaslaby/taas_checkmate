@@ -47,7 +47,7 @@ pub fn step_lif_at(
                 params[40 + j] = tau_theta[i + j];
                 params[48 + j] = beta[i + j];
             }
-            kernels::lif_at_step(v8, th8, I8, sp8, &params, refr8, tau_ref);
+            kernels::lif_at_step(v8, th8, I8, sp8, &params, refr8, tau_ref, None);
         });
 }
 
@@ -81,7 +81,7 @@ pub fn step_lif(
                 params[24 + j] = v_thresh[i + j];
                 params[32 + j] = v_reset[i + j];
             }
-            kernels::lif_step(v8, I8, sp8, &params, refr8, tau_ref);
+            kernels::lif_step(v8, I8, sp8, &params, refr8, tau_ref, None);
         });
 }
 
@@ -150,6 +150,7 @@ impl EPropLIF {
                     refr8,
                     self.dt, self.tau_m, self.tau_e, self.tau_ref,
                     self.v_rest, self.v_thresh, self.v_reset, self.tau_surrogate,
+                    None,
                 )
             })
             .sum();

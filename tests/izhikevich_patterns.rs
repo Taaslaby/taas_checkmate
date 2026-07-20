@@ -13,7 +13,7 @@
 
 #![allow(non_snake_case)]
 
-use taas_checkmate::neuron::{self, SpikeRaster, compute_isi, compute_cvs};
+use taas_checkmate::neuron::{self, SpikeRaster};
 
 /// Pad n to multiple of 8 (SIMD requirement).
 fn make_padded(n: usize) -> usize {

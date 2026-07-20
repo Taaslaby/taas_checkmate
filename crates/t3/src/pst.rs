@@ -118,7 +118,7 @@ pub fn pst_linear_features_into<B: T3Backend>(tri: &TriOscillator<B>, out: &mut 
     // Pop 3
     let (ms3, mc3) = mean_sincos(sin3, cos3, n);
     let mr3: f32 = tri.r3[..n].iter().sum::<f32>() / nf;
-    out[pos] = ms3; out[pos + 1] = mc3; out[pos + 2] = mr3; pos += 3;
+    out[pos] = ms3; out[pos + 1] = mc3; out[pos + 2] = mr3;
 }
 
 #[inline]

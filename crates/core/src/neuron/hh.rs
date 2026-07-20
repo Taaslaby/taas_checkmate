@@ -9,7 +9,6 @@
 //! step_hh_lut(&mut cfg, &mut spikes); // call every dt
 //! ```
 
-use rayon::prelude::*;
 use crate::kernels;
 
 /// Per-neuron HH parameters (constant during simulation).
@@ -282,7 +281,8 @@ mod tests {
             lut_spikes += lut_spike_buf[0];
 
             // Count exact spikes (crossing 0 mV from above)
-            if v_exact > 0.0 && last_exact_v <= 0.0 { exact_spikes += 1; }
+            if v_exact > 0.0 && last_exact_v <= 0.0 {                exact_spikes += 1;
+            }
 
             last_exact_v = v_exact;
         }
@@ -671,7 +671,7 @@ mod tests {
         let mut poly_first = None;
         let mut exact_first = None;
         let mut spikes = [0i32; 1];
-        let mut exact_spikes = 0u32;
+        let mut _exact_spikes = 0u32;
 
         let channels = standard_channels();
         let n_gates: usize = channels.iter().map(|ch| ch.gates.len()).sum();
@@ -690,7 +690,7 @@ mod tests {
                           20.0, 0.3, -65.0, 1.0, 0.01);
             // Exact downward zero-crossing (same as LUT)
             if last_exact_v >= 0.0 && v_exact < 0.0 {
-                exact_spikes += 1;
+                _exact_spikes += 1;
                 if exact_first.is_none() {
                     exact_first = Some(s);
                 }

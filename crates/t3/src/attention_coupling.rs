@@ -37,7 +37,6 @@
 
 #![allow(non_snake_case)]
 
-use super::PI;
 
 /// Attention-based Kuramoto coupling for one oscillator population.
 ///
@@ -221,7 +220,7 @@ impl AttentionCouplingConfig {
 
     /// Set coupling for population 1 only.
     pub fn pop1_only(config: AttentionCoupling) -> Self {
-        let n = config.n;
+        let _n = config.n;
         Self {
             pop1: Some(config),
             pop2: None,
@@ -449,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_tri_oscillator_with_attention_coupling() {
-        use crate::attention_coupling;
+        
 
         let n = 16;
         let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);

@@ -6,7 +6,7 @@
 //! are satisfied by the calling convention.
 
 use super::{attention, decode, measure, phase, signal};
-use super::neuron::{adex, delay, dopamine, fhn, fused, hh, izhikevich, lif, saw, stp, wc};
+use super::neuron::{adex, delay, dendrite, dopamine, fhn, fused, hh, izhikevich, lif, saw, stp, wc};
 
 // ═══════════════════════════════════════════════════════════
 //  signal
@@ -385,15 +385,50 @@ pub fn rdrand_fill(buf: &mut [f32]) {
 //  neuron / izhikevich
 // ═══════════════════════════════════════════════════════════
 
+/// Add dendritic current `I_dend` to input current `Ii` in-place.
+/// No-op if `I_dend` is `None`.
+fn add_dendritic_current(Ii: &mut [f32], I_dend: Option<&[f32]>) {
+    if let Some(dend) = I_dend {
+        assert_eq!(Ii.len(), dend.len(), "add_dendritic_current: I_dend length mismatch");
+        for (ii_val, &d) in Ii.iter_mut().zip(dend.iter()) {
+            *ii_val += d;
+        }
+    }
+}
+
+/// Merge dendritic current into an immutable Ii slice, returning either the
+/// borrowed original (when `I_dend` is `None`) or an owned copy with I_dend added.
+///
+/// This avoids heap allocation in the common case (no dendrites).
+fn with_dendritic_current<'a>(
+    ii: &'a [f32],
+    I_dend: Option<&'a [f32]>,
+    label: &str,
+) -> std::borrow::Cow<'a, [f32]> {
+    if let Some(dend) = I_dend {
+        assert_eq!(ii.len(), dend.len(), "{label}: I_dend length mismatch");
+        let mut tmp = ii.to_vec();
+        for (v, &d) in tmp.iter_mut().zip(dend.iter()) {
+            *v += d;
+        }
+        std::borrow::Cow::Owned(tmp)
+    } else {
+        std::borrow::Cow::Borrowed(ii)
+    }
+}
+
 /// Izhikevich neuron step: `dv/dt = 0.04v²+5v+140−u+I; du/dt = a(bv−u)`.
 ///
 /// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
+///
+/// `I_dend` — опциональный дендритный ток (той же длины, что `ii`).
 pub fn izhikevich_step(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32],
     a: &[f32], b: &[f32], ii: &mut [f32],
     dt: f32, trace_decay: f32,
     spikes: &mut [i32], c: &[f32], d: &[f32],
     refractory: &mut [f32], tau_ref: f32,
+    I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
     assert_eq!(u.len(), n, "izhikevich_step: u length mismatch");
@@ -405,6 +440,7 @@ pub fn izhikevich_step(
     assert_eq!(c.len(), n, "izhikevich_step: c length mismatch");
     assert_eq!(d.len(), n, "izhikevich_step: d length mismatch");
     assert_eq!(refractory.len(), n, "izhikevich_step: refractory length mismatch");
+    add_dendritic_current(ii, I_dend);
     safety_clamp(ii, -100.0, 100.0);
     unsafe { izhikevich::izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ii.as_ptr(), dt, trace_decay, spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
@@ -414,6 +450,7 @@ pub fn eprop_izhikevich_step(
     v: &mut [f32], u: &mut [f32], eligibility: &mut [f32], psi: &mut [f32],
     ii: &[f32], spikes: &mut [i32], pre_spikes: &[i32],
     dt: f32, tau_e: f32, a: f32, b: f32, c: f32, d: f32, tau_sg: f32,
+    I_dend: Option<&[f32]>,
 ) -> usize {
     let n = v.len();
     assert_eq!(u.len(), n, "eprop_izhikevich_step: u length mismatch");
@@ -422,6 +459,7 @@ pub fn eprop_izhikevich_step(
     assert_eq!(ii.len(), n, "eprop_izhikevich_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "eprop_izhikevich_step: spikes length mismatch");
     assert_eq!(pre_spikes.len(), n, "eprop_izhikevich_step: pre_spikes length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "eprop_izhikevich_step");
     unsafe { izhikevich::eprop_izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), dt, tau_e, a, b, c, d, tau_sg, n) }
 }
 
@@ -448,6 +486,7 @@ pub fn izhikevich_dual_step(
     m: &mut [f32],       // slow state per neuron
     tau_m: f32,          // slow state time constant (0..1, higher = slower)
     w_m: f32,            // memory-to-current weight
+    I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
     assert_eq!(u.len(), n, "izhikevich_dual_step: u length mismatch");
@@ -460,6 +499,7 @@ pub fn izhikevich_dual_step(
     assert_eq!(d.len(), n, "izhikevich_dual_step: d length mismatch");
     assert_eq!(refractory.len(), n, "izhikevich_dual_step: refractory length mismatch");
     assert_eq!(m.len(), n, "izhikevich_dual_step: m (slow state) length mismatch");
+    add_dendritic_current(ii, I_dend);
     safety_clamp(ii, -100.0, 100.0);
     unsafe { izhikevich::izhikevich_dual_step(
         v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
@@ -481,6 +521,7 @@ pub fn eprop_izhikevich_step_multi(
     n_pre: usize,
     dt: f32, tau_e: f32, a: f32, b: f32, c: f32, d: f32, tau_sg: f32,
     spikes: &mut [i32],
+    I_dend: Option<&[f32]>,
 ) -> usize {
     let n = v.len();
     assert_eq!(u.len(), n, "eprop_izhikevich_step_multi: u length mismatch");
@@ -489,6 +530,7 @@ pub fn eprop_izhikevich_step_multi(
     assert_eq!(i_ext.len(), n, "eprop_izhikevich_step_multi: I_ext length mismatch");
     assert_eq!(weights.len(), n_pre * n, "eprop_izhikevich_step_multi: weights length mismatch");
     assert_eq!(spikes.len(), n, "eprop_izhikevich_step_multi: spikes length mismatch");
+    let i_ext = with_dendritic_current(i_ext, I_dend, "eprop_izhikevich_step_multi");
     unsafe { izhikevich::eprop_izhikevich_step_multi(v.as_mut_ptr(), u.as_mut_ptr(), psi.as_mut_ptr(), e.as_mut_ptr(), z_pre.as_ptr(), i_ext.as_ptr(), weights.as_ptr(), n, n_pre, dt, tau_e, a, b, c, d, tau_sg, spikes.as_mut_ptr()) }
 }
 
@@ -496,27 +538,29 @@ pub fn eprop_izhikevich_step_multi(
 //  neuron / lif
 // ═══════════════════════════════════════════════════════════
 
-/// Leaky Integrate-and-Fire neuron step with exponential Euler integration.
+/// Leaky Integrate-and-Fire neuron step.
 ///
 /// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
-pub fn lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32) {
+pub fn lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32, I_dend: Option<&[f32]>) {
     let n = v.len();
     assert_eq!(ii.len(), n, "lif_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "lif_step: spikes length mismatch");
     assert_eq!(params.len(), n * 5, "lif_step: params length mismatch (expected {}*5={})", n, n * 5);
     assert_eq!(refractory.len(), n, "lif_step: refractory length mismatch");
+    add_dendritic_current(ii, I_dend);
     safety_clamp(ii, -100.0, 100.0);
     unsafe { lif::lif_step(v.as_mut_ptr(), ii.as_mut_ptr(), spikes.as_mut_ptr(), params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
 /// LIF with adaptive threshold: `τ_m·dv/dt = −(v−v_rest) + I; τ_θ·dθ/dt = −(θ−θ_rest) + b·spike`.
-pub fn lif_at_step(v: &mut [f32], theta: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32) {
+pub fn lif_at_step(v: &mut [f32], theta: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32, I_dend: Option<&[f32]>) {
     let n = v.len();
     assert_eq!(theta.len(), n, "lif_at_step: theta length mismatch");
     assert_eq!(ii.len(), n, "lif_at_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "lif_at_step: spikes length mismatch");
     assert_eq!(params.len(), n * 7, "lif_at_step: params length mismatch (expected {}*7={})", n, n * 7);
     assert_eq!(refractory.len(), n, "lif_at_step: refractory length mismatch");
+    add_dendritic_current(ii, I_dend);
     unsafe { lif::lif_at_step(v.as_mut_ptr(), theta.as_mut_ptr(), ii.as_mut_ptr(), spikes.as_mut_ptr(), params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -528,6 +572,7 @@ pub fn eprop_lif_step(
     refractory: &mut [f32],
     dt: f32, tau_m: f32, tau_e: f32, tau_ref: f32,
     v_rest: f32, v_thresh: f32, v_reset: f32, tau_sg: f32,
+    I_dend: Option<&[f32]>,
 ) -> usize {
     let n = v.len();
     assert_eq!(eligibility.len(), n, "eprop_lif_step: eligibility length mismatch");
@@ -536,6 +581,7 @@ pub fn eprop_lif_step(
     assert_eq!(spikes.len(), n, "eprop_lif_step: spikes length mismatch");
     assert_eq!(pre_spikes.len(), n, "eprop_lif_step: pre_spikes length mismatch");
     assert_eq!(refractory.len(), n, "eprop_lif_step: refractory length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "eprop_lif_step");
     unsafe { lif::eprop_lif_step(v.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), refractory.as_mut_ptr(), dt, tau_m, tau_e, tau_ref, v_rest, v_thresh, v_reset, tau_sg, n) }
 }
 
@@ -550,6 +596,7 @@ pub fn saw_step(
     dt: f32, trace_decay: f32, noise_amp: f32,
     spikes: &mut [i32],
     refractory: &mut [f32], tau_ref: f32,
+    I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
     assert_eq!(u.len(), n, "saw_step: u length mismatch");
@@ -559,6 +606,7 @@ pub fn saw_step(
     assert_eq!(ii.len(), n, "saw_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "saw_step: spikes length mismatch");
     assert_eq!(refractory.len(), n, "saw_step: refractory length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "saw_step");
     unsafe { saw::saw_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ii.as_ptr(), dt, trace_decay, noise_amp, spikes.as_mut_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -567,6 +615,7 @@ pub fn eprop_saw_step(
     v: &mut [f32], u: &mut [f32], eligibility: &mut [f32], psi: &mut [f32],
     ii: &[f32], spikes: &mut [i32], pre_spikes: &[i32],
     dt: f32, tau_e: f32, a: f32, b: f32, tau_sg: f32,
+    I_dend: Option<&[f32]>,
 ) -> usize {
     let n = v.len();
     assert_eq!(u.len(), n, "eprop_saw_step: u length mismatch");
@@ -575,6 +624,7 @@ pub fn eprop_saw_step(
     assert_eq!(ii.len(), n, "eprop_saw_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "eprop_saw_step: spikes length mismatch");
     assert_eq!(pre_spikes.len(), n, "eprop_saw_step: pre_spikes length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "eprop_saw_step");
     unsafe { saw::eprop_saw_step(v.as_mut_ptr(), u.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(), dt, tau_e, a, b, tau_sg, n) }
 }
 
@@ -599,13 +649,14 @@ pub fn psi_wave_step(
 // ═══════════════════════════════════════════════════════════
 
 /// Adaptive Exponential (AdEx) neuron step: `τ·dv/dt = −(v−v_rest) + ΔT·exp((v−v_thresh)/ΔT) + I/w`.
-pub fn adex_step(v: &mut [f32], u: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32) {
+pub fn adex_step(v: &mut [f32], u: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32, I_dend: Option<&[f32]>) {
     let n = v.len();
     assert_eq!(u.len(), n, "adex_step: u length mismatch");
     assert_eq!(ii.len(), n, "adex_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "adex_step: spikes length mismatch");
     assert_eq!(params.len(), n * 9, "adex_step: params length mismatch (expected {}*9={})", n, n * 9);
     assert_eq!(refractory.len(), n, "adex_step: refractory length mismatch");
+    add_dendritic_current(ii, I_dend);
     unsafe { adex::adex_step(v.as_mut_ptr(), u.as_mut_ptr(), ii.as_mut_ptr(), spikes.as_mut_ptr(), params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -622,6 +673,7 @@ pub fn eprop_adex_step_multi(
     a: f32, b: f32,
     tau_e: f32, tau_sg: f32,
     spikes: &mut [i32],
+    I_dend: Option<&[f32]>,
 ) -> usize {
     let n = v.len();
     assert_eq!(w.len(), n, "eprop_adex_step_multi: w length mismatch");
@@ -630,6 +682,7 @@ pub fn eprop_adex_step_multi(
     assert_eq!(i_ext.len(), n, "eprop_adex_step_multi: I_ext length mismatch");
     assert_eq!(weights.len(), n_pre * n, "eprop_adex_step_multi: weights length mismatch");
     assert_eq!(spikes.len(), n, "eprop_adex_step_multi: spikes length mismatch");
+    let i_ext = with_dendritic_current(i_ext, I_dend, "eprop_adex_step_multi");
     unsafe { adex::eprop_adex_step_multi(v.as_mut_ptr(), w.as_mut_ptr(), psi.as_mut_ptr(), e.as_mut_ptr(), z_pre.as_ptr(), i_ext.as_ptr(), weights.as_ptr(), n, n_pre, dt, tau_m, tau_w, v_rest, v_thresh, v_reset, delta_t, a, b, tau_e, tau_sg, spikes.as_mut_ptr()) }
 }
 
@@ -656,6 +709,7 @@ pub fn hh_poly_step(
     g_leak: &[f32], e_leak: &[f32], c_m: &[f32],
     channel_meta: &[hh::ChannelMeta],
     dt: f32,
+    I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
     assert_eq!(gates.len(), {
@@ -666,6 +720,7 @@ pub fn hh_poly_step(
     assert_eq!(g_leak.len(), n, "hh_poly_step: g_leak length mismatch");
     assert_eq!(e_leak.len(), n, "hh_poly_step: E_leak length mismatch");
     assert_eq!(c_m.len(), n, "hh_poly_step: C_m length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "hh_poly_step");
     unsafe { hh::hh_poly_step(
         v.as_mut_ptr(), gates.as_mut_ptr(), ii.as_ptr(),
         g_leak.as_ptr(), e_leak.as_ptr(), c_m.as_ptr(),
@@ -684,18 +739,31 @@ pub fn hh_poly_step(
 ///   dw/dt = (v + a - b·w) / τ
 ///
 /// Params layout: dt, tau_w, a, b (4 × n, column-major).
-pub fn fhn_step(v: &mut [f32], w: &mut [f32], ii: &[f32], spikes: &mut [i32], params: &[f32]) {
+pub fn fhn_step(v: &mut [f32], w: &mut [f32], ii: &[f32], spikes: &mut [i32], params: &[f32], I_dend: Option<&[f32]>) {
     let n = v.len();
     assert_eq!(w.len(), n, "fhn_step: w length mismatch");
     assert_eq!(ii.len(), n, "fhn_step: Ii length mismatch");
     assert_eq!(spikes.len(), n, "fhn_step: spikes length mismatch");
     assert_eq!(params.len(), n * 4, "fhn_step: params length mismatch (expected {}*4={})", n, n * 4);
+    let ii = with_dendritic_current(ii, I_dend, "fhn_step");
     unsafe { fhn::fhn_step(v.as_mut_ptr(), w.as_mut_ptr(), ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n) }
 }
 
 // ═══════════════════════════════════════════════════════════
 //  neuron / wc (Wilson-Cowan)
 // ═══════════════════════════════════════════════════════════
+
+/// Dendritic computation step: compartmentalized dendrites with local PSP integration.
+///
+/// Обновляет дендритные потенциалы компартментов и аккумулирует ток в сому.
+/// После вызова `I_dend` содержит полный дендритный вклад для каждого нейрона
+/// (может быть прибавлен к `Ii` в Izhikevich/LIF/AdEx шаге).
+///
+/// См. [`DendriteState`] для safe API через struct.
+pub fn dendrite_step(state: &mut dendrite::DendriteState, V_soma: &[f32], dt: f32) {
+    assert_eq!(V_soma.len(), state.n, "dendrite_step: V_soma length mismatch");
+    state.step(V_soma, dt);
+}
 
 /// Wilson-Cowan population model step: excitatory-inhibitory rate dynamics.
 ///

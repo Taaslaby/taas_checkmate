@@ -33,6 +33,10 @@
 //!                                indices=conn.group("mn"), max_rate=100.0)
 //! ```
 
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod data;
 pub mod rcm;
 pub mod record;

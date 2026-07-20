@@ -434,6 +434,7 @@ pub extern "C" fn brain_step(
                 &storage.packed,
                 &mut brain.state.refractory,
                 storage.tau_ref,
+                None,
             );
         }
         BrainParams::Izhikevich(storage) => {
@@ -451,6 +452,7 @@ pub extern "C" fn brain_step(
                 &storage.d,
                 &mut brain.state.refractory,
                 storage.tau_ref,
+                None,
             );
         }
     }
@@ -548,6 +550,7 @@ pub extern "C" fn brain_step_ex(
                     &storage.packed,
                     &mut brain.state.refractory,
                     storage.tau_ref,
+                    None,
                 );
             }
             BrainParams::Izhikevich(storage) => {
@@ -565,6 +568,7 @@ pub extern "C" fn brain_step_ex(
                     &storage.d,
                     &mut brain.state.refractory,
                     storage.tau_ref,
+                    None,
                 );
             }
         }
@@ -653,6 +657,7 @@ pub extern "C" fn brain_step_n(
                     &storage.packed,
                     &mut brain.state.refractory,
                     storage.tau_ref,
+                    None,
                 );
             }
             BrainParams::Izhikevich(storage) => {
@@ -670,6 +675,7 @@ pub extern "C" fn brain_step_n(
                     &storage.d,
                     &mut brain.state.refractory,
                     storage.tau_ref,
+                    None,
                 );
             }
         }

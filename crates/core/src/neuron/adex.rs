@@ -54,7 +54,7 @@ pub fn step_adex(
                 params[56 + j] = a[i + j];
                 params[64 + j] = b[i + j];
             }
-            kernels::adex_step(v8, u8, I8, sp8, &params, refr8, tau_ref);
+            kernels::adex_step(v8, u8, I8, sp8, &params, refr8, tau_ref, None);
         });
 }
 
@@ -157,6 +157,7 @@ impl EPropAdExMulti {
             a, b,
             tau_e, tau_sg,
             spikes,
+            None,
         )
     }
 

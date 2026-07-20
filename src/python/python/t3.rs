@@ -600,7 +600,7 @@ pub fn py_t2spike_grad_pst_matrix(
 ) -> PyResult<Py<PyArray2<f32>>> {
     let result = crate::train::spike::t3spike_compute_pst_matrix(&traj.inner);
     let n = traj.inner.n_osc;
-    let n_steps = traj.inner.n_steps;
+    let _n_steps = traj.inner.n_steps;
     let pst_dim = crate::t3::pst_linear_dim(n);
     let arr = PyArray2::from_vec2(py, &result.chunks(pst_dim).map(|c| c.to_vec()).collect::<Vec<_>>())
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
@@ -619,7 +619,7 @@ pub fn py_t2spike_grad_pst_fast_matrix(
 ) -> PyResult<Py<PyArray2<f32>>> {
     let result = crate::train::spike::t3spike_compute_pst_fast_matrix(&traj.inner);
     let n = traj.inner.n_osc;
-    let n_steps = traj.inner.n_steps;
+    let _n_steps = traj.inner.n_steps;
     let dim = crate::t3::pst_fast_dim(n);
     let arr = PyArray2::from_vec2(py, &result.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>())
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
@@ -1010,7 +1010,7 @@ impl PySpikeGradBridge {
 
         let (gw, gb) = self.inner.backward(&gp, &traj.inner, sp, per_step.as_deref());
 
-        let sd = self.inner.spike_dim;
+        let _sd = self.inner.spike_dim;
         let dd = self.inner.drive_dim;
 
         let gw_arr = PyArray2::from_vec2(

@@ -47,6 +47,7 @@ pub fn step_izhikevich(
                 dt, trace_decay,
                 sp8, c8, d8,
                 refr8, tau_ref,
+                None,
             );
         });
 }
@@ -104,6 +105,7 @@ impl EPropIzhikevich {
                     v8, u8, e8, ps8,
                     I8, sp8, pre8,
                     self.dt, self.tau_e, self.a, self.b, self.c, self.d, self.tau_surrogate,
+                    None,
                 )
             })
             .sum();
@@ -235,6 +237,7 @@ impl EPropIzhikevichMulti {
             n_pre,
             dt, tau_e, a, b, c, d, tau_sg,
             spikes,
+            None,
         )
     }
 

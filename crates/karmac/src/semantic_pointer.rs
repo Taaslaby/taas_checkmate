@@ -64,8 +64,8 @@ impl SemanticPointer {
     pub fn random_vector(&self) -> Vec<f32> {
         use rand::SeedableRng;
         let mut rng = rand::rngs::StdRng::seed_from_u64(rand::thread_rng().gen());
-        let mut v: Vec<f32> = (0..self.dim).map(|_| rng.gen::<f32>() * 2.0 - 1.0).collect();
-        self.normalize(&mut v);
+        let v: Vec<f32> = (0..self.dim).map(|_| rng.gen::<f32>() * 2.0 - 1.0).collect();
+        self.normalize(&v);
         v
     }
 

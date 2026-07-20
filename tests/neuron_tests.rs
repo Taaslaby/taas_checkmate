@@ -606,7 +606,7 @@ fn test_eprop_izhikevich_gradient_fd() {
     }
 
     // Loss = sum of spikes (we want to maximize spiking)
-    let loss = spikes.iter().map(|&s| s as f32).sum::<f32>();
+    let _loss = spikes.iter().map(|&s| s as f32).sum::<f32>();
     let learning_signal = vec![1.0; n];  // dL/d(spike)
 
     // Analytical gradient: dw_j = L_j * e_j * lr (before actual update)
@@ -1964,7 +1964,7 @@ fn test_fused_sparse_consistency() {
             &mut v_ref, &mut u_ref, &mut tr_ref,
             &a, &b, &mut I_ref,
             dt, trace_decay, &mut sp_ref, &c, &d,
-            &mut refr_ref, tau_ref,
+            &mut refr_ref, tau_ref, None,
         );
 
         // No spikes expected (subthreshold I ≈ 3-4). Compare per-step voltage.
@@ -1986,7 +1986,7 @@ fn test_fused_sparse_consistency() {
 
 #[test]
 fn test_hh_high_current_stability() {
-    use taas_checkmate::kernels;
+    
     let channels = taas_checkmate::kernels::neuron::hh::standard_channels();
     let meta = taas_checkmate::kernels::neuron::hh::build_channel_meta(&channels);
     let n_gates: usize = meta.iter().map(|ch| ch.n_gates).sum();
@@ -2060,7 +2060,7 @@ fn test_eprop_lif_refractory_prevents_back_to_back() {
 
     // First step — should spike with strong I
     eprop.step(&I, &mut spikes, &pre_spikes);
-    let first_spike = spikes.iter().any(|&s| s != 0);
+    let _first_spike = spikes.iter().any(|&s| s != 0);
 
     // If first step didn't spike, run more steps until it does
     let mut spike_step = 0;

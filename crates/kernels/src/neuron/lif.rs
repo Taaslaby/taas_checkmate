@@ -494,7 +494,7 @@ mod tests {
         let mut v = vec![v_rest; n];
         let mut eligibility = vec![0.0; n];
         let mut psi = vec![0.0; n];
-        let mut Ii = vec![I_const; n];
+        let Ii = vec![I_const; n];
         let mut spikes = vec![0i32; n];
         let pre_spikes = vec![1i32; n]; // all pre-synaptic neurons fire
 

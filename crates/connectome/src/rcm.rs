@@ -337,9 +337,11 @@ pub fn fiedler_vector(
 
     let (rp, ci, vals) = build_laplacian_csr(adj);
 
-    // Начальный вектор: случайный, ортогональный 1
+    // Начальный вектор: детерминированный ПСЧ из индекса, ортогональный 1
     let mut x: Vec<f32> = (0..n).map(|i| {
-        let v = ((i * 6364136223846793005).wrapping_mul(1442695040888963407) as f32) / 1.8446744e19;
+        // SplitMix64-style: две wrapping_mul чтобы избежать overflow в debug mode
+        let h = i.wrapping_mul(6364136223846793005);
+        let v = (h.wrapping_mul(1442695040888963407) as f32) / 1.8446744e19;
         v * 2.0 - 1.0
     }).collect();
 
@@ -699,7 +701,7 @@ mod tests {
         let mut row_ptr = vec![0i32; n + 1];
         let mut col_indices = Vec::new();
         let mut values = Vec::new();
-        let mut rng: u64 = 12345;
+        let rng: u64 = 12345;
 
         for i in 0..n {
             let n_syn = 2 + ((rng.wrapping_mul(6364136223846793005).wrapping_add(1)) % 3) as usize;

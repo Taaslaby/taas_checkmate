@@ -1156,7 +1156,7 @@ pub struct XorAttention {
 
 impl XorAttention {
     pub fn new(n_keys: usize, n_bytes: usize) -> Result<Self, String> {
-        assert!(n_bytes % 8 == 0);
+        assert!(n_bytes.is_multiple_of(8));
         let ctx = unsafe { xor_attention_create(n_keys as c_int, n_bytes as c_int) };
         if ctx.is_null() { Err("xor_attention_create failed".into()) }
         else { Ok(XorAttention { ctx, n_keys, n_bytes }) }
@@ -1187,7 +1187,7 @@ impl Drop for XorAttention {
 pub fn xor_attention(query: &[u8], keys: &[u8], values: &[f32],
     output: &mut [f32], n_keys: usize, n_bytes: usize) -> Result<(), String>
 {
-    assert!(n_bytes % 8 == 0);
+    assert!(n_bytes.is_multiple_of(8));
     ok_or(unsafe {
         cuda_xor_attention(query.as_ptr(), keys.as_ptr(), values.as_ptr(),
             output.as_mut_ptr(), n_keys as c_int, n_bytes as c_int)
@@ -1514,7 +1514,7 @@ pub fn kuramoto_csr_coupling(
 ) -> Result<(), String> {
     let n = coupling.len().min(sin_buf.len()).min(cos_buf.len());
     let n_neurons = row_ptr.len() - 1;
-    let n_syn = col_indices.len().min(values.len());
+    let _n_syn = col_indices.len().min(values.len());
     // Validate sizes
     assert!(n <= n_neurons, "coupling.len={} > n_neurons={}", n, n_neurons);
     ok_or(unsafe {

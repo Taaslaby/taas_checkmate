@@ -706,7 +706,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![30.0f32; n];
+        let I = vec![30.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
@@ -729,7 +729,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![-20.0f32; n];
+        let I = vec![-20.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
@@ -752,7 +752,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![30.0f32; n];
+        let I = vec![30.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
@@ -777,7 +777,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![10.0f32; n];  // moderate current
+        let I = vec![10.0f32; n];  // moderate current
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
@@ -814,7 +814,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![30.0f32; n];
+        let I = vec![30.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
@@ -847,7 +847,7 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let mut I = vec![10.0f32; n];
+        let I = vec![10.0f32; n];
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];

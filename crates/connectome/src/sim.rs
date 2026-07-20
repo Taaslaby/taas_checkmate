@@ -141,7 +141,7 @@ impl BrainState {
     let queue_cap = n_neurons.max(4).next_power_of_two();
 
     // Slow state initialized to 0.5 (neutral baseline)
-    let mut slow_state = vec![0.5f32; n_padded];
+    let _slow_state = vec![0.5f32; n_padded];
 
     Self {
             v: vec![v_init; n_padded],
@@ -960,6 +960,7 @@ pub fn sim_lif(
             &params.packed,
             &mut state.refractory,
             params.tau_ref,
+            None,
         );
 
         // 4. Push spikes to queue (decouple SIMD → scatter)
@@ -1035,6 +1036,7 @@ pub fn sim_lif_synaptic(
             &params.packed,
             &mut state.refractory,
             params.tau_ref,
+            None,
         );
 
         // 6. Push spikes to queue
@@ -1103,6 +1105,7 @@ pub fn sim_izhikevich(
             &mut state.spikes,
             &padded_c, &padded_d,
             &mut state.refractory, params.tau_ref,
+            None,
         );
 
         // 4. Push spikes to queue
@@ -1188,6 +1191,7 @@ pub fn sim_izhikevich_dual(
             &padded_c, &padded_d,
             &mut state.refractory, params.tau_ref,
             &mut state.slow_state, tau_m, w_m,
+            None,
         );
 
         // 3. Push spikes to queue
@@ -1539,6 +1543,7 @@ pub fn sim_izhikevich_synaptic(
             &mut state.spikes,
             &padded_c, &padded_d,
             &mut state.refractory, params.tau_ref,
+            None,
         );
 
         // 6. Push spikes to queue
@@ -1634,6 +1639,7 @@ pub fn sim_izhikevich_eprop(
             &mut state.spikes,
             &padded_c, &padded_d,
             &mut state.refractory, params.tau_ref,
+            None,
         );
 
         // 3. Surrogate gradient: ψ_j = 1 / (1 + |v_j - 30|/τ_s)²

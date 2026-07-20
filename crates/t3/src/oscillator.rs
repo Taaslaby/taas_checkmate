@@ -25,7 +25,7 @@ use super::{
     PI, TWO_PI,
     backend::T3Backend,
     phase_gate::phase_gate,
-    attention_coupling::{AttentionCoupling, AttentionCouplingConfig},
+    attention_coupling::AttentionCoupling,
 };
 
 /// 3-population oscillator state with generic backend.
@@ -424,8 +424,8 @@ fn weighted_sum_sincos(r: &[f32], sin: &[f32], cos: &[f32], n: usize) -> (f32, f
                 cos[i], cos[i+1], cos[i+2], cos[i+3],
                 cos[i+4], cos[i+5], cos[i+6], cos[i+7],
             ]);
-            sum_s_v = sum_s_v + rv * sv;
-            sum_c_v = sum_c_v + rv * cv;
+            sum_s_v += rv * sv;
+            sum_c_v += rv * cv;
         }
 
     let mut sum_s = sum_s_v.reduce_add();

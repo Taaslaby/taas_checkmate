@@ -8,8 +8,9 @@
 //! - NaN/inf protection
 //! - Boundary conditions (clamping)
 
+#![allow(non_snake_case)]
+
 use taas_kernels::*;
-use taas_kernels::neuron::*;
 use taas_kernels::neuron::hh::{standard_channels, steady_state_gates};
 use taas_kernels::build_hh_channel_meta;
 
@@ -30,12 +31,6 @@ fn assert_no_nan(data: &[f32], label: &str) {
     for (i, &v) in data.iter().enumerate() {
         assert!(!v.is_nan(), "{label}[{i}] = NaN");
         assert!(!v.is_infinite(), "{label}[{i}] = Inf ({v})");
-    }
-}
-
-fn assert_all_eq_static(data: &[f32], val: f32, label: &str) {
-    for (i, &v) in data.iter().enumerate() {
-        assert!((v - val).abs() < 1e-6, "{label}[{i}]: {v} != {val}");
     }
 }
 
@@ -432,7 +427,7 @@ fn test_izhikevich_refractory_works() {
     let mut refractory = vec![0.0; n];
 
     izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
-                    &mut spikes, &c, &d, &mut refractory, 3.0);
+                    &mut spikes, &c, &d, &mut refractory, 3.0, None);
 
     if spikes.iter().any(|&s| s > 0) {
         for i in 0..n {
@@ -441,7 +436,7 @@ fn test_izhikevich_refractory_works() {
             }
         }
         izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
-                        &mut spikes, &c, &d, &mut refractory, 3.0);
+                        &mut spikes, &c, &d, &mut refractory, 3.0, None);
         assert_eq!(spikes.iter().sum::<i32>(), 0, "Spiked during refractory!");
     }
 }
@@ -472,7 +467,7 @@ fn test_lif_spike_rate() {
         let mut refractory = vec![0.0; n];
         let mut total = 0i32;
         for _ in 0..200 {
-            lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0);
+            lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0, None);
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "LIF n={n}: no spikes with I=25");
@@ -494,8 +489,7 @@ fn test_lif_analytical_accuracy() {
     let mut spikes = vec![0i32; n];
     let mut refractory = vec![0.0; n];
 
-    for _ in 0..200 {
-        lif_step(&mut v, &mut Ii, &mut spikes, &params, &mut refractory, 0.0);
+    for _ in 0..200 {            lif_step(&mut v, &mut Ii, &mut spikes, &params, &mut refractory, 0.0, None);
     }
     for i in 0..n {
         assert!((v[i] - (-55.0)).abs() < 0.1, "LIF steady state: {:.4}", v[i]);
@@ -620,7 +614,7 @@ fn test_hh_poly_step_basic() {
         }
     }
 
-    hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01);
+    hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01, None);
     assert_no_nan(&v, "hh_poly v");
     assert_no_nan(&gates, "hh_poly gates");
 }
@@ -645,7 +639,7 @@ fn test_hh_poly_step_no_spike_small_current() {
     }
 
     for _ in 0..100 {
-        hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01);
+        hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01, None);
     }
     for &vv in &v {
         assert!(vv < -40.0, "HH without input spiked: {vv}");
@@ -672,7 +666,7 @@ fn test_fhn_spikes_with_strong_current() {
     }
     let mut total = 0i32;
     for _ in 0..200 {
-        fhn_step(&mut v, &mut w, &ii, &mut spikes, &params);
+        fhn_step(&mut v, &mut w, &ii, &mut spikes, &params, None);
         total += spikes.iter().sum::<i32>();
     }
     assert!(total > 0, "FHN no spikes with I=1.0");
@@ -736,7 +730,7 @@ fn test_adex_step_basic() {
         let mut refractory = vec![0.0; n];
         let mut total = 0i32;
         for _ in 0..200 {
-            adex_step(&mut v, &mut u, &mut I, &mut spikes, &params, &mut refractory, 2.0);
+            adex_step(&mut v, &mut u, &mut I, &mut spikes, &params, &mut refractory, 2.0, None);
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "AdEx n={n}: no spikes");
@@ -803,9 +797,8 @@ fn test_single_neuron() {
     let d = vec![8.0];
     let mut refractory = vec![0.0];
     let mut total = 0i32;
-    for _ in 0..100 {
-        izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
-                        &mut spikes, &c, &d, &mut refractory, 3.0);
+    for _ in 0..100 {        izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
+                    &mut spikes, &c, &d, &mut refractory, 3.0, None);
         total += spikes.iter().sum::<i32>();
     }
     assert!(total > 0, "Single Izhikevich: no spikes");
@@ -823,10 +816,8 @@ fn test_nan_input_safety() {
     let mut spikes = vec![0i32; n];
     let c = vec![-65.0; n];
     let d = vec![8.0; n];
-    let mut refractory = vec![0.0; n];
-
-    izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
-                    &mut spikes, &c, &d, &mut refractory, 3.0);
+    let mut refractory = vec![0.0; n];        izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5,
+                        &mut spikes, &c, &d, &mut refractory, 3.0, None);
     assert!(!spikes.iter().any(|&s| s < 0), "negative spike count");
 }
 
@@ -850,7 +841,7 @@ fn test_izhikevich_long_run_stability() {
 
     for _ in 0..100000 {
         izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 0.5, 0.5,
-                        &mut spikes, &c, &d, &mut refractory, 3.0);
+                        &mut spikes, &c, &d, &mut refractory, 3.0, None);
     }
     assert_no_nan(&v, "izhikevich long-run v");
     assert_no_nan(&u, "izhikevich long-run u");
@@ -869,7 +860,7 @@ fn test_lif_long_run_stability() {
     let mut refractory = vec![0.0; n];
 
     for _ in 0..100000 {
-        lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0);
+        lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0, None);
     }
     assert_no_nan(&v, "lif long-run v");
     for &vv in &v { assert!(vv > -200.0 && vv < 100.0, "lif long-run v={vv}"); }

@@ -2,6 +2,10 @@
 //! Use the [`safe`] module for safe slice-based wrappers.
 //! Raw `unsafe` functions are available via internal submodules for crate-internal use.
 
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod attention;
 pub mod decode;
 pub mod measure;
@@ -300,7 +304,7 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..200 {
-            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
+            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0, None);
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "Expected spikes with I=30");
@@ -321,7 +325,7 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..100 {
-            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0);
+            izhikevich_step(&mut v, &mut u, &mut trace, &a, &b, &mut I, 1.0, 0.5, &mut spikes, &c, &d, &mut refractory, 3.0, None);
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert_eq!(total_spikes, 0, "No spikes with I=-20");
@@ -344,7 +348,7 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..100 {
-            lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0);
+            lif_step(&mut v, &mut I, &mut spikes, &params, &mut refractory, 2.0, None);
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "LIF should spike with I=30");

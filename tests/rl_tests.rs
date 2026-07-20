@@ -71,7 +71,7 @@ fn test_agent_learn_updates_weights() {
     let state = vec![1.0, 0.0];
     let (_, value) = agent.act(&state);
 
-    let w_before = agent.w_ih[0];
+    let _w_before = agent.w_ih[0];
     let td = agent.learn(1.0, value, true);
 
     // With positive reward, td_error should be positive
@@ -146,7 +146,7 @@ fn test_agent_runs_multiple_steps() {
     let mut total_reward = 0.0f32;
     for _step in 0..50 {
         let state = vec![0.5, -0.5];
-        let (action, value) = agent.act(&state);
+        let (action, _value) = agent.act(&state);
         let reward = if action == 0 { 1.0 } else { -0.5 };
         let next_state = vec![-0.5, 0.5];
         let (_, next_val) = agent.act(&next_state);
@@ -161,7 +161,7 @@ fn test_agent_runs_multiple_steps() {
 /// Test softmax sampling produces valid probabilities.
 #[test]
 fn test_softmax_sampling() {
-    use taas_checkmate::rl::test_mdp_episode;
+    
     use taas_checkmate::ActorCriticAgent;
 
     // Just verify the sampling doesn't crash
@@ -188,7 +188,7 @@ fn test_eligibility_accumulates() {
     agent.act(&state);
 
     // After acting, some eligibility should exist (synapses with spiking pre/post)
-    let has_eligibility = agent.elig_ih.iter().any(|&e| e != 0.0)
+    let _has_eligibility = agent.elig_ih.iter().any(|&e| e != 0.0)
         || agent.elig_ho.iter().any(|&e| e != 0.0)
         || agent.elig_ic.iter().any(|&e| e != 0.0);
     // Note: it's possible no eligibility accumulates if no spikes occurred

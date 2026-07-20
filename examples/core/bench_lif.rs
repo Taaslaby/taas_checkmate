@@ -36,7 +36,7 @@ fn main() {
 
         let t0 = Instant::now();
         for _ in 0..n_steps {
-            lif_step(&mut v, &mut ii, &mut spikes, &params, &mut refractory, tau_ref);
+            lif_step(&mut v, &mut ii, &mut spikes, &params, &mut refractory, tau_ref, None);
         }
         let elapsed = t0.elapsed().as_secs_f64();
         let throughput = n as f64 * n_steps as f64 / elapsed;

@@ -196,7 +196,7 @@ impl PySpaunPipelineGPU {
 
     pub fn weights<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> { self.w_motor.clone().into_pyarray(py) }
 
-    pub fn set_weights(&mut self, py: Python<'_>, arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+    pub fn set_weights(&mut self, _py: Python<'_>, arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = arr.readonly();
         let sl = ro.as_slice()?;
         if sl.len() != self.n_outputs * self.cortical_dim {
