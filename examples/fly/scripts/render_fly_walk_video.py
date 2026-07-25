@@ -91,12 +91,13 @@ def render_walking_animation(n_frames=120, fps=30):
     print(f"[2/3] Simulating and Rendering {n_frames} Frames of 3D Locomotion...")
 
     substeps_per_frame = int(1.0 / (fps * dt))
+    smooth_ctrl = np.zeros(min(n_joints, len(actuator_indices)), dtype=np.float32)
 
     for frame_idx in range(n_frames):
         for _ in range(substeps_per_frame):
             step = int(data.time / dt)
-            # Smooth biological CPG sinusoidal wave (15 Hz stride rate)
-            cpg_wave = math.sin(2.0 * math.pi * 15.0 * data.time)
+            # Natural 3.0 Hz biological stride frequency for graceful walking
+            cpg_wave = math.sin(2.0 * math.pi * 3.0 * data.time)
 
             spikes.fill(0)
             if cpg_wave > 0.0:
@@ -129,21 +130,35 @@ def render_walking_animation(n_frames=120, fps=30):
                     joint_stf[j] = k0[j] + beta[j] * ca_sum
                     joint_dmp[j] = b0[j] + alpha[j] * ca_sum
 
-            # 3. Apply Atlasov Muscle Impedance & Drive into MuJoCo Actuators (data.ctrl)
+            # 3. Apply Atlasov Muscle Drive into MuJoCo Actuators with Temporal Low-Pass Filtering
             for j in range(min(n_joints, len(actuator_indices))):
                 act_idx = actuator_indices[j]
                 dof_idx = dof_indices[j]
-                q = data.qpos[dof_idx]
                 q_dot = data.qvel[dof_idx]
 
                 df = joint_df[j]
-                k_stf = joint_stf[j]
                 b_dmp = joint_dmp[j]
 
-                # Convert Atlasov Muscle Tug-of-War into smooth joint flexing control ctrl
-                target_ctrl = np.clip(df * 0.2, -0.5, 0.5)
-                data.ctrl[act_idx] = target_ctrl
+                jname = leg_joint_names[j]
+                bias = 0.25 if 'femur' in jname else (-0.15 if 'tibia' in jname else 0.1)
+
+                raw_target = np.clip(bias + df * 0.15, -0.4, 0.5)
+                # Exponential moving average filter (tau = 40 ms)
+                smooth_ctrl[j] += (dt / 0.04) * (raw_target - smooth_ctrl[j])
+
+                data.ctrl[act_idx] = smooth_ctrl[j]
                 data.qfrc_applied[dof_idx] = -b_dmp * q_dot
+
+            # Enable claw adhesion strictly during stance phase for grounded tripod legs
+            claw_map_a = [72, 75, 76] # T1_left, T2_right, T3_left
+            claw_map_b = [73, 74, 77] # T1_right, T2_left, T3_right
+
+            if cpg_wave > 0.0:
+                for c in claw_map_a: data.ctrl[c] = 0.5
+                for c in claw_map_b: data.ctrl[c] = 0.0
+            else:
+                for c in claw_map_b: data.ctrl[c] = 0.5
+                for c in claw_map_a: data.ctrl[c] = 0.0
 
             mu.mj_step(model, data)
 

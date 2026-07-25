@@ -99,6 +99,7 @@ def run_gui_viewer():
     print("   • Spacebar           : Pause / Resume Physics\n")
 
     step = 0
+    smooth_ctrl = np.zeros(min(n_joints, len(actuator_indices)), dtype=np.float32)
 
     with viewer.launch_passive(model, data) as v:
         v.cam.distance = 12.0
@@ -108,8 +109,8 @@ def run_gui_viewer():
         while v.is_running():
             step_start = time.time()
 
-            # 1. Biological Tripod Gait Pattern Generation (Smooth 15 Hz CPG Sinusoidal Drive)
-            cpg_wave = math.sin(2.0 * math.pi * 15.0 * data.time)
+            # 1. Biological Tripod Gait Pattern Generation (Natural 3.0 Hz Stride Pace)
+            cpg_wave = math.sin(2.0 * math.pi * 3.0 * data.time)
             spikes.fill(0)
 
             if cpg_wave > 0.0:
@@ -155,20 +156,34 @@ def run_gui_viewer():
                     joint_stf[j] = k0[j] + beta[j] * ca_sum
                     joint_dmp[j] = b0[j] + alpha[j] * ca_sum
 
-            # 3. Apply Leg Joint Impedance & Drive into MuJoCo Actuators (data.ctrl)
+            # 3. Apply Leg Joint Impedance & Drive into MuJoCo Actuators with Temporal Low-Pass Filtering
             for j in range(min(n_joints, len(actuator_indices))):
                 act_idx = actuator_indices[j]
                 dof_idx = dof_indices[j]
-                q = data.qpos[dof_idx]
                 q_dot = data.qvel[dof_idx]
 
                 df = joint_df[j]
-                k_stf = joint_stf[j]
                 b_dmp = joint_dmp[j]
 
-                target_ctrl = np.clip(df * 0.2, -0.5, 0.5)
-                data.ctrl[act_idx] = target_ctrl
+                jname = leg_joint_names[j]
+                bias = 0.25 if 'femur' in jname else (-0.15 if 'tibia' in jname else 0.1)
+
+                raw_target = np.clip(bias + df * 0.15, -0.4, 0.5)
+                smooth_ctrl[j] += (dt / 0.04) * (raw_target - smooth_ctrl[j])
+
+                data.ctrl[act_idx] = smooth_ctrl[j]
                 data.qfrc_applied[dof_idx] = -b_dmp * q_dot
+
+            # Enable claw adhesion strictly during stance phase for grounded tripod legs
+            claw_map_a = [72, 75, 76] # T1_left, T2_right, T3_left
+            claw_map_b = [73, 74, 77] # T1_right, T2_left, T3_right
+
+            if cpg_wave > 0.0:
+                for c in claw_map_a: data.ctrl[c] = 0.5
+                for c in claw_map_b: data.ctrl[c] = 0.0
+            else:
+                for c in claw_map_b: data.ctrl[c] = 0.5
+                for c in claw_map_a: data.ctrl[c] = 0.0
 
             # 4. Step MuJoCo 3D Rigid Physics
             mu.mj_step(model, data)
