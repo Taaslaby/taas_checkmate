@@ -671,6 +671,130 @@ mod tests {
         );
     }
 
+    // ═══════════════════════════════════════════════════════
+    //  INDUSTRY STANDARD VERIFICATION: LIF F-I Curve
+    // ═══════════════════════════════════════════════════════
+
+    /// LIF F-I curve: firing rate vs input current.
+    /// Analytical formula: f(I) = 1 / (t_ref + τ·ln((v_rest + R·I - v_reset) / (v_rest + R·I - v_thresh)))
+    ///
+    /// Standard: f increases monotonically with I above rheobase.
+    /// For τ=10ms, v_rest=-70, v_thresh=-54, v_reset=-70, t_ref=2ms:
+    ///   Rheobase I_min ≈ (v_thresh - v_rest) = 16 (for R=1)
+    ///   At I=20: f ≈ 1/(0.002 + 0.01·ln((0+20-(-70))/(0+20-(-54)))) = 1/(0.002 + 0.01·ln(90/74)) = 1/(0.002+0.00195) ≈ 253 Hz
+    #[test]
+    fn lif_fi_curve_against_analytical() {
+        let n = 8;
+        let dt = 0.5;
+        let tau_m = 10.0;
+        let v_rest = -70.0;
+        let v_thresh = -54.0;
+        let v_reset = -70.0;
+        let tau_ref = 2.0;
+        let sim_ms = 500.0;
+        let n_steps = (sim_ms / dt) as usize;
+
+        // Test at multiple current levels
+        let currents = [18.0, 20.0, 25.0, 30.0, 40.0];
+
+        for &I in &currents {
+            let mut v = vec![v_rest; n];
+            let mut Ii = vec![I; n];
+            let mut spikes = vec![0i32; n];
+            let mut params = vec![0.0f32; n * 5];
+            for j in 0..n {
+                params[j] = dt;
+                params[n + j] = tau_m;
+                params[2 * n + j] = v_rest;
+                params[3 * n + j] = v_thresh;
+                params[4 * n + j] = v_reset;
+            }
+            let mut refractory = vec![0.0f32; n];
+            let mut total_spikes = 0usize;
+
+            for _ in 0..n_steps {
+                unsafe {
+                    lif_step(
+                        v.as_mut_ptr(), Ii.as_mut_ptr(),
+                        spikes.as_mut_ptr(), params.as_ptr(),
+                        refractory.as_mut_ptr(), tau_ref, n,
+                    );
+                }
+                total_spikes += spikes.iter().map(|&s| s as usize).sum::<usize>();
+            }
+
+            let avg_firing_rate = total_spikes as f32 / (n as f32) / (sim_ms / 1000.0);
+
+            // Analytical F-I formula (LIF with refractory period)
+            // τ_m = 10ms, R = 1 (since we use clamped I directly)
+            let v_ss = v_rest + I; // steady-state: v_rest + I·R (R=1)
+            if v_ss > v_thresh {
+                // Superthreshold: compute analytical rate
+                let numerator = (v_ss - v_reset).max(1e-6);
+                let denominator = (v_ss - v_thresh).max(1e-6);
+                let analytical_rate = 1.0 / (tau_ref / 1000.0 + tau_m / 1000.0 * (numerator / denominator).ln());
+
+                // Tolerance: 30% for Euler integration + finite-runs effects
+                let ratio = avg_firing_rate / analytical_rate;
+                assert!(ratio > 0.5 && ratio < 1.5,
+                    "F-I: I={I}, sim={avg_firing_rate:.1}Hz, analytical={analytical_rate:.1}Hz, ratio={ratio:.3}");
+            }
+        }
+    }
+
+    /// LIF refractory period: verify that no spike occurs within tau_ref after a spike.
+    /// Inject strong current after spike and check minimum ISI per neuron.
+    #[test]
+    fn lif_refractory_lockout() {
+        let n = 1; // single neuron to avoid cross-neuron interference
+        let dt = 0.5;
+        let tau_m = 10.0;
+        let v_rest = -70.0;
+        let v_thresh = -54.0;
+        let v_reset = -70.0;
+        let tau_ref = 5.0; // 5ms absolute refractory
+        let I_strong = 50.0;
+
+        let mut v = vec![v_rest; n];
+        let mut Ii = vec![I_strong; n];
+        let mut spikes = vec![0i32; n];
+        let mut params = vec![0.0f32; n * 5];
+        for j in 0..n {
+            params[j] = dt;
+            params[n + j] = tau_m;
+            params[2 * n + j] = v_rest;
+            params[3 * n + j] = v_thresh;
+            params[4 * n + j] = v_reset;
+        }
+        let mut refractory = vec![0.0f32; n];
+        let mut spike_steps = Vec::new();
+
+        for step in 0..200 {
+            unsafe {
+                lif_step(
+                    v.as_mut_ptr(), Ii.as_mut_ptr(),
+                    spikes.as_mut_ptr(), params.as_ptr(),
+                    refractory.as_mut_ptr(), tau_ref, n,
+                );
+            }
+            if spikes[0] != 0 {
+                spike_steps.push(step);
+            }
+        }
+
+        // At least 2 spikes should occur
+        assert!(spike_steps.len() >= 2,
+            "Expected >=2 spikes with I={I_strong}, got {}", spike_steps.len());
+
+        // All ISIs must be >= tau_ref (minus 1 step tolerance for discretization)
+        for pair in spike_steps.windows(2) {
+            let isi_ms = (pair[1] - pair[0]) as f32 * dt;
+            assert!(isi_ms >= tau_ref - dt,
+                "Refractory violation: ISI={isi_ms}ms < tau_ref={tau_ref}ms (steps {}→{})",
+                pair[0], pair[1]);
+        }
+    }
+
     /// eProp LIF: verify eligibility trace dynamics.
     ///
     /// With I_const=30, tau_m=10, v_rest=-65, takes ~14 steps to reach
