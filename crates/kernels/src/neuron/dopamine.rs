@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
+use super::{fast_exp_simd, load8, load8_i32, load8_mut, store8};
 use wide::{f32x8, CmpGt};
-use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8};
 
 // ═══════════════════════════════════════════════════════
 //  Dopamine-Modulated STDP — 3-factor plasticity for RL
@@ -40,10 +40,18 @@ use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8};
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn dopamine_traces_step(
-    trace_pre: *mut f32, trace_post: *mut f32, eligibility: *mut f32,
-    pre_spikes: *const i32, post_spikes: *const i32,
-    dt: f32, tau_pre: f32, tau_post: f32, tau_e: f32,
-    a_ltp: f32, a_ltd: f32, n: usize,
+    trace_pre: *mut f32,
+    trace_post: *mut f32,
+    eligibility: *mut f32,
+    pre_spikes: *const i32,
+    post_spikes: *const i32,
+    dt: f32,
+    tau_pre: f32,
+    tau_post: f32,
+    tau_e: f32,
+    a_ltp: f32,
+    a_ltd: f32,
+    n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
     // BUGFIX: clamp to EPSILON (was 1.0) — prevents div-by-zero without silently changing dynamics
@@ -104,8 +112,12 @@ pub(crate) unsafe fn dopamine_traces_step(
             let decay_post = (-dt / tau_post.max(epsi)).exp();
             tp[i] *= decay_pre;
             tpo[i] *= decay_post;
-            if pre[i] != 0 { tp[i] += 1.0; }
-            if post[i] != 0 { tpo[i] += 1.0; }
+            if pre[i] != 0 {
+                tp[i] += 1.0;
+            }
+            if post[i] != 0 {
+                tpo[i] += 1.0;
+            }
             let ltp = if post[i] != 0 { a_ltp * tp[i] } else { 0.0 };
             let ltd = if pre[i] != 0 { a_ltd * tpo[i] } else { 0.0 };
             ee[i] += ltp - ltd;

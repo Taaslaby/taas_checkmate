@@ -4,6 +4,4 @@
 
 pub mod fly_embodied;
 
-pub use fly_embodied::{
-    FlyEmbodiedState, FlyPose, JointMapping, SimStepOutput,
-};
+pub use fly_embodied::{FlyEmbodiedState, FlyPose, JointMapping, SimStepOutput};

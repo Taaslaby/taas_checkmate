@@ -105,7 +105,7 @@ pub fn propagate_spikes(
 
 // ─── Hamiltonian ─────────────────────────────────────────
 
-/// Compute ψ-wave Hamiltonian in parallel: H_real = W * u, H_imag = -W * v.
+/// Compute graph-coupled oscillator Hamiltonian: H_real = W * u, H_imag = -W * v.
 pub fn compute_hamiltonian(
     row_ptr: &[i32],
     col_indices: &[i32],
@@ -152,21 +152,22 @@ pub fn compute_hamiltonian(
         });
 }
 
-// ─── Full ψ-wave step ────────────────────────────────────
+// ─── Full oscillator step ───────────────────────────────
 
-/// Full ψ-wave step. Sequential (each row depends on previous state).
-pub fn step_psi_wave_full(
+/// Full graph-coupled oscillator step. Sequential (each row depends on previous state).
+/// `scale` = time-energy scaling factor (analogous to 1/ħ in Hamiltonian evolution).
+pub fn step_gco_full(
     v: &mut [f32],
     u: &mut [f32],
     row_ptr: &[i32],
     col_indices: &[i32],
     values: &[f32],
     dt: f32,
-    hbar: f32,
+    scale: f32,
 ) {
     let n = v.len().min(u.len());
     let max_syn = col_indices.len().min(values.len());
-    let dt_hbar = dt / hbar;
+    let dt_scale = dt * scale;
     for i in 0..n {
         // Direct row_ptr indexing — row_ptr values are SYNAPSE indices
         let start = row_ptr.get(i).copied().unwrap_or(0).max(0) as usize;
@@ -193,8 +194,8 @@ pub fn step_psi_wave_full(
             hr += w * u[col];
             hi -= w * v[col];
         }
-        let vi = v[i] + hr * dt_hbar;
-        let ui = u[i] + hi * dt_hbar;
+        let vi = v[i] + hr * dt_scale;
+        let ui = u[i] + hi * dt_scale;
         let nrm = vi * vi + ui * ui + 1e-9;
         let inv = 1.0 / nrm.sqrt();
         v[i] = vi * inv;

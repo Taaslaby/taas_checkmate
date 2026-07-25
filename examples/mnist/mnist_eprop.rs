@@ -44,17 +44,17 @@ use taas_checkmate::{EPropIzhikevichMulti, PoissonGenerator};
 // ─── Constants ────────────────────────────────────────────
 
 const N_INPUT: usize = 784;
-const N_HIDDEN: usize = 256;       // padded to ×8 internally
+const N_HIDDEN: usize = 256; // padded to ×8 internally
 const N_OUTPUT: usize = 10;
-const N_STEPS: usize = 30;         // timesteps per image
-const DT: f32 = 1.0;               // ms
-const LR: f32 = 0.005;             // E-Prop (hidden)
-const LR_OUT: f32 = 0.01;          // output weights
-const TAU_E: f32 = 20.0;           // eligibility time constant (ms)
+const N_STEPS: usize = 30; // timesteps per image
+const DT: f32 = 1.0; // ms
+const LR: f32 = 0.005; // E-Prop (hidden)
+const LR_OUT: f32 = 0.01; // output weights
+const TAU_E: f32 = 20.0; // eligibility time constant (ms)
 const POISSON_RATE_MAX: f32 = 200.0; // max Poisson firing rate (Hz)
-const WEIGHT_SCALE: f32 = 5.0;     // weight init: ±scale/√n_in
-const W_CLAMP: f32 = 5.0;          // weight clamping
-const I_BIAS: f32 = 4.0;           // constant bias current per hidden neuron
+const WEIGHT_SCALE: f32 = 5.0; // weight init: ±scale/√n_in
+const W_CLAMP: f32 = 5.0; // weight clamping
+const I_BIAS: f32 = 4.0; // constant bias current per hidden neuron
 
 const N_TRAIN: usize = 60_000;
 const N_TEST: usize = 10_000;
@@ -88,7 +88,9 @@ fn load_labels(path: &str) -> Vec<u8> {
 }
 
 fn check_data_file(path: &str) {
-    if Path::new(path).exists() { return; }
+    if Path::new(path).exists() {
+        return;
+    }
     println!("  ✗ {path} not found! Run: python3 examples/python/download_mnist.py");
     panic!("missing MNIST data file: {path}");
 }
@@ -108,26 +110,40 @@ fn fast_exp(x: f32) -> f32 {
     let poly = ((c4 * f + c3) * f + c2) * f + c1;
     let exp2f = poly * f + 1.0;
     let biased = n.wrapping_add(127);
-    let exp2n = if biased <= 0 { 0.0 }
-        else if biased >= 255 { f32::INFINITY }
-        else { f32::from_bits((biased as u32) << 23) };
+    let exp2n = if biased <= 0 {
+        0.0
+    } else if biased >= 255 {
+        f32::INFINITY
+    } else {
+        f32::from_bits((biased as u32) << 23)
+    };
     exp2n * exp2f
 }
 
 fn softmax(logits: &[f32]) -> Vec<f32> {
     let max_v = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let mut exps: Vec<f32> = logits.iter()
-        .map(|&x| fast_exp((x - max_v).max(-50.0).min(50.0))).collect();
+    let mut exps: Vec<f32> = logits
+        .iter()
+        .map(|&x| fast_exp((x - max_v).max(-50.0).min(50.0)))
+        .collect();
     let sum: f32 = exps.iter().sum();
-    if sum > 1e-20 { for e in &mut exps { *e /= sum; } }
+    if sum > 1e-20 {
+        for e in &mut exps {
+            *e /= sum;
+        }
+    }
     exps
 }
 
 // ─── LCG RNG for init ────────────────────────────────────
 
-struct Lcg { state: u32 }
+struct Lcg {
+    state: u32,
+}
 impl Lcg {
-    fn new(seed: u32) -> Self { Self { state: seed } }
+    fn new(seed: u32) -> Self {
+        Self { state: seed }
+    }
     fn next_f32(&mut self) -> f32 {
         self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
         (self.state >> 8) as f32 / 16777216.0
@@ -154,9 +170,9 @@ struct EPropNet {
     w_fb: Vec<f32>,
 
     // ─── Buffers ──────────────────────────────────────
-    z_pre: Vec<i32>,          // Poisson input spikes [n_input]
-    I_ext: Vec<f32>,          // bias current per hidden neuron
-    spikes_buf: Vec<i32>,     // hidden spikes [n_hidden]
+    z_pre: Vec<i32>,      // Poisson input spikes [n_input]
+    I_ext: Vec<f32>,      // bias current per hidden neuron
+    spikes_buf: Vec<i32>, // hidden spikes [n_hidden]
     hidden_spike_count: Vec<f32>,
     output_logits: Vec<f32>,
 }
@@ -195,9 +211,11 @@ impl EPropNet {
         Self {
             poisson,
             eprop,
-            w_in, w_out, w_fb,
+            w_in,
+            w_out,
+            w_fb,
             z_pre: vec![0i32; ni],
-            I_ext: vec![I_BIAS; nh],  // constant bias to help spiking
+            I_ext: vec![I_BIAS; nh], // constant bias to help spiking
             spikes_buf: vec![0i32; nh],
             hidden_spike_count: vec![0.0f32; nh],
             output_logits: vec![0.0f32; no],
@@ -230,7 +248,8 @@ impl EPropNet {
 
             // 2. Fused E-Prop step: weights × spikes → I_total → Izhikevich → eligibility
             //    w_in is column-major: w_in[i * nh + j] = weight from input i to hidden j
-            self.eprop.step(&self.w_in, &self.z_pre, &self.I_ext, &mut self.spikes_buf);
+            self.eprop
+                .step(&self.w_in, &self.z_pre, &self.I_ext, &mut self.spikes_buf);
 
             // 3. Accumulate hidden spikes for output readout
             for j in 0..nh {
@@ -271,10 +290,13 @@ impl EPropNet {
         // 4. Error = target - prediction (for gradient descent)
         let mut error = vec![0.0f32; no];
         error[label] = 1.0;
-        for k in 0..no { error[k] -= probs[k]; }
+        for k in 0..no {
+            error[k] -= probs[k];
+        }
 
         // 5. Predicted class
-        let pred = probs.iter()
+        let pred = probs
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
@@ -308,11 +330,16 @@ impl EPropNet {
         //    w_in is [ni × nh] column-major: w_in[i * nh + j]
         //    e is [ni × nh] column-major: e[i * nh + j]
         //    update_weights_multi iterates: each row (pre-neuron) → all post-connections
-        self.eprop.update_weights_multi(&mut self.w_in, &learning_signals, LR);
+        self.eprop
+            .update_weights_multi(&mut self.w_in, &learning_signals, LR);
 
         // 9. Weight clamping
-        for w in self.w_in.iter_mut() { *w = w.clamp(-W_CLAMP, W_CLAMP); }
-        for w in self.w_out.iter_mut() { *w = w.clamp(-W_CLAMP, W_CLAMP); }
+        for w in self.w_in.iter_mut() {
+            *w = w.clamp(-W_CLAMP, W_CLAMP);
+        }
+        for w in self.w_out.iter_mut() {
+            *w = w.clamp(-W_CLAMP, W_CLAMP);
+        }
 
         (loss, pred, correct)
     }
@@ -321,7 +348,8 @@ impl EPropNet {
     fn predict(&mut self, img: &[f32], label: usize) -> (usize, bool) {
         let logits = self.forward(img);
         let probs = softmax(logits);
-        let pred = probs.iter()
+        let pred = probs
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
@@ -354,8 +382,12 @@ fn main() {
     // 1. Load MNIST
     println!("─── Loading MNIST data ───");
     fs::create_dir_all(DATA_DIR).ok();
-    for f in &["train-images-idx3-ubyte", "train-labels-idx1-ubyte",
-               "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"] {
+    for f in &[
+        "train-images-idx3-ubyte",
+        "train-labels-idx1-ubyte",
+        "t10k-images-idx3-ubyte",
+        "t10k-labels-idx1-ubyte",
+    ] {
         check_data_file(&format!("{DATA_DIR}/{f}"));
     }
 
@@ -371,11 +403,28 @@ fn main() {
     // 2. Create network
     println!("─── Initialising E-Prop Network ───");
     let mut net = EPropNet::new();
-    println!("  w_in:  {} × {} = {} params (column-major)", N_INPUT, N_HIDDEN, N_INPUT * N_HIDDEN);
-    println!("  w_out: {} × {} = {} params", N_OUTPUT, N_HIDDEN, N_OUTPUT * N_HIDDEN);
-    println!("  e:     {} × {} = {} eligibility traces (per-synapse!)",
-        N_INPUT, N_HIDDEN, N_INPUT * N_HIDDEN);
-    println!("  Total: {} trainable params", N_INPUT * N_HIDDEN + N_OUTPUT * N_HIDDEN);
+    println!(
+        "  w_in:  {} × {} = {} params (column-major)",
+        N_INPUT,
+        N_HIDDEN,
+        N_INPUT * N_HIDDEN
+    );
+    println!(
+        "  w_out: {} × {} = {} params",
+        N_OUTPUT,
+        N_HIDDEN,
+        N_OUTPUT * N_HIDDEN
+    );
+    println!(
+        "  e:     {} × {} = {} eligibility traces (per-synapse!)",
+        N_INPUT,
+        N_HIDDEN,
+        N_INPUT * N_HIDDEN
+    );
+    println!(
+        "  Total: {} trainable params",
+        N_INPUT * N_HIDDEN + N_OUTPUT * N_HIDDEN
+    );
     println!();
 
     // 3. Train
@@ -387,13 +436,13 @@ fn main() {
     let mut firing_rate_ema = 0.0f32;
 
     for img_idx in 0..N_TRAIN {
-        let (loss, pred, correct) = net.train(
-            &train_images[img_idx],
-            train_labels[img_idx] as usize,
-        );
+        let (loss, pred, correct) =
+            net.train(&train_images[img_idx], train_labels[img_idx] as usize);
 
         total_loss += loss;
-        if correct { total_correct += 1; }
+        if correct {
+            total_correct += 1;
+        }
 
         // Track firing rate
         let fr = net.hidden_spike_count.iter().sum::<f32>() / N_HIDDEN as f32 / N_STEPS as f32;
@@ -406,9 +455,13 @@ fn main() {
             let img_per_sec = (img_idx + 1) as f64 / elapsed.as_secs_f64();
             println!(
                 "  [{:5}/{}] loss={:.4} acc={:.1}% | FR={:.4} spk/step | {:.0} img/s | {:.1}s",
-                img_idx + 1, N_TRAIN, avg_loss, accuracy,
+                img_idx + 1,
+                N_TRAIN,
+                avg_loss,
+                accuracy,
                 firing_rate_ema,
-                img_per_sec, elapsed.as_secs_f64(),
+                img_per_sec,
+                elapsed.as_secs_f64(),
             );
         }
     }
@@ -418,7 +471,8 @@ fn main() {
     println!();
     println!("─── Training Done ───");
     println!("  Train accuracy: {final_train_acc:.1}% ({total_correct}/{N_TRAIN})");
-    println!("  Total time:     {:.1}s ({:.0} img/s)",
+    println!(
+        "  Total time:     {:.1}s ({:.0} img/s)",
         total_elapsed.as_secs_f64(),
         N_TRAIN as f64 / total_elapsed.as_secs_f64(),
     );
@@ -433,23 +487,28 @@ fn main() {
     for (i, img) in test_images.iter().enumerate() {
         let label = test_labels[i] as usize;
         let (pred, correct) = net.predict(img, label);
-        if correct { test_correct += 1; }
+        if correct {
+            test_correct += 1;
+        }
         test_preds[pred] += 1;
     }
 
     let test_elapsed = test_start.elapsed();
     let test_accuracy = test_correct as f64 / N_TEST as f64 * 100.0;
     println!("  Test accuracy:  {test_accuracy:.1}% ({test_correct}/{N_TEST})");
-    println!("  Test time:      {:.1}s ({:.0} img/s)",
+    println!(
+        "  Test time:      {:.1}s ({:.0} img/s)",
         test_elapsed.as_secs_f64(),
         N_TEST as f64 / test_elapsed.as_secs_f64(),
     );
     println!();
     println!("  Prediction distribution:");
     for k in 0..N_OUTPUT {
-        println!("    Digit {k}: {} predictions ({:.1}%)",
+        println!(
+            "    Digit {k}: {} predictions ({:.1}%)",
             test_preds[k],
-            test_preds[k] as f64 / N_TEST as f64 * 100.0);
+            test_preds[k] as f64 / N_TEST as f64 * 100.0
+        );
     }
     println!();
 
@@ -461,8 +520,10 @@ fn main() {
     println!("  LR:        {LR} (hidden), {LR_OUT} (output)");
     println!("  Train acc: {final_train_acc:.1}%");
     println!("  Test acc:  {test_accuracy:.1}%");
-    println!("  Speed:     {:.0} img/s",
-        N_TRAIN as f64 / total_elapsed.as_secs_f64());
+    println!(
+        "  Speed:     {:.0} img/s",
+        N_TRAIN as f64 / total_elapsed.as_secs_f64()
+    );
     println!();
     println!("{}", "═".repeat(60));
     println!("  Done. Paper saved to bellec2020_eprop.pdf");

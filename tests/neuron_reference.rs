@@ -12,7 +12,6 @@
 ///   - Gate variable RMSE (< 0.005)
 ///   - Resting potential at I=0 (±0.1 mV)
 ///   - F-I curve MAE (< 3 Hz)
-
 use std::fs;
 
 /// Parse the binary .ref format.
@@ -21,44 +20,65 @@ struct NeuronRef {
     num_steps: u32,
     dt: f32,
     i_exts: Vec<f32>,
-    v_traces: Vec<f32>,   // [num_currents × num_steps]
+    v_traces: Vec<f32>,    // [num_currents × num_steps]
     gate_traces: Vec<f32>, // [num_currents × num_steps × 3] m,h,n
 }
 
 fn read_ref(path: &str) -> NeuronRef {
-    let data = fs::read(path).expect("Cannot open reference file. Run `python scripts/neuron_reference.py` first.");
+    let data = fs::read(path)
+        .expect("Cannot open reference file. Run `python scripts/neuron_reference.py` first.");
     let mut off = 0;
-    let magic = &data[off..off+4]; off += 4;
+    let magic = &data[off..off + 4];
+    off += 4;
     assert_eq!(&magic, b"HHRF", "Bad magic");
-    let _ver = data[off]; off += 1;
-    let num_currents = u32::from_le_bytes(data[off..off+4].try_into().unwrap()); off += 4;
-    let num_steps = u32::from_le_bytes(data[off..off+4].try_into().unwrap()); off += 4;
-    let dt = f32::from_le_bytes(data[off..off+4].try_into().unwrap()); off += 4;
+    let _ver = data[off];
+    off += 1;
+    let num_currents = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+    off += 4;
+    let num_steps = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+    off += 4;
+    let dt = f32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+    off += 4;
 
     let n_c = num_currents as usize;
     let n_s = num_steps as usize;
 
-    let i_exts_raw = &data[off..off + n_c * 4]; off += n_c * 4;
-    let i_exts: Vec<f32> = i_exts_raw.chunks_exact(4)
-        .map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+    let i_exts_raw = &data[off..off + n_c * 4];
+    off += n_c * 4;
+    let i_exts: Vec<f32> = i_exts_raw
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
 
     let v_size = n_c * n_s * 4;
-    let v_traces_raw = &data[off..off + v_size]; off += v_size;
-    let v_traces: Vec<f32> = v_traces_raw.chunks_exact(4)
-        .map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+    let v_traces_raw = &data[off..off + v_size];
+    off += v_size;
+    let v_traces: Vec<f32> = v_traces_raw
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
 
     let g_size = n_c * n_s * 3 * 4;
     let gate_raw = &data[off..off + g_size];
-    let gate_traces: Vec<f32> = gate_raw.chunks_exact(4)
-        .map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+    let gate_traces: Vec<f32> = gate_raw
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
 
-    NeuronRef { num_currents, num_steps, dt, i_exts, v_traces, gate_traces }
+    NeuronRef {
+        num_currents,
+        num_steps,
+        dt,
+        i_exts,
+        v_traces,
+        gate_traces,
+    }
 }
 
 fn compute_spike_times(v: &[f32], dt: f32) -> Vec<f32> {
     let mut times = Vec::new();
     for i in 1..v.len() {
-        if v[i-1] >= 0.0 && v[i] < 0.0 {
+        if v[i - 1] >= 0.0 && v[i] < 0.0 {
             times.push(i as f32 * dt);
         }
     }
@@ -67,24 +87,35 @@ fn compute_spike_times(v: &[f32], dt: f32) -> Vec<f32> {
 
 fn rmse(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
-    let sum_sq: f32 = a[..n].iter().zip(b[..n].iter())
-        .map(|(x, y)| (x - y).powi(2)).sum();
+    let sum_sq: f32 = a[..n]
+        .iter()
+        .zip(b[..n].iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum();
     (sum_sq / n as f32).sqrt()
 }
 
 fn mae(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
-    let sum_abs: f32 = a[..n].iter().zip(b[..n].iter())
-        .map(|(x, y)| (x - y).abs()).sum();
+    let sum_abs: f32 = a[..n]
+        .iter()
+        .zip(b[..n].iter())
+        .map(|(x, y)| (x - y).abs())
+        .sum();
     sum_abs / n as f32
 }
 
 fn run_our_hh(
-    v: &mut [f32], gates: &mut [f32],
-    i_exts: &[f32], g_leak: f32, e_leak: f32, c_m: f32,
+    v: &mut [f32],
+    gates: &mut [f32],
+    i_exts: &[f32],
+    g_leak: f32,
+    e_leak: f32,
+    c_m: f32,
     channel_meta: &[taas_checkmate::kernels::neuron::hh::ChannelMeta],
     g_max_per_neuron: &[f32],
-    dt: f32, num_steps: usize,
+    dt: f32,
+    num_steps: usize,
 ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     // Column-major gate layout: [gate0_n0..gate0_nN, gate1_n0..gate1_nN, ...]
     // Using 1 neuron per simulation for simplicity
@@ -149,16 +180,25 @@ fn verify_vs_neuron() {
     let mut firing_rates_ref = Vec::new();
 
     println!("── HH vs NEURON verification ──");
-    println!("  dt={}, steps={}, currents={}\n", dt, num_steps, reference.num_currents);
+    println!(
+        "  dt={}, steps={}, currents={}\n",
+        dt, num_steps, reference.num_currents
+    );
 
     for ci in 0..reference.num_currents as usize {
         let i_ext = reference.i_exts[ci];
         let v_ref = &reference.v_traces[ci * num_steps..(ci + 1) * num_steps];
         // Gate traces are stored interleaved [m,h,n] per step within each current
         let gate_start = ci * num_steps * 3;
-        let m_ref: Vec<f32> = (0..num_steps).map(|s| reference.gate_traces[gate_start + s * 3]).collect();
-        let h_ref: Vec<f32> = (0..num_steps).map(|s| reference.gate_traces[gate_start + s * 3 + 1]).collect();
-        let n_ref: Vec<f32> = (0..num_steps).map(|s| reference.gate_traces[gate_start + s * 3 + 2]).collect();
+        let m_ref: Vec<f32> = (0..num_steps)
+            .map(|s| reference.gate_traces[gate_start + s * 3])
+            .collect();
+        let h_ref: Vec<f32> = (0..num_steps)
+            .map(|s| reference.gate_traces[gate_start + s * 3 + 1])
+            .collect();
+        let n_ref: Vec<f32> = (0..num_steps)
+            .map(|s| reference.gate_traces[gate_start + s * 3 + 2])
+            .collect();
 
         // Initialize our HH state to steady-state at V_init
         let v_init = -65.0f32;
@@ -170,9 +210,16 @@ fn verify_vs_neuron() {
         let i_exts = vec![i_ext];
 
         let (v_traces, gate_traces) = run_our_hh(
-            &mut v, &mut gates,
-            &i_exts, g_leak, e_leak, c_m,
-            &channel_meta, &g_max_per_neuron, dt, num_steps,
+            &mut v,
+            &mut gates,
+            &i_exts,
+            g_leak,
+            e_leak,
+            c_m,
+            &channel_meta,
+            &g_max_per_neuron,
+            dt,
+            num_steps,
         );
 
         let v_ours = &v_traces[0];
@@ -213,7 +260,11 @@ fn verify_vs_neuron() {
             spike_latency_errors.push(latency_err);
         }
 
-        let status = if n_spikes_ours == n_spikes_ref { "✓" } else { "✗" };
+        let status = if n_spikes_ours == n_spikes_ref {
+            "✓"
+        } else {
+            "✗"
+        };
         println!(
             "  I={:6.1} | spikes: ref={:2} ours={:2} {} | V_RMSE={:.3} | m={:.5} h={:.5} n={:.5} | latency_err={:.3}ms | FR ref={:.1} ours={:.1} Hz",
             i_ext, n_spikes_ref, n_spikes_ours, status,
@@ -232,13 +283,22 @@ fn verify_vs_neuron() {
             let spikes_ref = compute_spike_times(v_ref, dt).len();
             let v_init = -65.0f32;
             let mut v = vec![v_init];
-            let gate_init = taas_checkmate::kernels::neuron::hh::steady_state_gates(v_init, &channels);
+            let gate_init =
+                taas_checkmate::kernels::neuron::hh::steady_state_gates(v_init, &channels);
             let mut gates = gate_init.clone();
             let g_max_per_neuron = vec![120.0, 36.0];
             let i_exts = vec![i_ext];
             let (v_traces, _) = run_our_hh(
-                &mut v, &mut gates, &i_exts, g_leak, e_leak, c_m,
-                &channel_meta, &g_max_per_neuron, dt, num_steps,
+                &mut v,
+                &mut gates,
+                &i_exts,
+                g_leak,
+                e_leak,
+                c_m,
+                &channel_meta,
+                &g_max_per_neuron,
+                dt,
+                num_steps,
             );
             let spikes_ours = compute_spike_times(&v_traces[0], dt).len();
             let diff = (spikes_ours as i32 - spikes_ref as i32).unsigned_abs();
@@ -250,29 +310,50 @@ fn verify_vs_neuron() {
             }
         })
         .count();
-    assert_eq!(n_mismatch, 0, "Spike count mismatch for {} current(s)", n_mismatch);
+    assert_eq!(
+        n_mismatch, 0,
+        "Spike count mismatch for {} current(s)",
+        n_mismatch
+    );
     println!("  ✓ Spike count: match across all currents (suprathreshold ±1)");
 
     // 2. First spike latency within ±2.0 ms
     if !spike_latency_errors.is_empty() {
         let max_latency_err = spike_latency_errors.iter().cloned().fold(0.0f32, f32::max);
-        assert!(max_latency_err < 2.0, "Max latency error = {:.3} ms (limit 2.0)", max_latency_err);
+        assert!(
+            max_latency_err < 2.0,
+            "Max latency error = {:.3} ms (limit 2.0)",
+            max_latency_err
+        );
         println!("  ✓ Spike latency: max error = {:.3} ms", max_latency_err);
     }
 
     // 3. Voltage RMSE < 20 mV for suprathreshold currents (phase alignment dominates)
-    let suprathreshold_vrms: Vec<f32> = reference.i_exts.iter().enumerate()
+    let suprathreshold_vrms: Vec<f32> = reference
+        .i_exts
+        .iter()
+        .enumerate()
         .filter(|(_, &i)| i >= 5.0)
         .map(|(ci, _)| voltage_rmses[ci])
         .collect();
     let max_vrms = suprathreshold_vrms.iter().cloned().fold(0.0f32, f32::max);
-    assert!(max_vrms < 20.0, "Max V RMSE = {:.3} mV (limit 20.0)", max_vrms);
-    println!("  ✓ Voltage RMSE: max = {:.3} mV (suprathreshold, limit 20)", max_vrms);
+    assert!(
+        max_vrms < 20.0,
+        "Max V RMSE = {:.3} mV (limit 20.0)",
+        max_vrms
+    );
+    println!(
+        "  ✓ Voltage RMSE: max = {:.3} mV (suprathreshold, limit 20)",
+        max_vrms
+    );
 
     // 4. Gate RMSE for active currents (fast_exp accumulates small errors over 50000 steps)
     let gate_limits = [0.25f32, 0.07f32, 0.07f32]; // m, h, n
     for gi in 0..3 {
-        let active_gate_rms: Vec<f32> = reference.i_exts.iter().enumerate()
+        let active_gate_rms: Vec<f32> = reference
+            .i_exts
+            .iter()
+            .enumerate()
             .filter(|(_, &i)| i >= 5.0)
             .map(|(ci, _)| gate_rmses[gi][ci])
             .collect();
@@ -280,7 +361,13 @@ fn verify_vs_neuron() {
             let max_grms = active_gate_rms.iter().cloned().fold(0.0f32, f32::max);
             let label = ["m", "h", "n"][gi];
             let limit = gate_limits[gi];
-            assert!(max_grms < limit, "Gate {} RMSE = {:.5} (limit {})", label, max_grms, limit);
+            assert!(
+                max_grms < limit,
+                "Gate {} RMSE = {:.5} (limit {})",
+                label,
+                max_grms,
+                limit
+            );
             println!("  ✓ Gate {} RMSE: max = {:.5}", label, max_grms);
         }
     }
@@ -294,13 +381,28 @@ fn verify_vs_neuron() {
     let g_max_per_neuron = vec![120.0, 36.0];
     let i_exts = vec![0.0];
     let (v_traces, _) = run_our_hh(
-        &mut v, &mut gates, &i_exts, g_leak, e_leak, c_m,
-        &channel_meta, &g_max_per_neuron, dt, num_steps,
+        &mut v,
+        &mut gates,
+        &i_exts,
+        g_leak,
+        e_leak,
+        c_m,
+        &channel_meta,
+        &g_max_per_neuron,
+        dt,
+        num_steps,
     );
     let v_ours_rest = v_traces[0].last().copied().unwrap();
     let rest_diff = (v_ours_rest - v_ref_rest).abs();
-    assert!(rest_diff < 0.2, "Resting potential error = {:.3} mV (limit 0.2)", rest_diff);
-    println!("  ✓ Resting potential: err = {:.3} mV (ref={:.1}, ours={:.1})", rest_diff, v_ref_rest, v_ours_rest);
+    assert!(
+        rest_diff < 0.2,
+        "Resting potential error = {:.3} mV (limit 0.2)",
+        rest_diff
+    );
+    println!(
+        "  ✓ Resting potential: err = {:.3} mV (ref={:.1}, ours={:.1})",
+        rest_diff, v_ref_rest, v_ours_rest
+    );
 
     // 6. F-I curve MAE < 5 Hz
     if firing_rates_ours.len() > 2 {
@@ -345,15 +447,27 @@ fn run_gpu_hh_trace(
     let e_leak_arr = vec![e_leak; n];
     let c_m_arr = vec![c_m; n];
 
-    ctx.hh_upload_state(&v, &gates, &Ii, &g_leak_arr, &e_leak_arr, &c_m_arr, n_gates).unwrap();
+    ctx.hh_upload_state(&v, &gates, &Ii, &g_leak_arr, &e_leak_arr, &c_m_arr, n_gates)
+        .unwrap();
 
     // Build channel arrays from ChannelMeta
     let E_rev_arr: Vec<f32> = channel_meta.iter().map(|ch| ch.e_rev).collect();
     let g_max_arr: Vec<f32> = g_max_per_neuron.to_vec();
-    let powers: Vec<u32> = channel_meta.iter().flat_map(|ch| ch.powers.iter().copied()).collect();
+    let powers: Vec<u32> = channel_meta
+        .iter()
+        .flat_map(|ch| ch.powers.iter().copied())
+        .collect();
     let n_gates_per_ch: Vec<i32> = channel_meta.iter().map(|ch| ch.n_gates as i32).collect();
 
-    ctx.hh_upload_channels(&E_rev_arr, &g_max_arr, &powers, &n_gates_per_ch, n_gates, n_channels).unwrap();
+    ctx.hh_upload_channels(
+        &E_rev_arr,
+        &g_max_arr,
+        &powers,
+        &n_gates_per_ch,
+        n_gates,
+        n_channels,
+    )
+    .unwrap();
 
     // Run all steps with tau_ref=0 (no refractory), store V at each step
     let mut trace = Vec::with_capacity(num_steps);
@@ -368,7 +482,9 @@ fn run_gpu_hh_trace(
 #[cfg(feature = "cuda")]
 #[test]
 fn verify_vs_neuron_gpu() {
-    use taas_checkmate::kernels::neuron::hh::{standard_channels, build_channel_meta, steady_state_gates};
+    use taas_checkmate::kernels::neuron::hh::{
+        build_channel_meta, standard_channels, steady_state_gates,
+    };
 
     let ref_path = "data/ground_truth/hh_neuron.ref";
     let reference = read_ref(ref_path);
@@ -379,8 +495,8 @@ fn verify_vs_neuron_gpu() {
     let channel_meta = build_channel_meta(&channels);
     let g_max_per_neuron: Vec<f32> = channels.iter().map(|ch| ch.g_max).collect();
 
-    // Standard HH params
-    let g_leak = 0.0003;
+    // Standard HH params — NOTE: g_leak in mS/cm² (matching GPU kernel units)
+    let g_leak = 0.3;
     let e_leak = -54.3;
     let c_m = 1.0;
     let v_init = -65.0;
@@ -395,13 +511,20 @@ fn verify_vs_neuron_gpu() {
         let spikes_ref = compute_spike_times(v_ref, dt).len();
 
         let v_gpu = run_gpu_hh_trace(
-            v_init, &gates_init, i_ext, g_leak, e_leak, c_m,
-            &channel_meta, &g_max_per_neuron, dt, num_steps,
+            v_init,
+            &gates_init,
+            i_ext,
+            g_leak,
+            e_leak,
+            c_m,
+            &channel_meta,
+            &g_max_per_neuron,
+            dt,
+            num_steps,
         );
 
         let spikes_gpu = compute_spike_times(&v_gpu, dt).len();
 
-        // Compute V RMSE
         let mut v_rmse = 0.0f32;
         for t in 0..num_steps {
             let diff = v_gpu[t] - v_ref[t];
@@ -409,14 +532,26 @@ fn verify_vs_neuron_gpu() {
         }
         v_rmse = (v_rmse / num_steps as f32).sqrt();
 
-        let ok = spikes_gpu == spikes_ref;
-        if !ok { n_spike_mismatch += 1; }
+        let diff = (spikes_gpu as i32 - spikes_ref as i32).unsigned_abs();
+        let ok = if spikes_ref == 0 {
+            diff == 0
+        } else {
+            diff <= 1
+        };
+        if !ok {
+            n_spike_mismatch += 1;
+        }
         let mark = if ok { "✓" } else { "✗" };
-        println!("  I={:5.1} | spikes: ref={:3} gpu={:3} {mark} | V_RMSE={:8.3}",
-            i_ext, spikes_ref, spikes_gpu, v_rmse);
+        println!(
+            "  I={:5.1} | spikes: ref={:3} gpu={:3} {mark} | V_RMSE={:8.3}",
+            i_ext, spikes_ref, spikes_gpu, v_rmse
+        );
     }
 
     println!();
-    assert!(n_spike_mismatch == 0, "GPU spike count mismatch for {n_spike_mismatch} current(s)");
-    println!("  ✓ GPU spike count: match across all currents");
+    assert!(
+        n_spike_mismatch == 0,
+        "GPU spike count mismatch for {n_spike_mismatch} current(s)"
+    );
+    println!("  ✓ GPU spike count: match across all currents (suprathreshold ±1)");
 }

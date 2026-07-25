@@ -6,21 +6,43 @@ use wide::{f32x8, CmpGt};
 #[inline(always)]
 unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3),
-                 *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    f32x8::from([
+        *p,
+        *p.add(1),
+        *p.add(2),
+        *p.add(3),
+        *p.add(4),
+        *p.add(5),
+        *p.add(6),
+        *p.add(7),
+    ])
 }
 #[inline(always)]
 unsafe fn load8_mut(ptr: *mut f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3),
-                 *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    f32x8::from([
+        *p,
+        *p.add(1),
+        *p.add(2),
+        *p.add(3),
+        *p.add(4),
+        *p.add(5),
+        *p.add(6),
+        *p.add(7),
+    ])
 }
 #[inline(always)]
 unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     let a = v.to_array();
     let p = ptr.add(off);
-    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
-    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
+    *p = a[0];
+    *p.add(1) = a[1];
+    *p.add(2) = a[2];
+    *p.add(3) = a[3];
+    *p.add(4) = a[4];
+    *p.add(5) = a[5];
+    *p.add(6) = a[6];
+    *p.add(7) = a[7];
 }
 
 // Sigmoid via fast_exp_simd from neuron module (~3× faster than scalar f32::exp).
@@ -46,7 +68,9 @@ pub(crate) unsafe fn safety_clamp(data: *mut f32, n: usize, min: f32, max: f32) 
     }
     if n8 < n {
         let s = std::slice::from_raw_parts_mut(data, n);
-        for v in s[n8..].iter_mut() { *v = v.clamp(min, max); }
+        for v in s[n8..].iter_mut() {
+            *v = v.clamp(min, max);
+        }
     }
 }
 
@@ -55,8 +79,12 @@ pub(crate) unsafe fn safety_clamp(data: *mut f32, n: usize, min: f32, max: f32) 
 /// # Safety
 /// `target_i`, `inputs`, `noise` must each be non-null, aligned, and valid for `n` elements.
 pub(crate) unsafe fn stochastic_encoder(
-    target_i: *mut f32, inputs: *const f32,
-    noise: *const f32, threshold: f32, spike_val: f32, n: usize,
+    target_i: *mut f32,
+    inputs: *const f32,
+    noise: *const f32,
+    threshold: f32,
+    spike_val: f32,
+    n: usize,
 ) {
     let th_s = f32x8::splat(threshold);
     let sv_s = f32x8::splat(spike_val);
@@ -73,7 +101,11 @@ pub(crate) unsafe fn stochastic_encoder(
         let inp = std::slice::from_raw_parts(inputs, n);
         let no = std::slice::from_raw_parts(noise, n);
         for i in n8..n {
-            t[i] = if inp[i] + no[i] > threshold { spike_val } else { 0.0 };
+            t[i] = if inp[i] + no[i] > threshold {
+                spike_val
+            } else {
+                0.0
+            };
         }
     }
 }
@@ -84,9 +116,12 @@ pub(crate) unsafe fn stochastic_encoder(
 /// # Safety
 /// Pointers must be valid: `outputs[n_out]`, `states[n_in]`, `weights[n_in·n_out]`, `biases[n_out]`.
 pub(crate) unsafe fn linear_decoder(
-    outputs: *mut f32, states: *const f32,
-    weights: *const f32, biases: *const f32,
-    n_in: usize, n_out: usize,
+    outputs: *mut f32,
+    states: *const f32,
+    weights: *const f32,
+    biases: *const f32,
+    n_in: usize,
+    n_out: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(outputs, n_out);
     let s = std::slice::from_raw_parts(states, n_in);
@@ -107,7 +142,9 @@ pub(crate) unsafe fn linear_decoder(
         }
         let arr: [f32; 8] = vi.to_array();
         sum += arr.iter().sum::<f32>();
-        for j in i..n_in { sum += w[row_off + j] * s[j]; }
+        for j in i..n_in {
+            sum += w[row_off + j] * s[j];
+        }
         out[o] = sum;
     }
 }
@@ -117,8 +154,12 @@ pub(crate) unsafe fn linear_decoder(
 /// # Safety
 /// `target_i`, `source_v`, `gate_v` must be valid for `n` elements.
 pub(crate) unsafe fn thalamic_gate(
-    target_i: *mut f32, source_v: *const f32,
-    gate_v: *const f32, threshold: f32, gain: f32, n: usize,
+    target_i: *mut f32,
+    source_v: *const f32,
+    gate_v: *const f32,
+    threshold: f32,
+    gain: f32,
+    n: usize,
 ) {
     let gain_s = f32x8::splat(gain);
     let th_s = f32x8::splat(threshold);
@@ -145,8 +186,11 @@ pub(crate) unsafe fn thalamic_gate(
 /// # Safety
 /// `output`, `input` must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn sigmoid_gate(
-    output: *mut f32, input: *const f32,
-    gain: f32, threshold: f32, n: usize,
+    output: *mut f32,
+    input: *const f32,
+    gain: f32,
+    threshold: f32,
+    n: usize,
 ) {
     let gain_s = f32x8::splat(gain);
     let th_s = f32x8::splat(threshold);
@@ -169,8 +213,12 @@ pub(crate) unsafe fn sigmoid_gate(
 /// # Safety
 /// `output`, `input`, `r` must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn phase_gate_apply(
-    output: *mut f32, input: *const f32,
-    r: *const f32, gain: f32, threshold: f32, n: usize,
+    output: *mut f32,
+    input: *const f32,
+    r: *const f32,
+    gain: f32,
+    threshold: f32,
+    n: usize,
 ) {
     let gain_s = f32x8::splat(gain);
     let th_s = f32x8::splat(threshold);
@@ -204,7 +252,9 @@ pub(crate) unsafe fn t3_drive_encoder(drives: *mut f32, inputs: *const f32, gain
     if n8 < n {
         let d = std::slice::from_raw_parts_mut(drives, n);
         let inp = std::slice::from_raw_parts(inputs, n);
-        for i in n8..n { d[i] = gain * inp[i]; }
+        for i in n8..n {
+            d[i] = gain * inp[i];
+        }
     }
 }
 
@@ -214,8 +264,12 @@ pub(crate) unsafe fn t3_drive_encoder(drives: *mut f32, inputs: *const f32, gain
 /// # Safety
 /// `pulses`, `ph1`, `ph2`, `ph3` must be valid for `n` elements.
 pub(crate) unsafe fn t3_tact_generator(
-    pulses: *mut f32, ph1: *const f32, ph2: *const f32,
-    ph3: *const f32, threshold: f32, n: usize,
+    pulses: *mut f32,
+    ph1: *const f32,
+    ph2: *const f32,
+    ph3: *const f32,
+    threshold: f32,
+    n: usize,
 ) {
     let th = f32x8::splat(threshold);
     let one = f32x8::splat(1.0);
@@ -234,7 +288,11 @@ pub(crate) unsafe fn t3_tact_generator(
         let b = std::slice::from_raw_parts(ph2, n);
         let c = std::slice::from_raw_parts(ph3, n);
         for i in n8..n {
-            p[i] = if a[i] > threshold && b[i] > threshold && c[i] > threshold { 1.0 } else { 0.0 };
+            p[i] = if a[i] > threshold && b[i] > threshold && c[i] > threshold {
+                1.0
+            } else {
+                0.0
+            };
         }
     }
 }
@@ -245,8 +303,11 @@ pub(crate) unsafe fn t3_tact_generator(
 /// # Safety
 /// `output` must be valid for `n_osc` elements; `buffer` for `n_osc·delay_len`.
 pub(crate) unsafe fn echo_tap(
-    output: *mut f32, buffer: *const f32,
-    n_osc: usize, delay_len: usize, delay_idx: usize,
+    output: *mut f32,
+    buffer: *const f32,
+    n_osc: usize,
+    delay_len: usize,
+    delay_idx: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(output, n_osc);
     let buf = std::slice::from_raw_parts(buffer, n_osc * delay_len);
@@ -271,9 +332,15 @@ pub(crate) unsafe fn echo_tap(
 /// # Safety
 /// `drive_out`, `r`, `r_prev` must be valid for `n` elements.
 pub(crate) unsafe fn t3_inverse_kuramoto(
-    drive_out: *mut f32, r: *const f32, r_prev: *const f32,
-    _alpha: f32, gain: f32, eps: f32, decay: f32,
-    dt: f32, n: usize,
+    drive_out: *mut f32,
+    r: *const f32,
+    r_prev: *const f32,
+    _alpha: f32,
+    gain: f32,
+    eps: f32,
+    decay: f32,
+    dt: f32,
+    n: usize,
 ) {
     let dt_inv = f32x8::splat(1.0 / dt.max(eps));
     let gain_s = f32x8::splat(gain);
@@ -314,7 +381,9 @@ pub(crate) unsafe fn relu_simd(data: *mut f32, n: usize) {
     }
     if n8 < n {
         let s = std::slice::from_raw_parts_mut(data, n);
-        for v in s[n8..].iter_mut() { *v = v.max(0.0); }
+        for v in s[n8..].iter_mut() {
+            *v = v.max(0.0);
+        }
     }
 }
 
@@ -332,7 +401,9 @@ pub(crate) unsafe fn add_simd(a: *mut f32, b: *const f32, n: usize) {
     if n8 < n {
         let sa = std::slice::from_raw_parts_mut(a, n);
         let sb = std::slice::from_raw_parts(b, n);
-        for i in n8..n { sa[i] += sb[i]; }
+        for i in n8..n {
+            sa[i] += sb[i];
+        }
     }
 }
 
@@ -343,8 +414,12 @@ pub(crate) unsafe fn add_simd(a: *mut f32, b: *const f32, n: usize) {
 /// # Safety
 /// `velocity`, `weight`, `grad` must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn sgd_step_simd(
-    velocity: *mut f32, weight: *mut f32, grad: *const f32,
-    lr: f32, momentum: f32, n: usize,
+    velocity: *mut f32,
+    weight: *mut f32,
+    grad: *const f32,
+    lr: f32,
+    momentum: f32,
+    n: usize,
 ) {
     let lr_s = f32x8::splat(lr);
     let mom_s = f32x8::splat(momentum);
@@ -375,9 +450,17 @@ pub(crate) unsafe fn sgd_step_simd(
 /// # Safety
 /// `weight`, `m`, `v`, `grad` must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn adam_step_simd(
-    weight: *mut f32, m: *mut f32, v: *mut f32, grad: *const f32,
-    lr: f32, beta1: f32, beta2: f32, eps: f32,
-    beta1_t_corr: f32, beta2_t_corr: f32, n: usize,
+    weight: *mut f32,
+    m: *mut f32,
+    v: *mut f32,
+    grad: *const f32,
+    lr: f32,
+    beta1: f32,
+    beta2: f32,
+    eps: f32,
+    beta1_t_corr: f32,
+    beta2_t_corr: f32,
+    n: usize,
 ) {
     let lr_s = f32x8::splat(lr);
     let b1_s = f32x8::splat(beta1);
@@ -426,8 +509,12 @@ pub(crate) unsafe fn adam_step_simd(
 /// # Safety
 /// `weights`, `cos_diff` must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn hebbian_update(
-    weights: *mut f32, cos_diff: *const f32,
-    lr: f32, decay: f32, dt: f32, n: usize,
+    weights: *mut f32,
+    cos_diff: *const f32,
+    lr: f32,
+    decay: f32,
+    dt: f32,
+    n: usize,
 ) {
     let lr_s = f32x8::splat(lr);
     let decay_dt = f32x8::splat(decay * dt);
@@ -441,6 +528,8 @@ pub(crate) unsafe fn hebbian_update(
     if n8 < n {
         let w = std::slice::from_raw_parts_mut(weights, n);
         let cd = std::slice::from_raw_parts(cos_diff, n);
-        for i in n8..n { w[i] += lr * cd[i] - decay * w[i] * dt; }
+        for i in n8..n {
+            w[i] += lr * cd[i] - decay * w[i] * dt;
+        }
     }
 }

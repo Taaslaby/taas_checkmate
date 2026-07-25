@@ -27,7 +27,7 @@
 //! This is **safe backprop for spikes** — no surrogate gradients,
 //! no spike-cutting, through smooth physical dynamics (T3 oscillators).
 
-use crate::spike::{T3SpikeTrajectory, t3spike_forward, t3spike_backward_per_step};
+use crate::spike::{t3spike_backward_per_step, t3spike_forward, T3SpikeTrajectory};
 
 /// Learnable linear bridge: spike features → T3 drives.
 ///
@@ -86,10 +86,19 @@ impl SpikeGradBridge {
         let b = vec![0.0; drive_dim];
 
         Self {
-            w, b,
-            n_osc, dt, drive_gain, alpha, freq_min, freq_max,
-            coupling_w12, coupling_w13, coupling_w23,
-            spike_dim, drive_dim,
+            w,
+            b,
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+            spike_dim,
+            drive_dim,
         }
     }
 
@@ -112,17 +121,35 @@ impl SpikeGradBridge {
         bias: &[f32],
     ) -> Self {
         let drive_dim = 3 * n_osc;
-        assert_eq!(weights.len(), spike_dim * drive_dim,
+        assert_eq!(
+            weights.len(),
+            spike_dim * drive_dim,
             "from_weights: weights.len()={} != spike_dim*drive_dim={}*{}",
-            weights.len(), spike_dim, drive_dim);
-        assert_eq!(bias.len(), drive_dim,
-            "from_weights: bias.len()={} != drive_dim={}", bias.len(), drive_dim);
+            weights.len(),
+            spike_dim,
+            drive_dim
+        );
+        assert_eq!(
+            bias.len(),
+            drive_dim,
+            "from_weights: bias.len()={} != drive_dim={}",
+            bias.len(),
+            drive_dim
+        );
         Self {
             w: weights.to_vec(),
             b: bias.to_vec(),
-            n_osc, dt, drive_gain, alpha, freq_min, freq_max,
-            coupling_w12, coupling_w13, coupling_w23,
-            spike_dim, drive_dim,
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+            spike_dim,
+            drive_dim,
         }
     }
 
@@ -143,9 +170,17 @@ impl SpikeGradBridge {
         Self {
             w: vec![0.0; spike_dim * drive_dim],
             b: vec![0.0; drive_dim],
-            n_osc, dt, drive_gain, alpha, freq_min, freq_max,
-            coupling_w12, coupling_w13, coupling_w23,
-            spike_dim, drive_dim,
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+            spike_dim,
+            drive_dim,
         }
     }
 
@@ -179,9 +214,16 @@ impl SpikeGradBridge {
         }
 
         t3spike_forward(
-            self.n_osc, n_steps, self.dt, self.drive_gain, self.alpha,
-            self.freq_min, self.freq_max,
-            self.coupling_w12, self.coupling_w13, self.coupling_w23,
+            self.n_osc,
+            n_steps,
+            self.dt,
+            self.drive_gain,
+            self.alpha,
+            self.freq_min,
+            self.freq_max,
+            self.coupling_w12,
+            self.coupling_w13,
+            self.coupling_w23,
             &drives,
         )
     }
@@ -382,7 +424,10 @@ mod tests {
 
         assert!(gw.iter().all(|&x| x.is_finite()));
         assert!(gb.iter().all(|&x| x.is_finite()));
-        assert!(gw.iter().any(|&x| x.abs() > 1e-6), "per-step gradient should be non-zero");
+        assert!(
+            gw.iter().any(|&x| x.abs() > 1e-6),
+            "per-step gradient should be non-zero"
+        );
     }
 
     #[test]
@@ -400,9 +445,14 @@ mod tests {
         let gb = vec![0.05; nd];
 
         let w_before = bridge.w.clone();
-        bridge.update_adam(&gw, &gb, 0.01, 0.9, 0.999, 1e-8, 1, &mut m_w, &mut v_w, &mut m_b, &mut v_b);
+        bridge.update_adam(
+            &gw, &gb, 0.01, 0.9, 0.999, 1e-8, 1, &mut m_w, &mut v_w, &mut m_b, &mut v_b,
+        );
 
-        let changed = w_before.iter().zip(bridge.w.iter()).any(|(a, b)| (a - b).abs() > 1e-8);
+        let changed = w_before
+            .iter()
+            .zip(bridge.w.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-8);
         assert!(changed, "ADAM should update weights");
     }
 }

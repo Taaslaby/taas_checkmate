@@ -60,20 +60,39 @@ struct OctNode {
 
 impl OctNode {
     fn new(cx: f32, cy: f32, cz: f32, half: f32) -> Self {
-        Self { cx, cy, cz, half, children: None, neurons: Vec::new() }
+        Self {
+            cx,
+            cy,
+            cz,
+            half,
+            children: None,
+            neurons: Vec::new(),
+        }
     }
 
     /// Sphere-aabb distance squared (negative → center inside sphere)
     fn sphere_dist_sq(&self, sx: f32, sy: f32, sz: f32, _sr: f32) -> f32 {
-        let dx = if sx < self.cx - self.half { self.cx - self.half - sx }
-                 else if sx > self.cx + self.half { sx - self.cx - self.half }
-                 else { 0.0 };
-        let dy = if sy < self.cy - self.half { self.cy - self.half - sy }
-                 else if sy > self.cy + self.half { sy - self.cy - self.half }
-                 else { 0.0 };
-        let dz = if sz < self.cz - self.half { self.cz - self.half - sz }
-                 else if sz > self.cz + self.half { sz - self.cz - self.half }
-                 else { 0.0 };
+        let dx = if sx < self.cx - self.half {
+            self.cx - self.half - sx
+        } else if sx > self.cx + self.half {
+            sx - self.cx - self.half
+        } else {
+            0.0
+        };
+        let dy = if sy < self.cy - self.half {
+            self.cy - self.half - sy
+        } else if sy > self.cy + self.half {
+            sy - self.cy - self.half
+        } else {
+            0.0
+        };
+        let dz = if sz < self.cz - self.half {
+            self.cz - self.half - sz
+        } else if sz > self.cz + self.half {
+            sz - self.cz - self.half
+        } else {
+            0.0
+        };
         dx * dx + dy * dy + dz * dz
     }
 
@@ -95,9 +114,12 @@ impl Octree {
         let (mut minx, mut miny, mut minz) = (f32::MAX, f32::MAX, f32::MAX);
         let (mut maxx, mut maxy, mut maxz) = (f32::MIN, f32::MIN, f32::MIN);
         for p in positions {
-            minx = minx.min(p.x); maxx = maxx.max(p.x);
-            miny = miny.min(p.y); maxy = maxy.max(p.y);
-            minz = minz.min(p.z); maxz = maxz.max(p.z);
+            minx = minx.min(p.x);
+            maxx = maxx.max(p.x);
+            miny = miny.min(p.y);
+            maxy = maxy.max(p.y);
+            minz = minz.min(p.z);
+            maxz = maxz.max(p.z);
         }
         let cx = (minx + maxx) * 0.5;
         let cy = (miny + maxy) * 0.5;
@@ -129,10 +151,20 @@ impl Octree {
             // Subdivide
             let h = half * 0.5;
             let offsets: [(f32, f32, f32); 8] = [
-                (-h, -h, -h), ( h, -h, -h), (-h,  h, -h), ( h,  h, -h),
-                (-h, -h,  h), ( h, -h,  h), (-h,  h,  h), ( h,  h,  h),
+                (-h, -h, -h),
+                (h, -h, -h),
+                (-h, h, -h),
+                (h, h, -h),
+                (-h, -h, h),
+                (h, -h, h),
+                (-h, h, h),
+                (h, h, h),
             ];
-            let (cx, cy, cz) = (self.nodes[node_idx].cx, self.nodes[node_idx].cy, self.nodes[node_idx].cz);
+            let (cx, cy, cz) = (
+                self.nodes[node_idx].cx,
+                self.nodes[node_idx].cy,
+                self.nodes[node_idx].cz,
+            );
             let mut children = [0usize; 8];
             for (ci, &(ox, oy, oz)) in offsets.iter().enumerate() {
                 let ci_idx = self.nodes.len();
@@ -156,7 +188,6 @@ impl Octree {
             self.insert(children[ci], neuron_idx, positions);
         }
     }
-
 }
 
 // ─── Carmack BSP ───────────────────────────────────────────────────────────
@@ -192,13 +223,31 @@ pub struct CarmackBsp {
     pub lod_distances: [f32; 3],
     /// Hold steps per LOD level
     pub lod_hold_steps: [u8; 4],
+    /// Stride for LOD updates (e.g. 10 = update LOD every 10 steps)
+    pub update_stride: u64,
+    /// Threshold of inactive steps before demoting quiet neurons (default: 20 steps)
+    pub quiet_threshold: u16,
+    /// Threshold of inactive steps before dropping to Tanh (default: 50 steps)
+    pub sleep_threshold: u16,
     /// Current simulation step
-    step: u64,
+    pub step: u64,
+
+    /// Steps since last spike for each neuron
+    pub inactive_steps: Vec<u16>,
+    /// Spike history counter for firing rate LOD
+    pub spike_history: Vec<u16>,
+
+    // Pre-allocated buffers to prevent heap allocations in update_lod
+    min_dist_sq_buf: Vec<f32>,
+    spike_pos_buf: Vec<(f32, f32, f32)>,
 }
 
 impl CarmackBsp {
     pub fn new(positions: &[(f32, f32, f32)]) -> Self {
-        let coords: Vec<Coord> = positions.iter().map(|&(x, y, z)| Coord { x, y, z }).collect();
+        let coords: Vec<Coord> = positions
+            .iter()
+            .map(|&(x, y, z)| Coord { x, y, z })
+            .collect();
         let n = coords.len();
         let octree = Octree::new(&coords);
         let mut bsp = Self {
@@ -212,7 +261,14 @@ impl CarmackBsp {
             tanh_indices: Vec::new(),
             lod_distances: [10.0, 50.0, 200.0],
             lod_hold_steps: LOD_HOLD_STEPS,
+            update_stride: 1,
+            quiet_threshold: 20,
+            sleep_threshold: 50,
             step: 0,
+            inactive_steps: vec![u16::MAX; n],
+            spike_history: vec![0; n],
+            min_dist_sq_buf: vec![f32::MAX; n],
+            spike_pos_buf: Vec::with_capacity(512),
         };
         bsp.rebuild_indices();
         bsp
@@ -226,57 +282,188 @@ impl CarmackBsp {
         self.lod_hold_steps = [hh, izh, lif, tanh];
     }
 
+    pub fn set_update_stride(&mut self, stride: u64) {
+        self.update_stride = stride.max(1);
+    }
+
+    pub fn set_activity_thresholds(&mut self, quiet: u16, sleep: u16) {
+        self.quiet_threshold = quiet;
+        self.sleep_threshold = sleep;
+    }
+
     // ─── Update LOD ────────────────────────────────────────────────────────
 
     /// Update LOD based on spike locations.
-    ///
-    /// Algorithm:
-    /// 1. Query octree for neurons within `lod_distances[2]` of each spike
-    /// 2. Assign target LOD based on exact distance
-    /// 3. If target LOD > current → promote (set hold)
-    /// 4. If target LOD < current → demote only when hold == 0
-    /// 5. No spikes → tick holds, demote when hold == 0
+    /// Skip computation if step % update_stride != 0 (unless forced).
     pub fn update_lod(&mut self, spike_indices: &[usize]) {
         self.step += 1;
+        if self.update_stride > 1 && self.step % self.update_stride != 0 {
+            return;
+        }
+        self.perform_update(spike_indices);
+    }
 
-        // Collect spike positions
-        let spike_positions: Vec<(f32, f32, f32)> = spike_indices.iter()
-            .filter_map(|&idx| {
-                let p = self.positions.get(idx)?;
-                Some((p.x, p.y, p.z))
-            })
-            .collect();
+    /// Pure Activity-Based Sliding Window LOD update.
+    ///
+    /// Rules:
+    /// - `inactive_steps < hh_window` (default 20)  => LOD 0 (HhLut)
+    /// - `inactive_steps < izh_window` (default 100) => LOD 1 (Izhikevich)
+    /// - `inactive_steps < lif_window` (default 200) => LOD 2 (Lif)
+    /// - `inactive_steps >= lif_window`              => LOD 3 (Tanh)
+    pub fn update_activity_lod(
+        &mut self,
+        spike_indices: &[usize],
+        hh_window: u16,
+        izh_window: u16,
+        lif_window: u16,
+    ) {
+        self.step += 1;
+        let n = self.positions.len();
 
-        if spike_positions.is_empty() {
-            for i in 0..self.positions.len() {
+        // 1. Increment inactive_steps and reset for spiking neurons
+        for i in 0..n {
+            if self.inactive_steps[i] < u16::MAX {
+                self.inactive_steps[i] += 1;
+            }
+        }
+        for &idx in spike_indices {
+            if idx < n {
+                self.inactive_steps[idx] = 0;
+            }
+        }
+
+        // 2. Direct activity-window LOD mapping
+        for i in 0..n {
+            let inactive = self.inactive_steps[i];
+            let target = if inactive < hh_window {
+                LodLevel::HhLut
+            } else if inactive < izh_window {
+                LodLevel::Izhikevich
+            } else if inactive < lif_window {
+                LodLevel::Lif
+            } else {
+                LodLevel::Tanh
+            };
+
+            self.lod[i] = target;
+        }
+
+        self.rebuild_indices();
+    }
+
+    /// Dynamic Firing-Rate Spike-Triggered LOD update.
+    /// Promotes to HH only if neuron has fired at least `min_spikes_hh` in `window_steps`.
+    pub fn update_firing_rate_lod(
+        &mut self,
+        spike_indices: &[usize],
+        min_spikes_hh: u16,
+        window_steps: u16,
+    ) {
+        self.step += 1;
+        let n = self.positions.len();
+
+        if self.spike_history.len() != n {
+            self.spike_history = vec![0; n];
+        }
+
+        // Increment inactive_steps counters
+        for i in 0..n {
+            if self.inactive_steps[i] < u16::MAX {
+                self.inactive_steps[i] += 1;
+            }
+        }
+
+        // Reset inactive and increment spike history for spiking neurons
+        for &idx in spike_indices {
+            if idx < n {
+                self.inactive_steps[idx] = 0;
+                self.spike_history[idx] = self.spike_history[idx].saturating_add(1);
+            }
+        }
+
+        // Decay history window periodically
+        if self.step % (window_steps as u64) == 0 {
+            for i in 0..n {
+                self.spike_history[i] = self.spike_history[i].saturating_sub(1);
+            }
+        }
+
+        // Map firing rate to LOD
+        for i in 0..n {
+            let spikes = self.spike_history[i];
+            let inactive = self.inactive_steps[i];
+
+            let target = if spikes >= min_spikes_hh {
+                LodLevel::HhLut // Active spiking bursts => HH
+            } else if spikes > 0 {
+                LodLevel::Izhikevich // Single spikes => Izhikevich
+            } else if inactive < 50 {
+                LodLevel::Lif // Recent subthreshold / post-spike => LIF
+            } else {
+                LodLevel::Tanh // Quiet background => Tanh
+            };
+
+            self.lod[i] = target;
+        }
+
+        self.rebuild_indices();
+    }
+
+    fn perform_update(&mut self, spike_indices: &[usize]) {
+        let n = self.positions.len();
+
+        // 1. Update inactive_steps counters
+        for i in 0..n {
+            if self.inactive_steps[i] < u16::MAX {
+                self.inactive_steps[i] += 1;
+            }
+        }
+        for &idx in spike_indices {
+            if idx < n {
+                self.inactive_steps[idx] = 0;
+            }
+        }
+
+        // Re-use pre-allocated spike positions buffer
+        self.spike_pos_buf.clear();
+        for &idx in spike_indices {
+            if let Some(p) = self.positions.get(idx) {
+                self.spike_pos_buf.push((p.x, p.y, p.z));
+            }
+        }
+
+        if self.spike_pos_buf.is_empty() {
+            for i in 0..n {
                 self.tick_demote(i);
             }
             self.rebuild_indices();
             return;
         }
 
-        // Для каждого нейрона храним минимальное расстояние² до любого спайка.
-        // f32::MAX = не затронут спайками (tick_demote).
-        let mut min_dist_sq = vec![f32::MAX; self.positions.len()];
+        // Re-use pre-allocated min_dist_sq buffer (fill with MAX)
+        self.min_dist_sq_buf.clear();
+        self.min_dist_sq_buf.resize(n, f32::MAX);
 
-        // Octree walk per spike: для каждого спайка находим нейроны в радиусе,
-        // вычисляем точную дистанцию прямо в листе. Это O(spikes × candidates_in_radius),
-        // но candidates_in_radius ≪ N (отсекается октри).
         let max_r_sq = self.lod_distances[2] * self.lod_distances[2];
-        for &(sx, sy, sz) in &spike_positions {
-            self.update_min_dist_from_spike(0, sx, sy, sz, max_r_sq, &mut min_dist_sq);
+        let n_spikes = self.spike_pos_buf.len();
+        for k in 0..n_spikes {
+            let (sx, sy, sz) = self.spike_pos_buf[k];
+            self.update_min_dist_from_spike(0, sx, sy, sz, max_r_sq);
         }
 
-        // Обновляем LOD на основе минимальной дистанции
-        for i in 0..self.positions.len() {
-            let d_sq = min_dist_sq[i];
-            if d_sq == f32::MAX {
+        // 2. Hybrid Spatial + Activity-Based LOD Assignment
+        for i in 0..n {
+            let d_sq = self.min_dist_sq_buf[i];
+            let inactive = self.inactive_steps[i];
+
+            if d_sq == f32::MAX || inactive >= self.sleep_threshold {
+                // Sleep: Force demotion if inactive for sleep_threshold steps
                 self.tick_demote(i);
                 continue;
             }
 
             let dist = d_sq.sqrt();
-            let target = if dist <= self.lod_distances[0] {
+            let mut target = if dist <= self.lod_distances[0] {
                 LodLevel::HhLut
             } else if dist <= self.lod_distances[1] {
                 LodLevel::Izhikevich
@@ -285,6 +472,17 @@ impl CarmackBsp {
             } else {
                 LodLevel::Tanh
             };
+
+            // Activity override: if spatially close to wavefront BUT quiet for quiet_threshold steps,
+            // demote HH -> Izhikevich or Izhikevich -> LIF
+            if inactive >= self.quiet_threshold {
+                target = match target {
+                    LodLevel::HhLut => LodLevel::Izhikevich,
+                    LodLevel::Izhikevich => LodLevel::Lif,
+                    LodLevel::Lif => LodLevel::Tanh,
+                    LodLevel::Tanh => LodLevel::Tanh,
+                };
+            }
 
             if target < self.lod[i] {
                 // Promotion: higher fidelity (smaller LOD#) — immediate
@@ -303,13 +501,12 @@ impl CarmackBsp {
     /// Octree walk: для спайка (sx,sy,sz) обновляем `min_dist_sq` у нейронов в радиусе.
     /// Вычисляем точную дистанцию в листьях (O(1) на нейрон).
     fn update_min_dist_from_spike(
-        &self,
+        &mut self,
         node_idx: usize,
         sx: f32,
         sy: f32,
         sz: f32,
         max_r_sq: f32,
-        min_dist_sq: &mut [f32],
     ) {
         let n = &self.octree.nodes[node_idx];
         let d_sq = n.sphere_dist_sq(sx, sy, sz, max_r_sq.sqrt());
@@ -317,26 +514,27 @@ impl CarmackBsp {
             return;
         }
 
-        if let Some(children) = &n.children {
-            for &ci in children {
-                self.update_min_dist_from_spike(ci, sx, sy, sz, max_r_sq, min_dist_sq);
+        if let Some(children) = n.children {
+            for ci in children {
+                self.update_min_dist_from_spike(ci, sx, sy, sz, max_r_sq);
             }
         } else {
-            // Leaf: вычисляем точную дистанцию для каждого нейрона в листе
+            // Leaf: compute exact distance for each neuron in leaf
             for &ni in &n.neurons {
-                if ni >= self.positions.len() { continue; }
+                if ni >= self.positions.len() {
+                    continue;
+                }
                 let p = &self.positions[ni];
                 let dx = p.x - sx;
                 let dy = p.y - sy;
                 let dz = p.z - sz;
                 let d2 = dx * dx + dy * dy + dz * dz;
-                if d2 < min_dist_sq[ni] {
-                    min_dist_sq[ni] = d2;
+                if d2 < self.min_dist_sq_buf[ni] {
+                    self.min_dist_sq_buf[ni] = d2;
                 }
             }
         }
     }
-
 
     /// Decrement hold counter and demote one level when hold expires.
     /// Does nothing at Tanh (lowest LOD).
@@ -384,7 +582,25 @@ impl CarmackBsp {
     }
 
     pub fn lod_counts(&self) -> [usize; 4] {
-        [self.hh_indices.len(), self.izh_indices.len(), self.lif_indices.len(), self.tanh_indices.len()]
+        [
+            self.hh_indices.len(),
+            self.izh_indices.len(),
+            self.lif_indices.len(),
+            self.tanh_indices.len(),
+        ]
+    }
+
+    /// Estimated speedup factor compared to running 100% HH (LOD 0).
+    /// Costs: HH=64x, Izh=8x, LIF=2x, Tanh=1x.
+    pub fn speedup_factor(&self) -> f32 {
+        let n = self.positions.len() as f32;
+        if n == 0.0 {
+            return 1.0;
+        }
+        let c = self.lod_counts();
+        let total_cost = (c[0] * 64 + c[1] * 8 + c[2] * 2 + c[3] * 1) as f32;
+        let baseline_cost = n * 64.0;
+        baseline_cost / total_cost.max(1.0)
     }
 }
 
@@ -398,7 +614,9 @@ mod tests {
         for i in 0..side {
             for j in 0..side {
                 for k in 0..side {
-                    if pts.len() >= n { break; }
+                    if pts.len() >= n {
+                        break;
+                    }
                     pts.push((i as f32 * 10.0, j as f32 * 10.0, k as f32 * 10.0));
                 }
             }
@@ -496,8 +714,7 @@ mod tests {
         // Even after many steps without spike, hold keeps it at HH
         for _ in 0..9 {
             bsp.update_lod(&[]);
-            assert_eq!(bsp.lod[0], LodLevel::HhLut,
-                "should stay HH while hold > 0");
+            assert_eq!(bsp.lod[0], LodLevel::HhLut, "should stay HH while hold > 0");
         }
 
         // After 10 holds, finally demote

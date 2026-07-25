@@ -22,17 +22,17 @@ use taas_checkmate::rl::ActorCriticAgent;
 
 // ─── Constants ────────────────────────────────────────────
 
-const N_INPUT: usize = 784;   // 28 × 28 pixels
-const N_HIDDEN: usize = 64;   // Izhikevich neurons (padded to 64 → ×8)
-const N_ACTIONS: usize = 10;  // digits 0-9
-const N_STEPS: usize = 20;    // internal simulation steps
-const DT: f32 = 1.0;          // ms
+const N_INPUT: usize = 784; // 28 × 28 pixels
+const N_HIDDEN: usize = 64; // Izhikevich neurons (padded to 64 → ×8)
+const N_ACTIONS: usize = 10; // digits 0-9
+const N_STEPS: usize = 20; // internal simulation steps
+const DT: f32 = 1.0; // ms
 const SEED: u32 = 42;
 
 const N_TRAIN: usize = 60_000;
 const N_TEST: usize = 10_000;
 
-const BATCH_SIZE: usize = 500;  // report accuracy every N images
+const BATCH_SIZE: usize = 500; // report accuracy every N images
 
 const DATA_DIR: &str = "examples/data";
 
@@ -50,7 +50,7 @@ fn load_images(path: &str) -> Vec<Vec<f32>> {
         let offset = 16 + i * pixel_count;
         let mut img = Vec::with_capacity(pixel_count);
         for p in 0..pixel_count {
-            img.push(data[offset + p] as f32 / 255.0);  // normalize to [0, 1]
+            img.push(data[offset + p] as f32 / 255.0); // normalize to [0, 1]
         }
         images.push(img);
     }
@@ -86,15 +86,22 @@ fn main() {
     println!("  Hidden:   {N_HIDDEN} Izhikevich neurons (SIMD f32x8)");
     println!("  Output:   {N_ACTIONS} LIF readout → softmax → digit");
     println!("  Plasticity: dopamine-STDP (3-factor, Izhikevich 2007)");
-    println!("  Internal sim: {N_STEPS} steps × DT = {} ms", N_STEPS as f32 * DT);
+    println!(
+        "  Internal sim: {N_STEPS} steps × DT = {} ms",
+        N_STEPS as f32 * DT
+    );
     println!();
 
     // 1. Download / load MNIST
     println!("─── Loading MNIST data ───");
     fs::create_dir_all(DATA_DIR).ok();
 
-    for f in &["train-images-idx3-ubyte", "train-labels-idx1-ubyte",
-               "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"] {
+    for f in &[
+        "train-images-idx3-ubyte",
+        "train-labels-idx1-ubyte",
+        "t10k-images-idx3-ubyte",
+        "t10k-labels-idx1-ubyte",
+    ] {
         let path = format!("{DATA_DIR}/{f}");
         check_data_file(&path);
     }
@@ -110,9 +117,7 @@ fn main() {
 
     // 2. Create agent
     println!("─── Creating Agent ───");
-    let mut agent = ActorCriticAgent::new(
-        N_INPUT, N_HIDDEN, N_ACTIONS, N_STEPS, DT, SEED,
-    );
+    let mut agent = ActorCriticAgent::new(N_INPUT, N_HIDDEN, N_ACTIONS, N_STEPS, DT, SEED);
     // Tune hyperparams for MNIST
     agent.lr_actor = 0.02;
     agent.lr_critic = 0.02;
@@ -123,8 +128,14 @@ fn main() {
     agent.a_ltd = 0.10;
     agent.w_min = 0.0;
     agent.w_max = 3.0;
-    println!("  lr_actor={}, gamma={}, tau_e={}", agent.lr_actor, agent.gamma, agent.tau_e);
-    println!("  lr={}, a_ltp={}, a_ltd={}, w_max={}", agent.lr_actor, agent.a_ltp, agent.a_ltd, agent.w_max);
+    println!(
+        "  lr_actor={}, gamma={}, tau_e={}",
+        agent.lr_actor, agent.gamma, agent.tau_e
+    );
+    println!(
+        "  lr={}, a_ltp={}, a_ltd={}, w_max={}",
+        agent.lr_actor, agent.a_ltp, agent.a_ltd, agent.w_max
+    );
     println!();
 
     // 3. Train
@@ -150,7 +161,9 @@ fn main() {
         let td = agent.learn(reward, 0.0, true);
 
         total_reward += reward;
-        if action == label { total_correct += 1; }
+        if action == label {
+            total_correct += 1;
+        }
         episode += 1;
 
         // EMA of average reward
@@ -181,7 +194,8 @@ fn main() {
     println!();
     println!("─── Training Done ───");
     println!("  Final accuracy: {final_accuracy:.1}% ({total_correct}/{N_TRAIN})");
-    println!("  Total time: {:.1}s ({:.0} img/s)",
+    println!(
+        "  Total time: {:.1}s ({:.0} img/s)",
         total_elapsed.as_secs_f64(),
         N_TRAIN as f64 / total_elapsed.as_secs_f64(),
     );
@@ -201,7 +215,8 @@ fn main() {
     let test_elapsed = test_start.elapsed();
     let test_accuracy = test_correct as f64 / N_TEST as f64 * 100.0;
     println!("  Test accuracy: {test_accuracy:.1}% ({test_correct}/{N_TEST})");
-    println!("  Test time: {:.1}s ({:.0} img/s)",
+    println!(
+        "  Test time: {:.1}s ({:.0} img/s)",
         test_elapsed.as_secs_f64(),
         N_TEST as f64 / test_elapsed.as_secs_f64(),
     );

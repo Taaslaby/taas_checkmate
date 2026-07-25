@@ -27,19 +27,19 @@
 //!  "offset":0, "size":1536}
 //! ```
 
-pub mod types;
-pub mod writer;
-pub mod reader;
 pub mod components;
 pub mod inspect;
 pub mod migration;
+pub mod reader;
+pub mod types;
+pub mod writer;
 
-pub use types::{TAAS_MAGIC, TAAS_VERSION, TensorDtype, ComponentEntry, TaasManifest};
-pub use writer::TaasWriter;
-pub use reader::TaasReader;
 pub use components::*;
 pub use inspect::inspect_taas;
 pub use migration::migrate_bytes;
+pub use reader::TaasReader;
+pub use types::{ComponentEntry, TaasManifest, TensorDtype, TAAS_MAGIC, TAAS_VERSION};
+pub use writer::TaasWriter;
 
 // ─── Fallback timestamp (without chrono dependency) ─────
 
@@ -60,8 +60,8 @@ pub(crate) fn chrono_or_fallback() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use taas_t3::{Avx2Backend, TriOscillator, NlmsDecoder, KalmanDecoder};
     use taas_core::neuron::SornNetwork;
+    use taas_t3::{Avx2Backend, KalmanDecoder, NlmsDecoder, TriOscillator};
 
     #[test]
     fn test_roundtrip_taas_basic() {
@@ -73,7 +73,10 @@ mod tests {
 
         let bytes = writer.to_bytes().unwrap();
         let reader = TaasReader::from_bytes(&bytes).unwrap();
-        assert_eq!(reader.get_f32("test_tensor").unwrap(), &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            reader.get_f32("test_tensor").unwrap(),
+            &[1.0, 2.0, 3.0, 4.0]
+        );
         assert_eq!(reader.get_i32("test_int").unwrap(), &[10, 20, 30]);
         assert_eq!(reader.get_scalar_f32("test_scalar").unwrap(), 42.0);
         assert!(reader.get_scalar_bool("test_bool").unwrap());
@@ -159,7 +162,6 @@ mod tests {
 
     #[test]
     fn test_multiple_components() {
-
         let tri = TriOscillator::new(16, 0.5, 1.5, Avx2Backend);
         let dec = NlmsDecoder::new(16, 0.01, 1e-8);
 
@@ -174,7 +176,10 @@ mod tests {
         // TriOscillator: 1 grouped tensor + 10 scalars + 1 bool = 12 components
         // NlmsDecoder: 2 tensors + 2 scalars = 4 components
         assert_eq!(reader.manifest.components.len(), 12 + 4);
-        assert_eq!(reader.metadata().get("description").unwrap(), "Test multi-component");
+        assert_eq!(
+            reader.metadata().get("description").unwrap(),
+            "Test multi-component"
+        );
         assert!(reader.find_component("tri_state").is_ok());
         assert!(reader.find_component("nlms_weights").is_ok());
     }
@@ -256,7 +261,7 @@ mod tests {
     #[test]
     fn test_zstd_compression_roundtrip() {
         let mut writer = TaasWriter::new();
-        writer.set_compression(3);  // zstd level 3
+        writer.set_compression(3); // zstd level 3
         writer.add_f32("data", "Test", &[1.0, 2.0, 3.0, 4.0, 5.0]);
         writer.add_i32("int_data", "Test", &[10, 20, 30, 40]);
         writer.add_scalar_f32("scalar", "Test", 42.0);
@@ -280,17 +285,28 @@ mod tests {
 
         // Test mixed: compress some components, not others
         let mut writer2 = TaasWriter::new();
-        writer2.add_f32("raw", "Test", &[1.0; 16]);  // uncompressed
+        writer2.add_f32("raw", "Test", &[1.0; 16]); // uncompressed
         writer2.set_compression(3);
         writer2.add_f32("compressed", "Test", &[2.0; 16]);
         writer2.disable_compression();
-        writer2.add_f32("raw2", "Test", &[3.0; 16]);  // uncompressed again
+        writer2.add_f32("raw2", "Test", &[3.0; 16]); // uncompressed again
 
         let bytes2 = writer2.to_bytes().unwrap();
         let reader2 = TaasReader::from_bytes(&bytes2).unwrap();
         assert!(reader2.find_component("raw").unwrap().compression.is_none());
-        assert_eq!(reader2.find_component("compressed").unwrap().compression.as_deref(), Some("zstd"));
-        assert!(reader2.find_component("raw2").unwrap().compression.is_none());
+        assert_eq!(
+            reader2
+                .find_component("compressed")
+                .unwrap()
+                .compression
+                .as_deref(),
+            Some("zstd")
+        );
+        assert!(reader2
+            .find_component("raw2")
+            .unwrap()
+            .compression
+            .is_none());
         assert_eq!(reader2.get_f32("raw").unwrap(), &[1.0; 16]);
         assert_eq!(reader2.get_f32("compressed").unwrap(), &[2.0; 16]);
         assert_eq!(reader2.get_f32("raw2").unwrap(), &[3.0; 16]);
@@ -300,8 +316,12 @@ mod tests {
     fn test_izhikevich_params_roundtrip() {
         use taas_connectome::sim::IzhikevichParams;
         let params = IzhikevichParams {
-            a: vec![0.02; 8], b: vec![0.2; 8], c: vec![-65.0; 8], d: vec![2.0; 8],
-            dt_ms: 0.5, tau_ref: 2.0,
+            a: vec![0.02; 8],
+            b: vec![0.2; 8],
+            c: vec![-65.0; 8],
+            d: vec![2.0; 8],
+            dt_ms: 0.5,
+            tau_ref: 2.0,
         };
         let mut writer = TaasWriter::new();
         save_izhikevich_params(&params, &mut writer);

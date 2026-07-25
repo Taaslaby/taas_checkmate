@@ -13,7 +13,11 @@ pub struct DelayBuffer {
 impl DelayBuffer {
     pub fn new(n: usize) -> Self {
         let padded = n.div_ceil(8) * 8;
-        Self { buf: vec![0.0f32; padded], n, pos: 0 }
+        Self {
+            buf: vec![0.0f32; padded],
+            n,
+            pos: 0,
+        }
     }
 
     pub fn push(&mut self, data: &[f32]) {
@@ -41,10 +45,17 @@ impl DelayBuffer {
     pub fn read_multi(&self, delays: &[i32]) -> Vec<f32> {
         let n_taps = delays.len().min(self.n).min(8);
         let mut out = vec![0.0f32; n_taps];
-        let wrapped: Vec<i32> = delays.iter().map(|&d| {
-            let abs_d = d.unsigned_abs() as usize % self.n;
-            if d < 0 { -(abs_d as i32) } else { abs_d as i32 }
-        }).collect();
+        let wrapped: Vec<i32> = delays
+            .iter()
+            .map(|&d| {
+                let abs_d = d.unsigned_abs() as usize % self.n;
+                if d < 0 {
+                    -(abs_d as i32)
+                } else {
+                    abs_d as i32
+                }
+            })
+            .collect();
         kernels::delay_buffer_multi_tap(&mut out, &self.buf[..self.n], &wrapped);
         out
     }

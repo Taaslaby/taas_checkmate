@@ -7,9 +7,9 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::manual_clamp)]
 
-pub mod neuron;
-pub mod kuramoto;
-pub mod sparse;
 pub mod koit;
+pub mod kuramoto;
+pub mod neuron;
+pub mod sparse;
 
 pub use taas_kernels as kernels;

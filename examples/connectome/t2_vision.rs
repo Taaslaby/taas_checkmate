@@ -1,3 +1,5 @@
+use cuda_kernels::GpuContext;
+use rand::prelude::*;
 /// T2 visual stimulus → HH on FAFB 15M connectome with E/I balance
 ///
 /// Uses the pipeline from fly-brain-main:
@@ -7,10 +9,8 @@
 ///   4. HH + CSR propagate through connectome
 ///   5. DN readout (descending neurons for behavior)
 use std::fs::File;
-use std::io::{Write, BufWriter, Read, BufReader, BufRead};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
-use cuda_kernels::GpuContext;
-use rand::prelude::*;
 
 /// Resolve a path under `examples/data/` (works from any cwd via CARGO_MANIFEST_DIR).
 fn data(name: &str) -> PathBuf {
@@ -29,23 +29,29 @@ const TOTAL_STEPS: usize = 6000;
 const N_BATCHES: usize = TOTAL_STEPS / BATCH;
 
 /// T2 vision parameters (from fly-brain-main visual_system.py)
-const T2_MAX_HZ: f32 = 120.0;      // max T2 firing rate
-const CONTRAST_THRESH: f32 = 0.3;   // contrast threshold
-const BASELINE_UA: f32 = 10.0;      // baseline current (uA/cm²)
-const RATE_TO_CURRENT: f32 = 0.08;  // Hz → uA/cm²
-const N_OMMATIDIA: usize = 721;     // ommatidia per eye
-const BAR_SPEED: f32 = 16.7;        // retina sweep per second
+const T2_MAX_HZ: f32 = 120.0; // max T2 firing rate
+const CONTRAST_THRESH: f32 = 0.3; // contrast threshold
+const BASELINE_UA: f32 = 10.0; // baseline current (uA/cm²)
+const RATE_TO_CURRENT: f32 = 0.08; // Hz → uA/cm²
+const N_OMMATIDIA: usize = 721; // ommatidia per eye
+const BAR_SPEED: f32 = 16.7; // retina sweep per second
 
 fn load_indices(path: impl AsRef<std::path::Path>) -> Vec<usize> {
     let f = File::open(path).unwrap();
     let reader = BufReader::new(f);
-    reader.lines().filter_map(|l| l.ok().and_then(|s| s.trim().parse().ok())).collect()
+    reader
+        .lines()
+        .filter_map(|l| l.ok().and_then(|s| s.trim().parse().ok()))
+        .collect()
 }
 
 /// Build left/right T2 → ommatidium mapping
 /// Each T2 neuron maps to one of 721 ommatidia, preserving rough retinotopy
-fn build_t2_omm_mapping(t2_indices: &[usize], left_indices: &[usize], right_indices: &[usize])
-    -> Vec<(usize, usize)> // (t2_idx_in_connectome, ommatidium_idx)
+fn build_t2_omm_mapping(
+    t2_indices: &[usize],
+    left_indices: &[usize],
+    right_indices: &[usize],
+) -> Vec<(usize, usize)> // (t2_idx_in_connectome, ommatidium_idx)
 {
     let mut mapping = Vec::with_capacity(t2_indices.len());
     // Left eye T2s
@@ -121,16 +127,28 @@ fn main() {
     let dn_mdn = load_indices(&data("MDN_indices.txt"));
     let dn_lplc2 = load_indices(&data("LPLC2_indices.txt"));
     let dn_lc4 = load_indices(&data("LC4_indices.txt"));
-    println!("DNs: P9={}, DNa01={}, DNa02={}, MDN={}, LPLC2={}, LC4={}",
-             dn_p9.len(), dn_dna01.len(), dn_dna02.len(), dn_mdn.len(),
-             dn_lplc2.len(), dn_lc4.len());
+    println!(
+        "DNs: P9={}, DNa01={}, DNa02={}, MDN={}, LPLC2={}, LC4={}",
+        dn_p9.len(),
+        dn_dna01.len(),
+        dn_dna02.len(),
+        dn_mdn.len(),
+        dn_lplc2.len(),
+        dn_lc4.len()
+    );
 
     // ─── Upload connectome ───
     let ctx = GpuContext::new(n, n_syn).unwrap();
     // The .taas already has nt_types from the baking (excitatory/inhibitory from data)
     let pace_I = vec![0.0f32; n];
-    ctx.upload_connectome(&conn.row_ptr, &conn.col_indices, &conn.values,
-                          &conn.nt_types, &pace_I).unwrap();
+    ctx.upload_connectome(
+        &conn.row_ptr,
+        &conn.col_indices,
+        &conn.values,
+        &conn.nt_types,
+        &pace_I,
+    )
+    .unwrap();
 
     // ─── HH state ───
     const NG: usize = 3;
@@ -141,23 +159,37 @@ fn main() {
     let mut c_m = vec![1.0f32; n];
 
     for i in 0..n {
-        gates[i*NG..i*NG+3].copy_from_slice(&[0.05, 0.6, 0.3]);
-        g_leak[i] = (0.15f32 * (1.0 + (rng.gen::<f32>() - 0.5) * 1.5)).max(0.05).min(0.6);
-        c_m[i] = (1.0f32 * (1.0 + (rng.gen::<f32>() - 0.5) * 1.5)).max(0.3).min(2.5);
+        gates[i * NG..i * NG + 3].copy_from_slice(&[0.05, 0.6, 0.3]);
+        g_leak[i] = (0.15f32 * (1.0 + (rng.gen::<f32>() - 0.5) * 1.5))
+            .max(0.05)
+            .min(0.6);
+        c_m[i] = (1.0f32 * (1.0 + (rng.gen::<f32>() - 0.5) * 1.5))
+            .max(0.3)
+            .min(2.5);
         e_leak[i] = -65.0 + (rng.gen::<f32>() - 0.5) * 6.0;
         v_init[i] = -65.0 + (rng.gen::<f32>() - 0.5) * 6.0;
     }
 
-    ctx.hh_upload_state(&v_init, &gates, &vec![0.0f32; n],
-                        &g_leak, &e_leak, &c_m, NG).unwrap();
+    ctx.hh_upload_state(
+        &v_init,
+        &gates,
+        &vec![0.0f32; n],
+        &g_leak,
+        &e_leak,
+        &c_m,
+        NG,
+    )
+    .unwrap();
     // Only NaV (m³h) + KV (n⁴) — NO CaV-T (would make all neurons pacemakers)
     ctx.hh_upload_channels(
         &vec![50.0, -77.0],
         &vec![120.0, 36.0],
         &vec![3u32, 1, 4],
         &vec![2i32, 1],
-        3, 2
-    ).unwrap();
+        3,
+        2,
+    )
+    .unwrap();
 
     // ─── Buffers ───
     let mut spike_buf = vec![0i32; TOTAL_STEPS * n];
@@ -166,10 +198,17 @@ fn main() {
 
     // ─── DN rate tracking ───
     let dn_groups: Vec<(&str, &[usize])> = vec![
-        ("P9", &dn_p9), ("DNa01", &dn_dna01), ("DNa02", &dn_dna02),
-        ("MDN", &dn_mdn), ("LPLC2", &dn_lplc2), ("LC4", &dn_lc4),
+        ("P9", &dn_p9),
+        ("DNa01", &dn_dna01),
+        ("DNa02", &dn_dna02),
+        ("MDN", &dn_mdn),
+        ("LPLC2", &dn_lplc2),
+        ("LC4", &dn_lc4),
     ];
-    let mut dn_rates: Vec<Vec<f32>> = dn_groups.iter().map(|_| Vec::with_capacity(TOTAL_STEPS)).collect();
+    let mut dn_rates: Vec<Vec<f32>> = dn_groups
+        .iter()
+        .map(|_| Vec::with_capacity(TOTAL_STEPS))
+        .collect();
 
     println!("Running {} batches × {} steps...", N_BATCHES, BATCH);
     for b in 0..N_BATCHES {
@@ -193,37 +232,59 @@ fn main() {
 
         let start = b * BATCH * n;
         let end = (b + 1) * BATCH * n;
-        ctx.batch_hh_steps(&I_batch, &mut spike_buf[start..end],
-                           &mut hv, &mut his,
-                           BATCH, DT, TAU_REF, TAU_SYN, WEIGHT_SCALE).unwrap();
+        ctx.batch_hh_steps(
+            &I_batch,
+            &mut spike_buf[start..end],
+            &mut hv,
+            &mut his,
+            BATCH,
+            DT,
+            TAU_REF,
+            TAU_SYN,
+            WEIGHT_SCALE,
+        )
+        .unwrap();
 
         // ─── Record DN rates ───
         for step_rel in 0..BATCH {
             let step_abs = b * BATCH + step_rel;
             let off = step_abs * n;
             for (gi, (_, neurons)) in dn_groups.iter().enumerate() {
-                let count = neurons.iter().filter(|&&ni| spike_buf[off + ni] > 0).count();
+                let count = neurons
+                    .iter()
+                    .filter(|&&ni| spike_buf[off + ni] > 0)
+                    .count();
                 dn_rates[gi].push(count as f32 / neurons.len() as f32);
             }
         }
 
         if (b + 1) % 20 == 0 || b == 0 {
             let el = t0.elapsed();
-            println!("  {}% ({:.1}s)", (b + 1) * 100 / N_BATCHES, el.as_secs_f64());
+            println!(
+                "  {}% ({:.1}s)",
+                (b + 1) * 100 / N_BATCHES,
+                el.as_secs_f64()
+            );
         }
     }
 
     let total_spikes: i32 = spike_buf.iter().sum();
     let elapsed = t0.elapsed();
-    println!("\nTotal: {total_spikes} spikes in {:.2}s ({:.0} us/step)",
-             elapsed.as_secs_f64(),
-             elapsed.as_secs_f64() / TOTAL_STEPS as f64 * 1e6);
+    println!(
+        "\nTotal: {total_spikes} spikes in {:.2}s ({:.0} us/step)",
+        elapsed.as_secs_f64(),
+        elapsed.as_secs_f64() / TOTAL_STEPS as f64 * 1e6
+    );
 
     // ─── Stats ───
     let mut spike_count = vec![0usize; n];
     for step in 0..TOTAL_STEPS {
         let off = step * n;
-        for i in 0..n { if spike_buf[off + i] > 0 { spike_count[i] += 1; } }
+        for i in 0..n {
+            if spike_buf[off + i] > 0 {
+                spike_count[i] += 1;
+            }
+        }
     }
     let n_fired = spike_count.iter().filter(|&&c| c > 0).count();
     let max_spk = *spike_count.iter().max().unwrap();
@@ -241,10 +302,20 @@ fn main() {
     // E/I split stats
     let n_exc = conn.nt_types.iter().filter(|&&t| t > 0.0).count();
     let n_inh = n - n_exc;
-    let exc_spikes: f64 = spike_count.iter().zip(conn.nt_types.iter())
-        .filter(|(_, &t)| t > 0.0).map(|(&c, _)| c as f64).sum::<f64>() / n_exc.max(1) as f64;
-    let inh_spikes: f64 = spike_count.iter().zip(conn.nt_types.iter())
-        .filter(|(_, &t)| t <= 0.0).map(|(&c, _)| c as f64).sum::<f64>() / n_inh.max(1) as f64;
+    let exc_spikes: f64 = spike_count
+        .iter()
+        .zip(conn.nt_types.iter())
+        .filter(|(_, &t)| t > 0.0)
+        .map(|(&c, _)| c as f64)
+        .sum::<f64>()
+        / n_exc.max(1) as f64;
+    let inh_spikes: f64 = spike_count
+        .iter()
+        .zip(conn.nt_types.iter())
+        .filter(|(_, &t)| t <= 0.0)
+        .map(|(&c, _)| c as f64)
+        .sum::<f64>()
+        / n_inh.max(1) as f64;
     println!("\n  E/I: {n_exc}/{n_inh}, mean spikes: E={exc_spikes:.1}, I={inh_spikes:.1}");
 
     // ─── Save spikes ───
@@ -255,7 +326,9 @@ fn main() {
         let cnt: u32 = spike_buf[off..off + n].iter().filter(|&&s| s > 0).count() as u32;
         out.write_all(&cnt.to_le_bytes()).unwrap();
         for (i, &s) in spike_buf[off..off + n].iter().enumerate() {
-            if s > 0 { out.write_all(&(i as u32).to_le_bytes()).unwrap(); }
+            if s > 0 {
+                out.write_all(&(i as u32).to_le_bytes()).unwrap();
+            }
         }
     }
     out.flush().unwrap();
@@ -263,7 +336,9 @@ fn main() {
     // ─── Save DN rates ───
     let mut gr_out = BufWriter::new(File::create("t2_vision_dn.csv").unwrap());
     write!(gr_out, "step").unwrap();
-    for (name, _) in &dn_groups { write!(gr_out, ",{name}").unwrap(); }
+    for (name, _) in &dn_groups {
+        write!(gr_out, ",{name}").unwrap();
+    }
     writeln!(gr_out).unwrap();
     for s in 0..TOTAL_STEPS {
         write!(gr_out, "{s}").unwrap();

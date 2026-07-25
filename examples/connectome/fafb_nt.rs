@@ -47,8 +47,14 @@ mod inner {
         let i_count = conn.nt_types.iter().filter(|&&t| t < 0.0).count();
         println!("   ✓ Loaded: {n} neurons, {n_syn} synapses");
         println!("   ✓ NT types: E={e_count}, I={i_count}");
-        println!("   ✓ receptor_types: {} (old format → empty)", conn.receptor_types.len());
-        assert!(conn.receptor_types.is_empty(), "old format should have empty receptor_types");
+        println!(
+            "   ✓ receptor_types: {} (old format → empty)",
+            conn.receptor_types.len()
+        );
+        assert!(
+            conn.receptor_types.is_empty(),
+            "old format should have empty receptor_types"
+        );
         println!("   ✓ Backward compat: OK");
 
         // ─── 2. Build receptor_types ───────────────────
@@ -62,8 +68,14 @@ mod inner {
         let gaba_a = rt.iter().filter(|&&r| r == 2).count();
         let nmda = rt.iter().filter(|&&r| r == 1).count();
         let gaba_b = rt.iter().filter(|&&r| r == 3).count();
-        println!("   ✓ AMPA (0):   {ampa:>10} ({:.1}%)", ampa as f64 / n_syn as f64 * 100.0);
-        println!("   ✓ GABA_A (2): {gaba_a:>10} ({:.1}%)", gaba_a as f64 / n_syn as f64 * 100.0);
+        println!(
+            "   ✓ AMPA (0):   {ampa:>10} ({:.1}%)",
+            ampa as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "   ✓ GABA_A (2): {gaba_a:>10} ({:.1}%)",
+            gaba_a as f64 / n_syn as f64 * 100.0
+        );
         if nmda > 0 {
             println!("   ✓ NMDA (1):   {nmda:>10}");
         }
@@ -72,7 +84,11 @@ mod inner {
         }
         assert!(ampa > 0, "should have AMPA synapses");
         assert!(gaba_a > 0, "should have GABA_A synapses");
-        assert_eq!(ampa + gaba_a + nmda + gaba_b, n_syn, "all synapses accounted for");
+        assert_eq!(
+            ampa + gaba_a + nmda + gaba_b,
+            n_syn,
+            "all synapses accounted for"
+        );
         println!();
         println!("   build_receptor_types(): OK");
 
@@ -97,8 +113,15 @@ mod inner {
         assert_eq!(loaded.n_synapses, n_syn, "n_synapses mismatch");
         assert_eq!(loaded.values.len(), n_syn, "values length mismatch");
         assert_eq!(loaded.nt_types.len(), n, "nt_types length mismatch");
-        assert_eq!(loaded.receptor_types.len(), n_syn, "receptor_types length after load");
-        assert_eq!(loaded.receptor_types, conn.receptor_types, "receptor_types content mismatch");
+        assert_eq!(
+            loaded.receptor_types.len(),
+            n_syn,
+            "receptor_types length after load"
+        );
+        assert_eq!(
+            loaded.receptor_types, conn.receptor_types,
+            "receptor_types content mismatch"
+        );
         assert_eq!(loaded.values, conn.values, "values content mismatch");
         assert_eq!(loaded.nt_types, conn.nt_types, "nt_types content mismatch");
         assert_eq!(loaded.row_ptr, conn.row_ptr, "row_ptr mismatch");
@@ -120,8 +143,14 @@ mod inner {
         println!("║  Neurons:     {n}");
         println!("║  Synapses:    {n_syn}");
         println!("║  E/I:         {e_count}E / {i_count}I");
-        println!("║  AMPA:        {ampa} ({:.1}%)", ampa as f64 / n_syn as f64 * 100.0);
-        println!("║  GABA_A:      {gaba_a} ({:.1}%)", gaba_a as f64 / n_syn as f64 * 100.0);
+        println!(
+            "║  AMPA:        {ampa} ({:.1}%)",
+            ampa as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "║  GABA_A:      {gaba_a} ({:.1}%)",
+            gaba_a as f64 / n_syn as f64 * 100.0
+        );
         println!("║  Time:        {:.1}s", t0.elapsed().as_secs_f64());
         println!("╚═══════════════════════════════════════════════╝");
     }

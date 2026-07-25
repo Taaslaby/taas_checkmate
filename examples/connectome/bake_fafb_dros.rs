@@ -39,12 +39,12 @@ mod inner {
     ///   DA/SER/OCT → mAChR (6, slow mod)
     fn nt_to_receptor(nt: &str) -> u8 {
         match nt {
-            "GABA" => 2,      // GABA_A
-            "GLUT" => 5,      // GluCl (inhibitory in insects!)
-            "DA"   => 6,      // mAChR-like (slow mod)
-            "SER"  => 6,      // mAChR-like
-            "OCT"  => 6,      // mAChR-like
-            _ => 4,           // ACH or unknown → nAChR (fast exc)
+            "GABA" => 2, // GABA_A
+            "GLUT" => 5, // GluCl (inhibitory in insects!)
+            "DA" => 6,   // mAChR-like (slow mod)
+            "SER" => 6,  // mAChR-like
+            "OCT" => 6,  // mAChR-like
+            _ => 4,      // ACH or unknown → nAChR (fast exc)
         }
     }
 
@@ -74,9 +74,13 @@ mod inner {
         let mut line_count = 0usize;
         for line in iter {
             let line = line.expect("read error");
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             let fields: Vec<&str> = line.split(',').collect();
-            if fields.len() < 5 { continue; }
+            if fields.len() < 5 {
+                continue;
+            }
             line_count += 1;
 
             let pre: u64 = fields[0].parse().unwrap_or(0);
@@ -84,8 +88,16 @@ mod inner {
             let w: f32 = fields[3].parse().unwrap_or(1.0);
             let nt = fields[4].trim().to_uppercase();
 
-            let pi = *root_to_idx.entry(pre).or_insert_with(|| { let i = next_idx; next_idx += 1; i });
-            let pj = *root_to_idx.entry(post).or_insert_with(|| { let i = next_idx; next_idx += 1; i });
+            let pi = *root_to_idx.entry(pre).or_insert_with(|| {
+                let i = next_idx;
+                next_idx += 1;
+                i
+            });
+            let pj = *root_to_idx.entry(post).or_insert_with(|| {
+                let i = next_idx;
+                next_idx += 1;
+                i
+            });
 
             edges.push((pi as u32, pj as u32, w));
 
@@ -99,18 +111,25 @@ mod inner {
 
         let n = root_to_idx.len();
         let n_syn = edges.len();
-        println!("   {n} neurons, {n_syn} synapses in {:.1}s",
-                 t0.elapsed().as_secs_f64());
+        println!(
+            "   {n} neurons, {n_syn} synapses in {:.1}s",
+            t0.elapsed().as_secs_f64()
+        );
 
         // ─── Step 2: Build CSR matrix ─────────────────────────────────
         println!("2. Building CSR matrix ...");
         let t1 = Instant::now();
         let mut row_counts = vec![0usize; n + 1];
-        for &(pre, _, _) in &edges { row_counts[pre as usize] += 1; }
+        for &(pre, _, _) in &edges {
+            row_counts[pre as usize] += 1;
+        }
 
         let mut row_ptr = vec![0i32; n + 1];
         let mut cum = 0i32;
-        for i in 0..n { row_ptr[i] = cum; cum += row_counts[i] as i32; }
+        for i in 0..n {
+            row_ptr[i] = cum;
+            cum += row_counts[i] as i32;
+        }
         row_ptr[n] = cum;
         drop(row_counts);
 
@@ -127,7 +146,9 @@ mod inner {
         // Build root_id → idx reverse mapping
         let mut idx_to_root: Vec<u64> = vec![0u64; n];
         for (&root_id, &idx) in &root_to_idx {
-            if idx < n { idx_to_root[idx] = root_id; }
+            if idx < n {
+                idx_to_root[idx] = root_id;
+            }
         }
         // Build per-neuron NT labels and nt_types
         for i in 0..n {
@@ -150,20 +171,25 @@ mod inner {
             let idx = row_ptr[pre as usize] as usize + p;
             col_indices[idx] = post as i32;
             values[idx] = w * 1e-12; // scale raw synapse count to nA
-            // Receptor type from pre-neuron's NT label → Drosophila-appropriate
+                                     // Receptor type from pre-neuron's NT label → Drosophila-appropriate
             let label = &per_neuron_label[pre as usize];
             receptor_types[syn_idx] = nt_to_receptor(label);
             pos[pre as usize] = p + 1;
             syn_idx += 1;
         }
-        drop(edges); drop(pos);
+        drop(edges);
+        drop(pos);
 
         println!("   CSR built in {:.1}s", t1.elapsed().as_secs_f64());
 
         // ─── Step 3: NT distribution stats ────────────────────────────
         let mut nt_counts: HashMap<&str, usize> = HashMap::new();
         for label in &per_neuron_label {
-            let key = if label.is_empty() { "unknown" } else { label.as_str() };
+            let key = if label.is_empty() {
+                "unknown"
+            } else {
+                label.as_str()
+            };
             *nt_counts.entry(key).or_insert(0) += 1;
         }
         let mut nt_sorted: Vec<_> = nt_counts.iter().collect();
@@ -171,7 +197,10 @@ mod inner {
         println!();
         println!("   NT distribution (per neuron):");
         for (label, count) in nt_sorted {
-            println!("     {label:>8}: {count:>6} ({:.1}%)", *count as f64 / n as f64 * 100.0);
+            println!(
+                "     {label:>8}: {count:>6} ({:.1}%)",
+                *count as f64 / n as f64 * 100.0
+            );
         }
 
         // ─── Step 4: Receptor type stats ──────────────────────────────
@@ -184,16 +213,37 @@ mod inner {
         let _gaba_b = receptor_types.iter().filter(|&&r| r == 3).count();
         println!();
         println!("   Receptor types (per synapse):");
-        println!("     nAChR (ACH):  {nachr:>8} ({:.1}%)", nachr as f64 / n_syn as f64 * 100.0);
-        println!("     GluCl (GLUT): {glucl:>8} ({:.1}%) — inhibitory in insects! ⭐", glucl as f64 / n_syn as f64 * 100.0);
-        println!("     mAChR (DA/O): {machr:>8} ({:.1}%)", machr as f64 / n_syn as f64 * 100.0);
-        println!("     GABA_A:       {gaba_a:>8} ({:.1}%)", gaba_a as f64 / n_syn as f64 * 100.0);
-        println!("     AMPA:         {ampa:>8} ({:.1}%)", ampa as f64 / n_syn as f64 * 100.0);
+        println!(
+            "     nAChR (ACH):  {nachr:>8} ({:.1}%)",
+            nachr as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "     GluCl (GLUT): {glucl:>8} ({:.1}%) — inhibitory in insects! ⭐",
+            glucl as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "     mAChR (DA/O): {machr:>8} ({:.1}%)",
+            machr as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "     GABA_A:       {gaba_a:>8} ({:.1}%)",
+            gaba_a as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "     AMPA:         {ampa:>8} ({:.1}%)",
+            ampa as f64 / n_syn as f64 * 100.0
+        );
 
         let exc = nachr + ampa;
         let inh = glucl + gaba_a + machr;
-        println!("     Excitatory: {exc} ({:.1}%)", exc as f64 / n_syn as f64 * 100.0);
-        println!("     Inhibitory: {inh} ({:.1}%)", inh as f64 / n_syn as f64 * 100.0);
+        println!(
+            "     Excitatory: {exc} ({:.1}%)",
+            exc as f64 / n_syn as f64 * 100.0
+        );
+        println!(
+            "     Inhibitory: {inh} ({:.1}%)",
+            inh as f64 / n_syn as f64 * 100.0
+        );
 
         // ─── Step 5: Build ConnectomeData ─────────────────────────────
         let conn = ConnectomeData {
@@ -225,8 +275,10 @@ mod inner {
 
         assert_eq!(loaded.n_neurons, conn.n_neurons);
         assert_eq!(loaded.n_synapses, conn.n_synapses);
-        assert_eq!(loaded.receptor_types, conn.receptor_types,
-            "receptor_types mismatch after round-trip");
+        assert_eq!(
+            loaded.receptor_types, conn.receptor_types,
+            "receptor_types mismatch after round-trip"
+        );
         println!("   ✓ All arrays match");
 
         let elapsed = t0.elapsed().as_secs_f64();
@@ -240,7 +292,10 @@ mod inner {
         println!("╚══════════════════════════════════════════════════╝");
         println!();
         println!("Run biology_check on it:");
-        println!("  cargo run --features connectome --example biology_check --release -- {}", out_path.display());
+        println!(
+            "  cargo run --features connectome --example biology_check --release -- {}",
+            out_path.display()
+        );
     }
 }
 

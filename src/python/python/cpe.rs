@@ -46,9 +46,7 @@ pub fn py_cpe_kuramoto_step(
 /// Phase coherence R ∈ [0, 1].
 #[pyfunction]
 #[pyo3(name = "phase_coherence")]
-pub fn py_cpe_phase_coherence(
-    phases: Bound<'_, PyArray1<f32>>,
-) -> f32 {
+pub fn py_cpe_phase_coherence(phases: Bound<'_, PyArray1<f32>>) -> f32 {
     let phases = phases.readonly();
     let phases_slice = match phases.as_slice() {
         Ok(s) => s,
@@ -87,7 +85,11 @@ pub fn py_cpe_detect_spikes(
     let mut spikes_out = spikes_out.readwrite();
     let phases = phases.readonly();
     let phases_prev = phases_prev.readonly();
-    if let (Ok(sp), Ok(p), Ok(pp)) = (spikes_out.as_slice_mut(), phases.as_slice(), phases_prev.as_slice()) {
+    if let (Ok(sp), Ok(p), Ok(pp)) = (
+        spikes_out.as_slice_mut(),
+        phases.as_slice(),
+        phases_prev.as_slice(),
+    ) {
         let result = taas_cpe::detect_spikes(p, pp, threshold);
         let n = sp.len().min(result.len());
         sp[..n].copy_from_slice(&result[..n]);
@@ -112,7 +114,14 @@ pub fn py_cpe_dopamine_delta(
         beta,
         ..taas_cpe::CpeConfig::default()
     };
-    taas_cpe::dopamine_delta(&config, reward, pattern_r, pattern_h_err, chaos_r, chaos_h_err)
+    taas_cpe::dopamine_delta(
+        &config,
+        reward,
+        pattern_r,
+        pattern_h_err,
+        chaos_r,
+        chaos_h_err,
+    )
 }
 
 /// Dopamine timing gate: scales [0, 1] based on critical steps ratio.

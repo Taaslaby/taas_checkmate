@@ -6,12 +6,10 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use taas_connectome::{
-    ConnectomeData, SpikeQueue,
-    bandwidth, mean_bandwidth,
-    build_adjacency, reverse_cuthill_mckee, apply_permutation_to_csr,
-    csr_propagate_from_queue,
+    apply_permutation_to_csr, bandwidth, build_adjacency, csr_propagate_from_queue, mean_bandwidth,
+    reverse_cuthill_mckee, ConnectomeData, SpikeQueue,
 };
 
 // ─── Синтетический коннектом ────────────────────────────
@@ -64,8 +62,12 @@ fn make_conn(rp: &[i32], ci: &[i32], vals: &[f32], nt: &[f32]) -> ConnectomeData
 
 /// Один прогон csr_propagate_from_queue: push n_spikes → propagate.
 fn run_propagate(
-    rp: &[i32], ci: &[i32], vals: &[f32], nt: &[f32],
-    n: usize, n_spikes: usize,
+    rp: &[i32],
+    ci: &[i32],
+    vals: &[f32],
+    nt: &[f32],
+    n: usize,
+    n_spikes: usize,
 ) -> f64 {
     let mut q = SpikeQueue::new(n_spikes.max(256));
     let mut I_buf = vec![0.0f32; n];
@@ -110,41 +112,57 @@ fn bench_rcm(c: &mut Criterion) {
     let bw_after = bandwidth(&new_rp, &new_ci);
     let mbw_after = mean_bandwidth(&new_rp, &new_ci);
 
-    print!("\n═══ RCM Benchmark: {n} neurons, ~{syn_avg} syn/neuron ═══\n",
-        syn_avg = (n_syn + n / 2) / n);
+    print!(
+        "\n═══ RCM Benchmark: {n} neurons, ~{syn_avg} syn/neuron ═══\n",
+        syn_avg = (n_syn + n / 2) / n
+    );
     println!("  RCM time:      {:.3}s", rcm_time.as_secs_f64());
     println!("  Total syn:     {n_syn}");
     println!();
     println!("  BW BEFORE:     {bw_before:>10}");
     println!("  BW AFTER:      {bw_after:>10}");
-    println!("  BW reduction:  {:.1}×", bw_before as f64 / bw_after.max(1) as f64);
+    println!(
+        "  BW reduction:  {:.1}×",
+        bw_before as f64 / bw_after.max(1) as f64
+    );
     println!("  Mean BW BEFORE: {mbw_before:>9.2}");
     println!("  Mean BW AFTER:  {mbw_after:>9.2}");
-    println!("  Mean reduction: {:.1}×", mbw_before / mbw_after.max(1e-10));
+    println!(
+        "  Mean reduction: {:.1}×",
+        mbw_before / mbw_after.max(1e-10)
+    );
 
     // ─── Propagate benchmark (criterion) ────────
 
-    let p50 = n / 20;  // 5% firing
-    let p10 = n / 10;  // 10% firing
+    let p50 = n / 20; // 5% firing
+    let p10 = n / 10; // 10% firing
 
     let mut g = c.benchmark_group("propagate_5pct");
     g.throughput(Throughput::Elements(p50 as u64));
-    g.bench_function("before_rcm", |b| b.iter(|| {
-        run_propagate(&rp, &ci, &vals, &nt, n, p50);
-    }));
-    g.bench_function("after_rcm", |b| b.iter(|| {
-        run_propagate(&new_rp, &new_ci, &vals, &nt, n, p50);
-    }));
+    g.bench_function("before_rcm", |b| {
+        b.iter(|| {
+            run_propagate(&rp, &ci, &vals, &nt, n, p50);
+        })
+    });
+    g.bench_function("after_rcm", |b| {
+        b.iter(|| {
+            run_propagate(&new_rp, &new_ci, &vals, &nt, n, p50);
+        })
+    });
     g.finish();
 
     let mut g = c.benchmark_group("propagate_10pct");
     g.throughput(Throughput::Elements(p10 as u64));
-    g.bench_function("before_rcm", |b| b.iter(|| {
-        run_propagate(&rp, &ci, &vals, &nt, n, p10);
-    }));
-    g.bench_function("after_rcm", |b| b.iter(|| {
-        run_propagate(&new_rp, &new_ci, &vals, &nt, n, p10);
-    }));
+    g.bench_function("before_rcm", |b| {
+        b.iter(|| {
+            run_propagate(&rp, &ci, &vals, &nt, n, p10);
+        })
+    });
+    g.bench_function("after_rcm", |b| {
+        b.iter(|| {
+            run_propagate(&new_rp, &new_ci, &vals, &nt, n, p10);
+        })
+    });
     g.finish();
 
     // ─── Wall-clock timings ────────────────────
@@ -166,8 +184,12 @@ fn bench_rcm(c: &mut Criterion) {
         t_bef /= n_runs as f64;
         t_aft /= n_runs as f64;
         let speedup = if t_aft > 0.0 { t_bef / t_aft } else { 0.0 };
-        println!("  {name:>3} spikes: before={:.3}ms  after={:.3}ms  speedup={:.1}×",
-            t_bef * 1000.0, t_aft * 1000.0, speedup);
+        println!(
+            "  {name:>3} spikes: before={:.3}ms  after={:.3}ms  speedup={:.1}×",
+            t_bef * 1000.0,
+            t_aft * 1000.0,
+            speedup
+        );
     }
     println!();
 }

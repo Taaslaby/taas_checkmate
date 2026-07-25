@@ -8,10 +8,10 @@
 #![allow(deprecated)]
 
 use numpy::{PyArray1, PyArrayMethods};
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 
-use crate::core::neuron::hh::{HhLutConfig, step_hh_lut, standard_config};
+use crate::core::neuron::hh::{standard_config, step_hh_lut, HhLutConfig};
 
 /// LUT-based Hodgkin-Huxley simulator.
 ///
@@ -49,7 +49,8 @@ impl PyHhLut {
         let cfg = if pacemaking.unwrap_or(false) {
             let channels = crate::kernels::neuron::hh::pacemaking_channels();
             crate::core::neuron::hh::build_config_from_channels(
-                &channels, n, dt, -100.0, 60.0, 1024)
+                &channels, n, dt, -100.0, 60.0, 1024,
+            )
         } else {
             standard_config(n, dt)
         };
@@ -92,9 +93,15 @@ impl PyHhLut {
     /// Set leak conductances.
     pub fn set_g_leak(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("g_leak: {e}")))?;
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("g_leak: {e}")))?;
         if slice.len() != self.cfg.n {
-            return Err(PyValueError::new_err(format!("expected {} values, got {}", self.cfg.n, slice.len())));
+            return Err(PyValueError::new_err(format!(
+                "expected {} values, got {}",
+                self.cfg.n,
+                slice.len()
+            )));
         }
         self.cfg.g_leak.copy_from_slice(slice);
         Ok(())
@@ -109,9 +116,15 @@ impl PyHhLut {
     /// Set leak reversal potentials.
     pub fn set_E_leak(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("E_leak: {e}")))?;
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("E_leak: {e}")))?;
         if slice.len() != self.cfg.n {
-            return Err(PyValueError::new_err(format!("expected {} values, got {}", self.cfg.n, slice.len())));
+            return Err(PyValueError::new_err(format!(
+                "expected {} values, got {}",
+                self.cfg.n,
+                slice.len()
+            )));
         }
         self.cfg.E_leak.copy_from_slice(slice);
         Ok(())
@@ -137,7 +150,9 @@ impl PyHhLut {
     ///     values: [n_channels] (broadcast to all neurons) or [n_channels * n] (per-neuron).
     pub fn set_g_max_arr(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("g_max_arr: {e}")))?;
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("g_max_arr: {e}")))?;
         let n = self.cfg.n;
         if slice.len() == self.cfg.n_channels {
             // Broadcast per-channel to all neurons
@@ -151,7 +166,9 @@ impl PyHhLut {
         } else {
             return Err(PyValueError::new_err(format!(
                 "g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
-                slice.len(), self.cfg.n_channels, self.cfg.n_channels * n
+                slice.len(),
+                self.cfg.n_channels,
+                self.cfg.n_channels * n
             )));
         }
         Ok(())
@@ -167,10 +184,14 @@ impl PyHhLut {
     /// Set reversal potentials for each ion channel type.
     pub fn set_E_rev_arr(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("E_rev_arr: {e}")))?;
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("E_rev_arr: {e}")))?;
         if slice.len() != self.cfg.n_channels {
             return Err(PyValueError::new_err(format!(
-                "expected {} values, got {}", self.cfg.n_channels, slice.len()
+                "expected {} values, got {}",
+                self.cfg.n_channels,
+                slice.len()
             )));
         }
         self.cfg.E_rev_arr.copy_from_slice(slice);
@@ -179,19 +200,27 @@ impl PyHhLut {
 
     /// Number of neurons.
     #[getter]
-    pub fn n(&self) -> usize { self.cfg.n }
+    pub fn n(&self) -> usize {
+        self.cfg.n
+    }
 
     /// Total gates across all channels.
     #[getter]
-    pub fn n_gates(&self) -> usize { self.cfg.n_gates }
+    pub fn n_gates(&self) -> usize {
+        self.cfg.n_gates
+    }
 
     /// Number of ion channel types.
     #[getter]
-    pub fn n_channels(&self) -> usize { self.cfg.n_channels }
+    pub fn n_channels(&self) -> usize {
+        self.cfg.n_channels
+    }
 
     /// Timestep in ms.
     #[getter]
-    pub fn dt(&self) -> f32 { self.cfg.dt }
+    pub fn dt(&self) -> f32 {
+        self.cfg.dt
+    }
 
     /// Reset all neurons to resting state (correct steady-state gates).
     pub fn reset(&mut self) {
@@ -209,7 +238,10 @@ impl PyHhLut {
     /// Set input current for a single neuron.
     pub fn set_I(&mut self, idx: usize, value: f32) -> PyResult<()> {
         if idx >= self.cfg.n {
-            return Err(PyValueError::new_err(format!("index {idx} out of range (n={})", self.cfg.n)));
+            return Err(PyValueError::new_err(format!(
+                "index {idx} out of range (n={})",
+                self.cfg.n
+            )));
         }
         self.cfg.Ii[idx] = value;
         Ok(())
@@ -218,11 +250,14 @@ impl PyHhLut {
     /// Set input current for all neurons at once.
     pub fn set_I_all(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice()
+        let slice = ro
+            .as_slice()
             .map_err(|e| PyValueError::new_err(format!("I array: {e}")))?;
         if slice.len() != self.cfg.n {
             return Err(PyValueError::new_err(format!(
-                "expected {} values, got {}", self.cfg.n, slice.len()
+                "expected {} values, got {}",
+                self.cfg.n,
+                slice.len()
             )));
         }
         self.cfg.Ii.copy_from_slice(slice);
@@ -232,11 +267,14 @@ impl PyHhLut {
     /// Set membrane potentials for all neurons.
     pub fn set_v(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
-        let slice = ro.as_slice()
+        let slice = ro
+            .as_slice()
             .map_err(|e| PyValueError::new_err(format!("v array: {e}")))?;
         if slice.len() != self.cfg.n {
             return Err(PyValueError::new_err(format!(
-                "expected {} values, got {}", self.cfg.n, slice.len()
+                "expected {} values, got {}",
+                self.cfg.n,
+                slice.len()
             )));
         }
         self.cfg.v.copy_from_slice(slice);

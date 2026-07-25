@@ -11,7 +11,7 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 // ─── Синтетический коннектом ────────────────────────────
 
@@ -99,7 +99,7 @@ fn bench_propagate(
     n_neurons: usize,
     n_spikes: usize,
 ) -> f64 {
-    use taas_connectome::{SpikeQueue, csr_propagate_from_queue};
+    use taas_connectome::{csr_propagate_from_queue, SpikeQueue};
 
     let mut queue = SpikeQueue::new(n_spikes.max(256));
     let mut I_buf = vec![0.0f32; n_neurons];
@@ -113,8 +113,13 @@ fn bench_propagate(
     // Measure
     let t0 = std::time::Instant::now();
     let total = csr_propagate_from_queue(
-        row_ptr, col_indices, values, nt_types,
-        &mut queue, &mut I_buf, 1.0,
+        row_ptr,
+        col_indices,
+        values,
+        nt_types,
+        &mut queue,
+        &mut I_buf,
+        1.0,
     );
     let elapsed = t0.elapsed();
 
@@ -145,8 +150,11 @@ fn bench_rcm_bandwidth(c: &mut Criterion) {
     let adj = taas_connectome::build_adjacency(&conn);
     let perm = taas_connectome::reverse_cuthill_mckee(&adj);
     let (new_rp, new_ci, _, _) = taas_connectome::apply_permutation_to_csr(
-        &conn.row_ptr, &conn.col_indices, &conn.values,
-        &conn.nt_types, &perm,
+        &conn.row_ptr,
+        &conn.col_indices,
+        &conn.values,
+        &conn.nt_types,
+        &perm,
     );
     let rcm_time = t0.elapsed();
 
@@ -154,17 +162,26 @@ fn bench_rcm_bandwidth(c: &mut Criterion) {
     let bw_after = taas_connectome::bandwidth(&new_rp, &new_ci);
     let mean_bw_after = taas_connectome::mean_bandwidth(&new_rp, &new_ci);
 
-    println!("\n═══ RCM Benchmark: {n} neurons, ~{} synapses/neuron ═══", (sc.values.len() + n - 1) / n);
+    println!(
+        "\n═══ RCM Benchmark: {n} neurons, ~{} synapses/neuron ═══",
+        (sc.values.len() + n - 1) / n
+    );
     println!("  RCM preprocessing: {:.3}s", rcm_time.as_secs_f64());
     println!("  Synapses: {}", sc.values.len());
     println!();
     println!("  Bandwidth BEFORE: {bw_before:>10}");
     println!("  Bandwidth AFTER:  {bw_after:>10}");
-    println!("  Reduction:        {:.1}×", bw_before as f64 / bw_after.max(1) as f64);
+    println!(
+        "  Reduction:        {:.1}×",
+        bw_before as f64 / bw_after.max(1) as f64
+    );
     println!();
     println!("  Mean BW BEFORE:   {mean_bw_before:>10.2}");
     println!("  Mean BW AFTER:    {mean_bw_after:>10.2}");
-    println!("  Reduction:        {:.1}×", mean_bw_before / mean_bw_after.max(1e-10));
+    println!(
+        "  Reduction:        {:.1}×",
+        mean_bw_before / mean_bw_after.max(1e-10)
+    );
 }
 
 fn bench_rcm_propagate(c: &mut Criterion) {
@@ -177,8 +194,11 @@ fn bench_rcm_propagate(c: &mut Criterion) {
     let adj = taas_connectome::build_adjacency(&conn);
     let perm = taas_connectome::reverse_cuthill_mckee(&adj);
     let (new_rp, new_ci, _, _) = taas_connectome::apply_permutation_to_csr(
-        &conn.row_ptr, &conn.col_indices, &conn.values,
-        &conn.nt_types, &perm,
+        &conn.row_ptr,
+        &conn.col_indices,
+        &conn.values,
+        &conn.nt_types,
+        &perm,
     );
 
     // Firing rate: 5% = 5000 spikes
@@ -187,34 +207,52 @@ fn bench_rcm_propagate(c: &mut Criterion) {
     let mut g = c.benchmark_group("csr_propagate_rcm");
     g.throughput(Throughput::Elements(n_spikes as u64));
 
-    g.bench_function("before_rcm", |b| b.iter(|| {
-        let _ = bench_propagate(
-            &conn.row_ptr, &conn.col_indices, &conn.values,
-            &conn.nt_types, n, n_spikes,
-        );
-    }));
+    g.bench_function("before_rcm", |b| {
+        b.iter(|| {
+            let _ = bench_propagate(
+                &conn.row_ptr,
+                &conn.col_indices,
+                &conn.values,
+                &conn.nt_types,
+                n,
+                n_spikes,
+            );
+        })
+    });
 
-    g.bench_function("after_rcm", |b| b.iter(|| {
-        let _ = bench_propagate(
-            &new_rp, &new_ci,
-            &sc.values, // values unchanged by RCM (same values, just reordered)
-            &sc.nt_types,
-            n, n_spikes,
-        );
-    }));
+    g.bench_function("after_rcm", |b| {
+        b.iter(|| {
+            let _ = bench_propagate(
+                &new_rp,
+                &new_ci,
+                &sc.values, // values unchanged by RCM (same values, just reordered)
+                &sc.nt_types,
+                n,
+                n_spikes,
+            );
+        })
+    });
 
     g.finish();
 
     // Print detailed results
-    println!("\n═══ CSR Propagate: {n} neurons, {n_spikes} spikes ({:.1}% firing) ═══", n_spikes as f64 / n as f64 * 100.0);
+    println!(
+        "\n═══ CSR Propagate: {n} neurons, {n_spikes} spikes ({:.1}% firing) ═══",
+        n_spikes as f64 / n as f64 * 100.0
+    );
     println!("  Single-pass timings (not criterion):");
 
     // Warmup
     for _ in 0..3 {
-        bench_propagate(&conn.row_ptr, &conn.col_indices, &conn.values,
-            &conn.nt_types, n, n_spikes);
-        bench_propagate(&new_rp, &new_ci, &sc.values,
-            &sc.nt_types, n, n_spikes);
+        bench_propagate(
+            &conn.row_ptr,
+            &conn.col_indices,
+            &conn.values,
+            &conn.nt_types,
+            n,
+            n_spikes,
+        );
+        bench_propagate(&new_rp, &new_ci, &sc.values, &sc.nt_types, n, n_spikes);
     }
 
     // Timed runs
@@ -222,10 +260,15 @@ fn bench_rcm_propagate(c: &mut Criterion) {
     let mut t_after = 0.0f64;
     let n_runs = 20;
     for _ in 0..n_runs {
-        t_before += bench_propagate(&conn.row_ptr, &conn.col_indices, &conn.values,
-            &conn.nt_types, n, n_spikes);
-        t_after += bench_propagate(&new_rp, &new_ci, &sc.values,
-            &sc.nt_types, n, n_spikes);
+        t_before += bench_propagate(
+            &conn.row_ptr,
+            &conn.col_indices,
+            &conn.values,
+            &conn.nt_types,
+            n,
+            n_spikes,
+        );
+        t_after += bench_propagate(&new_rp, &new_ci, &sc.values, &sc.nt_types, n, n_spikes);
     }
     t_before /= n_runs as f64;
     t_after /= n_runs as f64;

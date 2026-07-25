@@ -4,8 +4,8 @@
 //! in the original monolithic lib.rs, every physical quantity is stored as a
 //! named tensor component (f32[], i32[], i64[], u64[]) inside the .taas archive.
 
-use crate::writer::TaasWriter;
 use crate::reader::TaasReader;
+use crate::writer::TaasWriter;
 
 // ─── BrainState ─────────────────────────────────────────
 
@@ -24,13 +24,16 @@ pub fn save_brain_state(state: &taas_connectome::sim::BrainState, writer: &mut T
 
 /// Load CPU brain state from a .taas reader.
 pub fn load_brain_state(reader: &TaasReader) -> Result<taas_connectome::sim::BrainState, String> {
-    let n_padded = reader.metadata().get("n_neurons_padded")
+    let n_padded = reader
+        .metadata()
+        .get("n_neurons_padded")
         .and_then(|s| s.parse::<usize>().ok())
         .ok_or_else(|| "n_neurons_padded not found".to_string())?;
     // slow_state: backwards-compatible — old archives (pre slow_state) lack this
     // component; reconstruct it from n_padded as 0.5 (neutral baseline, matches
     // BrainState::new()). See BrainState::slow_state doc.
-    let slow_state = reader.get_f32("brain_slow_state")
+    let slow_state = reader
+        .get_f32("brain_slow_state")
         .unwrap_or_else(|_| vec![0.5; n_padded]);
     let state = taas_connectome::sim::BrainState {
         v: reader.get_f32("brain_v")?,
@@ -48,7 +51,10 @@ pub fn load_brain_state(reader: &TaasReader) -> Result<taas_connectome::sim::Bra
 }
 
 /// Save Izhikevich parameters.
-pub fn save_izhikevich_params(params: &taas_connectome::sim::IzhikevichParams, writer: &mut TaasWriter) {
+pub fn save_izhikevich_params(
+    params: &taas_connectome::sim::IzhikevichParams,
+    writer: &mut TaasWriter,
+) {
     writer.add_metadata("type", "IzhikevichParams");
     writer.add_metadata("n", &params.a.len().to_string());
     writer.add_f32("iz_a", "IzhikevichParams", &params.a);
@@ -60,7 +66,9 @@ pub fn save_izhikevich_params(params: &taas_connectome::sim::IzhikevichParams, w
 }
 
 /// Load Izhikevich parameters.
-pub fn load_izhikevich_params(reader: &TaasReader) -> Result<taas_connectome::sim::IzhikevichParams, String> {
+pub fn load_izhikevich_params(
+    reader: &TaasReader,
+) -> Result<taas_connectome::sim::IzhikevichParams, String> {
     Ok(taas_connectome::sim::IzhikevichParams {
         a: reader.get_f32("iz_a")?,
         b: reader.get_f32("iz_b")?,
@@ -75,7 +83,11 @@ pub fn load_izhikevich_params(reader: &TaasReader) -> Result<taas_connectome::si
 ///
 /// Requires the `cuda-kernels` feature (the `gpu` module provides the wrapper).
 #[cfg(feature = "cuda")]
-pub fn save_gpu_state(gpu: &cuda_kernels::GpuContext, n_neurons: usize, writer: &mut TaasWriter) -> Result<(), String> {
+pub fn save_gpu_state(
+    gpu: &cuda_kernels::GpuContext,
+    n_neurons: usize,
+    writer: &mut TaasWriter,
+) -> Result<(), String> {
     let mut v = vec![0.0f32; n_neurons];
     let mut u = vec![0.0f32; n_neurons];
     gpu.download_v(&mut v)?;
@@ -89,8 +101,13 @@ pub fn save_gpu_state(gpu: &cuda_kernels::GpuContext, n_neurons: usize, writer: 
 
 /// Load GPU brain state: creates GpuContext, uploads v, u.
 #[cfg(feature = "cuda")]
-pub fn load_gpu_state(reader: &TaasReader, n_synapses: usize) -> Result<cuda_kernels::GpuContext, String> {
-    let n_neurons = reader.metadata().get("n_neurons")
+pub fn load_gpu_state(
+    reader: &TaasReader,
+    n_synapses: usize,
+) -> Result<cuda_kernels::GpuContext, String> {
+    let n_neurons = reader
+        .metadata()
+        .get("n_neurons")
         .and_then(|s| s.parse::<usize>().ok())
         .ok_or_else(|| "n_neurons not found".to_string())?;
     let v = reader.get_f32("gpu_v")?;
@@ -113,7 +130,9 @@ pub fn save_brain_io(io: &taas_connectome::BrainIO, writer: &mut TaasWriter) {
 
 /// Load BrainIO from JSON metadata.
 pub fn load_brain_io(reader: &TaasReader) -> Result<taas_connectome::BrainIO, String> {
-    reader.metadata().get("brain_io")
+    reader
+        .metadata()
+        .get("brain_io")
         .and_then(|j| serde_json::from_str(j).ok())
         .ok_or_else(|| "brain_io not found in metadata".to_string())
 }
@@ -145,7 +164,9 @@ pub fn save_connectome(conn: &taas_connectome::ConnectomeData, writer: &mut Taas
 
 /// Load a connectome from a .taas reader.
 pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::ConnectomeData, String> {
-    let _n_neurons = reader.metadata().get("n_neurons")
+    let _n_neurons = reader
+        .metadata()
+        .get("n_neurons")
         .and_then(|s| s.parse::<usize>().ok())
         .ok_or_else(|| "n_neurons not found in metadata".to_string())?;
     let row_ptr = reader.get_i32("row_ptr")?;
@@ -155,14 +176,17 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
     // receptor_types is optional — old archives (pre receptor_types) lack it,
     // returning an empty Vec (matches ConnectomeData::new default).
     let receptor_types = reader.get_u8("receptor_types").unwrap_or_default();
-    let groups: Vec<taas_connectome::NeuronGroup> = reader.metadata()
+    let groups: Vec<taas_connectome::NeuronGroup> = reader
+        .metadata()
         .get("groups")
         .and_then(|g| serde_json::from_str(g).ok())
         .unwrap_or_default();
-    let group_refs: Vec<(&str, Vec<usize>)> = groups.iter()
+    let group_refs: Vec<(&str, Vec<usize>)> = groups
+        .iter()
         .map(|g| (g.name.as_str(), g.indices.clone()))
         .collect();
-    let mut conn = taas_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs);
+    let mut conn =
+        taas_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs);
     conn.receptor_types = receptor_types;
     Ok(conn)
 }
@@ -185,14 +209,9 @@ pub fn save_trioscilator(tri: &taas_t3::TriOscillator, writer: &mut TaasWriter) 
         };
     }
     push_all!(
-        th1, th2, th3,
-        prev_th1, prev_th2, prev_th3,
-        r1, r2, r3,
-        prev_r1, prev_r2, prev_r3,
-        omega1, omega2, omega3,
-        drive1, drive2, drive3,
-        sin1, cos1, sin2, cos2, sin3, cos3,
-        coupling1, coupling2, coupling3
+        th1, th2, th3, prev_th1, prev_th2, prev_th3, r1, r2, r3, prev_r1, prev_r2, prev_r3, omega1,
+        omega2, omega3, drive1, drive2, drive3, sin1, cos1, sin2, cos2, sin3, cos3, coupling1,
+        coupling2, coupling3
     );
     writer.add_f32_shape("tri_state", "TriOscillator", &buf, vec![27, n]);
 
@@ -219,8 +238,11 @@ macro_rules! restore_tri_field {
     };
 }
 
-pub fn load_trioscilator(reader: &TaasReader, n: usize) -> Result<taas_t3::TriOscillator<taas_t3::Avx2Backend>, String> {
-    use taas_t3::{TriOscillator, Avx2Backend};
+pub fn load_trioscilator(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_t3::TriOscillator<taas_t3::Avx2Backend>, String> {
+    use taas_t3::{Avx2Backend, TriOscillator};
     let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
 
     // Try new grouped format first (v2_grouped)
@@ -264,16 +286,33 @@ pub fn load_trioscilator(reader: &TaasReader, n: usize) -> Result<taas_t3::TriOs
                 }
             };
         }
-        restore!(th1, "th1"); restore!(th2, "th2"); restore!(th3, "th3");
-        restore!(prev_th1, "prev_th1"); restore!(prev_th2, "prev_th2"); restore!(prev_th3, "prev_th3");
-        restore!(r1, "r1"); restore!(r2, "r2"); restore!(r3, "r3");
-        restore!(prev_r1, "prev_r1"); restore!(prev_r2, "prev_r2"); restore!(prev_r3, "prev_r3");
-        restore!(omega1, "omega1"); restore!(omega2, "omega2"); restore!(omega3, "omega3");
-        restore!(drive1, "drive1"); restore!(drive2, "drive2"); restore!(drive3, "drive3");
-        restore!(sin1, "sin1"); restore!(cos1, "cos1");
-        restore!(sin2, "sin2"); restore!(cos2, "cos2");
-        restore!(sin3, "sin3"); restore!(cos3, "cos3");
-        restore!(coupling1, "coupling1"); restore!(coupling2, "coupling2"); restore!(coupling3, "coupling3");
+        restore!(th1, "th1");
+        restore!(th2, "th2");
+        restore!(th3, "th3");
+        restore!(prev_th1, "prev_th1");
+        restore!(prev_th2, "prev_th2");
+        restore!(prev_th3, "prev_th3");
+        restore!(r1, "r1");
+        restore!(r2, "r2");
+        restore!(r3, "r3");
+        restore!(prev_r1, "prev_r1");
+        restore!(prev_r2, "prev_r2");
+        restore!(prev_r3, "prev_r3");
+        restore!(omega1, "omega1");
+        restore!(omega2, "omega2");
+        restore!(omega3, "omega3");
+        restore!(drive1, "drive1");
+        restore!(drive2, "drive2");
+        restore!(drive3, "drive3");
+        restore!(sin1, "sin1");
+        restore!(cos1, "cos1");
+        restore!(sin2, "sin2");
+        restore!(cos2, "cos2");
+        restore!(sin3, "sin3");
+        restore!(cos3, "cos3");
+        restore!(coupling1, "coupling1");
+        restore!(coupling2, "coupling2");
+        restore!(coupling3, "coupling3");
     }
 
     tri.w12 = reader.get_scalar_f32("w12").unwrap_or(0.0);
@@ -306,7 +345,9 @@ pub fn load_nlms_decoder(reader: &TaasReader, n: usize) -> Result<taas_t3::NlmsD
     let n_w = weights.len().min(dec.weights.len());
     dec.weights[..n_w].copy_from_slice(&weights[..n_w]);
     if let Ok(bias) = reader.get_f32("nlms_bias") {
-        if !bias.is_empty() { dec.bias[0] = bias[0]; }
+        if !bias.is_empty() {
+            dec.bias[0] = bias[0];
+        }
     }
     dec.lr = reader.get_scalar_f32("nlms_lr").unwrap_or(0.01);
     dec.eps = reader.get_scalar_f32("nlms_eps").unwrap_or(1e-8);
@@ -324,7 +365,10 @@ pub fn save_kalman_decoder(dec: &taas_t3::KalmanDecoder, writer: &mut TaasWriter
     writer.add_scalar_f32("kalman_r", "KalmanDecoder", dec.r);
 }
 
-pub fn load_kalman_decoder(reader: &TaasReader, n: usize) -> Result<taas_t3::KalmanDecoder, String> {
+pub fn load_kalman_decoder(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_t3::KalmanDecoder, String> {
     let mut dec = taas_t3::KalmanDecoder::new(n, 0.001, 0.1);
     let weights = reader.get_f32("kalman_weights")?;
     let n_w = weights.len().min(dec.weights.len());
@@ -358,7 +402,10 @@ pub fn save_sorn_network(sorn: &taas_core::neuron::SornNetwork, writer: &mut Taa
     writer.add_scalar_f32("sorn_ip_decay", "SornNetwork", sorn.ip_decay);
 }
 
-pub fn load_sorn_network(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::SornNetwork, String> {
+pub fn load_sorn_network(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_core::neuron::SornNetwork, String> {
     let mut sorn = taas_core::neuron::SornNetwork::new(n, 0.1, 10.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
@@ -401,7 +448,10 @@ pub fn save_eprop_lif(eprop: &taas_core::neuron::EPropLIF, writer: &mut TaasWrit
     writer.add_scalar_f32("eprop_tau_surrogate", "EPropLIF", eprop.tau_surrogate);
 }
 
-pub fn load_eprop_lif(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::EPropLIF, String> {
+pub fn load_eprop_lif(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_core::neuron::EPropLIF, String> {
     let mut eprop = taas_core::neuron::EPropLIF::new(n, 1.0, 10.0, 20.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
@@ -412,7 +462,8 @@ pub fn load_eprop_lif(reader: &TaasReader, n: usize) -> Result<taas_core::neuron
         };
     }
     restore!(v, "eprop_v");
-    restore!(eligibility, "eprop_eligibility"); restore!(psi, "eprop_psi");
+    restore!(eligibility, "eprop_eligibility");
+    restore!(psi, "eprop_psi");
     restore!(refractory, "eprop_refractory");
     eprop.dt = reader.get_scalar_f32("eprop_dt").unwrap_or(1.0);
     eprop.tau_m = reader.get_scalar_f32("eprop_tau_m").unwrap_or(10.0);
@@ -439,7 +490,10 @@ pub fn save_stp(stp: &taas_core::neuron::ShortTermPlasticity, writer: &mut TaasW
     writer.add_scalar_f32("stp_dt", "ShortTermPlasticity", stp.dt);
 }
 
-pub fn load_stp(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::ShortTermPlasticity, String> {
+pub fn load_stp(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_core::neuron::ShortTermPlasticity, String> {
     let mut stp = taas_core::neuron::ShortTermPlasticity::new(n, 1.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
@@ -449,9 +503,12 @@ pub fn load_stp(reader: &TaasReader, n: usize) -> Result<taas_core::neuron::Shor
             }
         };
     }
-    restore!(x, "stp_x"); restore!(u, "stp_u");
-    restore!(tau_d, "stp_tau_d"); restore!(tau_f, "stp_tau_f");
-    restore!(u0, "stp_u0"); restore!(a, "stp_a");
+    restore!(x, "stp_x");
+    restore!(u, "stp_u");
+    restore!(tau_d, "stp_tau_d");
+    restore!(tau_f, "stp_tau_f");
+    restore!(u0, "stp_u0");
+    restore!(a, "stp_a");
     stp.dt = reader.get_scalar_f32("stp_dt").unwrap_or(1.0);
     Ok(stp)
 }
@@ -474,7 +531,11 @@ pub fn save_actor_critic_agent(agent: &taas_train::rl::ActorCriticAgent, writer:
     writer.add_f32("rl_trace_input", "ActorCriticAgent", &agent.trace_input);
     writer.add_f32("rl_trace_hidden", "ActorCriticAgent", &agent.trace_hidden);
     writer.add_f32("rl_trace_output", "ActorCriticAgent", &agent.trace_output);
-    writer.add_f32("rl_trace_critic", "ActorCriticAgent", &agent.trace_critic_val);
+    writer.add_f32(
+        "rl_trace_critic",
+        "ActorCriticAgent",
+        &agent.trace_critic_val,
+    );
     writer.add_scalar_f32("rl_dt", "ActorCriticAgent", agent.dt);
     writer.add_scalar_f32("rl_gamma", "ActorCriticAgent", agent.gamma);
     writer.add_scalar_f32("rl_lr_actor", "ActorCriticAgent", agent.lr_actor);
@@ -490,13 +551,32 @@ pub fn save_actor_critic_agent(agent: &taas_train::rl::ActorCriticAgent, writer:
 }
 
 #[cfg(feature = "train")]
-pub fn load_actor_critic_agent(reader: &TaasReader) -> Result<taas_train::rl::ActorCriticAgent, String> {
-    let n_input = reader.metadata().get("n_input").and_then(|s| s.parse().ok()).ok_or("n_input not found")?;
-    let n_hidden = reader.metadata().get("n_hidden").and_then(|s| s.parse().ok()).ok_or("n_hidden not found")?;
-    let n_actions = reader.metadata().get("n_actions").and_then(|s| s.parse().ok()).ok_or("n_actions not found")?;
-    let n_steps = reader.metadata().get("n_steps").and_then(|s| s.parse().ok()).ok_or("n_steps not found")?;
+pub fn load_actor_critic_agent(
+    reader: &TaasReader,
+) -> Result<taas_train::rl::ActorCriticAgent, String> {
+    let n_input = reader
+        .metadata()
+        .get("n_input")
+        .and_then(|s| s.parse().ok())
+        .ok_or("n_input not found")?;
+    let n_hidden = reader
+        .metadata()
+        .get("n_hidden")
+        .and_then(|s| s.parse().ok())
+        .ok_or("n_hidden not found")?;
+    let n_actions = reader
+        .metadata()
+        .get("n_actions")
+        .and_then(|s| s.parse().ok())
+        .ok_or("n_actions not found")?;
+    let n_steps = reader
+        .metadata()
+        .get("n_steps")
+        .and_then(|s| s.parse().ok())
+        .ok_or("n_steps not found")?;
     let dt = reader.get_scalar_f32("rl_dt").unwrap_or(1.0);
-    let mut agent = taas_train::rl::ActorCriticAgent::new(n_input, n_hidden, n_actions, n_steps, dt, 42);
+    let mut agent =
+        taas_train::rl::ActorCriticAgent::new(n_input, n_hidden, n_actions, n_steps, dt, 42);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
             if let Ok(v) = reader.get_f32($name) {
@@ -505,10 +585,16 @@ pub fn load_actor_critic_agent(reader: &TaasReader) -> Result<taas_train::rl::Ac
             }
         };
     }
-    restore!(w_ih, "rl_w_ih"); restore!(w_ho, "rl_w_ho"); restore!(w_ic, "rl_w_ic");
-    restore!(elig_ih, "rl_elig_ih"); restore!(elig_ho, "rl_elig_ho"); restore!(elig_ic, "rl_elig_ic");
-    restore!(trace_input, "rl_trace_input"); restore!(trace_hidden, "rl_trace_hidden");
-    restore!(trace_output, "rl_trace_output"); restore!(trace_critic_val, "rl_trace_critic");
+    restore!(w_ih, "rl_w_ih");
+    restore!(w_ho, "rl_w_ho");
+    restore!(w_ic, "rl_w_ic");
+    restore!(elig_ih, "rl_elig_ih");
+    restore!(elig_ho, "rl_elig_ho");
+    restore!(elig_ic, "rl_elig_ic");
+    restore!(trace_input, "rl_trace_input");
+    restore!(trace_hidden, "rl_trace_hidden");
+    restore!(trace_output, "rl_trace_output");
+    restore!(trace_critic_val, "rl_trace_critic");
     agent.gamma = reader.get_scalar_f32("rl_gamma").unwrap_or(0.95);
     agent.lr_actor = reader.get_scalar_f32("rl_lr_actor").unwrap_or(0.01);
     agent.lr_critic = reader.get_scalar_f32("rl_lr_critic").unwrap_or(0.01);
@@ -540,7 +626,11 @@ pub fn save_ttfs(ttfs: &taas_core::neuron::TtfsEncoder, writer: &mut TaasWriter,
     let fired: Vec<i32> = ttfs.fired.iter().map(|&x| if x { 1 } else { 0 }).collect();
     writer.add_u64("ttfs_fire_times", "TtfsEncoder", &fire_times);
     writer.add_i32("ttfs_fired", "TtfsEncoder", &fired);
-    writer.add_u64("ttfs_current_step", "TtfsEncoder", &[ttfs.current_step as u64]);
+    writer.add_u64(
+        "ttfs_current_step",
+        "TtfsEncoder",
+        &[ttfs.current_step as u64],
+    );
     writer.add_u64("ttfs_max_delay", "TtfsEncoder", &[ttfs.max_delay as u64]);
 }
 
@@ -571,7 +661,13 @@ pub fn load_stdp_weights(reader: &TaasReader) -> Result<Vec<f32>, String> {
 
 // ─── CSR sparse matrix ───────────────────────────────────
 
-pub fn save_csr(row_ptr: &[i32], col_indices: &[i32], values: &[f32], n_neurons: usize, writer: &mut TaasWriter) {
+pub fn save_csr(
+    row_ptr: &[i32],
+    col_indices: &[i32],
+    values: &[f32],
+    n_neurons: usize,
+    writer: &mut TaasWriter,
+) {
     writer.add_metadata("type", "CSRMatrix");
     writer.add_metadata("n_neurons", &n_neurons.to_string());
     writer.add_i32("csr_row_ptr", "CSRMatrix", row_ptr);
@@ -580,7 +676,11 @@ pub fn save_csr(row_ptr: &[i32], col_indices: &[i32], values: &[f32], n_neurons:
 }
 
 pub fn load_csr(reader: &TaasReader) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), String> {
-    Ok((reader.get_i32("csr_row_ptr")?, reader.get_i32("csr_col_indices")?, reader.get_f32("csr_values")?))
+    Ok((
+        reader.get_i32("csr_row_ptr")?,
+        reader.get_i32("csr_col_indices")?,
+        reader.get_f32("csr_values")?,
+    ))
 }
 
 // ─── InverseKuramotoDecoder ─────────────────────────────
@@ -596,7 +696,10 @@ pub fn save_inverse_kuramoto(dec: &taas_t3::InverseKuramotoDecoder, writer: &mut
     writer.add_scalar_bool("ikd_initialised", "InverseKuramotoDecoder", dec.initialised);
 }
 
-pub fn load_inverse_kuramoto(reader: &TaasReader, n: usize) -> Result<taas_t3::InverseKuramotoDecoder, String> {
+pub fn load_inverse_kuramoto(
+    reader: &TaasReader,
+    n: usize,
+) -> Result<taas_t3::InverseKuramotoDecoder, String> {
     let mut dec = taas_t3::InverseKuramotoDecoder::new(n, 1.0, 1.0);
     macro_rules! restore {
         ($field:ident, $name:expr) => {
@@ -606,7 +709,8 @@ pub fn load_inverse_kuramoto(reader: &TaasReader, n: usize) -> Result<taas_t3::I
             }
         };
     }
-    restore!(prev_amps, "ikd_prev_amps"); restore!(weights, "ikd_weights");
+    restore!(prev_amps, "ikd_prev_amps");
+    restore!(weights, "ikd_weights");
     dec.alpha = reader.get_scalar_f32("ikd_alpha").unwrap_or(1.0);
     dec.drive_gain = reader.get_scalar_f32("ikd_drive_gain").unwrap_or(1.0);
     dec.epsilon = reader.get_scalar_f32("ikd_epsilon").unwrap_or(0.1);
@@ -639,7 +743,9 @@ pub fn load_stdp_decoder(reader: &TaasReader, n: usize) -> Result<taas_t3::StdpD
             }
         };
     }
-    restore!(weights, "sd_weights"); restore!(traces, "sd_traces"); restore!(prev_states, "sd_prev_states");
+    restore!(weights, "sd_weights");
+    restore!(traces, "sd_traces");
+    restore!(prev_states, "sd_prev_states");
     dec.bias = reader.get_scalar_f32("sd_bias").unwrap_or(0.0);
     dec.lr = reader.get_scalar_f32("sd_lr").unwrap_or(0.01);
     dec.decay = reader.get_scalar_f32("sd_decay").unwrap_or(0.9);
@@ -659,7 +765,11 @@ pub fn save_pst_decoder(dec: &taas_t3::PstDecoder, writer: &mut TaasWriter) {
     writer.add_scalar_f32("pst_alpha", "PstDecoder", dec.alpha);
 }
 
-pub fn load_pst_decoder(reader: &TaasReader, feat_dim: usize, l: usize) -> Result<taas_t3::PstDecoder, String> {
+pub fn load_pst_decoder(
+    reader: &TaasReader,
+    feat_dim: usize,
+    l: usize,
+) -> Result<taas_t3::PstDecoder, String> {
     let mut dec = taas_t3::PstDecoder::new(feat_dim, l, 0.01);
     if let Ok(v) = reader.get_f32("pst_weights") {
         let n = v.len().min(dec.weights.len());
@@ -669,5 +779,3 @@ pub fn load_pst_decoder(reader: &TaasReader, feat_dim: usize, l: usize) -> Resul
     dec.alpha = reader.get_scalar_f32("pst_alpha").unwrap_or(0.01);
     Ok(dec)
 }
-
-

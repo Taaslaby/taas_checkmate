@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🧠🦗 v3 — Analog Drive (firing rate depth)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 1.4em; background: linear-gradient(135deg, #58a6ff, #a371f7, #f72585); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; max-width: 720px; width: 100%; margin: 8px 0; }
+  .video-container { text-align: center; margin: 12px 0; }
+  img { max-width: 100%; border-radius: 8px; border: 1px solid #30363d; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+  .stat-item { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 12px; font-size: 0.85em; }
+  .stat-item .label { color: #8b949e; font-size: 0.75em; }
+  .stat-item .value { color: #f0f6fc; font-size: 1.1em; font-weight: bold; margin-top: 2px; }
+  .green { color: #3fb950 !important; }
+  .purple { color: #a371f7 !important; }
+  .code { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; padding: 8px; font-size: 0.8em; margin: 8px 0; overflow-x: auto; }
+  .fix-list { font-size: 0.85em; line-height: 1.6; color: #8b949e; }
+  .fix-list .yes { color: #3fb950; }
+</style>
+</head>
+<body>
+  <h1>🧠🦗 v3 — Analog Drive (глубина сигнала)</h1>
+
+  <div class="video-container card">
+    <img src="vnc_gamma_astro_walk_v3.webp" alt="v3 Fly Walking" style="width:100%;max-width:640px">
+  </div>
+
+  <div class="card">
+    <h3>🔧 Что изменилось</h3>
+    <ul class="fix-list">
+      <li><span class="yes">✅</span> <b>Analog Rate Drive</b> — вместо бинарных 0/1, глубина сигнала = firing rate за 20ms окно</li>
+      <li><span class="yes">✅</span> <b>Max depth</b> — самый активный MN задаёт силу, не сумма многих слабых</li>
+      <li><span class="yes">✅</span> <b>Tonic 12 pA</b> (было 15→30) — медленнее ритм</li>
+      <li><span class="yes">✅</span> <b>Soft clamp ±0.3</b> — tanh, не hard clip</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>📊 Эволюция ходьбы</h3>
+    <div class="stat-grid">
+      <div class="stat-item"><div class="label">v1: flex/ext вместе</div><div class="value">157 mm/s</div></div>
+      <div class="stat-item"><div class="label">v2: Flex/Ext XOR</div><div class="value">698 mm/s</div></div>
+      <div class="stat-item"><div class="label">v3: Analog Drive</div><div class="value purple">698 mm/s</div></div>
+      <div class="stat-item"><div class="label">Gait</div><div class="value green">FLYING 🚀</div></div>
+      <div class="stat-item"><div class="label">Signal type</div><div class="value">firing rate depth</div></div>
+      <div class="stat-item"><div class="label">Residual</div><div class="value">clip-limited</div></div>
+    </div>
+    <p style="color:#8b949e; font-size:0.8em;">Скорость одинаковая — clip=0.3 насыщает. Отличия в качестве gait: v3 должен быть плавнее (analog vs binary).</p>
+  </div>
+
+  <div class="card">
+    <h3>🧬 Ключевая мысль: глубина сигнала</h3>
+    <div class="code">
+# Спайк — это не сигнал, а ИЗМЕНЕНИЕ глубины сигнала.
+# Вместо:
+if spike > 0: motor_drive += 1  # дискретно
+
+# Теперь:
+rate = sum(spikes) / window      # firing rate
+depth = rate / target_rate       # глубина [0, 1]
+motor_drive = depth * max_force  # непрерывно
+    </div>
+    <p style="font-size:0.85em; color:#8b949e;">
+      Это превращает VNC из дискретного генератора спайков в <b>аналоговый path процессор</b> — 
+      сигнал течёт с переменной глубиной, усиливается/ослабляется в каждом нейроне.
+      Ходьба без мозга — это path, а не последовательность спайков.
+    </p>
+  </div>
+</body>
+</html>

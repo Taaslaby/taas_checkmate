@@ -3,11 +3,12 @@
 
 #![allow(non_snake_case)]
 
-use std::cell::RefCell;
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
+use std::cell::RefCell;
 
 use crate::core::neuron;
+use crate::core::neuron::soma_dendrite::{DendriteConfig, SomatoDendriticNeuron};
 
 thread_local! {
     static REFRACTORY_BUF: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
@@ -152,23 +153,22 @@ pub fn py_step_saw(
     Ok(())
 }
 
-/// ψ-wave (Schrödinger neuron) — один шаг эволюции волновой функции.
+/// GCO (Graph-Coupled Oscillator) — один шаг.
 ///
-/// Уравнение: ħ·dψ/dt = -i·H·ψ + I_ext · ψ · speed
+/// Уравнение: dv/dt = H_real + I_ext · speed, du/dt = H_imag
 /// где ψ = v + i·u, H = гамильтониан (вычисляется отдельно)
 ///
 /// Args:
-///     v: действительная часть ψ [n]
-///     u: мнимая часть ψ [n]
+///     v: действительная часть [n]
+///     u: мнимая часть [n]
 ///     h_real: H·u (гамильтониан × мнимая часть) [n]
 ///     h_imag: -H·v (гамильтониан × действительная часть) [n]
 ///     I_ext: внешний ток [n]
 ///     speed: скорость (модулирует фазу) [n]
 ///     dt: шаг по времени
-///     hbar: квант действия (ħ), контролирует частоту
 #[pyfunction]
-#[pyo3(name = "step_psi_wave")]
-pub fn py_step_psi_wave(
+#[pyo3(name = "step_gco")]
+pub fn py_step_gco(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     h_real: Bound<'_, PyArray1<f32>>,
@@ -176,7 +176,7 @@ pub fn py_step_psi_wave(
     I_ext: Bound<'_, PyArray1<f32>>,
     speed: Bound<'_, PyArray1<f32>>,
     dt: f32,
-    hbar: f32,
+    _tau: f32,
 ) -> PyResult<()> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
@@ -185,7 +185,7 @@ pub fn py_step_psi_wave(
     let mut I_ext = I_ext.readwrite();
     let mut speed = speed.readwrite();
 
-    neuron::step_psi_wave(
+    neuron::step_gco(
         v.as_slice_mut()?,
         u.as_slice_mut()?,
         h_real.as_slice_mut()?,
@@ -193,7 +193,6 @@ pub fn py_step_psi_wave(
         I_ext.as_slice_mut()?,
         speed.as_slice_mut()?,
         dt,
-        hbar,
     );
     Ok(())
 }
@@ -535,6 +534,9 @@ pub fn py_step_wc(
 /// Modifies ca, tension, joint_delta_f, joint_stiffness, joint_damping in-place.
 #[pyfunction]
 #[pyo3(name = "step_atlasov_neuromotor")]
+#[pyo3(signature = (ca, tension, spikes, resets, dt, d_ca, tau_pump, eta_reset, t_max, kd, l0, v_max, lengths=None, velocities=None,
+    joint_delta_f=None, joint_stiffness=None, joint_damping=None,
+    k0=None, beta=None, b0=None, alpha=None))]
 pub fn py_step_atlasov_neuromotor(
     ca: Bound<'_, PyArray1<f32>>,
     tension: Bound<'_, PyArray1<f32>>,
@@ -546,6 +548,10 @@ pub fn py_step_atlasov_neuromotor(
     eta_reset: Bound<'_, PyArray1<f32>>,
     t_max: Bound<'_, PyArray1<f32>>,
     kd: Bound<'_, PyArray1<f32>>,
+    l0: Bound<'_, PyArray1<f32>>,
+    v_max: Bound<'_, PyArray1<f32>>,
+    lengths: Option<Bound<'_, PyArray1<f32>>>,
+    velocities: Option<Bound<'_, PyArray1<f32>>>,
     joint_delta_f: Option<Bound<'_, PyArray1<f32>>>,
     joint_stiffness: Option<Bound<'_, PyArray1<f32>>>,
     joint_damping: Option<Bound<'_, PyArray1<f32>>>,
@@ -563,6 +569,11 @@ pub fn py_step_atlasov_neuromotor(
     let eta_reset_ro = eta_reset.readonly();
     let t_max_ro = t_max.readonly();
     let kd_ro = kd.readonly();
+    let l0_ro = l0.readonly();
+    let v_max_ro = v_max.readonly();
+
+    let lengths_ro = lengths.as_ref().map(|a| a.readonly());
+    let velocities_ro = velocities.as_ref().map(|a| a.readonly());
 
     let mut j_df_storage = joint_delta_f.as_ref().map(|a| a.readwrite());
     let mut j_stf_storage = joint_stiffness.as_ref().map(|a| a.readwrite());
@@ -584,6 +595,10 @@ pub fn py_step_atlasov_neuromotor(
         eta_reset_ro.as_slice()?,
         t_max_ro.as_slice()?,
         kd_ro.as_slice()?,
+        l0_ro.as_slice()?,
+        v_max_ro.as_slice()?,
+        lengths_ro.as_ref().and_then(|a| a.as_slice().ok()),
+        velocities_ro.as_ref().and_then(|a| a.as_slice().ok()),
         j_df_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
         j_stf_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
         j_dmp_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
@@ -592,6 +607,184 @@ pub fn py_step_atlasov_neuromotor(
         b0_ro.as_ref().and_then(|a| a.as_slice().ok()),
         alpha_ro.as_ref().and_then(|a| a.as_slice().ok()),
     );
+
+    Ok(())
+}
+
+/// PyO3 класс сомато-дендритного нейрона с активными HH + Ca2+ дендритами.
+#[pyclass(name = "SomatoDendriticNeuron", module = "taas_checkmate.neurons")]
+pub struct PySomatoDendriticNeuron {
+    pub(crate) inner: SomatoDendriticNeuron,
+}
+
+#[pymethods]
+impl PySomatoDendriticNeuron {
+    #[new]
+    #[pyo3(signature = (n_neurons, n_compartments=4, r_a=200.0, r_m=100.0, c_m=0.1, dt=0.5, tau_m=20.0, v_rest=-65.0, v_thresh=-54.0, v_reset=-65.0, tau_ref=3.0))]
+    pub fn new(
+        n_neurons: usize,
+        n_compartments: usize,
+        r_a: f32,
+        r_m: f32,
+        c_m: f32,
+        dt: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_ref: f32,
+    ) -> Self {
+        let config = DendriteConfig {
+            n_compartments,
+            R_a: r_a,
+            R_m: r_m,
+            C_m: c_m,
+        };
+        let inner = SomatoDendriticNeuron::new(
+            n_neurons, &config, dt, tau_m, v_rest, v_thresh, v_reset, tau_ref,
+        );
+        Self { inner }
+    }
+
+    /// Включить активные HH + Ca2+ ионные каналы в дендритах.
+    #[pyo3(signature = (g_na=10.0, g_kv=5.0, g_ca=2.0))]
+    pub fn enable_active_channels(&mut self, g_na: f32, g_kv: f32, g_ca: f32) {
+        self.inner.dendrite.enable_active_channels(g_na, g_kv, g_ca);
+    }
+
+    /// Выполнить шаг симуляции.
+    pub fn step<'py>(
+        &mut self,
+        _py: Python<'py>,
+        I_ext: Bound<'py, PyArray1<f32>>,
+        dt: f32,
+    ) -> PyResult<()> {
+        let i_ext_ro = I_ext.readonly();
+        self.inner.step(i_ext_ro.as_slice()?, dt);
+        Ok(())
+    }
+
+    /// Скачок AMPA проводимости на компартменте comp нейрона nrn
+    pub fn jump_ampa(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_ampa(nrn, comp, g);
+    }
+
+    /// Скачок NMDA проводимости на компартменте comp нейрона nrn
+    pub fn jump_nmda(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_nmda(nrn, comp, g);
+    }
+
+    /// Скачок GABA_A проводимости на компартменте comp нейрона nrn
+    pub fn jump_gaba_a(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_gaba_a(nrn, comp, g);
+    }
+
+    /// Скачок GABA_B проводимости на компартменте comp нейрона nrn
+    pub fn jump_gaba_b(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_gaba_b(nrn, comp, g);
+    }
+
+    /// Скачок nAChR (ацетилхолин — главное возбуждение у насекомых) проводимости
+    pub fn jump_nachr(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_nachr(nrn, comp, g);
+    }
+
+    /// Скачок GluCl (глутамат — хлорное ТОРМОЖЕНИЕ у насекомых!) проводимости
+    pub fn jump_glucl(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_glucl(nrn, comp, g);
+    }
+
+    /// Скачок mAChR проводимости
+    pub fn jump_machr(&mut self, nrn: usize, comp: usize, g: f32) {
+        self.inner.jump_machr(nrn, comp, g);
+    }
+
+    /// Соматический мембранный потенциал [n]
+    #[getter]
+    pub fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, &self.inner.v))
+    }
+
+    /// Выходные спайки [n] (0 эбэтэр 1)
+    #[getter]
+    pub fn spikes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        Ok(PyArray1::from_slice(py, &self.inner.spikes))
+    }
+
+    /// Потенциал компартмента `comp` нейрона `nrn`
+    pub fn v_dend(&self, nrn: usize, comp: usize) -> f32 {
+        self.inner.v_dend(nrn, comp)
+    }
+
+    /// Дендритный ток в сому нейрона `nrn`
+    pub fn dend_current(&self, nrn: usize) -> f32 {
+        self.inner.dend_current(nrn)
+    }
+}
+
+/// Eligibility Propagation (e-prop) SNN learning step.
+///
+/// Updates eligibility traces and synaptic weights based on local surrogate gradient
+/// and target output errors (Bellec et al., Nature 2020).
+#[pyfunction]
+pub fn step_eprop(
+    weights: &Bound<'_, PyArray1<f32>>,
+    eligibility: &Bound<'_, PyArray1<f32>>,
+    v_post: &Bound<'_, PyArray1<f32>>,
+    spikes_pre: &Bound<'_, PyArray1<i32>>,
+    errors_post: &Bound<'_, PyArray1<f32>>,
+    n_post: usize,
+    n_pre: usize,
+    alpha_e: f32,
+    gamma: f32,
+    v_thresh: f32,
+    eta: f32,
+) -> PyResult<()> {
+    let weights_arr = weights.readwrite().as_slice_mut()?;
+    let eligibility_arr = eligibility.readwrite().as_slice_mut()?;
+    let v_post_arr = v_post.readonly().as_slice()?;
+    let spikes_pre_arr = spikes_pre.readonly().as_slice()?;
+    let errors_post_arr = errors_post.readonly().as_slice()?;
+
+    assert_eq!(
+        weights_arr.len(),
+        n_post * n_pre,
+        "step_eprop: weights len mismatch"
+    );
+    assert_eq!(
+        eligibility_arr.len(),
+        n_post * n_pre,
+        "step_eprop: eligibility len mismatch"
+    );
+    assert_eq!(v_post_arr.len(), n_post, "step_eprop: v_post len mismatch");
+    assert_eq!(
+        spikes_pre_arr.len(),
+        n_pre,
+        "step_eprop: spikes_pre len mismatch"
+    );
+    assert_eq!(
+        errors_post_arr.len(),
+        n_post,
+        "step_eprop: errors_post len mismatch"
+    );
+
+    for i in 0..n_post {
+        let v_diff = (v_post_arr[i] - v_thresh).abs();
+        let surrogate_grad_i = gamma / (1.0 + v_diff);
+        let err_i = errors_post_arr[i];
+
+        let row_off = i * n_pre;
+        for j in 0..n_pre {
+            let idx = row_off + j;
+            let s_j = spikes_pre_arr[j] as f32;
+
+            let e_val = alpha_e * eligibility_arr[idx] + surrogate_grad_i * s_j;
+            eligibility_arr[idx] = e_val;
+
+            let delta_w = -eta * err_i * e_val;
+            weights_arr[idx] += delta_w;
+        }
+    }
 
     Ok(())
 }

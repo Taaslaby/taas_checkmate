@@ -1,12 +1,12 @@
-//! PyO3 bindings for IIT Consciousness — Integrated Information Theory.
+//! PyO3 bindings for IIT Above thresholdness — Integrated Information Theory.
 //!
-//! Exposes `IITConsciousness` as a Python class with numpy array inputs.
+//! Exposes `IITAbove thresholdness` as a Python class with numpy array inputs.
 //!
 //! Usage:
 //! ```python
 //! import taas_checkmate as tcm
 //!
-//! iit = tcm.IITConsciousness(n_neurons=100, threshold=0.3)
+//! iit = tcm.IITAbove thresholdness(n_neurons=100, threshold=0.3)
 //!
 //! # From CSR connectome values + spike counts
 //! phi = iit.compute(values, spike_counts, n_steps=100)
@@ -14,42 +14,42 @@
 //! # With Kuramoto phases
 //! phi = iit.compute(values, spike_counts, n_steps=100, phases=phases)
 //!
-//! print(f"Φ = {iit.phi:.4f}, Conscious: {iit.is_conscious}")
+//! print(f"Φ = {iit.phi:.4f}, Above threshold: {iit.is_above_threshold}")
 //! print(f"Stats: {iit.stats()}")
 //! ```
 
 use numpy::{PyArray1, PyArrayMethods, IntoPyArray};
 use pyo3::prelude::*;
 
-/// 🧠 IIT Consciousness — Integrated Information Theory.
+/// 🧠 IIT Above thresholdness — Integrated Information Theory.
 ///
 /// Phi = connectivity × diversity × integration.
-/// Phi > threshold → system is conscious.
+/// Phi > threshold → system is above_threshold.
 ///
 /// Usage:
 /// ```python
 /// import taas_checkmate as tcm
-/// iit = tcm.IITConsciousness(100)
+/// iit = tcm.IITAbove thresholdness(100)
 /// phi = iit.compute(values, spike_counts, 100)
-/// print(f"Φ = {phi:.4f}, conscious = {iit.is_conscious}")
+/// print(f"Φ = {phi:.4f}, above_threshold = {iit.is_above_threshold}")
 /// ```
-#[pyclass(name = "IITConsciousness", module = "taas_checkmate")]
-pub struct PyIITConsciousness {
-    inner: taas_iit::IITConsciousness,
+#[pyclass(name = "IITThresholdness", module = "taas_checkmate")]
+pub struct PyIITThresholdness {
+    inner: taas_iit::IITThresholdness,
 }
 
 #[pymethods]
-impl PyIITConsciousness {
-    /// Create IIT Consciousness engine.
+impl PyIITThresholdness {
+    /// Create IIT Thresholdness engine.
     ///
     /// Args:
     ///     n_neurons: number of neurons in the network.
-    ///     threshold: Phi threshold for consciousness (default 0.3).
+    ///     threshold: Phi threshold for above_thresholdness (default 0.3).
     #[new]
     #[pyo3(signature = (n_neurons, threshold=0.3))]
     pub fn new(n_neurons: usize, threshold: f32) -> Self {
         Self {
-            inner: taas_iit::IITConsciousness::new(n_neurons, threshold),
+            inner: taas_iit::IITThresholdness::new(n_neurons, threshold),
         }
     }
 
@@ -154,16 +154,16 @@ impl PyIITConsciousness {
         self.inner.phi()
     }
 
-    /// Whether the system is conscious (Phi > threshold).
+    /// Whether the system is above_threshold (Phi > threshold).
     #[getter]
-    pub fn is_conscious(&self) -> bool {
-        self.inner.is_conscious()
+    pub fn is_above_threshold(&self) -> bool {
+        self.inner.is_above_threshold()
     }
 
-    /// Consciousness level as fraction of threshold (0..1).
+    /// Above thresholdness level as fraction of threshold (0..1).
     #[getter]
-    pub fn consciousness_level(&self) -> f32 {
-        self.inner.consciousness_level()
+    pub fn above_threshold_ratio(&self) -> f32 {
+        self.inner.above_threshold_ratio()
     }
 
     /// Current connectivity component (C).
@@ -223,8 +223,8 @@ impl PyIITConsciousness {
         d.set_item("connectivity", s.connectivity)?;
         d.set_item("diversity", s.diversity)?;
         d.set_item("integration", s.integration)?;
-        d.set_item("consciousness_level", s.consciousness_level)?;
-        d.set_item("conscious_ratio", s.conscious_ratio)?;
+        d.set_item("above_threshold_ratio", s.above_threshold_ratio)?;
+        d.set_item("above_threshold_ratio", s.above_threshold_ratio)?;
         d.set_item("trend", s.trend)?;
         Ok(d)
     }
@@ -244,10 +244,10 @@ impl PyIITConsciousness {
         self.inner.total_steps
     }
 
-    /// Conscious moments count.
+    /// Above threshold moments count.
     #[getter]
-    pub fn conscious_moments(&self) -> usize {
-        self.inner.conscious_moments
+    pub fn above_threshold_moments(&self) -> usize {
+        self.inner.above_threshold_moments
     }
 
     /// Reset all state.
@@ -261,7 +261,7 @@ impl PyIITConsciousness {
         self.inner.n
     }
 
-    /// Consciousness threshold.
+    /// Above thresholdness threshold.
     #[getter]
     pub fn threshold(&self) -> f32 {
         self.inner.threshold
@@ -315,7 +315,7 @@ impl PyIITConsciousness {
     ///     Dict with keys: phi_iit20, phi_proxy, connectivity, diversity, integration, phi_iit20_raw.
     #[staticmethod]
     #[pyo3(signature = (values, spike_matrix, n_steps, n_neurons, n_partitions=500))]
-    pub fn analyze_consciousness<'py>(
+    pub fn analyze_integration<'py>(
         py: Python<'py>,
         values: Bound<'py, PyArray1<f32>>,
         spike_matrix: Bound<'py, PyArray1<f32>>,
@@ -327,7 +327,7 @@ impl PyIITConsciousness {
         let mat = spike_matrix.readonly();
         let vals_sl = vals.as_slice()?;
         let mat_sl = mat.as_slice()?;
-        let result = taas_iit::analyze_consciousness(vals_sl, mat_sl, n_steps, n_neurons, n_partitions);
+        let result = taas_iit::analyze_integration(vals_sl, mat_sl, n_steps, n_neurons, n_partitions);
 
         let d = pyo3::types::PyDict::new(py);
         d.set_item("phi_iit20", result.phi_iit20)?;
@@ -341,10 +341,10 @@ impl PyIITConsciousness {
 
     fn __repr__(&self) -> String {
         format!(
-            "IITConsciousness(n={}, Φ={:.4}, conscious={})",
+            "IITAbove thresholdness(n={}, Φ={:.4}, above_threshold={})",
             self.inner.n,
             self.inner.phi(),
-            self.inner.is_conscious(),
+            self.inner.is_above_threshold(),
         )
     }
 }

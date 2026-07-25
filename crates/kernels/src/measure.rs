@@ -1,14 +1,22 @@
 //! Pure Rust SIMD measurement functions — `wide::f32x8`.
 //! Replaces all ASM measure kernels with portable SIMD.
 
-use wide::{f32x8, CmpGt};
 use core::f32::consts::PI;
+use wide::{f32x8, CmpGt};
 
 #[inline(always)]
 unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3),
-                 *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    f32x8::from([
+        *p,
+        *p.add(1),
+        *p.add(2),
+        *p.add(3),
+        *p.add(4),
+        *p.add(5),
+        *p.add(6),
+        *p.add(7),
+    ])
 }
 
 /// Pairwise interference: (1 + cos(φ_a − φ_b)) / 2.
@@ -17,8 +25,11 @@ unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
 /// # Safety
 /// `output[na·nb]`, `phases_a[na]`, `phases_b[nb]` must be valid.
 pub(crate) unsafe fn interference(
-    output: *mut f32, phases_a: *const f32,
-    phases_b: *const f32, na: usize, nb: usize,
+    output: *mut f32,
+    phases_a: *const f32,
+    phases_b: *const f32,
+    na: usize,
+    nb: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(output, na * nb);
     let a = std::slice::from_raw_parts(phases_a, na);
@@ -36,8 +47,10 @@ pub(crate) unsafe fn interference(
 /// # Safety
 /// `phases_a[n]`, `phases_b[n]` must be valid; `output` non-null.
 pub(crate) unsafe fn interference_mean(
-    output: *mut f32, phases_a: *const f32,
-    phases_b: *const f32, n: usize,
+    output: *mut f32,
+    phases_a: *const f32,
+    phases_b: *const f32,
+    n: usize,
 ) {
     let n8 = n & !7;
     let mut sum = f32x8::splat(0.0);
@@ -48,7 +61,9 @@ pub(crate) unsafe fn interference_mean(
         let d = a - b;
         let da: [f32; 8] = d.to_array();
         let mut cv = [0.0f32; 8];
-        for j in 0..8 { cv[j] = da[j].cos(); }
+        for j in 0..8 {
+            cv[j] = da[j].cos();
+        }
         sum += f32x8::from(cv);
     }
     let arr: [f32; 8] = sum.to_array();
@@ -56,7 +71,9 @@ pub(crate) unsafe fn interference_mean(
     if n8 < n {
         let a = std::slice::from_raw_parts(phases_a, n);
         let b = std::slice::from_raw_parts(phases_b, n);
-        for i in n8..n { total += (a[i] - b[i]).cos(); }
+        for i in n8..n {
+            total += (a[i] - b[i]).cos();
+        }
     }
     *output = (1.0 + total / n as f32) * 0.5;
 }
@@ -65,8 +82,14 @@ pub(crate) unsafe fn interference_mean(
 unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     let a = v.to_array();
     let p = ptr.add(off);
-    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
-    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
+    *p = a[0];
+    *p.add(1) = a[1];
+    *p.add(2) = a[2];
+    *p.add(3) = a[3];
+    *p.add(4) = a[4];
+    *p.add(5) = a[5];
+    *p.add(6) = a[6];
+    *p.add(7) = a[7];
 }
 
 /// Order parameter: |∑ a·e^{iφ}| / ∑ a.
@@ -75,8 +98,11 @@ unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
 /// # Safety
 /// `sin_buf[n]`, `cos_buf[n]`, `amplitudes[n]` valid; `output` non-null.
 pub(crate) unsafe fn phase_coherence(
-    output: *mut f32, sin_buf: *const f32,
-    cos_buf: *const f32, amplitudes: *const f32, n: usize,
+    output: *mut f32,
+    sin_buf: *const f32,
+    cos_buf: *const f32,
+    amplitudes: *const f32,
+    n: usize,
 ) {
     let n8 = n & !7;
     let (mut ss, mut cc, mut sa) = (f32x8::splat(0.0), f32x8::splat(0.0), f32x8::splat(0.0));
@@ -115,8 +141,11 @@ pub(crate) unsafe fn phase_coherence(
 /// `band_energies[n_bands]`, `amplitudes[n]`, `omegas[n]`, `band_edges[n_bands+1]` valid.
 pub(crate) unsafe fn band_energy(
     band_energies: *mut f32,
-    amplitudes: *const f32, omegas: *const f32,
-    band_edges: *const f32, n_bands: usize, n: usize,
+    amplitudes: *const f32,
+    omegas: *const f32,
+    band_edges: *const f32,
+    n_bands: usize,
+    n: usize,
 ) {
     let be = std::slice::from_raw_parts_mut(band_energies, n_bands);
     let a = std::slice::from_raw_parts(amplitudes, n);
@@ -139,8 +168,11 @@ pub(crate) unsafe fn band_energy(
 /// # Safety
 /// `output[na·nb]`, `phases_a[na]`, `phases_b[nb]` must be valid.
 pub(crate) unsafe fn winding_matrix(
-    output: *mut f32, phases_a: *const f32,
-    phases_b: *const f32, na: usize, nb: usize,
+    output: *mut f32,
+    phases_a: *const f32,
+    phases_b: *const f32,
+    na: usize,
+    nb: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(output, na * nb);
     let a = std::slice::from_raw_parts(phases_a, na);
@@ -159,9 +191,12 @@ pub(crate) unsafe fn winding_matrix(
 /// # Safety
 /// `sin_out[n]`, `cos_out[n]`, `phases[n]`, `phases_prev[n]` valid, non-overlapping.
 pub(crate) unsafe fn lazy_sincos_update(
-    sin_out: *mut f32, cos_out: *mut f32,
-    phases: *const f32, phases_prev: *mut f32,
-    eps: f32, n: usize,
+    sin_out: *mut f32,
+    cos_out: *mut f32,
+    phases: *const f32,
+    phases_prev: *mut f32,
+    eps: f32,
+    n: usize,
 ) {
     let eps_s = f32x8::splat(eps);
     let n8 = n & !7;
@@ -266,9 +301,12 @@ pub(crate) unsafe fn spike_entropy(
 /// `output[n_areas²]`, `areas[n_areas·n_elem]`, `areas_sin[n_areas·n_elem]`,
 /// `areas_cos[n_areas·n_elem]` must be valid.
 pub(crate) unsafe fn batch_coherence_sweep(
-    output: *mut f32, areas: *const f32,
-    areas_sin: *const f32, areas_cos: *const f32,
-    n_areas: usize, n_elem: usize,
+    output: *mut f32,
+    areas: *const f32,
+    areas_sin: *const f32,
+    areas_cos: *const f32,
+    n_areas: usize,
+    n_elem: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(output, n_areas * n_areas);
     let areas_data = std::slice::from_raw_parts(areas, n_areas * n_elem);
@@ -278,8 +316,7 @@ pub(crate) unsafe fn batch_coherence_sweep(
 
     for i in 0..n_areas {
         // Sum over area i using SIMD
-        let (mut ss_i, mut cc_i) =
-            (f32x8::splat(0.0), f32x8::splat(0.0));
+        let (mut ss_i, mut cc_i) = (f32x8::splat(0.0), f32x8::splat(0.0));
         let base_i = i * n_elem;
         let mut k = 0;
         while k < n8 {

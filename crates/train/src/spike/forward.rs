@@ -1,7 +1,10 @@
 //! Forward pass: drives → T3 (N steps) → PST features + trajectory.
 
-use crate::t3::{T3Backend, Avx2Backend, TriOscillator, pst_linear_features};
-use crate::spike::trajectory::{T3SpikeTrajectory, copy_slice, OFF_TH1, off_th2, off_th3, off_r1, off_r2, off_r3, off_drive1, off_drive2, off_drive3};
+use crate::spike::trajectory::{
+    copy_slice, off_drive1, off_drive2, off_drive3, off_r1, off_r2, off_r3, off_th2, off_th3,
+    T3SpikeTrajectory, OFF_TH1,
+};
+use crate::t3::{pst_linear_features, Avx2Backend, T3Backend, TriOscillator};
 
 /// Helper macro: get a step slice from flat trajectory data
 #[macro_export]
@@ -45,9 +48,17 @@ pub fn t3spike_forward_with_backend<B: T3Backend>(
     let step_size = 3 * n_osc;
 
     let mut traj = T3SpikeTrajectory::new(
-        n_osc, n_steps, dt, drive_gain, alpha, DEFAULT_EPSILON,
-        freq_min, freq_max,
-        coupling_w12, coupling_w13, coupling_w23,
+        n_osc,
+        n_steps,
+        dt,
+        drive_gain,
+        alpha,
+        DEFAULT_EPSILON,
+        freq_min,
+        freq_max,
+        coupling_w12,
+        coupling_w13,
+        coupling_w23,
     );
 
     for step in 0..n_steps {
@@ -55,12 +66,30 @@ pub fn t3spike_forward_with_backend<B: T3Backend>(
         let d_off = step * step_size;
 
         // Write pre-state into flat trajectory
-        copy_slice(step_slice_mut!(traj.flat, OFF_TH1, n_osc, step, n_steps), &tri.th1[..n_osc]);
-        copy_slice(step_slice_mut!(traj.flat, off_th2(n_steps, n_osc), n_osc, step, n_steps), &tri.th2[..n_osc]);
-        copy_slice(step_slice_mut!(traj.flat, off_th3(n_steps, n_osc), n_osc, step, n_steps), &tri.th3[..n_osc]);
-        copy_slice(step_slice_mut!(traj.flat, off_r1(n_steps, n_osc), n_osc, step, n_steps), &tri.r1[..n_osc]);
-        copy_slice(step_slice_mut!(traj.flat, off_r2(n_steps, n_osc), n_osc, step, n_steps), &tri.r2[..n_osc]);
-        copy_slice(step_slice_mut!(traj.flat, off_r3(n_steps, n_osc), n_osc, step, n_steps), &tri.r3[..n_osc]);
+        copy_slice(
+            step_slice_mut!(traj.flat, OFF_TH1, n_osc, step, n_steps),
+            &tri.th1[..n_osc],
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_th2(n_steps, n_osc), n_osc, step, n_steps),
+            &tri.th2[..n_osc],
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_th3(n_steps, n_osc), n_osc, step, n_steps),
+            &tri.th3[..n_osc],
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_r1(n_steps, n_osc), n_osc, step, n_steps),
+            &tri.r1[..n_osc],
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_r2(n_steps, n_osc), n_osc, step, n_steps),
+            &tri.r2[..n_osc],
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_r3(n_steps, n_osc), n_osc, step, n_steps),
+            &tri.r3[..n_osc],
+        );
 
         let d1 = &drives[d_off..d_off + n_osc];
         let d2 = &drives[d_off + n_osc..d_off + 2 * n_osc];
@@ -69,9 +98,18 @@ pub fn t3spike_forward_with_backend<B: T3Backend>(
         tri.drive2[..n_osc].copy_from_slice(d2);
         tri.drive3[..n_osc].copy_from_slice(d3);
 
-        copy_slice(step_slice_mut!(traj.flat, off_drive1(n_steps, n_osc), n_osc, step, n_steps), d1);
-        copy_slice(step_slice_mut!(traj.flat, off_drive2(n_steps, n_osc), n_osc, step, n_steps), d2);
-        copy_slice(step_slice_mut!(traj.flat, off_drive3(n_steps, n_osc), n_osc, step, n_steps), d3);
+        copy_slice(
+            step_slice_mut!(traj.flat, off_drive1(n_steps, n_osc), n_osc, step, n_steps),
+            d1,
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_drive2(n_steps, n_osc), n_osc, step, n_steps),
+            d2,
+        );
+        copy_slice(
+            step_slice_mut!(traj.flat, off_drive3(n_steps, n_osc), n_osc, step, n_steps),
+            d3,
+        );
 
         tri.step(dt);
     }
@@ -104,9 +142,16 @@ pub fn t3spike_forward(
 ) -> (Vec<f32>, T3SpikeTrajectory) {
     t3spike_forward_with_backend(
         Avx2Backend,
-        n_osc, n_steps, dt, drive_gain, alpha,
-        freq_min, freq_max,
-        coupling_w12, coupling_w13, coupling_w23,
+        n_osc,
+        n_steps,
+        dt,
+        drive_gain,
+        alpha,
+        freq_min,
+        freq_max,
+        coupling_w12,
+        coupling_w13,
+        coupling_w23,
         drives,
     )
 }

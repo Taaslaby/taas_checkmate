@@ -23,10 +23,13 @@ impl PyEPropLIF {
     #[new]
     #[pyo3(signature = (n, dt=1.0, tau_m=10.0, tau_e=20.0))]
     fn new(n: usize, dt: f32, tau_m: f32, tau_e: f32) -> Self {
-        Self { inner: neuron::EPropLIF::new(n, dt, tau_m, tau_e) }
+        Self {
+            inner: neuron::EPropLIF::new(n, dt, tau_m, tau_e),
+        }
     }
 
-    fn step(&mut self,
+    fn step(
+        &mut self,
         I: Bound<'_, PyArray1<f32>>,
         spikes: Bound<'_, PyArray1<i32>>,
         pre_spikes: Bound<'_, PyArray1<i32>>,
@@ -34,17 +37,23 @@ impl PyEPropLIF {
         let I = I.readonly();
         let mut spikes = spikes.readwrite();
         let pre_spikes = pre_spikes.readonly();
-        Ok(self.inner.step(I.as_slice()?, spikes.as_slice_mut()?, pre_spikes.as_slice()?))
+        Ok(self.inner.step(
+            I.as_slice()?,
+            spikes.as_slice_mut()?,
+            pre_spikes.as_slice()?,
+        ))
     }
 
-    fn update_weights(&self,
+    fn update_weights(
+        &self,
         weights: Bound<'_, PyArray1<f32>>,
         learning_signals: Bound<'_, PyArray1<f32>>,
         lr: f32,
     ) -> PyResult<()> {
         let mut weights = weights.readwrite();
         let ls = learning_signals.readonly();
-        self.inner.update_weights(weights.as_slice_mut()?, ls.as_slice()?, lr);
+        self.inner
+            .update_weights(weights.as_slice_mut()?, ls.as_slice()?, lr);
         Ok(())
     }
 
@@ -68,10 +77,15 @@ impl PyEPropLIF {
         Ok(())
     }
 
-    fn reset(&mut self) { self.inner.reset(); }
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
 
     fn __repr__(&self) -> String {
-        format!("EPropLIF(n={}, dt={}, τ_m={}, τ_e={})", self.inner.n, self.inner.dt, self.inner.tau_m, self.inner.tau_e)
+        format!(
+            "EPropLIF(n={}, dt={}, τ_m={}, τ_e={})",
+            self.inner.n, self.inner.dt, self.inner.tau_m, self.inner.tau_e
+        )
     }
 }
 
@@ -97,13 +111,16 @@ impl PyEPropIzhikevichMulti {
     #[new]
     #[pyo3(signature = (n_pre, n_post, dt=1.0, tau_e=20.0))]
     fn new(n_pre: usize, n_post: usize, dt: f32, tau_e: f32) -> Self {
-        Self { inner: neuron::EPropIzhikevichMulti::new(n_pre, n_post, dt, tau_e) }
+        Self {
+            inner: neuron::EPropIzhikevichMulti::new(n_pre, n_post, dt, tau_e),
+        }
     }
 
     /// One step: fused weight accumulation + Izhikevich + per-synapse eligibility.
     /// Returns number of output spikes.
     #[pyo3(signature = (weights, z_pre, I_ext, spikes))]
-    fn step(&mut self,
+    fn step(
+        &mut self,
         weights: Bound<'_, PyArray1<f32>>,
         z_pre: Bound<'_, PyArray1<i32>>,
         I_ext: Bound<'_, PyArray1<f32>>,
@@ -125,14 +142,16 @@ impl PyEPropIzhikevichMulti {
     /// weights: [n_pre × n_post] column-major, modified in-place
     /// learning_signals: [n_post] learning signal per hidden neuron
     #[pyo3(signature = (weights, learning_signals, lr))]
-    fn update_weights(&self,
+    fn update_weights(
+        &self,
         weights: Bound<'_, PyArray1<f32>>,
         learning_signals: Bound<'_, PyArray1<f32>>,
         lr: f32,
     ) -> PyResult<()> {
         let mut weights = weights.readwrite();
         let ls = learning_signals.readonly();
-        self.inner.update_weights_multi(weights.as_slice_mut()?, ls.as_slice()?, lr);
+        self.inner
+            .update_weights_multi(weights.as_slice_mut()?, ls.as_slice()?, lr);
         Ok(())
     }
 
@@ -149,17 +168,25 @@ impl PyEPropIzhikevichMulti {
     }
 
     /// Get number of post-synaptic neurons
-    fn n_post(&self) -> usize { self.inner.n_post }
+    fn n_post(&self) -> usize {
+        self.inner.n_post
+    }
 
     /// Get number of pre-synaptic neurons
-    fn n_pre(&self) -> usize { self.inner.n_pre }
+    fn n_pre(&self) -> usize {
+        self.inner.n_pre
+    }
 
     /// Reset all internal state (v, u, psi, eligibility)
-    fn reset(&mut self) { self.inner.reset(); }
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
 
     fn __repr__(&self) -> String {
-        format!("EPropIzhikevichMulti(n_pre={}, n_post={}, dt={}, τ_e={})",
-            self.inner.n_pre, self.inner.n_post, self.inner.dt, self.inner.tau_e)
+        format!(
+            "EPropIzhikevichMulti(n_pre={}, n_post={}, dt={}, τ_e={})",
+            self.inner.n_pre, self.inner.n_post, self.inner.dt, self.inner.tau_e
+        )
     }
 
     /// Set Izhikevich neuron parameters (a, b, c, d, tau_surrogate).
@@ -201,6 +228,8 @@ pub fn py_eprop_update(
     let w = weights.as_slice_mut()?;
     let e = elig.as_slice()?;
     let l = ls.as_slice()?;
-    for i in 0..n { w[i] += lr * l[i] * e[i]; }
+    for i in 0..n {
+        w[i] += lr * l[i] * e[i];
+    }
     Ok(())
 }

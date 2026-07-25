@@ -9,6 +9,9 @@
 //! Результат: перестановка `perm[i] = new_index`. Применяется к CSR + массивам нейронов.
 //! После RCM соседние нейроны в памяти имеют связанные синапсы → prefetcher работает,
 //! cache line utilisation растёт.
+//!
+//! однажды ты проснешься и осознаешь что ты rcm алгоритм и ты пытаешься
+//! минимизировать количество обращений к оперативной памяти чтобы не сдохнуть от перегрева
 
 use crate::data::ConnectomeData;
 
@@ -92,9 +95,7 @@ fn pseudo_peripheral_node(adj: &[Vec<usize>]) -> usize {
     }
 
     // Шаг 1: стартуем с узла минимальной степени
-    let s = (0..n)
-        .min_by_key(|&i| adj[i].len())
-        .unwrap_or(0);
+    let s = (0..n).min_by_key(|&i| adj[i].len()).unwrap_or(0);
 
     let mut current_root = s;
     loop {
@@ -143,11 +144,7 @@ fn cuthill_mckee(adj: &[Vec<usize>], root: usize) -> Vec<usize> {
         idx += 1;
 
         // Собираем непосещённых соседей v
-        let mut neighbors: Vec<usize> = adj[v]
-            .iter()
-            .filter(|&&u| !visited[u])
-            .copied()
-            .collect();
+        let mut neighbors: Vec<usize> = adj[v].iter().filter(|&&u| !visited[u]).copied().collect();
 
         if neighbors.is_empty() {
             continue;
@@ -247,10 +244,7 @@ fn build_laplacian_csr(adj: &[Vec<usize>]) -> (Vec<i32>, Vec<i32>, Vec<f32>) {
 }
 
 /// Симметричная CSR × vector: y = L · x (только верхний треугольник).
-fn csr_symv(
-    row_ptr: &[i32], col_indices: &[i32], values: &[f32],
-    x: &[f32], y: &mut [f32],
-) {
+fn csr_symv(row_ptr: &[i32], col_indices: &[i32], values: &[f32], x: &[f32], y: &mut [f32]) {
     let n = x.len();
     y.fill(0.0);
     for i in 0..n {
@@ -275,12 +269,17 @@ fn csr_symv(
 /// Решить (L - μI)⁻¹ · x через conjugate gradient (CG).
 /// L - μI симметрична положительно определена при μ < λ₂.
 fn solve_shifted_laplacian(
-    row_ptr: &[i32], col_indices: &[i32], values: &[f32],
-    mu: f32, b: &[f32], x: &mut [f32],
-    max_iter: usize, tol: f32,
+    row_ptr: &[i32],
+    col_indices: &[i32],
+    values: &[f32],
+    mu: f32,
+    b: &[f32],
+    x: &mut [f32],
+    max_iter: usize,
+    tol: f32,
 ) {
     let n = b.len();
-    x.copy_from_slice(b);  // initial guess = b
+    x.copy_from_slice(b); // initial guess = b
 
     // r = b - (L - μI)·x
     let mut r = vec![0.0f32; n];
@@ -303,10 +302,18 @@ fn solve_shifted_laplacian(
         // Ap = (L - μI)·p
         let mut ap = vec![0.0f32; n];
         csr_symv(row_ptr, col_indices, values, &p, &mut ap);
-        for i in 0..n { ap[i] -= mu * p[i]; }
+        for i in 0..n {
+            ap[i] -= mu * p[i];
+        }
 
-        let p_ap = p.iter().zip(ap.iter()).map(|(pi, api)| pi * api).sum::<f32>();
-        if p_ap.abs() < 1e-12 { break; }
+        let p_ap = p
+            .iter()
+            .zip(ap.iter())
+            .map(|(pi, api)| pi * api)
+            .sum::<f32>();
+        if p_ap.abs() < 1e-12 {
+            break;
+        }
 
         let alpha = rsq / p_ap;
         for i in 0..n {
@@ -316,7 +323,9 @@ fn solve_shifted_laplacian(
 
         let rsq_new = r_dot(&r);
         let beta = rsq_new / rsq;
-        for i in 0..n { p[i] = r[i] + beta * p[i]; }
+        for i in 0..n {
+            p[i] = r[i] + beta * p[i];
+        }
         rsq = rsq_new;
     }
 }
@@ -325,11 +334,7 @@ fn solve_shifted_laplacian(
 ///
 /// Возвращает вектор длины n — Fiedler vector (ортогонален 1, нормализован).
 /// На каждом шаге решает (L - σI)⁻¹ · x, где σ ≈ текущее собственное значение.
-pub fn fiedler_vector(
-    adj: &[Vec<usize>],
-    max_iter: usize,
-    tol: f32,
-) -> Vec<f32> {
+pub fn fiedler_vector(adj: &[Vec<usize>], max_iter: usize, tol: f32) -> Vec<f32> {
     let n = adj.len();
     if n <= 2 {
         return vec![1.0f32; n];
@@ -338,21 +343,25 @@ pub fn fiedler_vector(
     let (rp, ci, vals) = build_laplacian_csr(adj);
 
     // Начальный вектор: детерминированный ПСЧ из индекса, ортогональный 1
-    let mut x: Vec<f32> = (0..n).map(|i| {
-        // SplitMix64-style: две wrapping_mul чтобы избежать overflow в debug mode
-        let h = i.wrapping_mul(6364136223846793005);
-        let v = (h.wrapping_mul(1442695040888963407) as f32) / 1.8446744e19;
-        v * 2.0 - 1.0
-    }).collect();
+    let mut x: Vec<f32> = (0..n)
+        .map(|i| {
+            // SplitMix64-style: две wrapping_mul чтобы избежать overflow в debug mode
+            let h = i.wrapping_mul(6364136223846793005);
+            let v = (h.wrapping_mul(1442695040888963407) as f32) / 1.8446744e19;
+            v * 2.0 - 1.0
+        })
+        .collect();
 
     // Вычитаем среднее (ортогонализация к 1)
     let mean: f32 = x.iter().sum::<f32>() / n as f32;
-    for xi in x.iter_mut() { *xi -= mean; }
+    for xi in x.iter_mut() {
+        *xi -= mean;
+    }
 
     // Оценка λ₂ через Gershgorin: λ₂ ∈ [0, 2·max_degree]
     let max_deg = adj.iter().map(|nei| nei.len()).max().unwrap_or(1) as f32;
     let lambda_max = 2.0 * max_deg;
-    let mut sigma = lambda_max * 0.25;  // начальная оценка λ₂ ≈ λ_max/4
+    let mut sigma = lambda_max * 0.25; // начальная оценка λ₂ ≈ λ_max/4
 
     let mut lambda_old = sigma;
     let mut x_next = vec![0.0f32; n];
@@ -365,12 +374,16 @@ pub fn fiedler_vector(
 
         // Ортогонализация к 1
         let mean_x: f32 = x.iter().sum::<f32>() / n as f32;
-        for xi in x.iter_mut() { *xi -= mean_x; }
+        for xi in x.iter_mut() {
+            *xi -= mean_x;
+        }
 
         // Нормализация
         let norm: f32 = x.iter().map(|&v| v * v).sum::<f32>().sqrt();
         if norm > 1e-10 {
-            for xi in x.iter_mut() { *xi /= norm; }
+            for xi in x.iter_mut() {
+                *xi /= norm;
+            }
         }
 
         // Rayleigh quotient: λ = x^T L x / x^T x
@@ -390,7 +403,9 @@ pub fn fiedler_vector(
 
     // Ортогонализация к 1 (финальная)
     let mean_x: f32 = x.iter().sum::<f32>() / n as f32;
-    for xi in x.iter_mut() { *xi -= mean_x; }
+    for xi in x.iter_mut() {
+        *xi -= mean_x;
+    }
 
     x
 }
@@ -426,7 +441,11 @@ pub fn spectral_ordering(adj: &[Vec<usize>], max_iter: usize, tol: f32) -> Vec<u
 
     // Сортируем индексы по Fiedler vector (возрастание)
     let mut indices: Vec<usize> = (0..n).collect();
-    indices.sort_by(|&i, &j| fv[i].partial_cmp(&fv[j]).unwrap_or(std::cmp::Ordering::Equal));
+    indices.sort_by(|&i, &j| {
+        fv[i]
+            .partial_cmp(&fv[j])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // permutation[indices[i]] = i  (или n-1-i для reverse)
     // Используем reverse spectral (как RCM — reverse Cuthill-McKee)
@@ -447,9 +466,9 @@ pub fn bandwidth(row_ptr: &[i32], col_indices: &[i32]) -> usize {
         return 0;
     }
     let n = row_ptr.len() - 1;
-    let max_syn = col_indices.len().min(
-        row_ptr.last().copied().unwrap_or(0).max(0) as usize
-    );
+    let max_syn = col_indices
+        .len()
+        .min(row_ptr.last().copied().unwrap_or(0).max(0) as usize);
     let mut bw = 0usize;
     for i in 0..n {
         let start = row_ptr[i].max(0) as usize;
@@ -473,9 +492,9 @@ pub fn mean_bandwidth(row_ptr: &[i32], col_indices: &[i32]) -> f64 {
         return 0.0;
     }
     let n = row_ptr.len() - 1;
-    let max_syn = col_indices.len().min(
-        row_ptr.last().copied().unwrap_or(0).max(0) as usize
-    );
+    let max_syn = col_indices
+        .len()
+        .min(row_ptr.last().copied().unwrap_or(0).max(0) as usize);
     let mut total = 0u64;
     let mut count = 0u64;
     for i in 0..n {
@@ -490,7 +509,11 @@ pub fn mean_bandwidth(row_ptr: &[i32], col_indices: &[i32]) -> f64 {
             }
         }
     }
-    if count == 0 { 0.0 } else { total as f64 / count as f64 }
+    if count == 0 {
+        0.0
+    } else {
+        total as f64 / count as f64
+    }
 }
 
 /// Применить перестановку к CSR матрице + nt_types.
@@ -530,9 +553,7 @@ pub fn apply_permutation_to_csr(
     let mut new_values = vec![0.0f32; total_syn];
 
     // Заполняем col_indices и values
-    let mut cursor: Vec<usize> = new_row_ptr.iter()
-        .map(|&rp| rp.max(0) as usize)
-        .collect();
+    let mut cursor: Vec<usize> = new_row_ptr.iter().map(|&rp| rp.max(0) as usize).collect();
     // cursor[n] = total_syn (не трогаем)
 
     for old_i in 0..n {
@@ -542,7 +563,11 @@ pub fn apply_permutation_to_csr(
         let pos = &mut cursor[new_i];
         for j in start..end {
             let old_post = col_indices[j].max(0) as usize;
-            let new_post = if old_post < n { perm[old_post] } else { old_post };
+            let new_post = if old_post < n {
+                perm[old_post]
+            } else {
+                old_post
+            };
             new_col_indices[*pos] = new_post as i32;
             new_values[*pos] = values[j];
             *pos += 1;
@@ -562,10 +587,7 @@ pub fn apply_permutation_to_csr(
 /// Применить перестановку к массиву состояния (v, u, I_buf, spikes, refractory).
 ///
 /// `perm[i] = new_index`.
-pub fn apply_permutation_to_state<T: Copy + Default>(
-    state: &mut [T],
-    perm: &[usize],
-) {
+pub fn apply_permutation_to_state<T: Copy + Default>(state: &mut [T], perm: &[usize]) {
     let n = perm.len();
     if state.len() < n {
         return;
@@ -581,16 +603,21 @@ pub fn apply_permutation_to_groups(
     groups: &[crate::data::NeuronGroup],
     perm: &[usize],
 ) -> Vec<crate::data::NeuronGroup> {
-    groups.iter().map(|g| {
-        let new_indices: Vec<usize> = g.indices.iter()
-            .filter(|&&old| old < perm.len())
-            .map(|&old| perm[old])
-            .collect();
-        crate::data::NeuronGroup {
-            name: g.name.clone(),
-            indices: new_indices,
-        }
-    }).collect()
+    groups
+        .iter()
+        .map(|g| {
+            let new_indices: Vec<usize> = g
+                .indices
+                .iter()
+                .filter(|&&old| old < perm.len())
+                .map(|&old| perm[old])
+                .collect();
+            crate::data::NeuronGroup {
+                name: g.name.clone(),
+                indices: new_indices,
+            }
+        })
+        .collect()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -684,12 +711,18 @@ mod tests {
         let adj = build_adjacency(&dat);
         let perm = reverse_cuthill_mckee(&adj);
         let (new_rp, new_ci, _, _) = apply_permutation_to_csr(
-            &dat.row_ptr, &dat.col_indices, &dat.values,
-            &dat.nt_types, &perm,
+            &dat.row_ptr,
+            &dat.col_indices,
+            &dat.values,
+            &dat.nt_types,
+            &perm,
         );
         let bw_after = bandwidth(&new_rp, &new_ci);
         println!("Bandwidth AFTER:  {bw_after}");
-        println!("Mean BW before:  {:.2}", mean_bandwidth(&dat.row_ptr, &dat.col_indices));
+        println!(
+            "Mean BW before:  {:.2}",
+            mean_bandwidth(&dat.row_ptr, &dat.col_indices)
+        );
         println!("Mean BW after:   {:.2}", mean_bandwidth(&new_rp, &new_ci));
 
         assert!(bw_after <= bw_before, "bandwidth should not increase");
@@ -707,14 +740,20 @@ mod tests {
             let n_syn = 2 + ((rng.wrapping_mul(6364136223846793005).wrapping_add(1)) % 3) as usize;
             let start = row_ptr[i];
             for _ in 0..n_syn {
-                let post = ((rng.wrapping_mul(6364136223846793005).wrapping_add(1)) % n as u64) as i32;
+                let post =
+                    ((rng.wrapping_mul(6364136223846793005).wrapping_add(1)) % n as u64) as i32;
                 col_indices.push(post);
-                values.push(((rng.wrapping_mul(6364136223846793005).wrapping_add(1) as f32) % 10.0 - 5.0) / 10.0);
+                values.push(
+                    ((rng.wrapping_mul(6364136223846793005).wrapping_add(1) as f32) % 10.0 - 5.0)
+                        / 10.0,
+                );
             }
             row_ptr[i + 1] = start + n_syn as i32;
         }
         let n_syn = values.len();
-        let nt_types: Vec<f32> = (0..n).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let nt_types: Vec<f32> = (0..n)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
 
         let dat = ConnectomeData {
             n_neurons: n,
@@ -730,12 +769,16 @@ mod tests {
         let adj = build_adjacency(&dat);
         let perm = reverse_cuthill_mckee(&adj);
         let (new_rp, new_ci, new_vals, new_nt) = apply_permutation_to_csr(
-            &dat.row_ptr, &dat.col_indices, &dat.values,
-            &dat.nt_types, &perm,
+            &dat.row_ptr,
+            &dat.col_indices,
+            &dat.values,
+            &dat.nt_types,
+            &perm,
         );
 
         // Строим мультимножество из нового CSR
-        let mut edge_set: std::collections::HashMap<(i32, i32), f32> = std::collections::HashMap::new();
+        let mut edge_set: std::collections::HashMap<(i32, i32), f32> =
+            std::collections::HashMap::new();
         for i in 0..n {
             let start = new_rp[i].max(0) as usize;
             let end = (new_rp[i + 1] as usize).min(new_vals.len());
@@ -752,17 +795,25 @@ mod tests {
                 let new_i = perm[i] as i32;
                 let new_j = perm[col_indices[j] as usize] as i32;
                 let v = edge_set.get(&(new_i, new_j));
-                assert!(v.is_some(), "Edge ({new_i}→{new_j}) from ({i}→{}) not found after RCM", col_indices[j]);
-                assert!((*v.unwrap() - values[j]).abs() < 1e-6,
-                    "Weight mismatch for edge ({new_i}→{new_j})");
+                assert!(
+                    v.is_some(),
+                    "Edge ({new_i}→{new_j}) from ({i}→{}) not found after RCM",
+                    col_indices[j]
+                );
+                assert!(
+                    (*v.unwrap() - values[j]).abs() < 1e-6,
+                    "Weight mismatch for edge ({new_i}→{new_j})"
+                );
             }
         }
 
         // Проверяем nt_types
         for old_i in 0..n {
             let new_i = perm[old_i];
-            assert_eq!(new_nt[new_i], nt_types[old_i],
-                "nt_types mismatch for neuron {old_i}→{new_i}");
+            assert_eq!(
+                new_nt[new_i], nt_types[old_i],
+                "nt_types mismatch for neuron {old_i}→{new_i}"
+            );
         }
 
         println!("RCM semantics test: ✅ all {n_syn} edges preserved");
@@ -776,29 +827,27 @@ mod tests {
     fn test_fiedler_vector_simple() {
         // Line graph: 0-1-2-3 (path of 4 nodes)
         let adj = vec![
-            vec![1],          // 0
-            vec![0, 2],       // 1
-            vec![1, 3],       // 2
-            vec![2],          // 3
+            vec![1],    // 0
+            vec![0, 2], // 1
+            vec![1, 3], // 2
+            vec![2],    // 3
         ];
         let fv = fiedler_vector(&adj, 100, 1e-4);
         assert_eq!(fv.len(), 4);
         // Fiedler vector for a path graph should be monotonic
         // (sorted by position along the path)
         for i in 0..3 {
-            assert!(fv[i] != fv[i + 1], "Fiedler vector should distinguish adjacent nodes");
+            assert!(
+                fv[i] != fv[i + 1],
+                "Fiedler vector should distinguish adjacent nodes"
+            );
         }
         println!("Fiedler vector (path of 4): {:?}", fv);
     }
 
     #[test]
     fn test_spectral_ordering_permutation() {
-        let adj = vec![
-            vec![1, 2],
-            vec![0, 3],
-            vec![0, 3],
-            vec![1, 2],
-        ];
+        let adj = vec![vec![1, 2], vec![0, 3], vec![0, 3], vec![1, 2]];
         let perm = spectral_ordering(&adj, 50, 1e-3);
         assert_eq!(perm.len(), 4);
 
@@ -837,10 +886,10 @@ mod tests {
         }
         row_ptr[n] = n as i32;
 
-        let (rp_rcm, ci_rcm, _, _) = apply_permutation_to_csr(
-            &row_ptr, &col_indices, &values, &[], &rcm_perm);
-        let (rp_spec, ci_spec, _, _) = apply_permutation_to_csr(
-            &row_ptr, &col_indices, &values, &[], &spec_perm);
+        let (rp_rcm, ci_rcm, _, _) =
+            apply_permutation_to_csr(&row_ptr, &col_indices, &values, &[], &rcm_perm);
+        let (rp_spec, ci_spec, _, _) =
+            apply_permutation_to_csr(&row_ptr, &col_indices, &values, &[], &spec_perm);
 
         let bw_rcm = bandwidth(&rp_rcm, &ci_rcm);
         let bw_spec = bandwidth(&rp_spec, &ci_spec);

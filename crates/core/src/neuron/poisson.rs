@@ -1,6 +1,8 @@
 //! Poisson spike generator — generates Poisson spike trains at given rates.
 //!
 //! Uses per-neuron LCG RNG streams for independent spike generation.
+//!
+//! если что это не отравление это просто генератор случайных чисел ахахах
 
 use rayon::prelude::*;
 
@@ -35,7 +37,9 @@ impl PoissonGenerator {
     }
 
     pub fn set_rate(&mut self, idx: usize, rate_hz: f32) {
-        if idx < self.n { self.rates[idx] = rate_hz; }
+        if idx < self.n {
+            self.rates[idx] = rate_hz;
+        }
     }
 
     pub fn set_rates(&mut self, rates: &[f32]) {
@@ -47,7 +51,8 @@ impl PoissonGenerator {
     pub fn step(&mut self, spikes_out: &mut [i32]) {
         let n = self.n.min(spikes_out.len());
         let dt = self.dt;
-        self.rng_states[..n].par_chunks_exact_mut(8)
+        self.rng_states[..n]
+            .par_chunks_exact_mut(8)
             .zip(self.rates[..n].par_chunks_exact(8))
             .zip(spikes_out[..n].par_chunks_exact_mut(8))
             .for_each(|((states8, rates8), sp8)| {
@@ -62,10 +67,18 @@ impl PoissonGenerator {
                     }
                 }
             });
-        for i in n..self.n.min(spikes_out.len()) { spikes_out[i] = 0; }
+        for i in n..self.n.min(spikes_out.len()) {
+            spikes_out[i] = 0;
+        }
     }
 
-    pub fn dt(&self) -> f32 { self.dt }
-    pub fn rates(&self) -> &[f32] { &self.rates[..self.n] }
-    pub fn n_neurons(&self) -> usize { self.n }
+    pub fn dt(&self) -> f32 {
+        self.dt
+    }
+    pub fn rates(&self) -> &[f32] {
+        &self.rates[..self.n]
+    }
+    pub fn n_neurons(&self) -> usize {
+        self.n
+    }
 }

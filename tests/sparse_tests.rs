@@ -1,4 +1,4 @@
-//! Unit tests for sparse module — CSR propagation, Hamiltonian, ψ-wave, STDP LTD.
+//! Unit tests for sparse module — CSR propagation, Hamiltonian, Graph-Coupled Oscillator, STDP LTD.
 
 // Allow non_snake_case for mathematical variable names
 #![allow(non_snake_case)]
@@ -13,7 +13,7 @@ fn make_padded(n: usize) -> usize {
 fn ring_csr(n: usize) -> (Vec<i32>, Vec<i32>, Vec<f32>) {
     let n_pad = make_padded(n);
     let mut row_ptr = vec![0i32; n_pad + 1];
-    let mut col_indices = vec![0i32; n];  // one edge per neuron
+    let mut col_indices = vec![0i32; n]; // one edge per neuron
     let values = vec![1.0f32; n];
     for i in 0..n {
         row_ptr[i] = i as i32;
@@ -35,18 +35,35 @@ fn test_propagate_spikes_basic() {
     let (row_ptr, col_indices, values) = ring_csr(n);
     let n_pad = make_padded(n);
 
-    let spiked = vec![0i32];  // neuron 0 spikes
+    let spiked = vec![0i32]; // neuron 0 spikes
     let nt_types = vec![1.0f32; n_pad];
     let mut input_buf = vec![0.0f32; n_pad];
     let weight_scale = 1.0;
 
-    sparse::propagate_spikes(&row_ptr, &col_indices, &values, &spiked, &nt_types, &mut input_buf, weight_scale);
+    sparse::propagate_spikes(
+        &row_ptr,
+        &col_indices,
+        &values,
+        &spiked,
+        &nt_types,
+        &mut input_buf,
+        weight_scale,
+    );
 
     // Neuron 0 → neuron 1 with weight 1.0
-    assert!((input_buf[1] - 1.0).abs() < 1e-5, "Neuron 1 should get 1.0, got {}", input_buf[1]);
+    assert!(
+        (input_buf[1] - 1.0).abs() < 1e-5,
+        "Neuron 1 should get 1.0, got {}",
+        input_buf[1]
+    );
     // All others should be 0
     for i in 2..n {
-        assert!((input_buf[i] - 0.0).abs() < 1e-5, "Neuron {} should get 0, got {}", i, input_buf[i]);
+        assert!(
+            (input_buf[i] - 0.0).abs() < 1e-5,
+            "Neuron {} should get 0, got {}",
+            i,
+            input_buf[i]
+        );
     }
 }
 
@@ -56,16 +73,36 @@ fn test_propagate_spikes_multiple() {
     let (row_ptr, col_indices, values) = ring_csr(n);
     let n_pad = make_padded(n);
 
-    let spiked = vec![0i32, 2, 5];  // multiple spikes
+    let spiked = vec![0i32, 2, 5]; // multiple spikes
     let nt_types = vec![1.0f32; n_pad];
     let mut input_buf = vec![0.0f32; n_pad];
 
-    sparse::propagate_spikes(&row_ptr, &col_indices, &values, &spiked, &nt_types, &mut input_buf, 1.0);
+    sparse::propagate_spikes(
+        &row_ptr,
+        &col_indices,
+        &values,
+        &spiked,
+        &nt_types,
+        &mut input_buf,
+        1.0,
+    );
 
     // Neuron 0 → 1, Neuron 2 → 3, Neuron 5 → 6
-    assert!((input_buf[1] - 1.0).abs() < 1e-5, "N1 should get 1.0, got {}", input_buf[1]);
-    assert!((input_buf[3] - 1.0).abs() < 1e-5, "N3 should get 1.0, got {}", input_buf[3]);
-    assert!((input_buf[6] - 1.0).abs() < 1e-5, "N6 should get 1.0, got {}", input_buf[6]);
+    assert!(
+        (input_buf[1] - 1.0).abs() < 1e-5,
+        "N1 should get 1.0, got {}",
+        input_buf[1]
+    );
+    assert!(
+        (input_buf[3] - 1.0).abs() < 1e-5,
+        "N3 should get 1.0, got {}",
+        input_buf[3]
+    );
+    assert!(
+        (input_buf[6] - 1.0).abs() < 1e-5,
+        "N6 should get 1.0, got {}",
+        input_buf[6]
+    );
 }
 
 #[test]
@@ -75,13 +112,25 @@ fn test_propagate_spikes_weight_scale() {
     let n_pad = make_padded(n);
 
     let spiked = vec![0i32];
-    let nt_types = vec![2.0f32; n_pad];  // double strength
+    let nt_types = vec![2.0f32; n_pad]; // double strength
     let mut input_buf = vec![0.0f32; n_pad];
 
-    sparse::propagate_spikes(&row_ptr, &col_indices, &values, &spiked, &nt_types, &mut input_buf, 1.0);
+    sparse::propagate_spikes(
+        &row_ptr,
+        &col_indices,
+        &values,
+        &spiked,
+        &nt_types,
+        &mut input_buf,
+        1.0,
+    );
 
     // Neuron 0 → 1 with nt_type=2.0, weight=1.0 → 2.0
-    assert!((input_buf[1] - 2.0).abs() < 1e-5, "N1 should get 2.0, got {}", input_buf[1]);
+    assert!(
+        (input_buf[1] - 2.0).abs() < 1e-5,
+        "N1 should get 2.0, got {}",
+        input_buf[1]
+    );
 }
 
 // ─── Compute Hamiltonian ────────────────────────────────
@@ -97,21 +146,39 @@ fn test_compute_hamiltonian_basic() {
     let mut h_real = vec![0.0f32; n_pad];
     let mut h_imag = vec![0.0f32; n_pad];
 
-    sparse::compute_hamiltonian(&row_ptr, &col_indices, &values, &v, &u, &mut h_real, &mut h_imag);
+    sparse::compute_hamiltonian(
+        &row_ptr,
+        &col_indices,
+        &values,
+        &v,
+        &u,
+        &mut h_real,
+        &mut h_imag,
+    );
 
     // Ring: each neuron i receives from (i-1+n)%n
     // For neuron 1: receives from neuron 0 with u[0]=2.0, weight=1.0 → h_real[1]=2.0
     //             h_imag = -W*v[0] = -2.0
     for i in 1..n {
-        assert!((h_real[i] - 2.0).abs() < 1e-5, "h_real[{}] should be 2.0, got {}", i, h_real[i]);
-        assert!((h_imag[i] - (-1.0)).abs() < 1e-5, "h_imag[{}] should be -1.0, got {}", i, h_imag[i]);
+        assert!(
+            (h_real[i] - 2.0).abs() < 1e-5,
+            "h_real[{}] should be 2.0, got {}",
+            i,
+            h_real[i]
+        );
+        assert!(
+            (h_imag[i] - (-1.0)).abs() < 1e-5,
+            "h_imag[{}] should be -1.0, got {}",
+            i,
+            h_imag[i]
+        );
     }
 }
 
-// ─── ψ-wave Full Step ────────────────────────────────────
+// ─── Graph-Coupled Oscillator Full Step ────────────────────────────────────
 
 #[test]
-fn test_psi_wave_full_step_preserves_norm() {
+fn test_gco_full_step_preserves_norm() {
     let n = 8;
     let (row_ptr, col_indices, values) = ring_csr(n);
     let n_pad = make_padded(n);
@@ -127,12 +194,17 @@ fn test_psi_wave_full_step_preserves_norm() {
     let dt = 0.05;
     let hbar = 1.0;
 
-    sparse::step_psi_wave_full(&mut v, &mut u, &row_ptr, &col_indices, &values, dt, hbar);
+    sparse::step_gco_full(&mut v, &mut u, &row_ptr, &col_indices, &values, dt, hbar);
 
     // Norm should stay close to 1.0
     for i in 0..n {
         let nrm = (v[i] * v[i] + u[i] * u[i]).sqrt();
-        assert!((nrm - 1.0).abs() < 0.01, "ψ-wave norm should stay ~1, got {} at {}", nrm, i);
+        assert!(
+            (nrm - 1.0).abs() < 0.01,
+            "Graph-Coupled Oscillator norm should stay ~1, got {} at {}",
+            nrm,
+            i
+        );
     }
 }
 
@@ -164,12 +236,22 @@ fn test_apply_stdp_ltd_basic() {
     let spiked2 = vec![0i32];
     let traces2 = vec![0.0f32, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
-    sparse::apply_stdp_ltd(&_row_ptr2, &_col_indices2, &mut weights2, &spiked2, &traces2, lr);
+    sparse::apply_stdp_ltd(
+        &_row_ptr2,
+        &_col_indices2,
+        &mut weights2,
+        &spiked2,
+        &traces2,
+        lr,
+    );
 
     // Neuron 0 spikes → target = col_indices[0] = 1. traces[1] = 0.5
     // weight[0] -= 0.01 * 0.5 = 0.005
-    assert!((weights2[0] - 0.995).abs() < 1e-5,
-        "STDP LTD weight[0] should be 0.995, got {}", weights2[0]);
+    assert!(
+        (weights2[0] - 0.995).abs() < 1e-5,
+        "STDP LTD weight[0] should be 0.995, got {}",
+        weights2[0]
+    );
 }
 
 #[test]
@@ -178,11 +260,15 @@ fn test_apply_stdp_ltd_clamp_low() {
     let (row_ptr, col_indices, mut weights) = ring_csr(n);
 
     let spiked = vec![0i32];
-    let traces = vec![0.0f32, 1e10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];  // huge trace → clamp
+    let traces = vec![0.0f32, 1e10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]; // huge trace → clamp
     let lr = 1.0;
 
     sparse::apply_stdp_ltd(&row_ptr, &col_indices, &mut weights, &spiked, &traces, lr);
 
     // weight[0] -= 1.0 * 1e10 for col_indices[0]=1 → should be clamped to 1e-5
-    assert!((weights[0] - 1e-5).abs() < 1e-5, "LTD should clamp to 1e-5, got {}", weights[0]);
+    assert!(
+        (weights[0] - 1e-5).abs() < 1e-5,
+        "LTD should clamp to 1e-5, got {}",
+        weights[0]
+    );
 }

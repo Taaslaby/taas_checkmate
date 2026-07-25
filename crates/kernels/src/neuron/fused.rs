@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
+use super::{fast_exp_simd, load8, load8_mut, spike_mask_to_i32, store8, RNG_SCALE_24};
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{fast_exp_simd, load8, load8_mut, store8, spike_mask_to_i32, RNG_SCALE_24};
 
 // ═══════════════════════════════════════════════════════
 //  Fused Izhikevich with weight accumulation (SIMD)
@@ -28,13 +28,23 @@ use super::{fast_exp_simd, load8, load8_mut, store8, spike_mask_to_i32, RNG_SCAL
 /// to a multiple of 8. `v[nh]`, `u[nh]`, `trace[nh]`, `spikes[nh]`, `refractory[nh]`,
 /// `a[nh]`, `b[nh]`, `c[nh]`, `d[nh]` valid; `weights[ni·nh]` column-major; `input_spikes[ni]`.
 pub(crate) unsafe fn fused_hidden_izhikevich_step(
-    v: *mut f32, u: *mut f32, trace: *mut f32, spikes: *mut i32, refractory: *mut f32,
-    a: *const f32, b: *const f32, c: *const f32, d: *const f32,
+    v: *mut f32,
+    u: *mut f32,
+    trace: *mut f32,
+    spikes: *mut i32,
+    refractory: *mut f32,
+    a: *const f32,
+    b: *const f32,
+    c: *const f32,
+    d: *const f32,
     weights: *const f32,
     input_spikes: *const i32,
-    dt: f32, trace_decay: f32, tau_ref: f32,
-    ni: usize, nh: usize,
-    active_buf: &mut Vec<usize>,    // pre-allocated, cleared on entry
+    dt: f32,
+    trace_decay: f32,
+    tau_ref: f32,
+    ni: usize,
+    nh: usize,
+    active_buf: &mut Vec<usize>, // pre-allocated, cleared on entry
 ) {
     let dt_s = f32x8::splat(dt);
     let td_s = f32x8::splat(trace_decay);
@@ -72,7 +82,7 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
         let mut I_s = zero;
         for &i in active {
             let w = load8(weights, i * nh + off);
-            I_s = w.mul_add(scale10, I_s);  // I_s += w * 10.0
+            I_s = w.mul_add(scale10, I_s); // I_s += w * 10.0
         }
 
         // Refractory mask: refr > 0 → skip dynamics
@@ -110,49 +120,55 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
-    }        // Scalar tail (should be empty since nh is padded to ×8)
-        if n8 < nh {
-            let v = std::slice::from_raw_parts_mut(v, nh);
-            let u = std::slice::from_raw_parts_mut(u, nh);
-            let trace = std::slice::from_raw_parts_mut(trace, nh);
-            let spikes = std::slice::from_raw_parts_mut(spikes, nh);
-            let refr_sl = std::slice::from_raw_parts_mut(refractory, nh);
-            let a_sl = std::slice::from_raw_parts(a, nh);
-            let b_sl = std::slice::from_raw_parts(b, nh);
-            let c_sl = std::slice::from_raw_parts(c, nh);
-            let d_sl = std::slice::from_raw_parts(d, nh);
-            for j in n8..nh {
-                // Accumulate current from active pre-synapses only
-                let mut I_val = 0.0f32;
-                for &i in active {
-                    I_val += *weights.add(i * nh + j) * 10.0;
-                }
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
+    } // Scalar tail (should be empty since nh is padded to ×8)
+    if n8 < nh {
+        let v = std::slice::from_raw_parts_mut(v, nh);
+        let u = std::slice::from_raw_parts_mut(u, nh);
+        let trace = std::slice::from_raw_parts_mut(trace, nh);
+        let spikes = std::slice::from_raw_parts_mut(spikes, nh);
+        let refr_sl = std::slice::from_raw_parts_mut(refractory, nh);
+        let a_sl = std::slice::from_raw_parts(a, nh);
+        let b_sl = std::slice::from_raw_parts(b, nh);
+        let c_sl = std::slice::from_raw_parts(c, nh);
+        let d_sl = std::slice::from_raw_parts(d, nh);
+        for j in n8..nh {
+            // Accumulate current from active pre-synapses only
+            let mut I_val = 0.0f32;
+            for &i in active {
+                I_val += *weights.add(i * nh + j) * 10.0;
+            }
 
-                if refr_sl[j] > 0.0 {
-                    refr_sl[j] = (refr_sl[j] - dt).max(0.0);
-                    spikes[j] = 0;
-                    continue;
-                }
-                let orig_v = v[j];
-                let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[j] + I_val;
-                let du = a_sl[j] * (b_sl[j] * orig_v - u[j]);
-                v[j] += dt * dv;
-                u[j] += dt * du;
-                if v[j] >= 30.0 {
-                    spikes[j] = 1;
-                    v[j] = c_sl[j];
-                    u[j] += d_sl[j];
-                    refr_sl[j] = tau_ref;
-                    trace[j] += trace_decay * (1.0 - trace[j]);
-                } else {
-                    spikes[j] = 0;
-                    trace[j] *= 1.0 - trace_decay;
-                }
+            if refr_sl[j] > 0.0 {
+                refr_sl[j] = (refr_sl[j] - dt).max(0.0);
+                spikes[j] = 0;
+                continue;
+            }
+            let orig_v = v[j];
+            let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[j] + I_val;
+            let du = a_sl[j] * (b_sl[j] * orig_v - u[j]);
+            v[j] += dt * dv;
+            u[j] += dt * du;
+            if v[j] >= 30.0 {
+                spikes[j] = 1;
+                v[j] = c_sl[j];
+                u[j] += d_sl[j];
+                refr_sl[j] = tau_ref;
+                trace[j] += trace_decay * (1.0 - trace[j]);
+            } else {
+                spikes[j] = 0;
+                trace[j] *= 1.0 - trace_decay;
             }
         }
     }
+}
 
 // ═══════════════════════════════════════════════════════
 //  Fused LIF with weight accumulation (SIMD)
@@ -170,12 +186,19 @@ pub(crate) unsafe fn fused_hidden_izhikevich_step(
 /// `v[na]`, `spikes[na]`, `refractory[na]`, `tau_m[na]`, `v_rest[na]`,
 /// `v_th[na]`, `v_reset[na]` valid; `weights[nh·na]` column-major; `hidden_spikes[nh]`.
 pub(crate) unsafe fn fused_output_lif_step(
-    v: *mut f32, spikes: *mut i32, refractory: *mut f32,
-    tau_m: *const f32, v_rest: *const f32, v_th: *const f32, v_reset: *const f32,
+    v: *mut f32,
+    spikes: *mut i32,
+    refractory: *mut f32,
+    tau_m: *const f32,
+    v_rest: *const f32,
+    v_th: *const f32,
+    v_reset: *const f32,
     weights: *const f32,
     hidden_spikes: *const i32,
-    dt: f32, tau_ref: f32,
-    nh: usize, na: usize,
+    dt: f32,
+    tau_ref: f32,
+    nh: usize,
+    na: usize,
 ) {
     let dt_s = f32x8::splat(dt);
     let zero = f32x8::splat(0.0);
@@ -198,7 +221,7 @@ pub(crate) unsafe fn fused_output_lif_step(
             let zj = *hidden_spikes.add(j);
             if zj != 0 {
                 let w = load8(weights, j * na + off);
-                I_s = w.mul_add(scale10, I_s);  // I_s += w * 10.0
+                I_s = w.mul_add(scale10, I_s); // I_s += w * 10.0
             }
         }
 
@@ -225,8 +248,14 @@ pub(crate) unsafe fn fused_output_lif_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (should be empty since na is padded to ×8)
@@ -295,18 +324,27 @@ pub(crate) unsafe fn fused_output_lif_step(
 /// `refractory[nh]`, `a[nh]`, `b[nh]`, `c[nh]`, `d[nh]` valid;
 /// `weights[ni·nh]` column-major; `rng_states[ni]`, `rates[ni]`, `input_spikes_out[ni]`.
 pub(crate) unsafe fn poisson_fused_hidden_step(
-    v: *mut f32, u: *mut f32, trace: *mut f32, spikes: *mut i32, refractory: *mut f32,
-    a: *const f32, b: *const f32, c: *const f32, d: *const f32,
+    v: *mut f32,
+    u: *mut f32,
+    trace: *mut f32,
+    spikes: *mut i32,
+    refractory: *mut f32,
+    a: *const f32,
+    b: *const f32,
+    c: *const f32,
+    d: *const f32,
     weights: *const f32,
-    rng_states: *mut u32,      // [ni] per-input-neuron LCG states
-    rates: *const f32,         // [ni] Poisson rates in Hz
+    rng_states: *mut u32,       // [ni] per-input-neuron LCG states
+    rates: *const f32,          // [ni] Poisson rates in Hz
     input_spikes_out: *mut i32, // [ni] — spike flags for eligibility
     dt: f32,                    // ms (Poisson uses dt/1000 for probability)
-    trace_decay: f32, tau_ref: f32,
-    ni: usize, nh: usize,
-    active_buf: &mut Vec<usize>,    // pre-allocated, cleared on entry
+    trace_decay: f32,
+    tau_ref: f32,
+    ni: usize,
+    nh: usize,
+    active_buf: &mut Vec<usize>, // pre-allocated, cleared on entry
 ) {
-    let dt_sec = dt / 1000.0;  // ms → sec for Poisson probability
+    let dt_sec = dt / 1000.0; // ms → sec for Poisson probability
     let dt_s = f32x8::splat(dt);
     let td_s = f32x8::splat(trace_decay);
     let v_th = f32x8::splat(30.0);
@@ -385,8 +423,14 @@ pub(crate) unsafe fn poisson_fused_hidden_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (nh should be ×8)

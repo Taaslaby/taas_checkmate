@@ -1,294 +1,143 @@
-# ═══════════════════════════════════════════════════════════
-# TaasLab yakutia \\ ТаасЛаб якутия \\
-# ═══════════════════════════════
+# 🧠 taas-checkmate — Движок Мозга Простыми Словами 
 
-# 🧠 taas-checkmate — Pure Rust SIMD Neural Engine
+> **"Если вы не можете объяснить это простыми словами, вы сами этого не понимаете" — Ричард Фейнман.**
 
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-blue)]()
 [![SIMD](https://img.shields.io/badge/SIMD-f32x8-orange)]()
+[![CUDA](https://img.shields.io/badge/CUDA-12.0%2B-green)]()
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)]()
-[![CI](https://github.com/anomalyco/taas-checkmate/actions/workflows/ci.yml/badge.svg)]()
+[![Сахалыы](https://img.shields.io/badge/тыл-Сахалыы-green)](docs/README_SAKHA.md)
 
-> **Pure Rust spiking neural engine** — SIMD kernels, Kuramoto oscillators, FlyWire connectome, cognitive architecture
+👉 **[Сахалыы документация (README_SAKHA.md)](docs/README_SAKHA.md)**
 
-## 🏗 Architecture
+---
 
-```
-Python (PyO3)  ⇄  Rust safe wrappers  ⇄  pure Rust SIMD kernels (wide::f32x8)
-                                                       ↕
-                                             AVX2 / NEON / WASM SIMD / CUDA
-```
+## 💡 Что такое taas-checkmate?
 
-## 📦 Workspace (12 crates, 90+ source files)
+**taas-checkmate** — это симулятор виртуального мозга на языке Rust и GPU (CUDA). 
+
+В отличие от классического машинного обучения (где нейроны — это просто матрицы чисел), здесь нейроны **живые**: они накапливают электричество, генерируют молнии-спайки, общаются через химические рецепторы и обучаются в реальном времени.
+
+---
+
+## 🔬 Как устроен мозг внутри? (Объяснение на пальцах)
+
+### 1. 🫗 Нейрон — это "Стакан с дыркой"
+Представьте обычный стакан, у которого на дне пробита маленькая дырочка (утечка тока).
+- В стакан сверху постоянно льётся вода (электрические токи от соседних клеток).
+- Если капнуть пару капель, вода просто вытечет через дырку — нейрон остынет и ничего не произойдёт.
+- Но если влить воду резко, уровень поднимается! Как только вода доходит до самого края (**порог $V_{thresh}$**), стакан резко переворачивается — происходит **"СПАЙК" (электрическая вспышка)**!
+- После импульса стакан опустошается до самого дна (**сброс $V_{reset}$**) и ненадолго замирает (**рефрактерный период** — клетка «отдыхает»).
+
+---
+
+### 2. 🌿 Дендриты — "Дерево с водопроводными трубами"
+Сигнал не попадает в центр нейрона мгновенно. Нейрон разветвляется на пышные кроны — **дендриты**.
+- Каждая ветка — это длинная водопроводная труба. Сигнал течёт по ней к центру (соме).
+- По пути часть сигнала теряется из-за трения о стенки трубы (**сопротивление $R_a$**).
+- В **taas-checkmate** дендриты **активные**: прямо на стенках труб стоят маленькие автоматические насосы ($Na^+$, $K^+$, $Ca^{2+}$). Если сигнал на ветке становится достаточно сильным, насосы подхватывают его и выстреливают локальный мощный импульс — **дендритный спайк**!
+
+---
+
+### 3. 🔑 Синапсы и Рецепторы — "Шлюзы и Ключи"
+Когда нейрон выстреливает спайком, он посылает пузырьки химических веществ соседним клеткам. На их стенках стоят рецепторы — как разные типы замков:
+- **AMPA**: Быстрый замок. Вспышка! — и вода сразу потекла внутрь нейрона.
+- **NMDA**: "Умный" замок с пробкой из магния ($Mg^{2+}$). Чтобы его открыть, нейрон уже должен быть немного под напряжением, иначе пробка вылетит! Это фундамент нашей памяти.
+- **GABA**: Тормозной замок. Вместо того чтобы наливать воду, он наоборот открывает сливной кран снизу, охлаждая нейрон и защищая мозг от перегрева (судорог).
+
+---
+
+### 4. ⚡ SIMD и GPU — "Армия параллельных конвейеров"
+Если симулировать 10 000 000 таких стаканов по одному — компьютеру понадобится вечность.
+- **SIMD (AVX2 / AVX-512)**: Мы берём 8 или 16 стаканов и обновляем их **одновременно за 1 процессорный такт**!
+- **GPU (CUDA)**: Мы используем тысячи ядер видеокарты и пересчитываем целиком мозг (например, мухи или млекопитающего) в реальном времени.
+
+---
+
+### 5. 🎓 Обучение — "Правило Хебба и Дофамин"
+Как мозг учится?
+- **STDP**: Если нейрон А выстрелил прямо перед нейроном Б, связь между ними укрепляется ("Нейроны, которые загораются вместе — связываются вместе").
+- **Дофаминовое вознаграждение (3-Factor Plasticity)**: Мозг запоминает последние действия в след памяти. Если через секунду приходит эмоциональная награда (дофамин!), эти следы превращаются в постоянные сильные связи!
+
+---
+
+## 🏗 Структура Проекта (Workspace)
 
 ```
 taas_checkmate/
-├── Cargo.toml              ← workspace root (lib = cdylib + lib)
-├── src/
-│   ├── lib.rs              ← re-exports all crates
-│   ├── io.rs               ← PWM encoder, gates, safety clamp
-│   └── python/             ← PyO3 bindings   [feature = "python"]
-│
 ├── crates/
-│   ├── kernels/            ← SIMD kernels (raw, unsafe)           19 files
-│   │   └── src/neuron/     ← izhikevich, lif, adex, saw, hh, stp, dopamine, fused
+│   ├── kernels/        ← Низкоуровневые SIMD-ядра (AVX2 / AVX-512)
+│   │   └── src/neuron/ ← LIF, Izhikevich, AdEx, HH (Hodgkin-Huxley), Active Dendrites
 │   │
-│   ├── core/               ← Safe wrappers + neuron models        20 files
-│   │   └── src/neuron/     ← 16 files: models + encoding + stats + eprop + autotune
+│   ├── core/           ← Безопасные обёртки + сомато-дендритный цикл
 │   │
-│   ├── t3/                 ← T3 oscillator engine (Kuramoto + Stuart-Landau)  12 files
-│   │   └── src/            ← oscillator, backends, decoders, pst, cochlea, spiker
+│   ├── connectome/     ← Симулятор связей мозга (FlyWire коннектом мухи)
 │   │
-│   ├── train/              ← RL + BPTT + SPIGRAD                  11 files
-│   │   └── src/spike/      ← forward, backward, pst_jacobian, trajectory
+│   ├── cuda-kernels/   ← Сверхбыстрый GPU-ускоритель (CUDA Graphs)
 │   │
-│   ├── connectome/         ← FlyWire connectome simulator          5 files
+│   ├── t3/             ← Движок ритмов и осцилляторов мозга (Курамото)
 │   │
-│   ├── karmac/             ← Cognitive architecture (GNW, BasalGanglia, LOD)  6 files
+│   ├── train/          ← Обучение (RL Actor-Critic, E-Prop, SPIGRAD)
 │   │
-│   │
-│   ├── cpe/                ← Coherence, Dopamine, STDP, Hybrid     6 files
-│   │
-│   ├── taas-format/        ← Binary .taas snapshot format          6 files
-│   │
-│   ├── cuda-kernels/       ← CUDA backend                         1 file
-│   │
-│   ├── unity/              ← C ABI for Unity                       1 file
-│   │
-│   └── gpu-eval/           ← GPU evaluation                        1 file
+│   └── karmac/         ← Когнитивная архитектура мозга (Сознание/GNW, Базальные ганглии)
 │
-├── tests/                  ← Integration tests (Rust + Python)
-├── benches/                ← Criterion benchmarks
-├── examples/rust/          ← 7 examples (MNIST, connectome, hologram)
-├── examples/python/        ← 9 Python examples (ψ-resonance, VNC, FlyWire)
-└── docs/                   ← 10 documentation files
+├── examples/           ← Готовые примеры (MNIST, FlyWire brain, Голограммы)
+└── tests/              ← Полный набор из 154+ автоматических тестов
 ```
 
-## 🔧 Features
+---
 
-| Feature | Description | Dependencies |
-|:--------|:------------|:-------------|
-| `t3` | T3 oscillator engine (default) | `taas-t3` |
-| `train` | BPTT, SPIGRAD, connectome chase | `taas-train/t3` |
-| `connectome` | Connectome LIF brain simulator | `taas-connectome`, `taas-train/connectome` |
-| `karmac` | Cognitive architecture (GNW, LOD, Basal) | `karmac` |
-| `cuda` | GPU acceleration (implies t3 + connectome) | `cuda-kernels` + CUDA backends |
-| `python` | PyO3 + numpy zero-copy bindings | `pyo3`, `numpy` |
-| `unity` | C ABI for Unity (implies connectome) | `taas-unity` |
-| `all` | Everything | all of the above |
+## 🚀 Быстрый старт
 
+### 1. Компиляция и сборка (Rust)
 ```bash
-# Minimal: just SIMD kernels + T3 oscillator
+# Клонировать и собрать базовый SIMD-движок
+git clone https://github.com/anomalyco/taas-checkmate.git
+cd taas-checkmate
 cargo build --no-default-features
 
-# With training
-cargo build --features train
-
-# Connectome brain simulator
-cargo build --features connectome
-
-# Full stack
-cargo build --features all
+# Запуск полного набора тестов
+cargo test --all-features
 ```
 
-## 🔬 Spiking Neuron Models
-
-### SIMD Kernels (`crates/kernels/src/neuron/`) — 10 files
-
-| File | Models | Integration | SIMD |
-|:-----|:-------|:------------|:-----|
-| `izhikevich.rs` | `izhikevich_step`, `eprop_izhikevich_step`, `eprop_izhikevich_step_multi` | Forward Euler (quadratic v²) | f32x8 |
-| `lif.rs` | `lif_step`, `lif_at_step`, `eprop_lif_step` | Exponential Euler (exact for const I) | f32x8 |
-| `adex.rs` | `adex_step`, `eprop_adex_step_multi` | Forward Euler + fast_exp | f32x8 |
-| `saw.rs` | `saw_step`, `eprop_saw_step`, `psi_wave_step` | Forward Euler + noise / unit circle | f32x8 |
-| `hh.rs` | `hh_lut_step` (scalar + SIMD) | LUT-interpolated exponential Euler | f32x8 |
-| `fused.rs` | `fused_hidden_izhikevich_step`, `fused_output_lif_step`, `poisson_fused_hidden_step` | Fused: RNG → weights → dynamics in 1 pass | f32x8 |
-| `dopamine.rs` | `dopamine_traces_step`, `dopamine_weight_update` | 3-factor STDP × dopamine (Izhikevich 2007) | f32x8 |
-| `stp.rs` | `stp_step`, `stdp_update`, `stdp_homeostatic` | Tsodyks-Markram STP + homeostatic STDP | f32x8 |
-| `delay.rs` | `delay_buffer_circular`, `delay_buffer_multi_tap` | Circular buffer for delays | f32x8 |
-
-### Safe Wrappers (`crates/core/src/neuron/`) — 16 files
-
-| File | Models |
-|:-----|:-------|
-| `izhikevich.rs` | `step_izhikevich`, `EPropIzhikevich`, `EPropIzhikevichMulti` |
-| `lif.rs` | `step_lif`, `step_lif_at`, `EPropLIF` |
-| `adex.rs` | `step_adex`, `EPropAdExMulti` |
-| `saw.rs` | `step_saw`, `step_psi_wave`, `EPropSaw` |
-| `hh.rs` | `HhLutConfig`, `HhState`, `step_hh_lut` |
-| `stdp.rs` | `DopamineSTDP` — 3-factor plasticity |
-| `stp.rs` | `ShortTermPlasticity`, `compute_lfp` |
-| `sorn.rs` | `SornNetwork` — intrinsic plasticity + synaptic normalization |
-| `encoding.rs` | BSA, Phase, TTFS spike encoders |
-| `poisson.rs` | `PoissonGenerator` |
-| `delay.rs` | `DelayBuffer` (circular) |
-| `stats.rs` | SpikeRaster, firing rates, ISI, CV |
-| `eprop.rs` | `surrogate_gradient`, `eprop_update` |
-| `autotune.rs` | `probe_fr`, `suggest_config` |
-| `trainer.rs` | `EPropTrainer` |
-
-### Plasticity Rules
-
-| Rule | Description |
-|:-----|:------------|
-| STDP | Spike-timing dependent plasticity (`stdp_update`, `stdp_homeostatic`) |
-| Dopamine-STDP | 3-factor: STDP × dopamine reward signal (Izhikevich 2007) |
-| STP | Tsodyks-Markram short-term (facilitation + depression) |
-| E-Prop | Eligibility traces + surrogate gradient for LIF, Izhikevich, SAW, AdEx |
-| Intrinsic Plasticity | Adaptive thresholds for target firing rate |
-| Synaptic Normalization | Weight normalization to target sum |
-
-## 🤖 Spiking Actor-Critic RL Agent
-
-Pure Rust spiking Actor-Critic with dopamine-modulated STDP (3-factor plasticity).
-Based on Izhikevich (2007) *"Solving the distal reward problem through linkage of STDP and dopamine signaling"*.
-
-```rust
-use taas_checkmate::rl::{ActorCriticAgent, test_mdp_episode};
-
-let mut agent = ActorCriticAgent::new(
-    4,      // n_input
-    16,     // n_hidden (padded to ×8)
-    2,      // n_actions
-    30,     // n_steps internal simulation
-    1.0,    // dt (ms)
-    42,     // seed
-);
-
-// Forward pass (Poisson → Izhikevich → LIF → softmax)
-let (action, value) = agent.act(&[0.5, -0.3, 0.0, 0.8]);
-
-// Learn from reward
-let td_error = agent.learn(1.0, 0.95, false);
-```
-
-### SIMD Optimization Journey
-
-| Step | Optimization | act() | Speedup |
-|:-----|:------------|:-----:|:-------:|
-| 0 | Baseline | 417 us | 1.0x |
-| 1 | Fused weight→Izhikevich SIMD kernel | 289 us | 1.44x |
-| 2 | Poisson RNG fused into SIMD pass | 260 us | 1.60x |
-| 3 | Fast-exp in softmax | 254 us | **1.64x** |
-
-### Fused SIMD Kernels
-
-| Kernel | Purpose |
-|:-------|:--------|
-| `poisson_fused_hidden_step` | LCG RNG → weights → Izhikevich in 1 pass |
-| `fused_output_lif_step` | hidden spikes → weights → LIF in 1 pass |
-| `fused_hidden_izhikevich_step` | input spikes → weights → Izhikevich in 1 pass |
-| `dopamine_weight_update` | Dw = n*D*e with SIMD clamp |
-
-## 🚀 T3 Super-module (PhaseFlow)
-
-The **T3 (Temporal Triplet)** engine — 3-population Kuramoto oscillator system with Stuart-Landau amplitudes.
-
-```rust
-use taas_checkmate::{TriOscillator, Avx2Backend, Decoder, NlmsDecoder, pst_linear_features};
-
-let mut tri = TriOscillator::new(128, 0.5, 1.5, Avx2Backend);
-tri.set_uniform_coupling(0.1, 0.05, 0.02);
-tri.step(0.001);
-
-let fv = pst_linear_features(&tri);
-let mut dec = NlmsDecoder::new(fv.len(), 0.01, 1e-8);
-let output = dec.predict(&fv);
-```
-
-## 🧠 Cognitive Architecture (karmac)
-
-| Module | Description |
-|:-------|:------------|
-| `gnw.rs` | Global Neuronal Workspace — conscious ignition |
-| `basal_ganglia.rs` | Action selection via competitive inhibition |
-| `working_memory.rs` | Persistent activity working memory |
-| `lod.rs` | Level of Description — multi-scale interface |
-| `semantic_pointer.rs` | Semantic Pointer Hypothesis (SPAUN-like) |
-
-## 🧬 Connectome Brain Simulator
-
-FlyWire connectome simulation with LIF neurons and spike propagation.
-
-```rust
-use taas_checkmate::connectome;
-
-// Load FlyWire connectome, run simulation
-```
-
-## 🐍 Python Bridge
-
+### 2. Запуск в Python (PyO3)
 ```bash
+# Сборка Python-модуля
 cargo build --features python
 ```
 
-Creates `libtaas_checkmate.so` — zero-copy numpy bindings for all functions.
-
 ```python
 import taas_checkmate as tc
-tc.step_izhikevich(v, u, trace, a, b, I, dt, 0.5, spikes, c, d)
-# or use stateful classes:
-snn = tc.PyLifNeuron(1024)
-snn.step(I, spikes)
+
+# Симуляция 1000 нейронов Izhikevich за шаг
+v, u, spikes = tc.step_izhikevich(v, u, I, dt=0.5)
+
+# Или симуляция полного коннектома мухи FlyWire
+brain = tc.BrainSimulator(n_neurons=130000, model="lif")
+spike_buffer = brain.step_batch(dt_ms=0.5, n_steps=100)
 ```
 
-## 🐍 Python API (Русский)
+---
 
-Подробная документация Python API на русском с примерами для каждого под-модуля:
-👉 **[PYTHON_API_RU.md](docs/PYTHON_API_RU.md)**
+## 📊 Производительность
 
-```python
-from taas_checkmate.neurons import step_psi_wave
-from taas_checkmate.t3 import PyTriOscillator
+| Модель / Компонент | Скорость |
+|:-------------------|:--------:|
+| **Izhikevich (8K нейронов)** | **1 000 000 нейронов / сек** (в 5 раз быстрее NEST) |
+| **Осцилляторы ритмов T3** | **388x реального времени** @ 48kHz |
+| **GPU Connectome (CUDA)** | **130 000 нейронов FlyWire в реальном времени** |
 
-agent.v       # свойство вместо copy_v(buf)
-agent.weights # свойство вместо copy_weights(out)
-```
+---
 
-## 📊 Performance
+## 📚 Документация и Детали
 
-| Pipeline | Speed |
-|:---------|:-----:|
-| 3 x 64 oscillators + PST + NLMS | **388x realtime** @ 48kHz |
-| 3 x 128 oscillators + Kalman | **240x realtime** @ 44.1kHz |
-| Izhikevich 8K neurons | **1M neur/s** (x5 faster than NEST) |
-| Sigmoid (Phase Gate) 8K | **8.2 ns/elem** (x3 faster than scipy) |
+- 📖 **[PYTHON_API_RU.md](docs/PYTHON_API_RU.md)** — Полный справочник по Python API
+- 🔬 **[MATHEMATICAL_AUDIT.md](docs/MATHEMATICAL_AUDIT.md)** — Подробный аудит уравнений
+- 🌊 **[T3_ARCHITECTURE.md](docs/T3_ARCHITECTURE.md)** — Архитектура волновых ритмов мозга
+- 🤖 **[RL_API.md](docs/RL_API.md)** — Обучение агентов с подкреплением (Actor-Critic)
 
-Benchmarks: `cargo bench --no-default-features` generates HTML reports in `target/criterion/`.
+---
 
-## 📚 Documentation
+## 📜 Лицензия
 
-| File | Description |
-|:-----|:------------|
-| [T3 Architecture](docs/T3_ARCHITECTURE.md) | T3 oscillator engine internals |
-| [Mathematical Audit](docs/MATHEMATICAL_AUDIT.md) | Equation verification |
-| [API Reference](docs/API_REFERENCE.md) | Full API docs |
-| [Python API (RU)](docs/PYTHON_API_RU.md) | Python bindings documentation |
-| [RL API](docs/RL_API.md) | Reinforcement learning API |
-| [VNC Ring Oscillator](docs/VNC_RING_OSCILLATOR.md) | VNC ring oscillator design |
-| [GPT Inspector](docs/GPT_INSPECTOR.md) | Connectome-GPT analysis |
-| [ArXiv Paper](docs/ARXIV_PAPER.md) | Research paper draft |
-
-## 🚀 Quick Start
-
-```bash
-# Clone + build
-cd taas_checkmate
-cargo build --no-default-features
-
-# Run tests
-cargo test --no-default-features
-
-# With features
-cargo build --features t3,train,connectome
-
-# Benchmarks
-cargo bench --no-default-features
-
-# Documentation
-cargo doc --no-deps --open
-```
-
-## 📜 License
-
-GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 — см. [LICENSE](LICENSE).

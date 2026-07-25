@@ -28,16 +28,22 @@ pub fn solve_cg(a: &[f32], b: &[f32], n: usize, max_iter: usize, tol: f32) -> Ve
             ap[i] = sum;
         }
         let p_ap: f32 = p.iter().zip(ap.iter()).map(|(&pi, &api)| pi * api).sum();
-        if p_ap.abs() < 1e-16 { break; }
+        if p_ap.abs() < 1e-16 {
+            break;
+        }
         let alpha = rsold / p_ap;
         for i in 0..n {
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
         }
         let rsnew: f32 = r.iter().map(|&x| x * x).sum();
-        if rsnew.sqrt() < tol { break; }
+        if rsnew.sqrt() < tol {
+            break;
+        }
         let beta = rsnew / rsold;
-        for i in 0..n { p[i] = r[i] + beta * p[i]; }
+        for i in 0..n {
+            p[i] = r[i] + beta * p[i];
+        }
         rsold = rsnew;
     }
     x
@@ -56,7 +62,11 @@ pub struct RidgeSolver {
 
 impl RidgeSolver {
     /// Create ridge solver with regularisation strength `alpha` (clamped ≥ 1e-8).
-    pub fn new(alpha: f32) -> Self { Self { alpha: alpha.max(1e-8) } }
+    pub fn new(alpha: f32) -> Self {
+        Self {
+            alpha: alpha.max(1e-8),
+        }
+    }
 
     /// Solve ridge regression.
     ///
@@ -79,7 +89,9 @@ impl RidgeSolver {
             }
         }
         // Add Ridge penalty
-        for j in 0..d { a[j * d + j] += self.alpha; }
+        for j in 0..d {
+            a[j * d + j] += self.alpha;
+        }
         solve_cg(&a, &b, d, 100, 1e-6)
     }
 }
@@ -89,7 +101,9 @@ impl RidgeSolver {
 /// Pearson correlation coefficient between two vectors.
 pub fn compute_pearson(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
-    if n < 2 { return 0.0; }
+    if n < 2 {
+        return 0.0;
+    }
     let mean_a: f32 = a.iter().sum::<f32>() / n as f32;
     let mean_b: f32 = b.iter().sum::<f32>() / n as f32;
     let (cov, var_a, var_b) = (0..n).fold((0.0, 0.0, 0.0), |(c, va, vb), i| {
@@ -97,15 +111,23 @@ pub fn compute_pearson(a: &[f32], b: &[f32]) -> f32 {
         let db = b[i] - mean_b;
         (c + da * db, va + da * da, vb + db * db)
     });
-    if var_a < 1e-10 || var_b < 1e-10 { 0.0 } else { cov / (var_a * var_b).sqrt() }
+    if var_a < 1e-10 || var_b < 1e-10 {
+        0.0
+    } else {
+        cov / (var_a * var_b).sqrt()
+    }
 }
 
 /// Feature normalization: (x - mean) / std (in-place).
 pub fn normalize_features(features: &mut [f32], n_samples: usize, dim: usize) {
-    if n_samples == 0 { return; }
+    if n_samples == 0 {
+        return;
+    }
     for d in 0..dim {
         let mut sum = 0.0f32;
-        for i in 0..n_samples { sum += features[i * dim + d]; }
+        for i in 0..n_samples {
+            sum += features[i * dim + d];
+        }
         let mean = sum / n_samples as f32;
         let mut var = 0.0f32;
         for i in 0..n_samples {
@@ -147,7 +169,11 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let b = vec![5.0, 4.0, 3.0, 2.0, 1.0];
         let r = compute_pearson(&a, &b);
-        assert!((r - (-1.0)).abs() < 0.01, "perfect negative corr r≈-1: {}", r);
+        assert!(
+            (r - (-1.0)).abs() < 0.01,
+            "perfect negative corr r≈-1: {}",
+            r
+        );
     }
 
     #[test]

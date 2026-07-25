@@ -15,10 +15,14 @@ use super::stdp::stdp_update;
 ///
 /// θ += lr_ip · (firing_rate - target_rate)
 pub fn intrinsic_plasticity(
-    theta: &mut [f32], spikes: &[i32],
-    lr_ip: f32, target_rate: f32, decay: f32,
+    theta: &mut [f32],
+    spikes: &[i32],
+    lr_ip: f32,
+    target_rate: f32,
+    decay: f32,
 ) {
-    theta.par_iter_mut()
+    theta
+        .par_iter_mut()
         .zip(spikes.par_iter())
         .for_each(|(t, &s)| {
             let rate = if s != 0 { 1.0 } else { 0.0 };
@@ -34,20 +38,30 @@ pub fn intrinsic_plasticity(
 ///
 /// w_ij := w_ij · target_sum / max(Σ_k w_kj, eps)
 pub fn synaptic_normalization(
-    weights: &mut [f32], n_pre: usize, n_post: usize,
-    target_sum: f32, eps: f32,
+    weights: &mut [f32],
+    n_pre: usize,
+    n_post: usize,
+    target_sum: f32,
+    eps: f32,
 ) {
     assert!(weights.len() >= n_pre * n_post);
     let mut col_scales = vec![1.0f32; n_post];
-    col_scales.par_iter_mut().enumerate().for_each(|(j, scale)| {
-        let mut sum: f32 = 0.0;
-        for i in 0..n_pre {
-            sum += weights[i * n_post + j];
-        }
-        if sum > eps { *scale = target_sum / sum; }
-    });
+    col_scales
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(j, scale)| {
+            let mut sum: f32 = 0.0;
+            for i in 0..n_pre {
+                sum += weights[i * n_post + j];
+            }
+            if sum > eps {
+                *scale = target_sum / sum;
+            }
+        });
     weights.par_chunks_exact_mut(n_post).for_each(|row| {
-        for j in 0..n_post { row[j] *= col_scales[j]; }
+        for j in 0..n_post {
+            row[j] *= col_scales[j];
+        }
     });
 }
 
@@ -101,17 +115,27 @@ impl SornNetwork {
     /// 1. STDP, 2. Intrinsic Plasticity, 3. Synaptic Normalization
     pub fn step(&mut self, spikes: &[i32], traces_pre: &[f32], traces_post: &[f32]) {
         stdp_update(
-            &mut self.weights, traces_pre, traces_post,
-            self.lr_stdp_ltd, self.lr_stdp_ltp,
-            self.w_min, self.w_max,
+            &mut self.weights,
+            traces_pre,
+            traces_post,
+            self.lr_stdp_ltd,
+            self.lr_stdp_ltp,
+            self.w_min,
+            self.w_max,
         );
         intrinsic_plasticity(
-            &mut self.theta, spikes,
-            self.lr_ip, self.target_rate, self.ip_decay,
+            &mut self.theta,
+            spikes,
+            self.lr_ip,
+            self.target_rate,
+            self.ip_decay,
         );
         synaptic_normalization(
-            &mut self.weights, self.n, self.n,
-            self.w_target_sum, self.sn_eps,
+            &mut self.weights,
+            self.n,
+            self.n,
+            self.w_target_sum,
+            self.sn_eps,
         );
     }
 

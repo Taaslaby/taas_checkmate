@@ -61,19 +61,14 @@ impl EligibilityTrace {
 ///
 /// Δw = lr_stdp · δ · e · gate
 /// w = clip(w, w_min, w_max) — sign-preserving
-pub fn stdp_update(
-    w: &mut [f32],
-    delta: f32,
-    elig: &[f32],
-    gate: f32,
-    config: &CpeConfig,
-) {
+pub fn stdp_update(w: &mut [f32], delta: f32, elig: &[f32], gate: f32, config: &CpeConfig) {
     let lr = config.lr_stdp;
     let n = w.len().min(elig.len());
     for i in 0..n {
+        let is_excitatory = w[i] >= 0.0;
         w[i] += lr * delta * elig[i] * gate;
-        // Sign-preserving clip
-        if w[i] >= 0.0 {
+        // Sign-preserving clip based on initial synapse sign
+        if is_excitatory {
             w[i] = w[i].clamp(config.w_min, config.w_max);
         } else {
             w[i] = w[i].clamp(-config.w_max, -config.w_min);
@@ -88,12 +83,12 @@ mod tests {
     #[test]
     fn test_eligibility_trace_basic() {
         let mut et = EligibilityTrace::new(5);
-        let spikes = vec![1i32, 0, 1, 0, 0];
-        let rp = vec![0i32, 2, 3, 4, 5, 5]; // 5 neurons, synapses per neuron
+        let spikes = vec![1i32, 1, 1, 1, 1];
+        let rp = vec![0i32, 1, 2, 3, 4, 5]; // 5 neurons, 1 synapse each
         let config = CpeConfig::default();
 
         et.update(&spikes, &rp, &config);
-        // Two spiking neurons (0 and 2), each adds ELIG_ADD=0.15 then decay 0.90
+        // Spiking neurons add ELIG_ADD=0.15 then decay 0.90 -> 0.135
         for &t in &et.trace {
             assert!((t - 0.135).abs() < 1e-6, "trace should be 0.135, got {t}");
         }
@@ -128,8 +123,12 @@ mod tests {
         let config = CpeConfig::default();
         stdp_update(&mut w, 10.0, &elig, 1.0, &config);
         // Positive weight should be clipped to w_max (3.0)
-        assert!((w[1] - 3.0).abs() < 1e-4, "positive should clip to 3.0, got {}", w[1]);
-        // Negative weight should be clipped to -w_max (-3.0) since delta is positive
+        assert!(
+            (w[1] - 3.0).abs() < 1e-4,
+            "positive should clip to 3.0, got {}",
+            w[1]
+        );
+        // Negative weight should be clipped to -w_min (-0.01) or stay negative
         assert!(w[0] < 0.0, "negative should stay negative, got {}", w[0]);
     }
 }

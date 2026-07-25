@@ -142,6 +142,16 @@ name = "biology_check"
 path = "examples/connectome/biology_check.rs"
 required-features = ["connectome"]
 
+[[example]]
+name = "bake_new_connectomes"
+path = "examples/connectome/bake_new_connectomes.rs"
+required-features = ["connectome"]
+
+[[example]]
+name = "convert_taas_format"
+path = "examples/connectome/convert_taas_format.rs"
+required-features = ["connectome"]
+
 # ── Connectome brain simulator (requires CUDA) ──
 [[example]]
 name = "viz_fly_brain"

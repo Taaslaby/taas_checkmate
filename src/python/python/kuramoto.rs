@@ -112,7 +112,11 @@ pub fn py_interference(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::interference(output.as_slice_mut()?, phases_a.as_slice()?, phases_b.as_slice()?);
+    kuramoto::interference(
+        output.as_slice_mut()?,
+        phases_a.as_slice()?,
+        phases_b.as_slice()?,
+    );
     Ok(())
 }
 
@@ -128,7 +132,8 @@ pub fn py_interference_matrix_cuda(
     phases_a: Bound<'_, PyArray1<f32>>,
     phases_b: Bound<'_, PyArray1<f32>>,
 ) -> PyResult<()> {
-    crate::cuda::set_device(0).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
+    crate::cuda::set_device(0)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
@@ -136,7 +141,8 @@ pub fn py_interference_matrix_cuda(
         output.as_slice_mut()?,
         phases_a.as_slice()?,
         phases_b.as_slice()?,
-    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    )
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 
@@ -151,7 +157,11 @@ pub fn py_interference_mean(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::interference_mean(output.as_slice_mut()?, phases_a.as_slice()?, phases_b.as_slice()?);
+    kuramoto::interference_mean(
+        output.as_slice_mut()?,
+        phases_a.as_slice()?,
+        phases_b.as_slice()?,
+    );
     Ok(())
 }
 
@@ -175,7 +185,8 @@ pub fn py_batch_coherence_sweep(
         areas.as_slice()?,
         areas_sin.as_slice()?,
         areas_cos.as_slice()?,
-        n_areas, n_elem,
+        n_areas,
+        n_elem,
     );
     Ok(())
 }
@@ -238,7 +249,8 @@ pub fn py_band_energy_cuda(
     omegas: Bound<'_, PyArray1<f32>>,
     band_edges: Bound<'_, PyArray1<f32>>,
 ) -> PyResult<()> {
-    crate::cuda::set_device(0).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
+    crate::cuda::set_device(0)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
     let mut band_energies = band_energies.readwrite();
     let amplitudes = amplitudes.readonly();
     let omegas = omegas.readonly();
@@ -248,7 +260,8 @@ pub fn py_band_energy_cuda(
         amplitudes.as_slice()?,
         omegas.as_slice()?,
         band_edges.as_slice()?,
-    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    )
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 
@@ -289,7 +302,13 @@ pub fn py_kalman_update(
     let mut weights = weights.readwrite();
     let mut cov = cov.readwrite();
     let states = states.readonly();
-    kuramoto::kalman_update(weights.as_slice_mut()?, cov.as_slice_mut()?, states.as_slice()?, error, s);
+    kuramoto::kalman_update(
+        weights.as_slice_mut()?,
+        cov.as_slice_mut()?,
+        states.as_slice()?,
+        error,
+        s,
+    );
     Ok(())
 }
 
@@ -316,8 +335,17 @@ pub fn py_adam_train(
     let mut v = v.readwrite();
     let states = states.readonly();
     kuramoto::adam_train(
-        weights.as_slice_mut()?, m.as_slice_mut()?, v.as_slice_mut()?,
-        states.as_slice()?, error, lr, beta1, beta2, bc1, bc2, eps,
+        weights.as_slice_mut()?,
+        m.as_slice_mut()?,
+        v.as_slice_mut()?,
+        states.as_slice()?,
+        error,
+        lr,
+        beta1,
+        beta2,
+        bc1,
+        bc2,
+        eps,
     );
     Ok(())
 }
@@ -338,7 +366,14 @@ pub fn py_nlms_train(
     let mut weights = weights.readwrite();
     let mut bias = bias.readwrite();
     let states = states.readonly();
-    kuramoto::nlms_train(weights.as_slice_mut()?, bias.as_slice_mut()?, states.as_slice()?, error, lr, eps);
+    kuramoto::nlms_train(
+        weights.as_slice_mut()?,
+        bias.as_slice_mut()?,
+        states.as_slice()?,
+        error,
+        lr,
+        eps,
+    );
     Ok(())
 }
 
@@ -357,8 +392,12 @@ pub fn py_pst_decode(
     let buffer = buffer.readonly();
     let weights = weights.readonly();
     kuramoto::pst_decode(
-        output.as_slice_mut()?, buffer.as_slice()?, weights.as_slice()?,
-        feat_dim, L, pos,
+        output.as_slice_mut()?,
+        buffer.as_slice()?,
+        weights.as_slice()?,
+        feat_dim,
+        L,
+        pos,
     );
     Ok(())
 }
@@ -378,7 +417,12 @@ pub fn py_ring_synthesis(
     let amplitudes = amplitudes.readonly();
     let trig_buf = trig_buf.readonly();
     let weights = weights.readonly();
-    kuramoto::ring_synthesis(output.as_slice_mut()?, amplitudes.as_slice()?, trig_buf.as_slice()?, weights.as_slice()?);
+    kuramoto::ring_synthesis(
+        output.as_slice_mut()?,
+        amplitudes.as_slice()?,
+        trig_buf.as_slice()?,
+        weights.as_slice()?,
+    );
     Ok(())
 }
 
@@ -394,13 +438,19 @@ pub fn py_ring_synthesis_cuda(
     trig_buf: Bound<'_, PyArray1<f32>>,
     weights: Bound<'_, PyArray1<f32>>,
 ) -> PyResult<()> {
-    crate::cuda::set_device(0).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
+    crate::cuda::set_device(0)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
     let mut output = output.readwrite();
     let amplitudes = amplitudes.readonly();
     let trig_buf = trig_buf.readonly();
     let weights = weights.readonly();
-    crate::cuda::ring_synthesis(output.as_slice_mut()?, amplitudes.as_slice()?, trig_buf.as_slice()?, weights.as_slice()?)
-        .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    crate::cuda::ring_synthesis(
+        output.as_slice_mut()?,
+        amplitudes.as_slice()?,
+        trig_buf.as_slice()?,
+        weights.as_slice()?,
+    )
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 
@@ -415,6 +465,10 @@ pub fn py_winding_matrix(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::winding_matrix(output.as_slice_mut()?, phases_a.as_slice()?, phases_b.as_slice()?);
+    kuramoto::winding_matrix(
+        output.as_slice_mut()?,
+        phases_a.as_slice()?,
+        phases_b.as_slice()?,
+    );
     Ok(())
 }

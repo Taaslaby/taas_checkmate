@@ -12,11 +12,7 @@ use crate::io;
 /// Безопасная клипса: обрезает data до [min_val, max_val] in-place.
 #[pyfunction]
 #[pyo3(name = "safety_clamp")]
-pub fn py_safety_clamp(
-    data: Bound<'_, PyArray1<f32>>,
-    min_val: f32,
-    max_val: f32,
-) -> PyResult<()> {
+pub fn py_safety_clamp(data: Bound<'_, PyArray1<f32>>, min_val: f32, max_val: f32) -> PyResult<()> {
     let mut data = data.readwrite();
     io::safety_clamp(data.as_slice_mut()?, min_val, max_val);
     Ok(())
@@ -52,7 +48,13 @@ pub fn py_phase_gate_apply(
     let mut output = output.readwrite();
     let input = input.readonly();
     let r = r.readonly();
-    io::phase_gate_apply(output.as_slice_mut()?, input.as_slice()?, r.as_slice()?, gain, threshold);
+    io::phase_gate_apply(
+        output.as_slice_mut()?,
+        input.as_slice()?,
+        r.as_slice()?,
+        gain,
+        threshold,
+    );
     Ok(())
 }
 
@@ -91,8 +93,12 @@ pub fn py_t3_complex_decoder(
     let weights = weights.readonly();
     let biases = biases.readonly();
     io::t3_complex_decoder(
-        outputs.as_slice_mut()?, amplitudes.as_slice()?, cos_buf.as_slice()?,
-        weights.as_slice()?, biases.as_slice()?, n_out,
+        outputs.as_slice_mut()?,
+        amplitudes.as_slice()?,
+        cos_buf.as_slice()?,
+        weights.as_slice()?,
+        biases.as_slice()?,
+        n_out,
     );
     Ok(())
 }
@@ -109,7 +115,13 @@ pub fn py_echo_tap(
 ) -> PyResult<()> {
     let mut output = output.readwrite();
     let buffer = buffer.readonly();
-    io::echo_tap(output.as_slice_mut()?, buffer.as_slice()?, n_osc, delay_len, delay_idx);
+    io::echo_tap(
+        output.as_slice_mut()?,
+        buffer.as_slice()?,
+        n_osc,
+        delay_len,
+        delay_idx,
+    );
     Ok(())
 }
 
@@ -146,7 +158,8 @@ pub fn py_stochastic_encoder(
         target_I.readwrite().as_slice_mut()?,
         inputs.readonly().as_slice()?,
         noise.readonly().as_slice()?,
-        threshold, spike_val,
+        threshold,
+        spike_val,
     );
     Ok(())
 }
@@ -167,7 +180,8 @@ pub fn py_thalamic_gate(
         target_I.readwrite().as_slice_mut()?,
         source_v.readonly().as_slice()?,
         gate_v.readonly().as_slice()?,
-        threshold, gain,
+        threshold,
+        gain,
     );
     Ok(())
 }
@@ -192,7 +206,11 @@ pub fn py_t3_inverse_kuramoto(
         drive_out.readwrite().as_slice_mut()?,
         r.readonly().as_slice()?,
         r_prev.readonly().as_slice()?,
-        alpha, gain, eps, decay, dt,
+        alpha,
+        gain,
+        eps,
+        decay,
+        dt,
     );
     Ok(())
 }
@@ -250,13 +268,15 @@ pub fn py_t3_tact_generator_cuda(
     ph3: Bound<'_, PyArray1<f32>>,
     threshold: f32,
 ) -> PyResult<()> {
-    crate::cuda::set_device(0).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
+    crate::cuda::set_device(0)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("cuda init: {e}")))?;
     crate::cuda::t3_tact_generator(
         pulses.readwrite().as_slice_mut()?,
         ph1.readonly().as_slice()?,
         ph2.readonly().as_slice()?,
         ph3.readonly().as_slice()?,
         threshold,
-    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    )
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }

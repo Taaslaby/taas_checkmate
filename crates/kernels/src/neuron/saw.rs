@@ -1,6 +1,9 @@
 #![allow(non_snake_case)]
+use super::{
+    fast_exp_simd, load8, load8_i32, load8_mut, rand_f32, spike_mask_to_i32, store8,
+    surrogate_gradient,
+};
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i32, rand_f32, surrogate_gradient};
 
 // ═══════════════════════════════════════════════════════
 //  SAW (Spike-Adaptive-Width)
@@ -11,11 +14,19 @@ use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i3
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn saw_step(
-    v: *mut f32, u: *mut f32, trace: *mut f32,
-    a: *const f32, b: *const f32, Ii: *const f32,
-    dt: f32, trace_decay: f32, noise_amp: f32,
+    v: *mut f32,
+    u: *mut f32,
+    trace: *mut f32,
+    a: *const f32,
+    b: *const f32,
+    Ii: *const f32,
+    dt: f32,
+    trace_decay: f32,
+    noise_amp: f32,
     spikes: *mut i32,
-    refractory: *mut f32, tau_ref: f32, n: usize,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
     let td_s = f32x8::splat(trace_decay);
@@ -35,14 +46,18 @@ pub(crate) unsafe fn saw_step(
         let mut refr = load8_mut(refractory, off);
         let aa = load8(a, off);
         let bb = load8(b, off);
-        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
 
         // Refractory mask: refr > 0 → skip dynamics
         let refr_mask = refr.cmp_gt(zero);
 
         // Compute dv/du only for non-refractory neurons
         let v_sq = vv * vv;
-        let dv = f32x8::splat(0.04).mul_add(v_sq, f32x8::splat(5.0) * vv) + f32x8::splat(140.0) - uu + ii;
+        let dv = f32x8::splat(0.04).mul_add(v_sq, f32x8::splat(5.0) * vv) + f32x8::splat(140.0)
+            - uu
+            + ii;
         let du = aa * (bb * vv - uu);
         vv += refr_mask.blend(zero, dt_s * dv);
         uu += refr_mask.blend(zero, dt_s * du);
@@ -52,18 +67,26 @@ pub(crate) unsafe fn saw_step(
         let sm = vv.cmp_ge(v_th) & not_refr;
 
         // Reset after spike
-        // Generate 8 independent random values for noise (each neuron gets its own)
         let rand_vals = [
-            rand_f32(), rand_f32(), rand_f32(), rand_f32(),
-            rand_f32(), rand_f32(), rand_f32(), rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
+            rand_f32(),
         ];
         let rand_v = f32x8::from(rand_vals);
-        vv = refr_mask.blend(vv, sm.blend(v_reset, vv + na_s * (rand_v - f32x8::splat(0.5))));
+        vv = refr_mask.blend(
+            vv,
+            sm.blend(v_reset, vv + na_s * (rand_v - f32x8::splat(0.5))),
+        );
         uu = refr_mask.blend(uu, uu + sm.blend(u_add, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr -= dt_s;  // Always decrement
-        refr = sm.blend(tr_s_, refr);  // Set to tau_ref on spike
+        refr -= dt_s;
+        refr = sm.blend(tr_s_, refr);
         refr = refr.max(zero);
 
         // trace update
@@ -78,8 +101,14 @@ pub(crate) unsafe fn saw_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     if n8 < n {
@@ -139,9 +168,18 @@ pub(crate) unsafe fn saw_step(
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn eprop_saw_step(
-    v: *mut f32, u: *mut f32, eligibility: *mut f32, psi: *mut f32,
-    Ii: *const f32, spikes: *mut i32, pre_spikes: *const i32,
-    dt: f32, tau_e: f32, a: f32, b: f32, tau_sg: f32,
+    v: *mut f32,
+    u: *mut f32,
+    eligibility: *mut f32,
+    psi: *mut f32,
+    Ii: *const f32,
+    spikes: *mut i32,
+    pre_spikes: *const i32,
+    dt: f32,
+    tau_e: f32,
+    a: f32,
+    b: f32,
+    tau_sg: f32,
     n: usize,
 ) -> usize {
     let dt_s = f32x8::splat(dt);
@@ -164,11 +202,12 @@ pub(crate) unsafe fn eprop_saw_step(
         let mut vv = load8_mut(v, off);
         let mut uu = load8_mut(u, off);
         let mut ee = load8_mut(eligibility, off);
-        let ii_clamped = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii_clamped = load8(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let pre = load8_i32(pre_spikes, off);
 
         // SAW dynamics (same as Izhikevich)
-        // Euler: v += dt * dv
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + ii_clamped;
         let du = a_s * (b_s * vv - uu);
@@ -181,7 +220,6 @@ pub(crate) unsafe fn eprop_saw_step(
         let ps = one / (one_plus_diff * one_plus_diff);
 
         // Eligibility trace: exponential Euler
-        // de/dt = -e/τ_e + ψ · z_pre → e(t+dt) = e·exp(-dt/τ_e) + ψ·z_pre·τ_e·(1 - exp(-dt/τ_e))
         let z_pre = pre.cmp_gt(zero).blend(one, zero);
         let e_decay = fast_exp_simd(-dt_s / tau_e_s);
         let one_minus_e_decay = one - e_decay;
@@ -194,7 +232,9 @@ pub(crate) unsafe fn eprop_saw_step(
 
         // Count spikes
         for &val in sm.to_array().iter() {
-            if val.to_bits() != 0 { total_spikes += 1; }
+            if val.to_bits() != 0 {
+                total_spikes += 1;
+            }
         }
 
         store8(v, off, vv);
@@ -204,8 +244,14 @@ pub(crate) unsafe fn eprop_saw_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -242,21 +288,32 @@ pub(crate) unsafe fn eprop_saw_step(
 }
 
 // ═══════════════════════════════════════════════════════
-//  ψ-wave (quantum neural dynamics)
+//  gco_step — Graph-Coupled Oscillator (coupled phase oscillators)
 // ═══════════════════════════════════════════════════════
 
-/// Step `n` ψ-wave neurons. Uses `f32x8` SIMD.
+/// Step `n` graph-coupled oscillators. Uses `f32x8` SIMD.
+///
+/// Evolution (Euler step):
+///   dv/dt = H_real - H_imag · speed + I_ext
+///   du/dt = H_imag + H_real · speed
+///   Normalize: |v + iu| = 1
+///
+/// Where H_real = H @ u (Hamiltonian real), H_imag = -H @ v (Hamiltonian imag).
+/// The normalization keeps oscillators on the unit circle (phase-only dynamics).
 ///
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
-pub(crate) unsafe fn psi_wave_step(
-    v: *mut f32, u: *mut f32,
-    h_real: *mut f32, h_imag: *mut f32,
-    i_ext: *mut f32, speed: *mut f32,
-    dt: f32, hbar: f32, n: usize,
+pub(crate) unsafe fn gco_step(
+    v: *mut f32,
+    u: *mut f32,
+    h_real: *mut f32,
+    h_imag: *mut f32,
+    i_ext: *mut f32,
+    speed: *mut f32,
+    dt: f32,
+    n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
-    let hbar_s = f32x8::splat(hbar);
     let n8 = n & !7;
 
     for off in (0..n8).step_by(8) {
@@ -264,13 +321,15 @@ pub(crate) unsafe fn psi_wave_step(
         let mut uu = load8_mut(u, off);
         let hr = load8_mut(h_real, off);
         let hi = load8_mut(h_imag, off);
-        let ie = load8_mut(i_ext, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ie = load8_mut(i_ext, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let sp = load8_mut(speed, off);
 
         let dv = hr - hi * sp + ie;
         let du = hi + hr * sp;
-        vv += dt_s * dv / hbar_s;
-        uu += dt_s * du / hbar_s;
+        vv += dt_s * dv;
+        uu += dt_s * du;
 
         // Normalize: keep on unit circle
         let nrm = (vv * vv + uu * uu + f32x8::splat(1e-9)).sqrt();
@@ -292,8 +351,8 @@ pub(crate) unsafe fn psi_wave_step(
         for i in n8..n {
             let dv = h_real[i] - h_imag[i] * speed[i] + i_ext[i].clamp(-100.0, 100.0);
             let du = h_imag[i] + h_real[i] * speed[i];
-            v[i] += dt * dv / hbar;
-            u[i] += dt * du / hbar;
+            v[i] += dt * dv;
+            u[i] += dt * du;
             let nrm = (v[i] * v[i] + u[i] * u[i] + 1e-9).sqrt();
             let inv = 1.0 / nrm;
             v[i] *= inv;

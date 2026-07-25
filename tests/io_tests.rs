@@ -18,9 +18,21 @@ fn test_safety_clamp_basic() {
 
     io::safety_clamp(&mut data, -100.0, 100.0);
 
-    assert!((data[0] - (-100.0)).abs() < 1e-5, "Clamp min failed: {}", data[0]);
-    assert!((data[1] - 100.0).abs() < 1e-5, "Clamp max failed: {}", data[1]);
-    assert!((data[2] - 50.0).abs() < 1e-5, "Should not clamp middle: {}", data[2]);
+    assert!(
+        (data[0] - (-100.0)).abs() < 1e-5,
+        "Clamp min failed: {}",
+        data[0]
+    );
+    assert!(
+        (data[1] - 100.0).abs() < 1e-5,
+        "Clamp max failed: {}",
+        data[1]
+    );
+    assert!(
+        (data[2] - 50.0).abs() < 1e-5,
+        "Should not clamp middle: {}",
+        data[2]
+    );
 }
 
 #[test]
@@ -39,15 +51,19 @@ fn test_safety_clamp_noop() {
 fn test_stochastic_encoder_strong_input() {
     let n = make_padded(8);
     let mut target = vec![0.0f32; n];
-    let inputs = vec![100.0f32; n];  // very strong → always fire
-    let noise = vec![0.0f32; n];     // no noise
+    let inputs = vec![100.0f32; n]; // very strong → always fire
+    let noise = vec![0.0f32; n]; // no noise
     let threshold = 0.5;
     let spike_val = 40.0;
 
     io::stochastic_encoder(&mut target, &inputs, &noise, threshold, spike_val);
 
     for &t in &target {
-        assert!((t - spike_val).abs() < 1e-5, "Strong input should spike, got {}", t);
+        assert!(
+            (t - spike_val).abs() < 1e-5,
+            "Strong input should spike, got {}",
+            t
+        );
     }
 }
 
@@ -55,7 +71,7 @@ fn test_stochastic_encoder_strong_input() {
 fn test_stochastic_encoder_weak_input() {
     let n = make_padded(8);
     let mut target = vec![0.0f32; n];
-    let inputs = vec![0.0f32; n];   // zero input → never fire
+    let inputs = vec![0.0f32; n]; // zero input → never fire
     let noise = vec![0.0f32; n];
     let threshold = 0.5;
     let spike_val = 40.0;
@@ -63,7 +79,11 @@ fn test_stochastic_encoder_weak_input() {
     io::stochastic_encoder(&mut target, &inputs, &noise, threshold, spike_val);
 
     for &t in &target {
-        assert!((t - 0.0).abs() < 1e-5, "No input should not spike, got {}", t);
+        assert!(
+            (t - 0.0).abs() < 1e-5,
+            "No input should not spike, got {}",
+            t
+        );
     }
 }
 
@@ -79,7 +99,11 @@ fn test_t3_drive_encoder() {
     io::t3_drive_encoder(&mut drives, &inputs, gain);
 
     for &d in &drives {
-        assert!((d - 6.0).abs() < 1e-5, "drive = gain * input = 6.0, got {}", d);
+        assert!(
+            (d - 6.0).abs() < 1e-5,
+            "drive = gain * input = 6.0, got {}",
+            d
+        );
     }
 }
 
@@ -89,8 +113,8 @@ fn test_t3_drive_encoder() {
 fn test_thalamic_gate() {
     let n = make_padded(8);
     let mut target = vec![0.0f32; n];
-    let source = vec![10.0f32; n];   // source current
-    let gate = vec![1.0f32; n];      // above threshold → pass
+    let source = vec![10.0f32; n]; // source current
+    let gate = vec![1.0f32; n]; // above threshold → pass
     let threshold = 0.0;
     let gain = 1.0;
 
@@ -106,7 +130,7 @@ fn test_thalamic_gate_closed() {
     let n = make_padded(8);
     let mut target = vec![0.0f32; n];
     let source = vec![10.0f32; n];
-    let gate = vec![-1.0f32; n];     // below threshold → sigmoid attenuation
+    let gate = vec![-1.0f32; n]; // below threshold → sigmoid attenuation
     let threshold = 0.0;
     let gain = 1.0;
 
@@ -115,7 +139,11 @@ fn test_thalamic_gate_closed() {
     // sigmoid(1 * (-1 - 0)) = 1/(1+e) ≈ 0.2689
     // target = 10 * 0.2689 ≈ 2.689 (not exactly 0 — sigmoid doesn't fully block)
     for &t in &target {
-        assert!((t - 2.689).abs() < 1e-2, "Gate should attenuate to ~2.689, got {}", t);
+        assert!(
+            (t - 2.689).abs() < 1e-2,
+            "Gate should attenuate to ~2.689, got {}",
+            t
+        );
     }
 }
 
@@ -152,7 +180,11 @@ fn test_phase_gate_apply() {
 
     // r (0.8) >> threshold (0.3) → sigmoid close to 1 → output ≈ input
     for &o in &output {
-        assert!((o - 5.0).abs() < 0.5, "Phase gate should pass ~5.0, got {}", o);
+        assert!(
+            (o - 5.0).abs() < 0.5,
+            "Phase gate should pass ~5.0, got {}",
+            o
+        );
     }
 }
 
@@ -175,7 +207,11 @@ fn test_hebbian_update() {
         // w += (cos_diff - decay*w) * lr*dt
         // = 0.5 + (0.5 - 0.1*0.5) * 0.01*0.01
         // = 0.5 + 0.0045 = 0.5045
-        assert!((w - 0.5045).abs() < 1e-5, "Hebbian w should be ~0.5045, got {}", w);
+        assert!(
+            (w - 0.5045).abs() < 1e-5,
+            "Hebbian w should be ~0.5045, got {}",
+            w
+        );
     }
 }
 
@@ -200,8 +236,13 @@ fn test_echo_tap() {
     // delay_idx=0 → buf[i * delay_len + 0] for each osc i
     for osc in 0..n_osc {
         let expected = (osc * 100 + 0) as f32;
-        assert!((output[osc] - expected).abs() < 1e-5,
-            "Echo tap osc {}: expected {}, got {}", osc, expected, output[osc]);
+        assert!(
+            (output[osc] - expected).abs() < 1e-5,
+            "Echo tap osc {}: expected {}, got {}",
+            osc,
+            expected,
+            output[osc]
+        );
     }
 }
 
@@ -223,7 +264,12 @@ fn test_echo_tap_delay() {
     // delay_idx=5 → buf[i * delay_len + 5] for each osc i
     for osc in 0..n_osc {
         let expected = (osc * 100 + 5) as f32;
-        assert!((output[osc] - expected).abs() < 1e-5,
-            "Echo tap delay=5 osc {}: expected {}, got {}", osc, expected, output[osc]);
+        assert!(
+            (output[osc] - expected).abs() < 1e-5,
+            "Echo tap delay=5 osc {}: expected {}, got {}",
+            osc,
+            expected,
+            output[osc]
+        );
     }
 }

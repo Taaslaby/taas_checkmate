@@ -986,6 +986,7 @@ name = "taas-kernels"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "rayon",
  "wide",
 ]
 

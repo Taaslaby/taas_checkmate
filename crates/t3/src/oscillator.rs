@@ -22,10 +22,7 @@
 use wide::f32x8;
 
 use super::{
-    PI, TWO_PI,
-    backend::T3Backend,
-    phase_gate::phase_gate,
-    attention_coupling::AttentionCoupling,
+    attention_coupling::AttentionCoupling, backend::T3Backend, phase_gate::phase_gate, PI, TWO_PI,
 };
 
 /// 3-population oscillator state with generic backend.
@@ -38,32 +35,53 @@ pub struct TriOscillator<B: T3Backend = super::backend::Avx2Backend> {
     pub backend: B,
 
     // Phases
-    pub th1: Vec<f32>, pub th2: Vec<f32>, pub th3: Vec<f32>,
+    pub th1: Vec<f32>,
+    pub th2: Vec<f32>,
+    pub th3: Vec<f32>,
     // Previous phases (for dθ/dt)
-    pub prev_th1: Vec<f32>, pub prev_th2: Vec<f32>, pub prev_th3: Vec<f32>,
+    pub prev_th1: Vec<f32>,
+    pub prev_th2: Vec<f32>,
+    pub prev_th3: Vec<f32>,
     // Amplitudes (Stuart-Landau)
-    pub r1: Vec<f32>, pub r2: Vec<f32>, pub r3: Vec<f32>,
+    pub r1: Vec<f32>,
+    pub r2: Vec<f32>,
+    pub r3: Vec<f32>,
     // Previous amplitudes
-    pub prev_r1: Vec<f32>, pub prev_r2: Vec<f32>, pub prev_r3: Vec<f32>,
+    pub prev_r1: Vec<f32>,
+    pub prev_r2: Vec<f32>,
+    pub prev_r3: Vec<f32>,
     // Natural frequencies
-    pub omega1: Vec<f32>, pub omega2: Vec<f32>, pub omega3: Vec<f32>,
+    pub omega1: Vec<f32>,
+    pub omega2: Vec<f32>,
+    pub omega3: Vec<f32>,
     // Drive inputs
-    pub drive1: Vec<f32>, pub drive2: Vec<f32>, pub drive3: Vec<f32>,
+    pub drive1: Vec<f32>,
+    pub drive2: Vec<f32>,
+    pub drive3: Vec<f32>,
     // Sin/cos buffers
-    pub sin1: Vec<f32>, pub cos1: Vec<f32>,
-    pub sin2: Vec<f32>, pub cos2: Vec<f32>,
-    pub sin3: Vec<f32>, pub cos3: Vec<f32>,
+    pub sin1: Vec<f32>,
+    pub cos1: Vec<f32>,
+    pub sin2: Vec<f32>,
+    pub cos2: Vec<f32>,
+    pub sin3: Vec<f32>,
+    pub cos3: Vec<f32>,
     // Coupling
-    pub coupling1: Vec<f32>, pub coupling2: Vec<f32>, pub coupling3: Vec<f32>,
+    pub coupling1: Vec<f32>,
+    pub coupling2: Vec<f32>,
+    pub coupling3: Vec<f32>,
     // Uniform coupling weights (scalars, not n×n matrix)
-    pub w12: f32, pub w13: f32, pub w23: f32,
+    pub w12: f32,
+    pub w13: f32,
+    pub w23: f32,
     // Stuart-Landau params
     pub alpha: f32,
     pub drive_gain: f32,
     pub epsilon: f32,
     // Phase Gate params
     pub phase_gate_gain: f32,
-    pub gamma1: f32, pub gamma2: f32, pub gamma3: f32,
+    pub gamma1: f32,
+    pub gamma2: f32,
+    pub gamma3: f32,
     // Attention-based coupling (optional, replaces uniform coupling per-population)
     pub attn_coupling1: Option<AttentionCoupling>,
     pub attn_coupling2: Option<AttentionCoupling>,
@@ -80,24 +98,49 @@ impl<B: T3Backend> TriOscillator<B> {
         Self {
             n,
             backend,
-            th1: vec![0.0; n], th2: vec![0.0; n], th3: vec![0.0; n],
-            prev_th1: vec![0.0; n], prev_th2: vec![0.0; n], prev_th3: vec![0.0; n],
-            r1: vec![0.1; n], r2: vec![0.1; n], r3: vec![0.1; n],
-            prev_r1: vec![0.1; n], prev_r2: vec![0.1; n], prev_r3: vec![0.1; n],
-            omega1: (0..n).map(|i| freq_min + freq_spread * (i as f32 / n as f32)).collect(),
-            omega2: (0..n).map(|i| freq_min + freq_spread * ((i + n/3) as f32 / n as f32)).collect(),
-            omega3: (0..n).map(|i| freq_min + freq_spread * ((i + 2*n/3) as f32 / n as f32)).collect(),
-            drive1: vec![0.0; n], drive2: vec![0.0; n], drive3: vec![0.0; n],
-            sin1: vec![0.0; n], cos1: vec![0.0; n],
-            sin2: vec![0.0; n], cos2: vec![0.0; n],
-            sin3: vec![0.0; n], cos3: vec![0.0; n],
-            coupling1: vec![0.0; n], coupling2: vec![0.0; n], coupling3: vec![0.0; n],
-            w12: 0.0, w13: 0.0, w23: 0.0,
+            th1: vec![0.0; n],
+            th2: vec![0.0; n],
+            th3: vec![0.0; n],
+            prev_th1: vec![0.0; n],
+            prev_th2: vec![0.0; n],
+            prev_th3: vec![0.0; n],
+            r1: vec![0.1; n],
+            r2: vec![0.1; n],
+            r3: vec![0.1; n],
+            prev_r1: vec![0.1; n],
+            prev_r2: vec![0.1; n],
+            prev_r3: vec![0.1; n],
+            omega1: (0..n)
+                .map(|i| freq_min + freq_spread * (i as f32 / n as f32))
+                .collect(),
+            omega2: (0..n)
+                .map(|i| freq_min + freq_spread * ((i + n / 3) as f32 / n as f32))
+                .collect(),
+            omega3: (0..n)
+                .map(|i| freq_min + freq_spread * ((i + 2 * n / 3) as f32 / n as f32))
+                .collect(),
+            drive1: vec![0.0; n],
+            drive2: vec![0.0; n],
+            drive3: vec![0.0; n],
+            sin1: vec![0.0; n],
+            cos1: vec![0.0; n],
+            sin2: vec![0.0; n],
+            cos2: vec![0.0; n],
+            sin3: vec![0.0; n],
+            cos3: vec![0.0; n],
+            coupling1: vec![0.0; n],
+            coupling2: vec![0.0; n],
+            coupling3: vec![0.0; n],
+            w12: 0.0,
+            w13: 0.0,
+            w23: 0.0,
             alpha: 1.0,
             drive_gain: 10.0,
             epsilon: 0.1,
             phase_gate_gain: 4.0,
-            gamma1: 0.5, gamma2: 1.0, gamma3: 1.12,
+            gamma1: 0.5,
+            gamma2: 1.0,
+            gamma3: 1.12,
             attn_coupling1: None,
             attn_coupling2: None,
             attn_coupling3: None,
@@ -108,9 +151,12 @@ impl<B: T3Backend> TriOscillator<B> {
     /// Recompute sin/cos and wrap phases (calls backend.prepare).
     /// Useful after manually setting th/r for PST feature extraction without advancing dynamics.
     pub fn prepare(&mut self) {
-        self.backend.prepare(&mut self.th1, &mut self.cos1, &mut self.sin1);
-        self.backend.prepare(&mut self.th2, &mut self.cos2, &mut self.sin2);
-        self.backend.prepare(&mut self.th3, &mut self.cos3, &mut self.sin3);
+        self.backend
+            .prepare(&mut self.th1, &mut self.cos1, &mut self.sin1);
+        self.backend
+            .prepare(&mut self.th2, &mut self.cos2, &mut self.sin2);
+        self.backend
+            .prepare(&mut self.th3, &mut self.cos3, &mut self.sin3);
     }
 
     /// Set uniform cross-coupling strengths (scalars, O(1)). No n×n matrix alloc.
@@ -144,9 +190,12 @@ impl<B: T3Backend> TriOscillator<B> {
         self.initialised = true;
 
         // 2. Compute sin/cos via backend (also wraps phases)
-        self.backend.prepare(&mut self.th1, &mut self.cos1, &mut self.sin1);
-        self.backend.prepare(&mut self.th2, &mut self.cos2, &mut self.sin2);
-        self.backend.prepare(&mut self.th3, &mut self.cos3, &mut self.sin3);
+        self.backend
+            .prepare(&mut self.th1, &mut self.cos1, &mut self.sin1);
+        self.backend
+            .prepare(&mut self.th2, &mut self.cos2, &mut self.sin2);
+        self.backend
+            .prepare(&mut self.th3, &mut self.cos3, &mut self.sin3);
 
         // 3. Compute order parameters for Phase Gate
         let r1_op = self.order_parameter(&self.th1);
@@ -166,7 +215,10 @@ impl<B: T3Backend> TriOscillator<B> {
         // Cross-population coupling (from other populations) always uses
         // uniform coupling (w12, w13, w23) regardless of attention setting.
 
-        if self.attn_coupling1.is_some() || self.attn_coupling2.is_some() || self.attn_coupling3.is_some() {
+        if self.attn_coupling1.is_some()
+            || self.attn_coupling2.is_some()
+            || self.attn_coupling3.is_some()
+        {
             // Attention coupling for specific populations
             // Internal (same-population) coupling uses attention,
             // cross-population coupling still uses uniform weights.
@@ -191,7 +243,7 @@ impl<B: T3Backend> TriOscillator<B> {
             }
             for i in 0..n {
                 self.coupling1[i] += cp12 * (self.cos1[i] * r2s2 - self.sin1[i] * r2c2)
-                                   + cp13 * (self.cos1[i] * r3s3 - self.sin1[i] * r3c3);
+                    + cp13 * (self.cos1[i] * r3s3 - self.sin1[i] * r3c3);
             }
 
             // Pop 2: cross from 1+3 + self-attention
@@ -202,7 +254,7 @@ impl<B: T3Backend> TriOscillator<B> {
             }
             for i in 0..n {
                 self.coupling2[i] += cp21 * (self.cos2[i] * r1s1 - self.sin2[i] * r1c1)
-                                   + cp23 * (self.cos2[i] * r3s3 - self.sin2[i] * r3c3);
+                    + cp23 * (self.cos2[i] * r3s3 - self.sin2[i] * r3c3);
             }
 
             // Pop 3: cross from 1+2 + self-attention
@@ -213,7 +265,7 @@ impl<B: T3Backend> TriOscillator<B> {
             }
             for i in 0..n {
                 self.coupling3[i] += cp31 * (self.cos3[i] * r1s1 - self.sin3[i] * r1c1)
-                                   + cp32 * (self.cos3[i] * r2s2 - self.sin3[i] * r2c2);
+                    + cp32 * (self.cos3[i] * r2s2 - self.sin3[i] * r2c2);
             }
         } else {
             // Original O(N) uniform coupling (no attention)
@@ -244,18 +296,66 @@ impl<B: T3Backend> TriOscillator<B> {
 
             for c in 0..n_chunks {
                 let i = c * 8;
-                let c1_v = f32x8::new([self.cos1[i], self.cos1[i+1], self.cos1[i+2], self.cos1[i+3],
-                                       self.cos1[i+4], self.cos1[i+5], self.cos1[i+6], self.cos1[i+7]]);
-                let s1_v = f32x8::new([self.sin1[i], self.sin1[i+1], self.sin1[i+2], self.sin1[i+3],
-                                       self.sin1[i+4], self.sin1[i+5], self.sin1[i+6], self.sin1[i+7]]);
-                let c2_v = f32x8::new([self.cos2[i], self.cos2[i+1], self.cos2[i+2], self.cos2[i+3],
-                                       self.cos2[i+4], self.cos2[i+5], self.cos2[i+6], self.cos2[i+7]]);
-                let s2_v = f32x8::new([self.sin2[i], self.sin2[i+1], self.sin2[i+2], self.sin2[i+3],
-                                       self.sin2[i+4], self.sin2[i+5], self.sin2[i+6], self.sin2[i+7]]);
-                let c3_v = f32x8::new([self.cos3[i], self.cos3[i+1], self.cos3[i+2], self.cos3[i+3],
-                                       self.cos3[i+4], self.cos3[i+5], self.cos3[i+6], self.cos3[i+7]]);
-                let s3_v = f32x8::new([self.sin3[i], self.sin3[i+1], self.sin3[i+2], self.sin3[i+3],
-                                       self.sin3[i+4], self.sin3[i+5], self.sin3[i+6], self.sin3[i+7]]);
+                let c1_v = f32x8::new([
+                    self.cos1[i],
+                    self.cos1[i + 1],
+                    self.cos1[i + 2],
+                    self.cos1[i + 3],
+                    self.cos1[i + 4],
+                    self.cos1[i + 5],
+                    self.cos1[i + 6],
+                    self.cos1[i + 7],
+                ]);
+                let s1_v = f32x8::new([
+                    self.sin1[i],
+                    self.sin1[i + 1],
+                    self.sin1[i + 2],
+                    self.sin1[i + 3],
+                    self.sin1[i + 4],
+                    self.sin1[i + 5],
+                    self.sin1[i + 6],
+                    self.sin1[i + 7],
+                ]);
+                let c2_v = f32x8::new([
+                    self.cos2[i],
+                    self.cos2[i + 1],
+                    self.cos2[i + 2],
+                    self.cos2[i + 3],
+                    self.cos2[i + 4],
+                    self.cos2[i + 5],
+                    self.cos2[i + 6],
+                    self.cos2[i + 7],
+                ]);
+                let s2_v = f32x8::new([
+                    self.sin2[i],
+                    self.sin2[i + 1],
+                    self.sin2[i + 2],
+                    self.sin2[i + 3],
+                    self.sin2[i + 4],
+                    self.sin2[i + 5],
+                    self.sin2[i + 6],
+                    self.sin2[i + 7],
+                ]);
+                let c3_v = f32x8::new([
+                    self.cos3[i],
+                    self.cos3[i + 1],
+                    self.cos3[i + 2],
+                    self.cos3[i + 3],
+                    self.cos3[i + 4],
+                    self.cos3[i + 5],
+                    self.cos3[i + 6],
+                    self.cos3[i + 7],
+                ]);
+                let s3_v = f32x8::new([
+                    self.sin3[i],
+                    self.sin3[i + 1],
+                    self.sin3[i + 2],
+                    self.sin3[i + 3],
+                    self.sin3[i + 4],
+                    self.sin3[i + 5],
+                    self.sin3[i + 6],
+                    self.sin3[i + 7],
+                ]);
 
                 let term12 = s_cpl12_cos * (c1_v * s_r2s2 - s1_v * s_r2c2);
                 let term13 = s_cpl13_cos * (c1_v * s_r3s3 - s1_v * s_r3c3);
@@ -271,42 +371,77 @@ impl<B: T3Backend> TriOscillator<B> {
             }
 
             for i in (n_chunks * 8)..n {
-                self.coupling1[i] = self.w12 * g2 / nf * (self.cos1[i] * r2s2 - self.sin1[i] * r2c2)
-                                  + self.w13 * g3 / nf * (self.cos1[i] * r3s3 - self.sin1[i] * r3c3);
-                self.coupling2[i] = self.w12 * g1 / nf * (self.cos2[i] * r1s1 - self.sin2[i] * r1c1)
-                                  + self.w23 * g3 / nf * (self.cos2[i] * r3s3 - self.sin2[i] * r3c3);
-                self.coupling3[i] = self.w13 * g1 / nf * (self.cos3[i] * r1s1 - self.sin3[i] * r1c1)
-                                  + self.w23 * g2 / nf * (self.cos3[i] * r2s2 - self.sin3[i] * r2c2);
+                self.coupling1[i] = self.w12 * g2 / nf
+                    * (self.cos1[i] * r2s2 - self.sin1[i] * r2c2)
+                    + self.w13 * g3 / nf * (self.cos1[i] * r3s3 - self.sin1[i] * r3c3);
+                self.coupling2[i] = self.w12 * g1 / nf
+                    * (self.cos2[i] * r1s1 - self.sin2[i] * r1c1)
+                    + self.w23 * g3 / nf * (self.cos2[i] * r3s3 - self.sin2[i] * r3c3);
+                self.coupling3[i] = self.w13 * g1 / nf
+                    * (self.cos3[i] * r1s1 - self.sin3[i] * r1c1)
+                    + self.w23 * g2 / nf * (self.cos3[i] * r2s2 - self.sin3[i] * r2c2);
             }
         }
 
         // 5. Backend update (amplitudes + phases)
         self.backend.update(
-            &mut self.th1, &mut self.r1, &self.omega1,
-            &self.coupling1, &self.drive1, dt, self.alpha, self.drive_gain,
+            &mut self.th1,
+            &mut self.r1,
+            &self.omega1,
+            &self.coupling1,
+            &self.drive1,
+            dt,
+            self.alpha,
+            self.drive_gain,
         );
         self.backend.update(
-            &mut self.th2, &mut self.r2, &self.omega2,
-            &self.coupling2, &self.drive2, dt, self.alpha, self.drive_gain,
+            &mut self.th2,
+            &mut self.r2,
+            &self.omega2,
+            &self.coupling2,
+            &self.drive2,
+            dt,
+            self.alpha,
+            self.drive_gain,
         );
         self.backend.update(
-            &mut self.th3, &mut self.r3, &self.omega3,
-            &self.coupling3, &self.drive3, dt, self.alpha, self.drive_gain,
+            &mut self.th3,
+            &mut self.r3,
+            &self.omega3,
+            &self.coupling3,
+            &self.drive3,
+            dt,
+            self.alpha,
+            self.drive_gain,
         );
 
         // 6. Wrap phases to [-π, π] and clamp amplitudes
-        for p in self.th1.iter_mut() { *p = (*p + PI).rem_euclid(TWO_PI) - PI; }
-        for p in self.th2.iter_mut() { *p = (*p + PI).rem_euclid(TWO_PI) - PI; }
-        for p in self.th3.iter_mut() { *p = (*p + PI).rem_euclid(TWO_PI) - PI; }
-        for r in self.r1.iter_mut() { *r = r.clamp(0.001, 10.0); }
-        for r in self.r2.iter_mut() { *r = r.clamp(0.001, 10.0); }
-        for r in self.r3.iter_mut() { *r = r.clamp(0.001, 10.0); }
+        for p in self.th1.iter_mut() {
+            *p = (*p + PI).rem_euclid(TWO_PI) - PI;
+        }
+        for p in self.th2.iter_mut() {
+            *p = (*p + PI).rem_euclid(TWO_PI) - PI;
+        }
+        for p in self.th3.iter_mut() {
+            *p = (*p + PI).rem_euclid(TWO_PI) - PI;
+        }
+        for r in self.r1.iter_mut() {
+            *r = r.clamp(0.001, 10.0);
+        }
+        for r in self.r2.iter_mut() {
+            *r = r.clamp(0.001, 10.0);
+        }
+        for r in self.r3.iter_mut() {
+            *r = r.clamp(0.001, 10.0);
+        }
     }
 
     /// Compute order parameter R for a population: |mean(exp(iθ))|
     pub fn order_parameter(&self, phases: &[f32]) -> f32 {
         let n = phases.len();
-        if n == 0 { return 0.0; }
+        if n == 0 {
+            return 0.0;
+        }
         let (sum_sin, sum_cos): (f64, f64) = phases.iter().fold((0.0, 0.0), |(s, c), &p| {
             (s + p.sin() as f64, c + p.cos() as f64)
         });
@@ -316,7 +451,9 @@ impl<B: T3Backend> TriOscillator<B> {
     /// Cross order parameter between two populations.
     pub fn order_parameter_cross(&self, ph1: &[f32], ph2: &[f32]) -> f32 {
         let n = ph1.len().min(ph2.len());
-        if n == 0 { return 0.0; }
+        if n == 0 {
+            return 0.0;
+        }
         let (sum_sin, sum_cos): (f64, f64) = (0..n).fold((0.0, 0.0), |(s, c), i| {
             let d = (ph1[i] - ph2[i]) as f64;
             (s + d.sin(), c + d.cos())
@@ -369,7 +506,9 @@ impl<B: T3Backend> TriOscillator<B> {
         self.coupling1.fill(0.0);
         self.coupling2.fill(0.0);
         self.coupling3.fill(0.0);
-        self.w12 = 0.0; self.w13 = 0.0; self.w23 = 0.0;
+        self.w12 = 0.0;
+        self.w13 = 0.0;
+        self.w23 = 0.0;
         self.initialised = false;
         // Attention coupling config is preserved (not reset)
     }
@@ -410,23 +549,42 @@ fn store8(slice: &mut [f32], i: usize, v: f32x8) {
 fn weighted_sum_sincos(r: &[f32], sin: &[f32], cos: &[f32], n: usize) -> (f32, f32) {
     let n_chunks = n / 8;
     let mut sum_s_v = f32x8::splat(0.0);
-    let mut sum_c_v = f32x8::splat(0.0);        for c in 0..n_chunks {
-            let i = c * 8;
-            let rv = f32x8::new([
-                r[i], r[i+1], r[i+2], r[i+3],
-                r[i+4], r[i+5], r[i+6], r[i+7],
-            ]);
-            let sv = f32x8::new([
-                sin[i], sin[i+1], sin[i+2], sin[i+3],
-                sin[i+4], sin[i+5], sin[i+6], sin[i+7],
-            ]);
-            let cv = f32x8::new([
-                cos[i], cos[i+1], cos[i+2], cos[i+3],
-                cos[i+4], cos[i+5], cos[i+6], cos[i+7],
-            ]);
-            sum_s_v += rv * sv;
-            sum_c_v += rv * cv;
-        }
+    let mut sum_c_v = f32x8::splat(0.0);
+    for c in 0..n_chunks {
+        let i = c * 8;
+        let rv = f32x8::new([
+            r[i],
+            r[i + 1],
+            r[i + 2],
+            r[i + 3],
+            r[i + 4],
+            r[i + 5],
+            r[i + 6],
+            r[i + 7],
+        ]);
+        let sv = f32x8::new([
+            sin[i],
+            sin[i + 1],
+            sin[i + 2],
+            sin[i + 3],
+            sin[i + 4],
+            sin[i + 5],
+            sin[i + 6],
+            sin[i + 7],
+        ]);
+        let cv = f32x8::new([
+            cos[i],
+            cos[i + 1],
+            cos[i + 2],
+            cos[i + 3],
+            cos[i + 4],
+            cos[i + 5],
+            cos[i + 6],
+            cos[i + 7],
+        ]);
+        sum_s_v += rv * sv;
+        sum_c_v += rv * cv;
+    }
 
     let mut sum_s = sum_s_v.reduce_add();
     let mut sum_c = sum_c_v.reduce_add();
@@ -449,7 +607,10 @@ mod tests {
         let mut tri = TriOscillator::new(16, 0.5, 1.5, Avx2Backend);
         tri.set_uniform_coupling(0.1, 0.05, 0.02);
         tri.step(0.01);
-        assert!(tri.th1.iter().any(|&p| p.abs() > 0.001), "phases should update");
+        assert!(
+            tri.th1.iter().any(|&p| p.abs() > 0.001),
+            "phases should update"
+        );
         assert!(tri.r1.iter().any(|&r| r > 0.0), "amplitudes should exist");
     }
 
@@ -477,7 +638,9 @@ mod tests {
     fn test_tri_synchronization() {
         let mut tri = TriOscillator::new(8, 1.0, 1.0, Avx2Backend);
         tri.set_uniform_coupling(2.0, 1.0, 1.0);
-        tri.gamma1 = 0.0; tri.gamma2 = 0.0; tri.gamma3 = 0.0;
+        tri.gamma1 = 0.0;
+        tri.gamma2 = 0.0;
+        tri.gamma3 = 0.0;
         tri.phase_gate_gain = 100.0;
         tri.step(0.1);
         let r = tri.order_parameter(&tri.th1);
@@ -529,30 +692,45 @@ mod tests {
 
         for i in 0..n {
             // O(N²) reference: direct summation
-            let mut c12_ref = 0.0; let mut c13_ref = 0.0;
+            let mut c12_ref = 0.0;
+            let mut c13_ref = 0.0;
             for j in 0..n {
-                c12_ref += (0.3 / nf) * tri_new.r2[j]
-                    * (tri_new.sin2[j] * tri_new.cos1[i] - tri_new.cos2[j] * tri_new.sin1[i]) * g2;
-                c13_ref += (0.15 / nf) * tri_new.r3[j]
-                    * (tri_new.sin3[j] * tri_new.cos1[i] - tri_new.cos3[j] * tri_new.sin1[i]) * g3;
+                c12_ref += (0.3 / nf)
+                    * tri_new.r2[j]
+                    * (tri_new.sin2[j] * tri_new.cos1[i] - tri_new.cos2[j] * tri_new.sin1[i])
+                    * g2;
+                c13_ref += (0.15 / nf)
+                    * tri_new.r3[j]
+                    * (tri_new.sin3[j] * tri_new.cos1[i] - tri_new.cos3[j] * tri_new.sin1[i])
+                    * g3;
             }
             let c1_ref = c12_ref + c13_ref;
 
-            let mut c21_ref = 0.0; let mut c23_ref = 0.0;
+            let mut c21_ref = 0.0;
+            let mut c23_ref = 0.0;
             for j in 0..n {
-                c21_ref += (0.3 / nf) * tri_new.r1[j]
-                    * (tri_new.sin1[j] * tri_new.cos2[i] - tri_new.cos1[j] * tri_new.sin2[i]) * g1;
-                c23_ref += (0.08 / nf) * tri_new.r3[j]
-                    * (tri_new.sin3[j] * tri_new.cos2[i] - tri_new.cos3[j] * tri_new.sin2[i]) * g3;
+                c21_ref += (0.3 / nf)
+                    * tri_new.r1[j]
+                    * (tri_new.sin1[j] * tri_new.cos2[i] - tri_new.cos1[j] * tri_new.sin2[i])
+                    * g1;
+                c23_ref += (0.08 / nf)
+                    * tri_new.r3[j]
+                    * (tri_new.sin3[j] * tri_new.cos2[i] - tri_new.cos3[j] * tri_new.sin2[i])
+                    * g3;
             }
             let c2_ref = c21_ref + c23_ref;
 
-            let mut c31_ref = 0.0; let mut c32_ref = 0.0;
+            let mut c31_ref = 0.0;
+            let mut c32_ref = 0.0;
             for j in 0..n {
-                c31_ref += (0.15 / nf) * tri_new.r1[j]
-                    * (tri_new.sin1[j] * tri_new.cos3[i] - tri_new.cos1[j] * tri_new.sin3[i]) * g1;
-                c32_ref += (0.08 / nf) * tri_new.r2[j]
-                    * (tri_new.sin2[j] * tri_new.cos3[i] - tri_new.cos2[j] * tri_new.sin3[i]) * g2;
+                c31_ref += (0.15 / nf)
+                    * tri_new.r1[j]
+                    * (tri_new.sin1[j] * tri_new.cos3[i] - tri_new.cos1[j] * tri_new.sin3[i])
+                    * g1;
+                c32_ref += (0.08 / nf)
+                    * tri_new.r2[j]
+                    * (tri_new.sin2[j] * tri_new.cos3[i] - tri_new.cos2[j] * tri_new.sin3[i])
+                    * g2;
             }
             let c3_ref = c31_ref + c32_ref;
 
@@ -560,12 +738,30 @@ mod tests {
             // Note: reference uses post-step sin/cos which differs from pre-step sin/cos
             // used by step() internally (backend.update() changes th1/r1 after coupling).
             // 1e-2 tolerance accounts for this pre/post difference (~1% of coupling value).
-            assert!((c1_new[i] - c1_ref).abs() < tol,
-                "coupling1[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}", i, c1_new[i], c1_ref, (c1_new[i] - c1_ref).abs());
-            assert!((c2_new[i] - c2_ref).abs() < tol,
-                "coupling2[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}", i, c2_new[i], c2_ref, (c2_new[i] - c2_ref).abs());
-            assert!((c3_new[i] - c3_ref).abs() < tol,
-                "coupling3[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}", i, c3_new[i], c3_ref, (c3_new[i] - c3_ref).abs());
+            assert!(
+                (c1_new[i] - c1_ref).abs() < tol,
+                "coupling1[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}",
+                i,
+                c1_new[i],
+                c1_ref,
+                (c1_new[i] - c1_ref).abs()
+            );
+            assert!(
+                (c2_new[i] - c2_ref).abs() < tol,
+                "coupling2[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}",
+                i,
+                c2_new[i],
+                c2_ref,
+                (c2_new[i] - c2_ref).abs()
+            );
+            assert!(
+                (c3_new[i] - c3_ref).abs() < tol,
+                "coupling3[{}]: O(N)={:.10} O(N²)={:.10} diff={:.2e}",
+                i,
+                c3_new[i],
+                c3_ref,
+                (c3_new[i] - c3_ref).abs()
+            );
         }
     }
 }

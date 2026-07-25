@@ -25,7 +25,7 @@ fn main() {
         "t3_bptt_jacobian.cu",
         "t3_bptt_step.cu",
         "snn_kernels.cu",
-        "psi_wave.cu",
+        "gco.cu",
         "hh.cu",
         "csr_spmv_tanh.cu",
         "stdp_dopamine.cu",
@@ -49,7 +49,9 @@ fn main() {
 
         let mut cmd = Command::new(&nvcc);
         cmd.arg("-c")
-            .arg(&src).arg("-o").arg(&obj)
+            .arg(&src)
+            .arg("-o")
+            .arg(&obj)
             .arg(&arch)
             .arg("-O3")
             .arg("--use_fast_math")
@@ -135,5 +137,7 @@ fn which_nvcc() -> String {
 }
 
 fn get_cuda_home() -> Option<String> {
-    env::var("CUDA_HOME").or_else(|_| env::var("CUDA_PATH")).ok()
+    env::var("CUDA_HOME")
+        .or_else(|_| env::var("CUDA_PATH"))
+        .ok()
 }

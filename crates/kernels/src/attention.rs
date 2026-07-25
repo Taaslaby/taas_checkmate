@@ -11,8 +11,12 @@ const RNG_SCALE_32: f32 = 2.3283064e-10;
 /// # Safety
 /// `query[n_bytes]`, `keys[n_keys·n_bytes]`, `values[n_keys]` valid; `out` non-null.
 pub(crate) unsafe fn xor_attention(
-    query: *const u8, keys: *const u8, values: *const f32,
-    out: *mut f32, n_keys: usize, n_bytes: usize,
+    query: *const u8,
+    keys: *const u8,
+    values: *const f32,
+    out: *mut f32,
+    n_keys: usize,
+    n_bytes: usize,
 ) {
     let q = std::slice::from_raw_parts(query, n_bytes);
     let k = std::slice::from_raw_parts(keys, n_keys * n_bytes);
@@ -32,7 +36,11 @@ pub(crate) unsafe fn xor_attention(
             total_val += sim * v[i];
         }
     }
-    *out = if total_w > 0.0 { total_val / total_w } else { 0.0 };
+    *out = if total_w > 0.0 {
+        total_val / total_w
+    } else {
+        0.0
+    };
 }
 
 /// Fill buffer with pseudo-random floats in [0, 1) using xorshift32.

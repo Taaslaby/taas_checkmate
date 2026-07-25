@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
+use super::{
+    fast_exp_simd, load8, load8_i32, load8_mut, spike_mask_to_i32, store8, surrogate_gradient,
+};
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{load8, load8_mut, load8_i32, store8, spike_mask_to_i32, surrogate_gradient, fast_exp_simd};
 
 // ═══════════════════════════════════════════════════════
 //  LIF (Leaky Integrate-and-Fire)
@@ -13,12 +15,16 @@ use super::{load8, load8_mut, load8_i32, store8, spike_mask_to_i32, surrogate_gr
 /// # Safety
 /// `v[n]`, `Ii[n]`, `spikes[n]`, `params[5·n]`, `refractory[n]` must be valid.
 pub(crate) unsafe fn lif_step(
-    v: *mut f32, Ii: *mut f32, spikes: *mut i32,
+    v: *mut f32,
+    Ii: *mut f32,
+    spikes: *mut i32,
     params: *const f32,
-    refractory: *mut f32, tau_ref: f32, n: usize,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
 ) {
     let p = std::slice::from_raw_parts(params, n * 5);
-    let dt_val = p[0];  // dt is uniform across all neurons
+    let dt_val = p[0]; // dt is uniform across all neurons
     let dt_s = f32x8::splat(dt_val);
     let zero = f32x8::splat(0.0);
     let tr_s = f32x8::splat(tau_ref);
@@ -28,7 +34,9 @@ pub(crate) unsafe fn lif_step(
         let mut vv = load8_mut(v, off);
         let mut refr = load8_mut(refractory, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8_mut(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(2 * n), off);
         let v_th = load8(params.wrapping_add(3 * n), off);
         let v_reset = load8(params.wrapping_add(4 * n), off);
@@ -50,8 +58,8 @@ pub(crate) unsafe fn lif_step(
         vv = refr_mask.blend(vv, sm.blend(v_reset, vv));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr -= dt_s;  // Always decrement
-        refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
+        refr -= dt_s; // Always decrement
+        refr = sm.blend(tr_s, refr); // Set to tau_ref on spike
         refr = refr.max(zero);
 
         store8(v, off, vv);
@@ -59,8 +67,14 @@ pub(crate) unsafe fn lif_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     if n8 < n {
@@ -94,6 +108,125 @@ pub(crate) unsafe fn lif_step(
 }
 
 // ═══════════════════════════════════════════════════════
+//  LIF Crank-Nicolson — точная неявная схема (feature = "precise")
+// ═══════════════════════════════════════════════════════
+
+/// Step `n` LIF neurons using Crank-Nicolson (implicit) integration.
+///
+/// Точная для LIF ODE при **любом** dt:
+///
+/// ```text
+/// v(t+dt) = (v(t) + α·(v_rest + I)) / (1 + α),    α = dt / τ_m
+/// ```
+///
+/// Преимущества перед Forward Euler:
+/// - Устойчива при dt ≥ 1ms (нет накопления ошибки)
+/// - Steady-state точный: v_ss = v_rest + I (независимо от dt)
+/// - Нет численного overshooting при больших токах
+///
+/// Недостатки:
+/// - Медленнее (нет fused multiply-add паттерна Forward Euler)
+/// - Нужен feature = "precise" чтобы не перегружать горячий путь
+///
+/// # Safety
+/// Same as `lif_step`.
+#[cfg(feature = "precise")]
+pub(crate) unsafe fn lif_cn_step(
+    v: *mut f32,
+    Ii: *mut f32,
+    spikes: *mut i32,
+    params: *const f32,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
+) {
+    let p = std::slice::from_raw_parts(params, n * 5);
+    let dt_val = p[0];
+    let zero = f32x8::splat(0.0);
+    let one = f32x8::splat(1.0);
+    let tr_s = f32x8::splat(tau_ref);
+    let dt_s = f32x8::splat(dt_val);
+    let n8 = n & !7;
+
+    for off in (0..n8).step_by(8) {
+        let mut vv = load8_mut(v, off);
+        let mut refr = load8_mut(refractory, off);
+        let ii = load8_mut(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
+        let v_rest = load8(params.wrapping_add(2 * n), off);
+        let v_th = load8(params.wrapping_add(3 * n), off);
+        let v_reset = load8(params.wrapping_add(4 * n), off);
+        let tau_m = load8(params.wrapping_add(n), off);
+
+        let refr_mask = refr.cmp_gt(zero);
+
+        // Crank-Nicolson: v(t+dt) = (v + α·(v_rest + I)) / (1 + α)
+        // α = dt / τ_m,  exact solution for linear LIF ODE
+        let mask_tau = tau_m.cmp_gt(zero);
+        let alpha = mask_tau.blend(dt_s / tau_m, zero); // α = dt / τ
+        let numer = vv + alpha * (v_rest + ii); // v + α·(v_rest + I)
+        let denom = one + alpha; // 1 + α
+        let vv_cn = mask_tau.blend(numer / denom, vv);
+        vv = refr_mask.blend(vv, vv_cn);
+
+        // Spike detection (only non-refractory)
+        let not_refr = !refr_mask;
+        let sm = vv.cmp_ge(v_th) & not_refr;
+        vv = refr_mask.blend(vv, sm.blend(v_reset, vv));
+
+        refr -= dt_s;
+        refr = sm.blend(tr_s, refr);
+        refr = refr.max(zero);
+
+        store8(v, off, vv);
+        store8(refractory, off, refr);
+
+        let sp_i = spike_mask_to_i32(sm);
+        let sp8 = spikes.add(off);
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
+    }
+
+    // Scalar tail
+    if n8 < n {
+        let v = std::slice::from_raw_parts_mut(v, n);
+        let i_sl = std::slice::from_raw_parts_mut(Ii, n);
+        let spikes = std::slice::from_raw_parts_mut(spikes, n);
+        let refr_sl = std::slice::from_raw_parts_mut(refractory, n);
+        for i_idx in n8..n {
+            if refr_sl[i_idx] > 0.0 {
+                refr_sl[i_idx] = (refr_sl[i_idx] - dt_val).max(0.0);
+                spikes[i_idx] = 0;
+                continue;
+            }
+            let tau_m = p[n + i_idx];
+            let v_rest = p[2 * n + i_idx];
+            let v_thresh = p[3 * n + i_idx];
+            let v_reset = p[4 * n + i_idx];
+            let i_clamped = i_sl[i_idx].clamp(-100.0, 100.0);
+            if tau_m > 0.0 {
+                let alpha = dt_val / tau_m;
+                v[i_idx] = (v[i_idx] + alpha * (v_rest + i_clamped)) / (1.0 + alpha);
+            }
+            if v[i_idx] >= v_thresh {
+                spikes[i_idx] = 1;
+                v[i_idx] = v_reset;
+                refr_sl[i_idx] = tau_ref;
+            } else {
+                spikes[i_idx] = 0;
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════
 //  LIF-AT (LIF with Adaptive Threshold)
 // ═══════════════════════════════════════════════════════
 
@@ -104,9 +237,14 @@ pub(crate) unsafe fn lif_step(
 /// # Safety
 /// `v[n]`, `theta[n]`, `Ii[n]`, `spikes[n]`, `params[7·n]`, `refractory[n]` valid.
 pub(crate) unsafe fn lif_at_step(
-    v: *mut f32, theta: *mut f32, Ii: *mut f32, spikes: *mut i32,
+    v: *mut f32,
+    theta: *mut f32,
+    Ii: *mut f32,
+    spikes: *mut i32,
     params: *const f32,
-    refractory: *mut f32, tau_ref: f32, n: usize,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
 ) {
     let p = std::slice::from_raw_parts(params, n * 7);
     let dt_val = p[0];
@@ -120,7 +258,9 @@ pub(crate) unsafe fn lif_at_step(
         let mut th = load8_mut(theta, off);
         let mut refr = load8_mut(refractory, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8_mut(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(2 * n), off);
         let v_th = load8(params.wrapping_add(3 * n), off);
         let v_reset = load8(params.wrapping_add(4 * n), off);
@@ -150,8 +290,8 @@ pub(crate) unsafe fn lif_at_step(
         th += sm.blend(beta, zero);
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr -= dt_s;  // Always decrement
-        refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
+        refr -= dt_s; // Always decrement
+        refr = sm.blend(tr_s, refr); // Set to tau_ref on spike
         refr = refr.max(zero);
 
         store8(v, off, vv);
@@ -160,8 +300,14 @@ pub(crate) unsafe fn lif_at_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     if n8 < n {
@@ -181,7 +327,6 @@ pub(crate) unsafe fn lif_at_step(
                 }
                 continue;
             }
-            let dt_val = p[i_idx];
             let tau_m = p[n + i_idx];
             let v_rest = p[2 * n + i_idx];
             let v_thresh = p[3 * n + i_idx];
@@ -211,8 +356,6 @@ pub(crate) unsafe fn lif_at_step(
 //  E-Prop LIF (Eligibility Propagation) — SIMD kernel
 // ═══════════════════════════════════════════════════════
 
-
-
 /// Step `n` E-Prop LIF neurons with eligibility traces + refractory period.
 /// Uses `f32x8` SIMD for LIF dynamics + eligibility + surrogate gradient.
 ///
@@ -222,11 +365,21 @@ pub(crate) unsafe fn lif_at_step(
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn eprop_lif_step(
-    v: *mut f32, eligibility: *mut f32, psi: *mut f32,
-    Ii: *const f32, spikes: *mut i32, pre_spikes: *const i32,
+    v: *mut f32,
+    eligibility: *mut f32,
+    psi: *mut f32,
+    Ii: *const f32,
+    spikes: *mut i32,
+    pre_spikes: *const i32,
     refractory: *mut f32,
-    dt: f32, tau_m: f32, tau_e: f32, tau_ref: f32,
-    v_rest: f32, v_thresh: f32, v_reset: f32, tau_sg: f32,
+    dt: f32,
+    tau_m: f32,
+    tau_e: f32,
+    tau_ref: f32,
+    v_rest: f32,
+    v_thresh: f32,
+    v_reset: f32,
+    tau_sg: f32,
     n: usize,
 ) -> usize {
     let dt_s = f32x8::splat(dt);
@@ -263,12 +416,12 @@ pub(crate) unsafe fn eprop_lif_step(
         let diff = ((vv - v_thresh_s).abs() / tau_sg_s).max(f32x8::splat(1e-6));
         let one_plus_diff = one + diff;
         let mut ps = one / (one_plus_diff * one_plus_diff);
-        ps = refr_mask.blend(zero, ps);  // zero during refractory
+        ps = refr_mask.blend(zero, ps); // zero during refractory
 
         // Eligibility trace (frozen during refractory)
         let z_pre = pre.cmp_gt(zero).blend(one, zero); // 1 if pre[i] != 0
         let mut e_new = ee * e_decay + ps * z_pre * tau_e_s * one_minus_e_decay;
-        e_new = refr_mask.blend(ee, e_new);  // frozen during refractory
+        e_new = refr_mask.blend(ee, e_new); // frozen during refractory
         ee = e_new;
 
         // Spike detection (only non-refractory)
@@ -283,7 +436,9 @@ pub(crate) unsafe fn eprop_lif_step(
 
         // Count spikes
         for &val in sm.to_array().iter() {
-            if val.to_bits() != 0 { total_spikes += 1; }
+            if val.to_bits() != 0 {
+                total_spikes += 1;
+            }
         }
 
         store8(v, off, vv);
@@ -293,8 +448,14 @@ pub(crate) unsafe fn eprop_lif_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -312,7 +473,7 @@ pub(crate) unsafe fn eprop_lif_step(
             if refr_sl[i] > 0.0 {
                 refr_sl[i] = (refr_sl[i] - dt).max(0.0);
                 sp_sl[i] = 0;
-                continue;  // v, eligibility, psi frozen during refractory
+                continue; // v, eligibility, psi frozen during refractory
             }
             v_sl[i] += (v_rest - v_sl[i] + i_sl[i]) / tau_m * dt;
             psi_sl[i] = surrogate_gradient(v_sl[i], v_thresh, tau_sg);
@@ -345,14 +506,14 @@ mod tests {
     #[test]
     fn lif_exponential_euler_accuracy() {
         let n = 8;
-        let dt = 0.5;      // ms
-        let tau_m = 10.0;   // ms
+        let dt = 0.5; // ms
+        let tau_m = 10.0; // ms
         let v_rest = -70.0; // mV
         let v_thresh = -54.0; // mV
         let v_reset = -70.0; // mV
-        let I_const = 15.0;  // input current (suprathreshold but non-spiking in this test)
-        let n_steps = 200;   // 100 ms at dt=0.5
-        let tau_ref = 0.0;   // no refractory
+        let I_const = 15.0; // input current (suprathreshold but non-spiking in this test)
+        let n_steps = 200; // 100 ms at dt=0.5
+        let tau_ref = 0.0; // no refractory
 
         let mut v = vec![v_rest; n];
         let mut Ii = vec![I_const; n];
@@ -370,8 +531,13 @@ mod tests {
         for step in 0..n_steps {
             unsafe {
                 lif_step(
-                    v.as_mut_ptr(), Ii.as_mut_ptr(), spikes.as_mut_ptr(),
-                    params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n,
+                    v.as_mut_ptr(),
+                    Ii.as_mut_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    tau_ref,
+                    n,
                 );
             }
 
@@ -386,13 +552,20 @@ mod tests {
                 assert!(
                     diff < 0.3,
                     "Step {step}, neuron {i}: v={:.4}, expected={:.4}, diff={:.4}",
-                    v[i], expected_v, diff
+                    v[i],
+                    expected_v,
+                    diff
                 );
             }
 
             // Should not spike (v stays well below v_thresh = -54)
-            assert_eq!(spikes.iter().sum::<i32>(), 0,
-                "Spike at step {step}: v={:.4}, thresh={}", v[0], v_thresh);
+            assert_eq!(
+                spikes.iter().sum::<i32>(),
+                0,
+                "Spike at step {step}: v={:.4}, thresh={}",
+                v[0],
+                v_thresh
+            );
         }
 
         // Final voltage should be close to steady state: v_rest + I = -70 + 15 = -55
@@ -401,9 +574,13 @@ mod tests {
         let steady_state = v_rest + I_const;
         for i in 0..n {
             let diff = (v[i] - steady_state).abs();
-            assert!(diff < 0.1,
+            assert!(
+                diff < 0.1,
                 "Final v[{i}]={:.4}, expected steady state={:.4}, diff={:.4}",
-                v[i], steady_state, diff);
+                v[i],
+                steady_state,
+                diff
+            );
         }
     }
 
@@ -443,36 +620,55 @@ mod tests {
         // Expected: 10.0 * 0.9753 = 9.753
         unsafe {
             lif_at_step(
-                v.as_mut_ptr(), theta.as_mut_ptr(), Ii.as_mut_ptr(),
-                spikes.as_mut_ptr(), params.as_ptr(),
-                refractory.as_mut_ptr(), tau_ref, n,
+                v.as_mut_ptr(),
+                theta.as_mut_ptr(),
+                Ii.as_mut_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                refractory.as_mut_ptr(),
+                tau_ref,
+                n,
             );
         }
         let expected_theta = 10.0 * (-dt / tau_theta).exp();
         // Tolerance 0.02 accommodates fast_exp_simd ~0.18% rel error
         let diff = (theta[0] - expected_theta).abs();
-        assert!(diff < 0.02,
-            "Theta after decay: got {:.4}, expected {:.4}", theta[0], expected_theta);
+        assert!(
+            diff < 0.02,
+            "Theta after decay: got {:.4}, expected {:.4}",
+            theta[0],
+            expected_theta
+        );
 
         // Run until spike, verify theta increments by beta
         let mut spike_count = 0usize;
         unsafe {
             for _ in 0..200 {
                 lif_at_step(
-                    v.as_mut_ptr(), theta.as_mut_ptr(), Ii.as_mut_ptr(),
-                    spikes.as_mut_ptr(), params.as_ptr(),
-                    refractory.as_mut_ptr(), tau_ref, n,
+                    v.as_mut_ptr(),
+                    theta.as_mut_ptr(),
+                    Ii.as_mut_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    tau_ref,
+                    n,
                 );
                 spike_count += spikes.iter().map(|&s| s as usize).sum::<usize>();
             }
         }
         assert!(
             spike_count > 0,
-            "No spikes detected with I={} after 200 steps", I_const);
+            "No spikes detected with I={} after 200 steps",
+            I_const
+        );
         // Theta after 200 steps: pure decay → 10·exp(-100/20) = 0.067
         // With spikes: theta gets +5 per spike >> 0.067. Theta=1.83 observed.
-        assert!(theta.iter().any(|&t| t > 0.2),
-            "No theta increment detected after 200 steps: theta={:?}", theta);
+        assert!(
+            theta.iter().any(|&t| t > 0.2),
+            "No theta increment detected after 200 steps: theta={:?}",
+            theta
+        );
     }
 
     /// eProp LIF: verify eligibility trace dynamics.
@@ -508,10 +704,22 @@ mod tests {
         for _step in 0..n_steps {
             unsafe {
                 eprop_lif_step(
-                    v.as_mut_ptr(), eligibility.as_mut_ptr(), psi.as_mut_ptr(),
-                    Ii.as_ptr(), spikes.as_mut_ptr(), pre_spikes.as_ptr(),
+                    v.as_mut_ptr(),
+                    eligibility.as_mut_ptr(),
+                    psi.as_mut_ptr(),
+                    Ii.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    pre_spikes.as_ptr(),
                     refractory.as_mut_ptr(),
-                    dt, tau_m, tau_e, tau_ref, v_rest, v_thresh, v_reset, tau_sg, n,
+                    dt,
+                    tau_m,
+                    tau_e,
+                    tau_ref,
+                    v_rest,
+                    v_thresh,
+                    v_reset,
+                    tau_sg,
+                    n,
                 );
             }
             spike_count += spikes.iter().map(|&s| s as usize).sum::<usize>();
@@ -521,12 +729,16 @@ mod tests {
         // ψ grows as v approaches v_thresh
         // eligibility accumulates over time
         for i in 0..n {
-            assert!(eligibility[i] > 0.0,
+            assert!(
+                eligibility[i] > 0.0,
                 "Eligibility should be positive after pre-spike: e[{}]={:.6}",
-                i, eligibility[i]);
+                i,
+                eligibility[i]
+            );
         }
         assert!(
             spike_count > 0,
-            "No spikes after {n_steps} steps with I_const={I_const}");
+            "No spikes after {n_steps} steps with I_const={I_const}"
+        );
     }
 }

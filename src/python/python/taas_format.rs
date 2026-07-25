@@ -3,17 +3,17 @@
 #![allow(non_snake_case)]
 
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict, PyList};
 use pyo3::IntoPyObjectExt;
-use pyo3::types::{PyDict, PyList, PyBytes};
 
 use crate::taas_format;
 
-use super::t3::{PyTriOscillator, PyNlmsDecoder, PyKalmanDecoder};
 use super::connectome_brain::PyConnectomeData;
-use super::snn::PySornNetwork;
 use super::eprop::PyEPropLIF;
 use super::poisson_stp::PyShortTermPlasticity;
 use super::rl_agent::PyActorCriticAgent;
+use super::snn::PySornNetwork;
+use super::t3::{PyKalmanDecoder, PyNlmsDecoder, PyTriOscillator};
 
 /// Save simulation state to .taas file.
 #[pyfunction]
@@ -31,16 +31,36 @@ pub fn py_save_taas(
 ) -> PyResult<()> {
     let mut writer = taas_format::TaasWriter::new();
 
-    if let Some(t) = tri { taas_format::save_trioscilator(&t.inner, &mut writer); }
-    if let Some(d) = nlms { taas_format::save_nlms_decoder(&d.inner, &mut writer); }
-    if let Some(d) = kalman { taas_format::save_kalman_decoder(&d.inner, &mut writer); }
-    if let Some(s) = sorn { taas_format::save_sorn_network(&s.inner, &mut writer); }
-    if let Some(e) = eprop { taas_format::save_eprop_lif(&e.inner, &mut writer); }
-    if let Some(s) = stp { taas_format::save_stp(&s.inner, &mut writer); }
-    if let Some(agent) = rl_agent { taas_format::save_actor_critic_agent(&agent.inner, &mut writer); }
+    if let Some(t) = tri {
+        taas_format::save_trioscilator(&t.inner, &mut writer);
+    }
+    if let Some(d) = nlms {
+        taas_format::save_nlms_decoder(&d.inner, &mut writer);
+    }
+    if let Some(d) = kalman {
+        taas_format::save_kalman_decoder(&d.inner, &mut writer);
+    }
+    if let Some(s) = sorn {
+        taas_format::save_sorn_network(&s.inner, &mut writer);
+    }
+    if let Some(e) = eprop {
+        taas_format::save_eprop_lif(&e.inner, &mut writer);
+    }
+    if let Some(s) = stp {
+        taas_format::save_stp(&s.inner, &mut writer);
+    }
+    if let Some(agent) = rl_agent {
+        taas_format::save_actor_critic_agent(&agent.inner, &mut writer);
+    }
 
-    if let Some(md) = metadata { for (k, v) in md { writer.add_metadata(&k, &v); } }
-    writer.save_to_file(path).map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
+    if let Some(md) = metadata {
+        for (k, v) in md {
+            writer.add_metadata(&k, &v);
+        }
+    }
+    writer
+        .save_to_file(path)
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
 }
 
 /// Load simulation state from .taas file.
@@ -58,7 +78,9 @@ pub fn py_load_taas(path: &str, py: Python<'_>) -> PyResult<PyObject> {
             entry.shape.get(1).copied().unwrap_or(0)
         } else if let Ok(data) = reader.get_f32("th1") {
             data.len()
-        } else { 0 };
+        } else {
+            0
+        };
         if n > 0 {
             if let Ok(tri) = taas_format::load_trioscilator(&reader, n) {
                 dict.set_item("tri", PyTriOscillator::build(tri))?;
@@ -124,7 +146,9 @@ pub fn py_load_taas(path: &str, py: Python<'_>) -> PyResult<PyObject> {
     meta.set_item("version", reader.manifest.version.as_str())?;
     meta.set_item("created", reader.manifest.created.as_str())?;
     meta.set_item("n_components", reader.manifest.components.len())?;
-    for (k, v) in &reader.manifest.metadata { meta.set_item(k.as_str(), v.as_str())?; }
+    for (k, v) in &reader.manifest.metadata {
+        meta.set_item(k.as_str(), v.as_str())?;
+    }
     dict.set_item("_meta", meta)?;
 
     // LIF-AT state
@@ -177,9 +201,15 @@ pub fn py_save_connectome(
     metadata: Option<Vec<(String, String)>>,
 ) -> PyResult<()> {
     let mut writer = taas_format::TaasWriter::new();
-    if let Some(md) = metadata { for (k, v) in md { writer.add_metadata(&k, &v); } }
+    if let Some(md) = metadata {
+        for (k, v) in md {
+            writer.add_metadata(&k, &v);
+        }
+    }
     taas_format::save_connectome(&connectome.inner, &mut writer);
-    writer.save_to_file(path).map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
+    writer
+        .save_to_file(path)
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
 }
 
 /// Load connectome (ConnectomeData) from .taas file.
@@ -208,22 +238,27 @@ pub fn py_save_model(
     metadata: Option<Vec<(String, String)>>,
 ) -> PyResult<()> {
     let mut writer = taas_format::TaasWriter::new();
-    if let Some(md) = metadata { for (k, v) in md { writer.add_metadata(&k, &v); } }
+    if let Some(md) = metadata {
+        for (k, v) in md {
+            writer.add_metadata(&k, &v);
+        }
+    }
     taas_format::save_connectome(&connectome.inner, &mut writer);
     writer.add_metadata("type", "Model");
     writer.add_f32("bridge_w", "Model", &bridge_weights);
     writer.add_f32("bridge_b", "Model", &bridge_bias);
     writer.add_f32("decoder_w", "Model", &decoder_weights);
     writer.add_f32("decoder_b", "Model", &decoder_bias);
-    writer.save_to_file(path).map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
+    writer
+        .save_to_file(path)
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
 }
 
 /// Inspect .taas file. Returns human-readable string.
 #[pyfunction]
 #[pyo3(name = "inspect_taas")]
 pub fn py_inspect_taas(path: &str) -> PyResult<String> {
-    taas_format::inspect_taas(path)
-        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
+    taas_format::inspect_taas(path).map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -255,7 +290,11 @@ impl PyTaasReader {
     /// List all component names in the archive.
     #[getter]
     fn components(&self) -> Vec<String> {
-        self.reader.list_components().iter().map(|c| c.name.clone()).collect()
+        self.reader
+            .list_components()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
     }
 
     /// Number of components.
@@ -285,9 +324,12 @@ impl PyTaasReader {
     /// Get a component's raw bytes as `bytes` (Python).
     /// Raises KeyError if component not found.
     fn get_raw(&self, name: &str, py: Python<'_>) -> PyResult<PyObject> {
-        self.reader.find_component(name)
+        self.reader
+            .find_component(name)
             .map_err(PyErr::new::<pyo3::exceptions::PyKeyError, _>)?;
-        let data = self.reader.get_u8(name)
+        let data = self
+            .reader
+            .get_u8(name)
             .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
         Ok(PyBytes::new(py, &data).into())
     }
@@ -295,36 +337,36 @@ impl PyTaasReader {
     /// Get a component as a list of floats.
     /// Raises KeyError if not found, TypeError if wrong dtype.
     fn get_f32(&self, name: &str) -> PyResult<Vec<f32>> {
-        self.reader.get_f32(name)
-            .map_err(|e| {
-                if e.contains("not found") {
-                    PyErr::new::<pyo3::exceptions::PyKeyError, _>(e)
-                } else if e.contains("is not f32") {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)
-                } else {
-                    PyErr::new::<pyo3::exceptions::PyIOError, _>(e)
-                }
-            })
+        self.reader.get_f32(name).map_err(|e| {
+            if e.contains("not found") {
+                PyErr::new::<pyo3::exceptions::PyKeyError, _>(e)
+            } else if e.contains("is not f32") {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)
+            } else {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(e)
+            }
+        })
     }
 
     /// Get a component as a list of ints.
     fn get_i32(&self, name: &str) -> PyResult<Vec<i32>> {
-        self.reader.get_i32(name)
-            .map_err(|e| {
-                if e.contains("not found") {
-                    PyErr::new::<pyo3::exceptions::PyKeyError, _>(e)
-                } else if e.contains("is not i32") {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)
-                } else {
-                    PyErr::new::<pyo3::exceptions::PyIOError, _>(e)
-                }
-            })
+        self.reader.get_i32(name).map_err(|e| {
+            if e.contains("not found") {
+                PyErr::new::<pyo3::exceptions::PyKeyError, _>(e)
+            } else if e.contains("is not i32") {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)
+            } else {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(e)
+            }
+        })
     }
 
     /// Component info for a given name.
     /// Returns dict with keys: name, type, dtype, shape, size, compression.
     fn info(&self, name: &str, py: Python<'_>) -> PyResult<PyObject> {
-        let entry = self.reader.find_component(name)
+        let entry = self
+            .reader
+            .find_component(name)
             .map_err(PyErr::new::<pyo3::exceptions::PyKeyError, _>)?;
         let dict = PyDict::new(py);
         dict.set_item("name", entry.name.as_str())?;
@@ -359,7 +401,8 @@ impl PyTaasReader {
     /// Validate archive integrity (CRC32 checks).
     /// Raises IOError if validation fails.
     fn validate(&self) -> PyResult<()> {
-        self.reader.validate()
+        self.reader
+            .validate()
             .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
     }
 
@@ -368,15 +411,21 @@ impl PyTaasReader {
     fn get_tri(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let has_tri = self.reader.find_component("tri_state").is_ok()
             || self.reader.find_component("th1").is_ok();
-        if !has_tri { return Ok(None); }
+        if !has_tri {
+            return Ok(None);
+        }
 
         let n = if let Ok(entry) = self.reader.find_component("tri_state") {
             entry.shape.get(1).copied().unwrap_or(0)
         } else if let Ok(data) = self.reader.get_f32("th1") {
             data.len()
-        } else { 0 };
+        } else {
+            0
+        };
 
-        if n == 0 { return Ok(None); }
+        if n == 0 {
+            return Ok(None);
+        }
 
         match taas_format::load_trioscilator(&self.reader, n) {
             Ok(tri) => Ok(Some(PyTriOscillator::build(tri).into_py_any(py)?)),
@@ -397,7 +446,9 @@ impl PyTaasReader {
 
     /// Component names that match a type prefix.
     fn components_by_type(&self, type_prefix: &str) -> Vec<String> {
-        self.reader.list_components().iter()
+        self.reader
+            .list_components()
+            .iter()
             .filter(|c| c.component_type.starts_with(type_prefix))
             .map(|c| c.name.clone())
             .collect()

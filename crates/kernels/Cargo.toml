@@ -10,3 +10,10 @@ name = "taas_kernels"
 [dependencies]
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
+rayon = "1.8"
+
+[features]
+# Precise integrators (Crank-Nicolson for LIF, parallel Euler for others)
+# Slower than default Forward Euler but accurate for large dt (≥ 1ms)
+precise = []
+

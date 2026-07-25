@@ -22,16 +22,14 @@
 
 #![allow(non_snake_case)]
 
-use numpy::{PyArray1, PyArray2, PyArrayMethods, IntoPyArray};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods};
 use pyo3::prelude::*;
 
 use crate::connectome::{
-    self as conn,
-    ConnectomeData, NeuronModel,
-    LifParams, IzhikevichParams, RateParams, PsiParams,
+    self as conn, ConnectomeData, GcoParams, IzhikevichParams, LifParams, NeuronModel, RateParams,
     SynapticKinetics,
 };
-use crate::core::neuron::hh::{HhLutConfig, standard_config, build_config_from_channels};
+use crate::core::neuron::hh::{build_config_from_channels, standard_config, HhLutConfig};
 use crate::kernels::neuron::hh::pacemaking_channels;
 
 // ─── ConnectomeData ──────────────────────────────────
@@ -62,7 +60,8 @@ impl PyConnectomeData {
         let nt = nt_types.readonly();
 
         let groups = groups.unwrap_or_default();
-        let groups_refs: Vec<(&str, Vec<usize>)> = groups.iter()
+        let groups_refs: Vec<(&str, Vec<usize>)> = groups
+            .iter()
             .map(|(name, indices)| (name.as_str(), indices.clone()))
             .collect();
 
@@ -135,7 +134,10 @@ impl PyConnectomeData {
     ///   -2.0 = DA/SER/OCT → mAChR (slow mod, E_rev=-90)
     ///
     /// For Princeton baked data with +1/-1 nt_types, pass ``nt_types`` as nt_map.
-    pub fn build_receptor_types_flywire(&mut self, nt_map: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+    pub fn build_receptor_types_flywire(
+        &mut self,
+        nt_map: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<()> {
         let ro = nt_map.readonly();
         let sl = ro.as_slice()?;
         self.inner.build_receptor_types_flywire(sl);
@@ -174,8 +176,8 @@ pub struct PyBrainSimulator {
     model: conn::NeuronModel,
     n_neurons: usize,
     kinetics: Option<SynapticKinetics>,
-    hh_config: Option<(f32, HhLutConfig)>,  // (dt, config) — lazily created for "hh" model
-    hh_use_pacemaking: bool,                 // if true, use 3-channel HH (NaV+KV+CaT)
+    hh_config: Option<(f32, HhLutConfig)>, // (dt, config) — lazily created for "hh" model
+    hh_use_pacemaking: bool,               // if true, use 3-channel HH (NaV+KV+CaT)
 }
 
 impl PyBrainSimulator {
@@ -206,22 +208,36 @@ impl PyBrainSimulator {
             "lif" => (NeuronModel::LIF, false, None),
             "izhikevich" => (NeuronModel::Izhikevich, false, None),
             "rate" => (NeuronModel::Rate, false, None),
-            "psi" => (NeuronModel::Psi, false, None),
+            "psi" => (NeuronModel::LIF, false, None), // Psi removed
             "hh" => {
                 if pacemaking {
                     let channels = pacemaking_channels();
-                    let cfg = build_config_from_channels(&channels, n_neurons, 0.5, -100.0, 60.0, 1024);
+                    let cfg =
+                        build_config_from_channels(&channels, n_neurons, 0.5, -100.0, 60.0, 1024);
                     (NeuronModel::LIF, true, Some((0.0, cfg)))
                 } else {
-                    (NeuronModel::LIF, false, Some((0.0, standard_config(n_neurons, 0.5))))
+                    (
+                        NeuronModel::LIF,
+                        false,
+                        Some((0.0, standard_config(n_neurons, 0.5))),
+                    )
                 }
             }
-            other => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Unknown model '{other}'. Use: lif, izhikevich, rate, psi, hh")
-            )),
+            other => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Unknown model '{other}'. Use: lif, izhikevich, rate, psi, hh"
+                )))
+            }
         };
         let state = conn::BrainState::new(n_neurons, nm);
-        Ok(Self { state, model: nm, n_neurons, kinetics: None, hh_config, hh_use_pacemaking })
+        Ok(Self {
+            state,
+            model: nm,
+            n_neurons,
+            kinetics: None,
+            hh_config,
+            hh_use_pacemaking,
+        })
     }
 
     /// Getter for n_neurons.
@@ -292,9 +308,9 @@ impl PyBrainSimulator {
                     let params = RateParams { tau: 10.0, dt_ms };
                     conn::sim_rate(conn_data, &mut self.state, &params, &ext_I, n_steps)
                 }
-                NeuronModel::Psi => {
-                    let params = PsiParams { hbar: 1.0, dt_ms };
-                    conn::sim_psi(conn_data, &mut self.state, &params, &ext_I, n_steps)
+                NeuronModel::Gco => {
+                    let params = GcoParams { dt_ms };
+                    conn::sim_gco(conn_data, &mut self.state, &params, &ext_I, n_steps)
                 }
             }
         };
@@ -329,7 +345,7 @@ impl PyBrainSimulator {
     ) -> PyResult<Bound<'py, PyArray1<i32>>> {
         if connectome.inner.receptor_types.is_empty() {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "receptor_types empty — call connectome.build_receptor_types() first"
+                "receptor_types empty — call connectome.build_receptor_types() first",
             ));
         }
 
@@ -380,7 +396,15 @@ impl PyBrainSimulator {
                     let v_thresh = vec![-58.0f32; n];
                     let v_reset = vec![-70.0f32; n];
                     let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                    conn::sim_lif_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+                    conn::sim_lif_synaptic(
+                        conn_data,
+                        &mut self.state,
+                        &params,
+                        &ext_I,
+                        n_steps,
+                        kinetics,
+                        scale,
+                    )
                 }
                 NeuronModel::Izhikevich => {
                     let params = IzhikevichParams {
@@ -391,11 +415,22 @@ impl PyBrainSimulator {
                         dt_ms,
                         tau_ref: 2.0,
                     };
-                    conn::sim_izhikevich_synaptic(conn_data, &mut self.state, &params, &ext_I, n_steps, kinetics, scale)
+                    conn::sim_izhikevich_synaptic(
+                        conn_data,
+                        &mut self.state,
+                        &params,
+                        &ext_I,
+                        n_steps,
+                        kinetics,
+                        scale,
+                    )
                 }
-                _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("Synaptic mode not supported for model {:?}", self.model)
-                )),
+                _ => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Synaptic mode not supported for model {:?}",
+                        self.model
+                    )))
+                }
             }
         };
 
@@ -465,7 +500,13 @@ impl PyBrainSimulator {
         };
 
         let spike_buf = conn::sim_izhikevich_dual(
-            conn_data, &mut self.state, &params, &ext_I, n_steps, hebb_lr, hebb_decay,
+            conn_data,
+            &mut self.state,
+            &params,
+            &ext_I,
+            n_steps,
+            hebb_lr,
+            hebb_decay,
         );
 
         Ok(spike_buf.into_pyarray(py))
@@ -564,9 +605,11 @@ impl PyBrainSimulator {
                 }
                 cfg
             }
-            None => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "BrainSimulator not in HH mode — construct with model='hh'".to_string()
-            )),
+            None => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "BrainSimulator not in HH mode — construct with model='hh'".to_string(),
+                ))
+            }
         };
 
         // g_max_arr: [n_channels] (broadcast) or [n_channels * n_neurons] (per-neuron)
@@ -585,10 +628,12 @@ impl PyBrainSimulator {
                 // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
                 hh_cfg.g_max_arr.copy_from_slice(sl);
             } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
-                        sl.len(), hh_cfg.n_channels, hh_cfg.n_channels * self.n_neurons)
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
+                    sl.len(),
+                    hh_cfg.n_channels,
+                    hh_cfg.n_channels * self.n_neurons
+                )));
             }
         }
 
@@ -597,9 +642,11 @@ impl PyBrainSimulator {
             let ro = E_rev_arr.readonly();
             let sl = ro.as_slice()?;
             if sl.len() != hh_cfg.n_channels {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("E_rev_arr length {} != n_channels {}", sl.len(), hh_cfg.n_channels)
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "E_rev_arr length {} != n_channels {}",
+                    sl.len(),
+                    hh_cfg.n_channels
+                )));
             }
             hh_cfg.E_rev_arr.copy_from_slice(sl);
         }
@@ -663,47 +710,47 @@ impl PyBrainSimulator {
         }
     }
 
-    /// Run ψ-wave with time-varying external input, record (v, u) trajectory.
+    /// Run GCO (Graph-Coupled Oscillator) with time-varying external input, record (v, u) trajectory.
     ///
     /// Args:
     ///     connectome: ``ConnectomeData`` — CSR graph with NT types.
     ///     external_I: ``numpy.ndarray`` shape ``(n_changes, n_neurons)`` — external input per change.
-    ///     steps_per_input: PSI steps per external input.
+    ///     steps_per_input: GCO steps per external input.
     ///     dt_ms: timestep in milliseconds.
-    ///     hbar: Planck constant for ψ-wave.
+    ///     tau: phase time scale for GCO.
     ///     record_every: record state every N steps (default 0 = record at end of each input block).
     ///
     /// Returns:
     ///     ``(v_traj, u_traj)`` — each ``(n_records * n_neurons,)`` flat float32 array.
     ///     Reshape with ``.reshape(-1, n_neurons)`` in Python.
-    #[pyo3(signature = (connectome, external_I, steps_per_input, dt_ms=0.5, hbar=1.0, record_every=0))]
-    pub fn psi_record<'py>(
+    #[pyo3(signature = (connectome, external_I, steps_per_input, dt_ms=0.5, tau=1.0, record_every=0))]
+    pub fn gco_record<'py>(
         &mut self,
         py: Python<'py>,
         connectome: &PyConnectomeData,
         external_I: Bound<'_, PyArray2<f32>>,
         steps_per_input: usize,
         dt_ms: f32,
-        hbar: f32,
+        tau: f32,
         record_every: usize,
     ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
         let n_neurons = self.n_neurons;
         let n_changes = external_I.len()?;
         if n_changes == 0 {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "external_I must have at least one row".to_string()
+                "external_I must have at least one row".to_string(),
             ));
         }
         let ro = external_I.readonly();
         let ext_I_sl = ro.as_slice()?;
         if ext_I_sl.len() != n_changes * n_neurons {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("external_I shape ({n_changes},?) expected n_neurons={n_neurons}, got {} elements", ext_I_sl.len())
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "external_I shape ({n_changes},?) expected n_neurons={n_neurons}, got {} elements",
+                ext_I_sl.len()
+            )));
         }
-        let params = conn::PsiParams { hbar, dt_ms };
-
-        let (v_traj, u_traj) = conn::sim_psi_record(
+        let params = conn::GcoParams { dt_ms };
+        let (v_traj, u_traj) = conn::sim_gco_record(
             &connectome.inner,
             &mut self.state,
             &params,
@@ -761,8 +808,15 @@ impl PyBrainSimulator {
         let v_reset_sl = v_reset_ro.as_slice()?;
 
         let spike_buf = conn::sim_lif_gpu(
-            conn_data, &mut self.state, dt_ms, ext_I_sl,
-            n_steps, tau_m_sl, v_rest_sl, v_thresh_sl, v_reset_sl,
+            conn_data,
+            &mut self.state,
+            dt_ms,
+            ext_I_sl,
+            n_steps,
+            tau_m_sl,
+            v_rest_sl,
+            v_thresh_sl,
+            v_reset_sl,
         );
         Ok(spike_buf.into_pyarray(py))
     }
@@ -810,8 +864,15 @@ impl PyBrainSimulator {
         let d_sl = d_ro.as_slice()?;
 
         let spike_buf = conn::sim_izhikevich_gpu(
-            conn_data, &mut self.state, dt_ms, ext_I_sl,
-            n_steps, a_sl, b_sl, c_sl, d_sl,
+            conn_data,
+            &mut self.state,
+            dt_ms,
+            ext_I_sl,
+            n_steps,
+            a_sl,
+            b_sl,
+            c_sl,
+            d_sl,
         );
         Ok(spike_buf.into_pyarray(py))
     }
@@ -862,9 +923,9 @@ impl PySpikeRecorder {
     ) -> PyResult<Vec<f32>> {
         let sb = spike_buffer.readonly();
         let sb_sl = sb.as_slice()?;
-        Ok(self.inner.record_group(
-            sb_sl, n_steps, dt_ms, &indices, max_rate,
-        ))
+        Ok(self
+            .inner
+            .record_group(sb_sl, n_steps, dt_ms, &indices, max_rate))
     }
 
     /// Record rates for multiple named groups at once.
@@ -881,16 +942,18 @@ impl PySpikeRecorder {
     ) -> PyResult<Vec<Vec<f32>>> {
         if group_names.len() != group_indices.len() {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "group_names and group_indices must have same length"
+                "group_names and group_indices must have same length",
             ));
         }
         let sb = spike_buffer.readonly();
         let sb_sl = sb.as_slice()?;
 
         let group_strs: Vec<&str> = group_names.iter().map(|s| s.as_str()).collect();
-        let groups: Vec<(&str, &[usize])> = group_strs.iter().copied().zip(
-            group_indices.iter().map(|v| v.as_slice())
-        ).collect();
+        let groups: Vec<(&str, &[usize])> = group_strs
+            .iter()
+            .copied()
+            .zip(group_indices.iter().map(|v| v.as_slice()))
+            .collect();
 
         let recordings = self.inner.record(sb_sl, n_steps, dt_ms, &groups);
 

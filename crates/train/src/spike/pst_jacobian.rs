@@ -18,22 +18,38 @@
 
 /// Gradient-vector buffers (6 × n) — единственный тип для JIT Jacobian.
 pub struct PstGradients {
-    pub v_th1: Vec<f32>, pub v_th2: Vec<f32>, pub v_th3: Vec<f32>,
-    pub v_r1: Vec<f32>, pub v_r2: Vec<f32>, pub v_r3: Vec<f32>,
+    pub v_th1: Vec<f32>,
+    pub v_th2: Vec<f32>,
+    pub v_th3: Vec<f32>,
+    pub v_r1: Vec<f32>,
+    pub v_r2: Vec<f32>,
+    pub v_r3: Vec<f32>,
 }
 
 impl PstGradients {
     pub fn new(n: usize) -> Self {
         Self {
-            v_th1: vec![0.0; n], v_th2: vec![0.0; n], v_th3: vec![0.0; n],
-            v_r1: vec![0.0; n], v_r2: vec![0.0; n], v_r3: vec![0.0; n],
+            v_th1: vec![0.0; n],
+            v_th2: vec![0.0; n],
+            v_th3: vec![0.0; n],
+            v_r1: vec![0.0; n],
+            v_r2: vec![0.0; n],
+            v_r3: vec![0.0; n],
         }
     }
 
     pub fn resize(&mut self, n: usize) {
-        let grow = |v: &mut Vec<f32>, len: usize| { if v.len() < len { v.resize(len, 0.0); }};
-        grow(&mut self.v_th1, n); grow(&mut self.v_th2, n); grow(&mut self.v_th3, n);
-        grow(&mut self.v_r1, n); grow(&mut self.v_r2, n); grow(&mut self.v_r3, n);
+        let grow = |v: &mut Vec<f32>, len: usize| {
+            if v.len() < len {
+                v.resize(len, 0.0);
+            }
+        };
+        grow(&mut self.v_th1, n);
+        grow(&mut self.v_th2, n);
+        grow(&mut self.v_th3, n);
+        grow(&mut self.v_r1, n);
+        grow(&mut self.v_r2, n);
+        grow(&mut self.v_r3, n);
     }
 
     /// Zero all buffers.
@@ -48,17 +64,36 @@ impl PstGradients {
 
     /// Add another result in-place.
     pub fn add_into(&mut self, other: &PstGradients) {
-        for (a, b) in self.v_th1.iter_mut().zip(&other.v_th1) { *a += b; }
-        for (a, b) in self.v_th2.iter_mut().zip(&other.v_th2) { *a += b; }
-        for (a, b) in self.v_th3.iter_mut().zip(&other.v_th3) { *a += b; }
-        for (a, b) in self.v_r1.iter_mut().zip(&other.v_r1) { *a += b; }
-        for (a, b) in self.v_r2.iter_mut().zip(&other.v_r2) { *a += b; }
-        for (a, b) in self.v_r3.iter_mut().zip(&other.v_r3) { *a += b; }
+        for (a, b) in self.v_th1.iter_mut().zip(&other.v_th1) {
+            *a += b;
+        }
+        for (a, b) in self.v_th2.iter_mut().zip(&other.v_th2) {
+            *a += b;
+        }
+        for (a, b) in self.v_th3.iter_mut().zip(&other.v_th3) {
+            *a += b;
+        }
+        for (a, b) in self.v_r1.iter_mut().zip(&other.v_r1) {
+            *a += b;
+        }
+        for (a, b) in self.v_r2.iter_mut().zip(&other.v_r2) {
+            *a += b;
+        }
+        for (a, b) in self.v_r3.iter_mut().zip(&other.v_r3) {
+            *a += b;
+        }
     }
 
     /// Copy into BpttWorkspace slices.
-    pub fn copy_to_slices(&self, th1: &mut [f32], th2: &mut [f32], th3: &mut [f32],
-                          r1: &mut [f32], r2: &mut [f32], r3: &mut [f32]) {
+    pub fn copy_to_slices(
+        &self,
+        th1: &mut [f32],
+        th2: &mut [f32],
+        th3: &mut [f32],
+        r1: &mut [f32],
+        r2: &mut [f32],
+        r3: &mut [f32],
+    ) {
         th1.copy_from_slice(&self.v_th1);
         th2.copy_from_slice(&self.v_th2);
         th3.copy_from_slice(&self.v_th3);
@@ -96,9 +131,12 @@ impl PstGradients {
 /// - grad_pst: [pst_dim] градиент потерь по PST
 /// - out: [PstGradients] результат, будет занулён и заполнен
 pub fn pst_jacobian_v_jit(
-    th1: &[f32], _r1: &[f32],
-    th2: &[f32], _r2: &[f32],
-    th3: &[f32], _r3: &[f32],
+    th1: &[f32],
+    _r1: &[f32],
+    th2: &[f32],
+    _r2: &[f32],
+    th3: &[f32],
+    _r3: &[f32],
     n: usize,
     grad_pst: &[f32],
     out: &mut PstGradients,
@@ -108,13 +146,19 @@ pub fn pst_jacobian_v_jit(
     let inv_nf = 1.0 / nf;
 
     // ── Pre-compute sin/cos (O(n)) ──
-    let mut sin1 = vec![0.0f32; n]; let mut cos1 = vec![0.0f32; n];
-    let mut sin2 = vec![0.0f32; n]; let mut cos2 = vec![0.0f32; n];
-    let mut sin3 = vec![0.0f32; n]; let mut cos3 = vec![0.0f32; n];
+    let mut sin1 = vec![0.0f32; n];
+    let mut cos1 = vec![0.0f32; n];
+    let mut sin2 = vec![0.0f32; n];
+    let mut cos2 = vec![0.0f32; n];
+    let mut sin3 = vec![0.0f32; n];
+    let mut cos3 = vec![0.0f32; n];
     for i in 0..n {
-        sin1[i] = th1[i].sin(); cos1[i] = th1[i].cos();
-        sin2[i] = th2[i].sin(); cos2[i] = th2[i].cos();
-        sin3[i] = th3[i].sin(); cos3[i] = th3[i].cos();
+        sin1[i] = th1[i].sin();
+        cos1[i] = th1[i].cos();
+        sin2[i] = th2[i].sin();
+        cos2[i] = th2[i].cos();
+        sin3[i] = th3[i].sin();
+        cos3[i] = th3[i].cos();
     }
 
     let mut pos = 0usize;
@@ -138,14 +182,32 @@ pub fn pst_jacobian_v_jit(
     }
 
     // 4. Velocity [6n..9n]: d(vel)/d(th_post) = 1
-    for i in 0..n { out.v_th1[i] += grad_pst[pos]; pos += 1; }
-    for i in 0..n { out.v_th2[i] += grad_pst[pos]; pos += 1; }
-    for i in 0..n { out.v_th3[i] += grad_pst[pos]; pos += 1; }
+    for i in 0..n {
+        out.v_th1[i] += grad_pst[pos];
+        pos += 1;
+    }
+    for i in 0..n {
+        out.v_th2[i] += grad_pst[pos];
+        pos += 1;
+    }
+    for i in 0..n {
+        out.v_th3[i] += grad_pst[pos];
+        pos += 1;
+    }
 
     // 5. Amplitude [9n..12n]: d(r)/dr = 1
-    for i in 0..n { out.v_r1[i] += grad_pst[pos]; pos += 1; }
-    for i in 0..n { out.v_r2[i] += grad_pst[pos]; pos += 1; }
-    for i in 0..n { out.v_r3[i] += grad_pst[pos]; pos += 1; }
+    for i in 0..n {
+        out.v_r1[i] += grad_pst[pos];
+        pos += 1;
+    }
+    for i in 0..n {
+        out.v_r2[i] += grad_pst[pos];
+        pos += 1;
+    }
+    for i in 0..n {
+        out.v_r3[i] += grad_pst[pos];
+        pos += 1;
+    }
 
     // 6. sin²(θ₁ᵢ), cos²(θ₁ᵢ) [12n..14n]: d(sin²)/dθ = 2·sin·cos, d(cos²)/dθ = -2·sin·cos
     for i in 0..n {
@@ -181,8 +243,10 @@ pub fn pst_jacobian_v_jit(
     // Pre-compute per-pair sums
     let cross_sums = |sa: &[f32], ca: &[f32], sb: &[f32], cb: &[f32]| -> (f64, f64) {
         let (ss, sc) = (0..n).fold((0.0f64, 0.0f64), |(s, c), i| {
-            let a = sa[i] as f64; let b = ca[i] as f64;
-            let c2 = sb[i] as f64; let d = cb[i] as f64;
+            let a = sa[i] as f64;
+            let b = ca[i] as f64;
+            let c2 = sb[i] as f64;
+            let d = cb[i] as f64;
             (s + a * d - b * c2, c + b * d + a * c2)
         });
         (ss, sc)
@@ -194,7 +258,11 @@ pub fn pst_jacobian_v_jit(
 
     let norm_n = |ss: f64, sc: f64| -> f64 {
         let nrm = (ss * ss + sc * sc).sqrt();
-        if nrm > 1e-12 { 1.0 / (nrm * nf as f64) } else { 0.0 }
+        if nrm > 1e-12 {
+            1.0 / (nrm * nf as f64)
+        } else {
+            0.0
+        }
     };
     let inv12 = norm_n(ss12, sc12);
     let inv23 = norm_n(ss23, sc23);
@@ -278,13 +346,24 @@ mod tests {
         // Zero grad_pst → zero output
         let n = 8;
         let pst_dim = pst_linear_dim(n);
-        let th1 = vec![0.0; n]; let th2 = vec![0.5; n]; let th3 = vec![1.0; n];
-        let r1 = vec![1.0; n]; let r2 = vec![0.5; n]; let r3 = vec![0.8; n];
+        let th1 = vec![0.0; n];
+        let th2 = vec![0.5; n];
+        let th3 = vec![1.0; n];
+        let r1 = vec![1.0; n];
+        let r2 = vec![0.5; n];
+        let r3 = vec![0.8; n];
         let grad_pst = vec![0.0; pst_dim];
         let mut v = PstGradients::new(n);
         pst_jacobian_v_jit(&th1, &r1, &th2, &r2, &th3, &r3, n, &grad_pst, &mut v);
-        for x in v.v_th1.iter().chain(v.v_th2.iter()).chain(v.v_th3.iter())
-            .chain(v.v_r1.iter()).chain(v.v_r2.iter()).chain(v.v_r3.iter()) {
+        for x in v
+            .v_th1
+            .iter()
+            .chain(v.v_th2.iter())
+            .chain(v.v_th3.iter())
+            .chain(v.v_r1.iter())
+            .chain(v.v_r2.iter())
+            .chain(v.v_r3.iter())
+        {
             assert!((*x).abs() < 1e-10, "zero grad → zero out: {}", x);
         }
     }
@@ -295,22 +374,38 @@ mod tests {
         let n = 8;
         let pst_dim = pst_linear_dim(n);
         let th1: Vec<f32> = (0..n).map(|i| (i as f32 * 0.7)).collect();
-        let th2 = vec![0.0; n]; let th3 = vec![0.0; n];
-        let r1 = vec![1.0; n]; let r2 = vec![1.0; n]; let r3 = vec![1.0; n];
+        let th2 = vec![0.0; n];
+        let th3 = vec![0.0; n];
+        let r1 = vec![1.0; n];
+        let r2 = vec![1.0; n];
+        let r3 = vec![1.0; n];
 
         // grad_pst[0] = 1.0 → dL/d(sin(θ₁₀)) = 1.0
         let mut grad_pst = vec![0.0; pst_dim];
-        grad_pst[0] = 1.0;  // sin(θ₁₀)
+        grad_pst[0] = 1.0; // sin(θ₁₀)
 
         let mut v = PstGradients::new(n);
         pst_jacobian_v_jit(&th1, &r1, &th2, &r2, &th3, &r3, n, &grad_pst, &mut v);
 
         // Only v_th1[0] should be non-zero: d(sin(θ₁₀))/dθ₁₀ = cos(θ₁₀)
         let expected = th1[0].cos();
-        assert!((v.v_th1[0] - expected).abs() < 1e-6,
-            "sin(θ₁₀): v_th1[0]={:.10} expected={:.10}", v.v_th1[0], expected);
-        for i in 1..n { assert!(v.v_th1[i].abs() < 1e-10, "v_th1[{}] should be 0", i); }
-        for x in v.v_th2.iter().chain(v.v_th3.iter()).chain(v.v_r1.iter()).chain(v.v_r2.iter()).chain(v.v_r3.iter()) {
+        assert!(
+            (v.v_th1[0] - expected).abs() < 1e-6,
+            "sin(θ₁₀): v_th1[0]={:.10} expected={:.10}",
+            v.v_th1[0],
+            expected
+        );
+        for i in 1..n {
+            assert!(v.v_th1[i].abs() < 1e-10, "v_th1[{}] should be 0", i);
+        }
+        for x in v
+            .v_th2
+            .iter()
+            .chain(v.v_th3.iter())
+            .chain(v.v_r1.iter())
+            .chain(v.v_r2.iter())
+            .chain(v.v_r3.iter())
+        {
             assert!(x.abs() < 1e-10, "other channels should be 0");
         }
     }

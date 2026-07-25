@@ -1,279 +1,14 @@
 //! Brain simulator — универсальный движок для любого CSR коннектома.
 //!
-//! Поддерживает LIF, Izhikevich, Rate, и ψ-wave модели.
+//! Поддерживает LIF, Izhikevich, Rate, и GCO (Graph-Coupled Oscillator) модели.
 //! Принимает [`ConnectomeData`](crate::data::ConnectomeData) для описания графа.
 
+pub use crate::propagate::*;
+pub use crate::types::*;
+
 use crate::data::ConnectomeData;
+use taas_kernels::neuron::synapse::{DecayFactors, SynapticKinetics};
 use taas_kernels::safe;
-use taas_kernels::neuron::synapse::{DecayFactors, SynapticKinetics, ReceptorType};
-
-/// Neuron model type.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum NeuronModel {
-    LIF,
-    Izhikevich,
-    Rate,
-    Psi,
-}
-
-// ═══════════════════════════════════════════════════════════
-//  SpikeQueue — lock-free SPSC circular buffer
-// ═══════════════════════════════════════════════════════════
-
-/// Lock-free single-producer single-consumer spike queue (power-of-2 circular buffer).
-///
-/// Decouples SIMD-hot spike detection from CSR-scatter propagation.
-/// `push()` is called right after the SIMD neuron step (sequential scan of `spikes[]`),
-/// `pop()` / `drain()` is called by the CSR propagation phase.
-///
-/// Capacity must be a power of 2. The mask = capacity - 1 enables bitwise wrap.
-#[derive(Debug, Clone)]
-pub struct SpikeQueue {
-    buffer: Vec<u32>,
-    head: usize,
-    tail: usize,
-    mask: usize,
-}
-
-impl SpikeQueue {
-    /// Create a spike queue with capacity = next power of 2 >= `min_capacity`.
-    pub fn new(min_capacity: usize) -> Self {
-        let cap = min_capacity.max(4).next_power_of_two();
-        Self {
-            buffer: vec![0u32; cap],
-            head: 0,
-            tail: 0,
-            mask: cap - 1,
-        }
-    }
-
-    /// Push a spike ID. Panics on overflow (queue full) in debug builds.
-    #[inline(always)]
-    pub fn push(&mut self, spike_id: u32) {
-        debug_assert!(self.len() < self.buffer.len(), "SpikeQueue overflow: len={} cap={}", self.len(), self.buffer.len());
-        self.buffer[self.head & self.mask] = spike_id;
-        self.head += 1;
-    }
-
-    /// Pop the oldest spike ID.
-    #[inline(always)]
-    pub fn pop(&mut self) -> Option<u32> {
-        if self.head == self.tail {
-            None
-        } else {
-            let id = self.buffer[self.tail & self.mask];
-            self.tail += 1;
-            Some(id)
-        }
-    }
-
-    /// Drain all queued spikes: pop and discard (used after propagation).
-    #[inline(always)]
-    pub fn drain(&mut self) {
-        self.tail = self.head;
-    }
-
-    /// Number of spikes currently in the queue.
-    pub fn len(&self) -> usize {
-        self.head - self.tail
-    }
-
-    /// Reset the queue (discard all spikes).
-    pub fn clear(&mut self) {
-        self.head = 0;
-        self.tail = 0;
-    }
-}
-
-impl Default for SpikeQueue {
-    fn default() -> Self {
-        Self::new(1024)
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  Brain simulation state
-// ═══════════════════════════════════════════════════════════
-
-/// Brain simulation state (persistent between batch calls).
-///
-/// All arrays are padded to a multiple of 8 for SIMD alignment.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BrainState {
-    /// Membrane potential (LIF/Izhikevich/Psi). Padded to %8.
-    pub v: Vec<f32>,
-    /// Recovery variable (Izhikevich/Psi). Padded to %8.
-    pub u: Vec<f32>,
-    /// Spike trace (Izhikevich STDP only). Padded to %8.
-    pub trace: Vec<f32>,
-    /// Current buffer. Padded to %8.
-    pub I_buf: Vec<f32>,
-    /// Spike output buffer (per step). Padded to %8.
-    pub spikes: Vec<i32>,
-    /// Refractory counter (per neuron). Padded to %8.
-    pub refractory: Vec<f32>,
-    /// Padded length (multiple of 8 for SIMD).
-    pub n_padded: usize,
-    /// Actual number of neurons (unpadded).
-    #[serde(skip)]
-    pub n_neurons: usize,
-    /// Spike queue — decouples SIMD from CSR propagation.
-    #[serde(skip)]
-    pub queue: SpikeQueue,
-    /// Slow memory state for dual memory pathway (Sun et al. 2026).
-    /// Initialized to 0.5 (neutral). Updated by [`sim_izhikevich_dual`].
-    pub slow_state: Vec<f32>,
-}
-
-impl BrainState {
-    /// Create a new brain state for `n_neurons` neurons.
-    pub fn new(n_neurons: usize, model: NeuronModel) -> Self {
-        let n_padded = n_neurons.div_ceil(8) * 8;
-        let (v_init, u_init) = match model {
-            NeuronModel::LIF => (-58.0, 0.0),
-            NeuronModel::Izhikevich => (-65.0, -13.0),
-            NeuronModel::Rate => (0.0, 0.0),
-            NeuronModel::Psi => (0.0, 0.0),
-        };
-
-    // Queue capacity = n_neurons (max possible spikes per step), next power of 2
-    // Guarantees no overflow even in 50%+ firing rate bursts.
-    let queue_cap = n_neurons.max(4).next_power_of_two();
-
-    // Slow state initialized to 0.5 (neutral baseline)
-    let _slow_state = vec![0.5f32; n_padded];
-
-    Self {
-            v: vec![v_init; n_padded],
-            u: vec![u_init; n_padded],
-            trace: vec![0.0; n_padded],
-            slow_state: vec![0.5; n_padded],
-            I_buf: vec![0.0; n_padded],
-            spikes: vec![0; n_padded],
-            refractory: vec![0.0; n_padded],
-            n_padded,
-            n_neurons,
-            queue: SpikeQueue::new(queue_cap),
-        }
-    }
-
-    /// Переупорядочить state массивы по permutation (например, от RCM).
-    ///
-    /// `perm[i] = new_index`. Вызывается после `ConnectomeData::reorder_rcm()`
-    /// для синхронизации состояния нейронов с новым порядком.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let perm = connectome.reorder_rcm();
-    /// state.permute_state(&perm);
-    /// ```
-    pub fn permute_state(&mut self, perm: &[usize]) {
-        crate::rcm::apply_permutation_to_state(&mut self.v, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.u, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.trace, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.I_buf, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.spikes, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.refractory, perm);
-        crate::rcm::apply_permutation_to_state(&mut self.slow_state, perm);
-        // Padding (n_padded..) остаётся без изменений — в нём нет данных
-    }
-
-    /// Reset state with small random noise (no `rand` dependency — uses simple hash).
-    pub fn reset_with_noise(&mut self, n_neurons: usize) {
-        for i in 0..n_neurons {
-            // Simple deterministic noise without rand dependency
-            let noise = ((i as f32 * 0.577) % 1.0 - 0.5) * 2.0;
-            self.v[i] += noise * 0.03;
-        }
-    }
-}
-
-/// Packed LIF parameters for the SIMD kernel.
-///
-/// `safe::lif_step` expects `params: &[f32]` of length `n * 5` containing
-/// tau_m, v_rest, v_thresh, v_reset interleaved per neuron.
-#[derive(Debug, Clone)]
-pub struct LifParams {
-    packed: Vec<f32>,
-    pub tau_ref: f32,
-    pub dt_ms: f32,
-}
-
-impl LifParams {
-    /// Create LIF params padded to `n_padded` (must be >= n_neurons, multiple of 8 for SIMD).
-    ///
-    /// The kernel expects column-major layout with stride `n` (where n = n_padded = v.len()):
-    ///   params[0] = dt (scalar, index 0)
-    ///   params[n..2n) = tau_m[0..n)
-    ///   params[2n..3n) = v_rest[0..n)
-    ///   params[3n..4n) = v_thresh[0..n)
-    ///   params[4n..5n) = v_reset[0..n)
-    ///
-    /// Note: params[1..n) are UNUSED padding (gap after dt before first column).
-    pub fn new(tau_m: &[f32], v_rest: &[f32], v_thresh: &[f32], v_reset: &[f32], dt_ms: f32, tau_ref: f32) -> Self {
-        let n = tau_m.len();
-        let n_padded = n.div_ceil(8) * 8;
-        // Allocate 5 * n_padded elements (stride = n_padded for each column)
-        let mut packed = vec![0.0f32; n_padded * 5];
-        // Column 0: dt at index 0 (rest of indices 1..n_padded are unused padding)
-        packed[0] = dt_ms;
-        // Columns 1..4: tau_m, v_rest, v_thresh, v_reset
-        for i in 0..n {
-            packed[n_padded + i] = tau_m[i];        // col 1
-            packed[2 * n_padded + i] = v_rest[i];    // col 2
-            packed[3 * n_padded + i] = v_thresh[i];  // col 3
-            packed[4 * n_padded + i] = v_reset[i];   // col 4
-        }
-        // Replicate last values for padding elements (n..n_padded)
-        for i in n..n_padded {
-            packed[n_padded + i] = tau_m[n - 1];
-            packed[2 * n_padded + i] = v_rest[n - 1];
-            packed[3 * n_padded + i] = v_thresh[n - 1];
-            packed[4 * n_padded + i] = v_reset[n - 1];
-        }
-        Self { packed, tau_ref, dt_ms }
-    }
-}
-
-/// Parameters for Izhikevich model.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct IzhikevichParams {
-    pub a: Vec<f32>,
-    pub b: Vec<f32>,
-    pub c: Vec<f32>,
-    pub d: Vec<f32>,
-    pub dt_ms: f32,
-    pub tau_ref: f32,
-}
-
-/// Parameters for Izhikevich Dual Memory model.
-#[derive(Debug, Clone)]
-pub struct IzhikevichDualParams {
-    pub a: Vec<f32>,
-    pub b: Vec<f32>,
-    pub c: Vec<f32>,
-    pub d: Vec<f32>,
-    pub dt_ms: f32,
-    pub tau_ref: f32,
-    /// Slow memory time constant (0..1, higher = slower decay)
-    pub tau_m: f32,
-    /// Memory-to-current weight (how much slow state modulates I)
-    pub w_m: f32,
-}
-
-/// Parameters for Rate model.
-#[derive(Debug, Clone)]
-pub struct RateParams {
-    pub tau: f32,
-    pub dt_ms: f32,
-}
-
-/// Parameters for ψ-wave model.
-#[derive(Debug, Clone)]
-pub struct PsiParams {
-    pub hbar: f32,
-    pub dt_ms: f32,
-}
 
 // ═══════════════════════════════════════════════════════════
 //  Tests
@@ -282,6 +17,7 @@ pub struct PsiParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use taas_kernels::neuron::synapse::ReceptorType;
 
     #[test]
     fn spike_queue_basic_push_pop() {
@@ -341,14 +77,14 @@ mod tests {
 
     #[test]
     fn spike_queue_capacity_power_of_two() {
-        let q = SpikeQueue::new(5);  // next power of 2 = 8
+        let q = SpikeQueue::new(5); // next power of 2 = 8
         assert_eq!(q.buffer.len(), 8);
         assert_eq!(q.mask, 7);
 
-        let q2 = SpikeQueue::new(1000);  // next power of 2 = 1024
+        let q2 = SpikeQueue::new(1000); // next power of 2 = 1024
         assert_eq!(q2.buffer.len(), 1024);
 
-        let q3 = SpikeQueue::new(1);  // min 4
+        let q3 = SpikeQueue::new(1); // min 4
         assert_eq!(q3.buffer.len(), 4);
     }
 
@@ -376,7 +112,15 @@ mod tests {
 
         // Neuron 0 spikes
         q.push(0);
-        csr_propagate_from_queue(&row_ptr, &col_indices, &values, &nt_types, &mut q, &mut I_buf, 1.0);
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            1.0,
+        );
 
         // I_buf[1] should get 0.5
         assert!((I_buf[1] - 0.5).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
@@ -391,7 +135,7 @@ mod tests {
         let row_ptr = vec![0i32, 1, 2, 3, 4];
         let col_indices = vec![2, 1, 0, 1];
         let values = vec![1.0f32, 2.0, 3.0, 4.0];
-        let nt_types = vec![1.0f32, -1.0, 1.0, 1.0];  // neuron 1 is inhibitory
+        let nt_types = vec![1.0f32, -1.0, 1.0, 1.0]; // neuron 1 is inhibitory
         let mut I_buf = vec![0.0f32; 3];
         let mut q = SpikeQueue::new(16);
 
@@ -399,10 +143,18 @@ mod tests {
         q.push(1); // inh → I_buf[1] += 2.0 * -1.0 = -2.0
         q.push(3); // exc → I_buf[1] += 4.0
 
-        csr_propagate_from_queue(&row_ptr, &col_indices, &values, &nt_types, &mut q, &mut I_buf, 1.0);
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            1.0,
+        );
 
         assert!((I_buf[2] - 1.0).abs() < 1e-6, "I_buf[2]={}", I_buf[2]);
-        assert!((I_buf[1] - 2.0).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);  // -2.0 + 4.0 = 2.0
+        assert!((I_buf[1] - 2.0).abs() < 1e-6, "I_buf[1]={}", I_buf[1]); // -2.0 + 4.0 = 2.0
         assert_eq!(I_buf[0], 0.0);
         assert_eq!(q.len(), 0);
     }
@@ -410,15 +162,23 @@ mod tests {
     #[test]
     fn csr_propagate_from_queue_inhibitory_scale() {
         let row_ptr = vec![0i32, 2, 2];
-        let col_indices = vec![0, 1];  // neuron 0→0 and 0→1
+        let col_indices = vec![0, 1]; // neuron 0→0 and 0→1
         let values = vec![1.0f32, 1.0];
-        let nt_types = vec![1.0f32, 0.0];  // neuron 1 is silent (no synapses anyway)
+        let nt_types = vec![1.0f32, 0.0]; // neuron 1 is silent (no synapses anyway)
         let mut I_buf = vec![0.0f32; 2];
         let mut q = SpikeQueue::new(8);
 
         q.push(0);
         // scale = -0.5
-        csr_propagate_from_queue(&row_ptr, &col_indices, &values, &nt_types, &mut q, &mut I_buf, -0.5);
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            -0.5,
+        );
 
         assert!((I_buf[0] - (-0.5)).abs() < 1e-6, "I_buf[0]={}", I_buf[0]);
         assert!((I_buf[1] - (-0.5)).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
@@ -443,7 +203,10 @@ mod tests {
     #[test]
     fn test_sim_lif_synaptic_basic() {
         let conn = make_synaptic_connectome();
-        assert!(!conn.receptor_types.is_empty(), "receptor_types must be non-empty");
+        assert!(
+            !conn.receptor_types.is_empty(),
+            "receptor_types must be non-empty"
+        );
 
         let n = conn.n_neurons;
         let mut state = BrainState::new(n, NeuronModel::LIF);
@@ -458,10 +221,22 @@ mod tests {
         let n_steps = 100;
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, n_steps, &mut kinetics, 1.0);
+        let spikes = sim_lif_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            n_steps,
+            &mut kinetics,
+            1.0,
+        );
 
         let total_spikes: i32 = spikes.iter().sum();
-        assert!(total_spikes > 0, "LIF synaptic should fire with high drive, got {} spikes", total_spikes);
+        assert!(
+            total_spikes > 0,
+            "LIF synaptic should fire with high drive, got {} spikes",
+            total_spikes
+        );
         assert_eq!(spikes.len(), n_steps * n);
     }
 
@@ -483,10 +258,21 @@ mod tests {
         let external_I = vec![7.0f32; n];
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 20, &mut kinetics, 1.0);
+        let spikes = sim_izhikevich_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            20,
+            &mut kinetics,
+            1.0,
+        );
 
         let total_spikes: i32 = spikes.iter().sum();
-        assert!(total_spikes > 0, "Izhikevich synaptic should fire with high drive");
+        assert!(
+            total_spikes > 0,
+            "Izhikevich synaptic should fire with high drive"
+        );
         assert_eq!(spikes.len(), 20 * n);
     }
 
@@ -509,18 +295,32 @@ mod tests {
         let initial_g = kinetics.g_ampa[0];
         assert!((initial_g - 10.0).abs() < 1e-6, "initial g={}", initial_g);
 
-        let _spikes = sim_lif_synaptic(&conn, &mut state, &params, &external_I, 1, &mut kinetics, 1.0);
+        let _spikes = sim_lif_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            1,
+            &mut kinetics,
+            1.0,
+        );
 
         let expected_decay = (-0.1f32 / 2.0).exp();
-        assert!(kinetics.g_ampa[0] < 10.0 * expected_decay * 1.01,
-            "g_ampa[0]={} should have decayed", kinetics.g_ampa[0]);
-        assert!(kinetics.g_ampa[0] > 0.0, "g_ampa[0] should still be positive");
+        assert!(
+            kinetics.g_ampa[0] < 10.0 * expected_decay * 1.01,
+            "g_ampa[0]={} should have decayed",
+            kinetics.g_ampa[0]
+        );
+        assert!(
+            kinetics.g_ampa[0] > 0.0,
+            "g_ampa[0] should still be positive"
+        );
     }
 
     #[test]
     fn test_sim_izhikevich_synaptic_receptor_types() {
         let mut conn = make_synaptic_connectome();
-        conn.receptor_types = vec![0u8, 1, 2];  // AMPA, NMDA, GABA_A
+        conn.receptor_types = vec![0u8, 1, 2]; // AMPA, NMDA, GABA_A
 
         let n = conn.n_neurons;
         let mut state = BrainState::new(n, NeuronModel::Izhikevich);
@@ -535,14 +335,28 @@ mod tests {
         let external_I = vec![10.0f32; n];
         let mut kinetics = SynapticKinetics::new(n);
 
-        let spikes = sim_izhikevich_synaptic(&conn, &mut state, &params, &external_I, 50, &mut kinetics, 1.0);
+        let spikes = sim_izhikevich_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            50,
+            &mut kinetics,
+            1.0,
+        );
 
         let total_spikes: i32 = spikes.iter().sum();
-        assert!(total_spikes > 0, "Izhikevich with mixed receptors should fire");
+        assert!(
+            total_spikes > 0,
+            "Izhikevich with mixed receptors should fire"
+        );
 
         let ampa_decay = (-0.5f32 / 2.0).exp().powi(50);
         let nmda_decay = (-0.5f32 / 50.0).exp().powi(50);
-        assert!(nmda_decay > ampa_decay, "NMDA should decay slower than AMPA");
+        assert!(
+            nmda_decay > ampa_decay,
+            "NMDA should decay slower than AMPA"
+        );
         println!("AMPA decay over 50 steps: {:.6}", ampa_decay);
         println!("NMDA decay over 50 steps: {:.6}", nmda_decay);
     }
@@ -550,7 +364,10 @@ mod tests {
     #[test]
     fn test_sim_hh_synaptic_basic() {
         let conn = make_synaptic_connectome();
-        assert!(!conn.receptor_types.is_empty(), "receptor_types must be non-empty");
+        assert!(
+            !conn.receptor_types.is_empty(),
+            "receptor_types must be non-empty"
+        );
 
         let n = conn.n_neurons;
         let mut cfg = taas_core::neuron::hh::standard_config(n, 0.5);
@@ -562,7 +379,11 @@ mod tests {
         let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, n_steps, &mut kinetics, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
-        assert!(total_spikes > 0, "HH synaptic should fire with high drive (I=15), got {} spikes", total_spikes);
+        assert!(
+            total_spikes > 0,
+            "HH synaptic should fire with high drive (I=15), got {} spikes",
+            total_spikes
+        );
         assert_eq!(spikes.len(), n_steps * n);
     }
 
@@ -577,7 +398,11 @@ mod tests {
         let spikes = sim_hh(&conn, &mut cfg, &external_I, n_steps, 1.0);
 
         let total_spikes: i32 = spikes.iter().sum();
-        assert!(total_spikes > 0, "HH (instant) should fire with high drive (I=15), got {} spikes", total_spikes);
+        assert!(
+            total_spikes > 0,
+            "HH (instant) should fire with high drive (I=15), got {} spikes",
+            total_spikes
+        );
         assert_eq!(spikes.len(), n_steps * n);
     }
 
@@ -588,11 +413,11 @@ mod tests {
     /// Simple 2-neuron connectome: 0 → 1 with nAChR
     fn make_2_neuron_connectome() -> ConnectomeData {
         let mut conn = ConnectomeData::new(
-            vec![0i32, 1, 2], // row_ptr: 0 has 1 syn, 1 has 0 syn
+            vec![0i32, 1, 2],      // row_ptr: 0 has 1 syn, 1 has 0 syn
             vec![1_usize as i32],  // 0 → 1
-            vec![1.0f32],     // weight
-            vec![1.0f32, -1.0f32],  // nt_types: 0=exc, 1=inh
-            vec![],           // receptors (built below)
+            vec![1.0f32],          // weight
+            vec![1.0f32, -1.0f32], // nt_types: 0=exc, 1=inh
+            vec![],                // receptors (built below)
         );
         conn.receptor_types = vec![4u8]; // nAChR (index 4)
         conn
@@ -607,13 +432,13 @@ mod tests {
         let mut cfg = taas_core::neuron::hh::standard_config(n, 0.1);
         let mut spikes_buf = vec![0i32; n];
 
-        let v_before = cfg.v[1];  // post-synaptic V before
+        let v_before = cfg.v[1]; // post-synaptic V before
 
         // Drive neuron 0 to fire
         for _ in 0..300 {
             cfg.Ii[0] = 15.0;
-            cfg.Ii[1] = 0.0;  // no direct drive to post
-            // Propagate any queued spikes (none initially)
+            cfg.Ii[1] = 0.0; // no direct drive to post
+                             // Propagate any queued spikes (none initially)
             let mut q = SpikeQueue::new(8);
             let external_I = vec![15.0f32, 0.0];
 
@@ -621,32 +446,48 @@ mod tests {
             cfg.Ii[0] += external_I[0];
             cfg.Ii[1] += external_I[1];
             taas_core::neuron::hh::step_hh_lut(&mut cfg, &mut spikes_buf);
-            if spikes_buf[0] != 0 { q.push(0); }
+            if spikes_buf[0] != 0 {
+                q.push(0);
+            }
             cfg.Ii[..2].fill(0.0);
             csr_propagate_from_queue(
-                &conn.row_ptr, &conn.col_indices, &conn.values,
-                &conn.nt_types, &mut q, &mut cfg.Ii, 1.0,
+                &conn.row_ptr,
+                &conn.col_indices,
+                &conn.values,
+                &conn.nt_types,
+                &mut q,
+                &mut cfg.Ii,
+                1.0,
             );
             // dt=0.1, I=15: first spike ~3-5ms = 30-50 steps
-            if spikes_buf[0] != 0 { break; }
+            if spikes_buf[0] != 0 {
+                break;
+            }
         }
 
         // Now pre fired (or we forced it). Track post voltage.
         let v_after_first = cfg.v[1];
-        println!("Current-based PSP: pre-V={:.1}, post V before={v_before:.1} after={v_after_first:.1}",
-            cfg.v[0]);
+        println!(
+            "Current-based PSP: pre-V={:.1}, post V before={v_before:.1} after={v_after_first:.1}",
+            cfg.v[0]
+        );
 
         // Post should get depolarized via CSR: I_post = 1.0 * 1.0 * 1.0 = 1.0 µA/cm²
         // HH threshold is ~7 µA/cm², so this single-spike EPSP should be subthreshold
         // but detectable as a voltage change.
         let dv_post = v_after_first - v_before;
-        assert!(dv_post != 0.0, "Current-based PSP should produce voltage change on post");
+        assert!(
+            dv_post != 0.0,
+            "Current-based PSP should produce voltage change on post"
+        );
         // The EPSP should be small: with dt=0.1ms and gL=0.3, one spike delivers
         // I=1.0 for one dt. ΔV = I/Cm * dt = 1.0/1.0 * 0.1e-3 * 1000 = 0.1 mV
         // But spike-triggered current might persist for multiple steps.
         // Allow 0.01-5mV range.
-        assert!(dv_post.abs() < 10.0,
-            "Current-based PSP too large: {dv_post} mV (should be < 10 mV)");
+        assert!(
+            dv_post.abs() < 10.0,
+            "Current-based PSP too large: {dv_post} mV (should be < 10 mV)"
+        );
     }
 
     #[test]
@@ -669,14 +510,18 @@ mod tests {
         let post_spikes: i32 = spikes.iter().skip(1).step_by(n).copied().sum();
         let pre_spikes: i32 = spikes.iter().step_by(n).copied().sum();
 
-        println!("Synaptic PSP: pre={} spikes, post={} spikes (conductance path)",
-            pre_spikes, post_spikes);
+        println!(
+            "Synaptic PSP: pre={} spikes, post={} spikes (conductance path)",
+            pre_spikes, post_spikes
+        );
         // Pre should fire with I=15
         assert!(pre_spikes > 0, "Pre-neuron should fire with I=15");
         // Post should fire too — each pre-spike adds g=1.0 to nAChR,
         // which delivers I ≈ 65 µA/cm² — well above threshold.
-        assert!(post_spikes > 0,
-            "Post should fire via conductance-based PSP (driving force ×65)");
+        assert!(
+            post_spikes > 0,
+            "Post should fire via conductance-based PSP (driving force ×65)"
+        );
     }
 
     #[test]
@@ -698,8 +543,10 @@ mod tests {
 
         let ratio = i_cond[1] / i_curr[1];
         println!("Conductance/Current ratio for nAChR at V=-65: {ratio:.0}× (expected ~65)");
-        assert!(ratio > 50.0 && ratio < 80.0,
-            "Ratio {ratio:.0} should be ~65× for nAChR at rest");
+        assert!(
+            ratio > 50.0 && ratio < 80.0,
+            "Ratio {ratio:.0} should be ~65× for nAChR at rest"
+        );
     }
 
     #[test]
@@ -725,200 +572,6 @@ mod tests {
         assert!(total_curr > 0, "Current-based HH should fire");
         assert!(total_cond > 0, "Conductance-based HH should fire");
     }
-}
-
-// ─── CSR propagation ─────────────────────────────────
-
-// ─── CSR propagation ─────────────────────────────────
-
-/// Propagate spikes through CSR: `I_buf[post] += W · mult` for each spiked pre-neuron.
-///
-/// Performs unrolled 4-wide scatter for performance.
-#[inline]
-pub fn csr_propagate(
-    row_ptr: &[i32],
-    col_indices: &[i32],
-    values: &[f32],
-    nt_types: &[f32],
-    spikes: &[i32],
-    n_neurons: usize,
-    I_buf: &mut [f32],
-    scale: f32,
-) -> u32 {
-    let max_syn = col_indices.len().min(values.len());
-    let mut total = 0u32;
-    for i in 0..n_neurons.min(spikes.len()) {
-        if spikes[i] != 0 {
-            total += 1;
-            let start = row_ptr[i].max(0) as usize;
-            let end = (row_ptr[i + 1] as usize).min(max_syn);
-            let mult = if i < nt_types.len() { nt_types[i] * scale } else { scale };
-            let mut j = start;
-            // Unrolled 4-wide
-            while j + 4 <= end {
-                let t0 = col_indices[j].max(0) as usize;
-                let t1 = col_indices[j + 1].max(0) as usize;
-                let t2 = col_indices[j + 2].max(0) as usize;
-                let t3 = col_indices[j + 3].max(0) as usize;
-                if t0 < I_buf.len() { I_buf[t0] += values[j] * mult; }
-                if t1 < I_buf.len() { I_buf[t1] += values[j + 1] * mult; }
-                if t2 < I_buf.len() { I_buf[t2] += values[j + 2] * mult; }
-                if t3 < I_buf.len() { I_buf[t3] += values[j + 3] * mult; }
-                j += 4;
-            }
-            for j in j..end {
-                let col = col_indices[j].max(0) as usize;
-                if col < I_buf.len() { I_buf[col] += values[j] * mult; }
-            }
-        }
-    }
-    total
-}
-
-/// Record spikes to spike buffer.
-#[inline]
-pub fn record_spikes(
-    spikes: &[i32],
-    n_neurons: usize,
-    spike_buffer: &mut [i32],
-    step: usize,
-) -> u32 {
-    let offset = step * n_neurons;
-    let mut step_count = 0u32;
-    for i in 0..n_neurons.min(spikes.len()) {
-        if spikes[i] != 0 {
-            let idx = offset + i;
-            if idx < spike_buffer.len() {
-                spike_buffer[idx] = 1;
-            }
-            step_count += 1;
-        }
-    }
-    step_count
-}
-
-// ─── Spike Queue helpers ──────────────────────────────
-
-/// Push all spiked neurons from `spikes[]` into the queue.
-///
-/// Returns the number of spikes pushed. Called right after the SIMD neuron step,
-/// before CSR propagation. This separates the SIMD-hot scan from scatter-write.
-#[inline]
-pub fn push_spikes_to_queue(spikes: &[i32], n_neurons: usize, queue: &mut SpikeQueue) -> u32 {
-    let mut count = 0u32;
-    for i in 0..n_neurons.min(spikes.len()) {
-        if spikes[i] != 0 {
-            queue.push(i as u32);
-            count += 1;
-        }
-    }
-    count
-}
-
-/// Propagate spikes from queue through CSR: `I_buf[post] += W · mult` for each queued pre-neuron.
-///
-/// Same unrolled 4-wide scatter as `csr_propagate()` but reads spike IDs from the queue
-/// instead of scanning the full `spikes[]` array. This gives:
-/// 1. Cache-friendly sequential read of spike IDs from queue buffer
-/// 2. Prefetcher can predict CSR row_ptr/col_indices access pattern
-/// 3. Clear separation between SIMD-hot and scatter-hot paths
-#[inline]
-pub fn csr_propagate_from_queue(
-    row_ptr: &[i32],
-    col_indices: &[i32],
-    values: &[f32],
-    nt_types: &[f32],
-    queue: &mut SpikeQueue,
-    I_buf: &mut [f32],
-    scale: f32,
-) -> u32 {
-    let max_syn = col_indices.len().min(values.len());
-    let mut total = 0u32;
-    while let Some(id) = queue.pop() {
-        let i = id as usize;
-        total += 1;
-        let start = row_ptr[i].max(0) as usize;
-        let end = (row_ptr[i + 1] as usize).min(max_syn);
-        let mult = if i < nt_types.len() { nt_types[i] * scale } else { scale };
-        let mut j = start;
-        // Unrolled 4-wide
-        while j + 4 <= end {
-            let t0 = col_indices[j].max(0) as usize;
-            let t1 = col_indices[j + 1].max(0) as usize;
-            let t2 = col_indices[j + 2].max(0) as usize;
-            let t3 = col_indices[j + 3].max(0) as usize;
-            if t0 < I_buf.len() { I_buf[t0] += values[j] * mult; }
-            if t1 < I_buf.len() { I_buf[t1] += values[j + 1] * mult; }
-            if t2 < I_buf.len() { I_buf[t2] += values[j + 2] * mult; }
-            if t3 < I_buf.len() { I_buf[t3] += values[j + 3] * mult; }
-            j += 4;
-        }
-        for j in j..end {
-            let col = col_indices[j].max(0) as usize;
-            if col < I_buf.len() { I_buf[col] += values[j] * mult; }
-        }
-    }
-    total
-}
-
-// ─── Conductance-based propagation ─────────────────
-
-/// Propagate spikes from queue through CSR: jump conductances instead of currents.
-///
-/// For each spiked pre-neuron, iterates its outgoing synapses and applies
-/// `kinetics.jump(post, receptor_types[j], values[j] * scale)`.
-///
-/// Requires `receptor_types` array of length `n_synapses`. Each synapse's
-/// receptor type is stored as a `u8` (0=AMPA, 1=NMDA, 2=GABA_A, 3=GABA_B).
-///
-/// Returns the number of spikes processed (total propagated).
-#[inline]
-pub fn csr_propagate_conductance_from_queue(
-    row_ptr: &[i32],
-    col_indices: &[i32],
-    values: &[f32],
-    receptor_types: &[u8],
-    queue: &mut SpikeQueue,
-    kinetics: &mut SynapticKinetics,
-    scale: f32,
-) -> u32 {
-    let max_syn = col_indices.len().min(values.len()).min(receptor_types.len());
-    let mut total = 0u32;
-    while let Some(id) = queue.pop() {
-        let i = id as usize;
-        total += 1;
-        let start = row_ptr[i].max(0) as usize;
-        let end = (row_ptr[i + 1] as usize).min(max_syn);
-        let mut j = start;
-        // Unrolled 4-wide
-        while j + 4 <= end {
-            let t0 = col_indices[j].max(0) as usize;
-            let t1 = col_indices[j + 1].max(0) as usize;
-            let t2 = col_indices[j + 2].max(0) as usize;
-            let t3 = col_indices[j + 3].max(0) as usize;
-            let w0 = values[j] * scale;
-            let w1 = values[j + 1] * scale;
-            let w2 = values[j + 2] * scale;
-            let w3 = values[j + 3] * scale;
-            let rec0 = ReceptorType::from_u8(receptor_types[j]);
-            let rec1 = ReceptorType::from_u8(receptor_types[j + 1]);
-            let rec2 = ReceptorType::from_u8(receptor_types[j + 2]);
-            let rec3 = ReceptorType::from_u8(receptor_types[j + 3]);
-            kinetics.jump(t0, rec0, w0);
-            kinetics.jump(t1, rec1, w1);
-            kinetics.jump(t2, rec2, w2);
-            kinetics.jump(t3, rec3, w3);
-            j += 4;
-        }
-        while j < end {
-            let post = col_indices[j].max(0) as usize;
-            let w = values[j] * scale;
-            let rec = ReceptorType::from_u8(receptor_types[j]);
-            kinetics.jump(post, rec, w);
-            j += 1;
-        }
-    }
-    total
 }
 
 // ─── LIF simulation ──────────────────────────────────
@@ -977,8 +630,13 @@ pub fn sim_lif(
 
         // 7. CSR propagate spikes from queue → I_buf (adds, does NOT overwrite)
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut state.queue, &mut state.I_buf, scale,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut state.queue,
+            &mut state.I_buf,
+            scale,
         );
     }
 
@@ -1047,8 +705,13 @@ pub fn sim_lif_synaptic(
 
         // 7. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut state.queue, kinetics, scale,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.receptor_types,
+            &mut state.queue,
+            kinetics,
+            scale,
         );
     }
 
@@ -1099,12 +762,19 @@ pub fn sim_izhikevich(
 
         // 2. Izhikevich step (SIMD + rayon) — clamp is INSIDE safe::izhikevich_step
         safe::izhikevich_step(
-            &mut state.v, &mut state.u, &mut state.trace,
-            &padded_a, &padded_b, &mut state.I_buf,
-            dt, 0.99, // dt, trace_decay
+            &mut state.v,
+            &mut state.u,
+            &mut state.trace,
+            &padded_a,
+            &padded_b,
+            &mut state.I_buf,
+            dt,
+            0.99, // dt, trace_decay
             &mut state.spikes,
-            &padded_c, &padded_d,
-            &mut state.refractory, params.tau_ref,
+            &padded_c,
+            &padded_d,
+            &mut state.refractory,
+            params.tau_ref,
             None,
         );
 
@@ -1122,8 +792,13 @@ pub fn sim_izhikevich(
 
         // 7. CSR propagate from queue
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut state.queue, &mut state.I_buf, 1.0,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut state.queue,
+            &mut state.I_buf,
+            1.0,
         );
     }
 
@@ -1180,17 +855,28 @@ pub fn sim_izhikevich_dual(
     for step in 0..n_steps {
         // 1. Set I = external_I (reset)
         state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+        for i in n..state.I_buf.len() {
+            state.I_buf[i] = 0.0;
+        }
 
         // 2. Izhikevich dual step (SIMD) — slow state m modulates I
         safe::izhikevich_dual_step(
-            &mut state.v, &mut state.u, &mut state.trace,
-            &padded_a, &padded_b, &mut state.I_buf,
-            dt, 0.99,
+            &mut state.v,
+            &mut state.u,
+            &mut state.trace,
+            &padded_a,
+            &padded_b,
+            &mut state.I_buf,
+            dt,
+            0.99,
             &mut state.spikes,
-            &padded_c, &padded_d,
-            &mut state.refractory, params.tau_ref,
-            &mut state.slow_state, tau_m, w_m,
+            &padded_c,
+            &padded_d,
+            &mut state.refractory,
+            params.tau_ref,
+            &mut state.slow_state,
+            tau_m,
+            w_m,
             None,
         );
 
@@ -1216,12 +902,19 @@ pub fn sim_izhikevich_dual(
 
         // 6. Reset I = external_I
         state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+        for i in n..state.I_buf.len() {
+            state.I_buf[i] = 0.0;
+        }
 
         // 7. CSR propagate from queue
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut state.queue, &mut state.I_buf, 1.0,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut state.queue,
+            &mut state.I_buf,
+            1.0,
         );
     }
 
@@ -1270,13 +963,22 @@ pub fn sim_rate(
 
         // 3. Propagate spikes from queue (rate-weighted)
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut state.queue, I, 1.0,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut state.queue,
+            I,
+            1.0,
         );
 
         // 4. Exponential Euler: r = r * decay + clamp(I + I_ext, 0, 1) * (1 - decay)
         for i in 0..n {
-            let ext = if i < external_I.len() { external_I[i] } else { 0.0 };
+            let ext = if i < external_I.len() {
+                external_I[i]
+            } else {
+                0.0
+            };
             let input = (I[i] + ext).clamp(0.0, 1.0);
             r[i] = r[i] * decay + input * inv_decay;
         }
@@ -1300,9 +1002,9 @@ pub fn sim_rate(
 /// GPU LIF simulation using CUDA — persistent context between calls.
 #[cfg(feature = "cuda")]
 pub mod gpu {
-    use crate::data::ConnectomeData;
     use super::BrainState;
-    use cuda_kernels::{GpuContext, DevicePtr};
+    use crate::data::ConnectomeData;
+    use cuda_kernels::{DevicePtr, GpuContext};
     use std::sync::Mutex;
 
     static GPU_CTX: Mutex<Option<(GpuContext, usize, usize, bool)>> = Mutex::new(None);
@@ -1314,7 +1016,7 @@ pub mod gpu {
         let mut cache = GPU_SPIKE_BUF.lock().unwrap();
         if let Some((ptr, size)) = cache.take() {
             if size == n_ints {
-                return ptr;  // reuse
+                return ptr; // reuse
             }
             // size changed — old buf dropped here
         }
@@ -1374,24 +1076,33 @@ pub mod gpu {
         gpu_ctx.upload_v_only(&state.v[..n_neurons]).unwrap();
 
         if needs_init {
-            gpu_ctx.upload_lif_params(dt_ms, tau_m, v_rest, v_thresh, v_reset).unwrap();
-            gpu_ctx.upload_connectome(
-                &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-                &connectome.nt_types, external_I,
-            ).unwrap();
+            gpu_ctx
+                .upload_lif_params(dt_ms, tau_m, v_rest, v_thresh, v_reset)
+                .unwrap();
+            gpu_ctx
+                .upload_connectome(
+                    &connectome.row_ptr,
+                    &connectome.col_indices,
+                    &connectome.values,
+                    &connectome.nt_types,
+                    external_I,
+                )
+                .unwrap();
         }
 
         // Get cached spike buffer or allocate new one
         let mut d_spike_buf = get_spike_buf(n_steps * n_neurons);
 
         // Batch run
-        gpu_ctx.batch_lif_steps(
-            external_I,
-            d_spike_buf.as_mut_ptr(),
-            &mut spike_buffer,
-            &mut v_back,
-            n_steps,
-        ).expect("GPU: batch_lif_steps");
+        gpu_ctx
+            .batch_lif_steps(
+                external_I,
+                d_spike_buf.as_mut_ptr(),
+                &mut spike_buffer,
+                &mut v_back,
+                n_steps,
+            )
+            .expect("GPU: batch_lif_steps");
 
         // Return spike buffer to cache
         put_spike_buf(d_spike_buf, n_steps * n_neurons);
@@ -1448,33 +1159,38 @@ pub mod gpu {
         };
 
         // Upload full neuron state (v, u, a, b, c, d) — Izhikevich needs all params
-        gpu_ctx.upload_neurons(
-            &state.v[..n_neurons],
-            &state.u[..n_neurons],
-            a, b, c, d,
-        ).unwrap();
+        gpu_ctx
+            .upload_neurons(&state.v[..n_neurons], &state.u[..n_neurons], a, b, c, d)
+            .unwrap();
 
         if needs_init {
-            gpu_ctx.upload_connectome(
-                &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-                &connectome.nt_types, external_I,
-            ).unwrap();
+            gpu_ctx
+                .upload_connectome(
+                    &connectome.row_ptr,
+                    &connectome.col_indices,
+                    &connectome.values,
+                    &connectome.nt_types,
+                    external_I,
+                )
+                .unwrap();
         }
 
         // Get cached spike buffer
         let mut d_spike_buf = get_spike_buf(n_steps * n_neurons);
 
         // Batch run
-        gpu_ctx.batch_izhikevich_steps(
-            external_I,
-            dt_ms,
-            trace_decay,
-            d_spike_buf.as_mut_ptr(),
-            &mut spike_buffer,
-            &mut v_back,
-            &mut u_back,
-            n_steps,
-        ).expect("GPU: batch_izhikevich_steps");
+        gpu_ctx
+            .batch_izhikevich_steps(
+                external_I,
+                dt_ms,
+                trace_decay,
+                d_spike_buf.as_mut_ptr(),
+                &mut spike_buffer,
+                &mut v_back,
+                &mut u_back,
+                n_steps,
+            )
+            .expect("GPU: batch_izhikevich_steps");
 
         // Return spike buffer to cache
         put_spike_buf(d_spike_buf, n_steps * n_neurons);
@@ -1530,19 +1246,28 @@ pub fn sim_izhikevich_synaptic(
 
         // 2. Set I_buf = external_I (reset)
         state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+        for i in n..state.I_buf.len() {
+            state.I_buf[i] = 0.0;
+        }
 
         // 3. Compute I_syn from conductances and add to I_buf
         kinetics.compute_currents(&state.v, &mut state.I_buf);
 
         // 4. Izhikevich step (SIMD) — clamp is INSIDE safe::izhikevich_step
         safe::izhikevich_step(
-            &mut state.v, &mut state.u, &mut state.trace,
-            &padded_a, &padded_b, &mut state.I_buf,
-            dt, 0.99,
+            &mut state.v,
+            &mut state.u,
+            &mut state.trace,
+            &padded_a,
+            &padded_b,
+            &mut state.I_buf,
+            dt,
+            0.99,
             &mut state.spikes,
-            &padded_c, &padded_d,
-            &mut state.refractory, params.tau_ref,
+            &padded_c,
+            &padded_d,
+            &mut state.refractory,
+            params.tau_ref,
             None,
         );
 
@@ -1554,8 +1279,13 @@ pub fn sim_izhikevich_synaptic(
 
         // 8. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut state.queue, kinetics, scale,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.receptor_types,
+            &mut state.queue,
+            kinetics,
+            scale,
         );
     }
 
@@ -1629,16 +1359,25 @@ pub fn sim_izhikevich_eprop(
     for step in 0..n_steps {
         // 1. Set I = external_I
         state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+        for i in n..state.I_buf.len() {
+            state.I_buf[i] = 0.0;
+        }
 
         // 2. Izhikevich step (SIMD) — clamp is INSIDE safe::izhikevich_step
         safe::izhikevich_step(
-            &mut state.v, &mut state.u, &mut state.trace,
-            &padded_a, &padded_b, &mut state.I_buf,
-            dt, trace_decay,
+            &mut state.v,
+            &mut state.u,
+            &mut state.trace,
+            &padded_a,
+            &padded_b,
+            &mut state.I_buf,
+            dt,
+            trace_decay,
             &mut state.spikes,
-            &padded_c, &padded_d,
-            &mut state.refractory, params.tau_ref,
+            &padded_c,
+            &padded_d,
+            &mut state.refractory,
+            params.tau_ref,
             None,
         );
 
@@ -1651,14 +1390,20 @@ pub fn sim_izhikevich_eprop(
         // 4. Pre-spike trace: z_i = β·z_i + spike_i
         for i in 0..n {
             pre_trace[i] = pre_trace[i] * trace_decay
-                + if i < state.spikes.len() && state.spikes[i] != 0 { 1.0 } else { 0.0 };
+                + if i < state.spikes.len() && state.spikes[i] != 0 {
+                    1.0
+                } else {
+                    0.0
+                };
         }
 
         // 5. Eligibility update for active pre-neurons
         //    e_ij = β_e · e_ij + z_i · ψ_j · dt
         for i in 0..n {
             let tr = pre_trace[i];
-            if tr < 1e-6 { continue; }
+            if tr < 1e-6 {
+                continue;
+            }
             let start = connectome.row_ptr[i].max(0) as usize;
             let end = (connectome.row_ptr[i + 1] as usize).min(max_syn);
             for idx in start..end {
@@ -1677,30 +1422,35 @@ pub fn sim_izhikevich_eprop(
 
         // 8. Reset I = external_I
         state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() { state.I_buf[i] = 0.0; }
+        for i in n..state.I_buf.len() {
+            state.I_buf[i] = 0.0;
+        }
 
         // 9. CSR propagate from queue
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut state.queue, &mut state.I_buf, 1.0,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut state.queue,
+            &mut state.I_buf,
+            1.0,
         );
     }
 
     (spike_buffer, eligibility)
 }
 
-// ─── Ψ-wave simulation ────────────────────────────────
+// ─── GCO simulation ──────────────────────────────────
 
-/// Simulate `n_steps` of ψ-wave dynamics on a connectome.
+/// Simulate `n_steps` of graph-coupled oscillator dynamics on a connectome.
 ///
-/// `safe::psi_wave_step` signature:
-/// `psi_wave_step(v, u, h_real, h_imag, i_ext, speed, dt, hbar)`
-pub fn sim_psi(
-
-
+/// `safe::gco_step` signature:
+/// `gco_step(v, u, h_real, h_imag, i_ext, speed, dt)`
+pub fn sim_gco(
     connectome: &ConnectomeData,
     state: &mut BrainState,
-    params: &PsiParams,
+    params: &GcoParams,
     external_I: &[f32],
     n_steps: usize,
 ) -> Vec<i32> {
@@ -1709,9 +1459,8 @@ pub fn sim_psi(
     let spike_buf_len = n_steps * n;
     let mut spike_buffer = vec![0i32; spike_buf_len];
     let dt = params.dt_ms / 1000.0;
-    let hbar = params.hbar;
 
-    // Hψ scratch buffers (must match v size)
+    // H*psi scratch buffers (must match v size)
     let mut h_real = vec![0.0; state.n_padded];
     let mut h_imag = vec![0.0; state.n_padded];
     let mut speed = vec![1.0; state.n_padded];
@@ -1725,7 +1474,11 @@ pub fn sim_psi(
         for pre in 0..n_neurons {
             let start = connectome.row_ptr[pre].max(0) as usize;
             let end = (connectome.row_ptr[pre + 1] as usize).min(max_syn);
-            let mult = if pre < connectome.nt_types.len() { connectome.nt_types[pre] } else { 1.0 };
+            let mult = if pre < connectome.nt_types.len() {
+                connectome.nt_types[pre]
+            } else {
+                1.0
+            };
             for j in start..end {
                 let post = connectome.col_indices[j] as usize;
                 let w = connectome.values[j] * mult;
@@ -1741,15 +1494,18 @@ pub fn sim_psi(
             state.I_buf[i] = external_I[i];
         }
 
-        // 3. ψ-wave step
-        safe::psi_wave_step(
-            &mut state.v, &mut state.u,
-            &mut h_real, &mut h_imag,
-            &mut state.I_buf, &mut speed,
-            dt, hbar,
+        // 3. GCO step
+        safe::gco_step(
+            &mut state.v,
+            &mut state.u,
+            &mut h_real,
+            &mut h_imag,
+            &mut state.I_buf,
+            &mut speed,
+            dt,
         );
 
-        // 4. "Spike" if |ψ|² > threshold
+        // 4. "Spike" if |v+iu|² > threshold
         for i in 0..n_neurons {
             let prob = state.v[i] * state.v[i] + state.u[i] * state.u[i];
             if prob > 0.5 {
@@ -1811,8 +1567,13 @@ pub fn sim_hh(
 
         // 7. CSR propagate spikes from queue → Ii
         csr_propagate_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.nt_types, &mut queue, &mut cfg.Ii, scale,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            &mut queue,
+            &mut cfg.Ii,
+            scale,
         );
     }
 
@@ -1870,32 +1631,37 @@ pub fn sim_hh_synaptic(
 
         // 7. CSR propagate: jump conductances (not currents!)
         csr_propagate_conductance_from_queue(
-            &connectome.row_ptr, &connectome.col_indices, &connectome.values,
-            &connectome.receptor_types, &mut queue, kinetics, scale,
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.receptor_types,
+            &mut queue,
+            kinetics,
+            scale,
         );
     }
 
     spike_buffer
 }
 
-/// Simulate ψ-wave with time-varying external input, recording (v, u) trajectory.
+/// Simulate GCO with time-varying external input, recording (v, u) trajectory.
 ///
 /// Args:
 ///   connectome: CSR connectome
 ///   state: mutable brain state (persistent across calls)
-///   params: PsiParams { hbar, dt_ms }
+///   params: GcoParams { dt_ms }
 ///   external_I: flat 2D array `[n_changes * n]` — I_ext per change
 ///   n_changes: number of distinct external input settings
-///   steps_per_input: PSI steps per external input
+///   steps_per_input: GCO steps per external input
 ///   record_every: record (v, u) every N steps (0 = only at end of each input block)
 ///
 /// Returns:
 ///   (v_traj, u_traj) — each Vec<f32> of length n_records * n
 ///   where n_records = n_changes * steps_per_input / record_every
-pub fn sim_psi_record(
+pub fn sim_gco_record(
     connectome: &ConnectomeData,
     state: &mut BrainState,
-    params: &PsiParams,
+    params: &GcoParams,
     external_I: &[f32],
     n_changes: usize,
     steps_per_input: usize,
@@ -1904,8 +1670,11 @@ pub fn sim_psi_record(
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
     let dt = params.dt_ms / 1000.0;
-    let hbar = params.hbar;
-    let re = if record_every == 0 { steps_per_input } else { record_every };
+    let re = if record_every == 0 {
+        steps_per_input
+    } else {
+        record_every
+    };
     let recs_per_input = steps_per_input / re;
     let n_records = n_changes * recs_per_input;
 
@@ -1930,7 +1699,11 @@ pub fn sim_psi_record(
             for pre in 0..n_neurons {
                 let start = connectome.row_ptr[pre].max(0) as usize;
                 let end = (connectome.row_ptr[pre + 1] as usize).min(max_syn);
-                let mult = if pre < connectome.nt_types.len() { connectome.nt_types[pre] } else { 1.0 };
+                let mult = if pre < connectome.nt_types.len() {
+                    connectome.nt_types[pre]
+                } else {
+                    1.0
+                };
                 for j in start..end {
                     let post = connectome.col_indices[j] as usize;
                     let w = connectome.values[j] * mult;
@@ -1941,11 +1714,14 @@ pub fn sim_psi_record(
                 }
             }
 
-            safe::psi_wave_step(
-                &mut state.v, &mut state.u,
-                &mut h_real, &mut h_imag,
-                &mut state.I_buf, &mut speed,
-                dt, hbar,
+            safe::gco_step(
+                &mut state.v,
+                &mut state.u,
+                &mut h_real,
+                &mut h_imag,
+                &mut state.I_buf,
+                &mut speed,
+                dt,
             );
 
             if (step + 1) % re == 0 {

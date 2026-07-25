@@ -34,7 +34,10 @@ const DEFAULT_TARGET_MEAN_W: f32 = 0.5;
 const DEFAULT_WEIGHT_CLAMP: f32 = 5.0;
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    env::var(key).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
 }
 
 fn main() {
@@ -44,7 +47,10 @@ fn main() {
 
     // ─── GPU check ─────────────────────────────────────
     let n_gpus = cuda_kernels::get_device_count().unwrap_or(0);
-    if n_gpus == 0 { eprintln!("❌ No CUDA devices"); std::process::exit(1); }
+    if n_gpus == 0 {
+        eprintln!("❌ No CUDA devices");
+        std::process::exit(1);
+    }
     let _ = cuda_kernels::set_device(0);
     println!("  GPU: {n_gpus} device(s)");
 
@@ -70,7 +76,7 @@ fn main() {
     let homeo_w = env_or("HOMEOSTASIS", DEFAULT_HOMEOSTASIS);
     let target_mean_w = env_or("TARGET_MEAN_W", DEFAULT_TARGET_MEAN_W);
     let weight_clamp = env_or("WEIGHT_CLAMP", DEFAULT_WEIGHT_CLAMP);
-    let grad_clip_norm = env_or("GRAD_CLIP_NORM", 1.0);  // 0 = disabled
+    let grad_clip_norm = env_or("GRAD_CLIP_NORM", 1.0); // 0 = disabled
     let coherence_start = n_steps / 2;
 
     println!("  Input:  {path}");
@@ -86,22 +92,36 @@ fn main() {
         .unwrap_or_else(|e| panic!("Cannot load .taas: {e}"));
     let n = conn.n_neurons;
     let s = conn.n_synapses;
-    println!("  Loaded: {n} neurons, {s} synapses ({:.1} syn/neu, {:.3}s)",
-             s as f64 / n.max(1) as f64, t.elapsed().as_secs_f64());
+    println!(
+        "  Loaded: {n} neurons, {s} synapses ({:.1} syn/neu, {:.3}s)",
+        s as f64 / n.max(1) as f64,
+        t.elapsed().as_secs_f64()
+    );
 
-    if n == 0 || s == 0 { eprintln!("Empty connectome"); std::process::exit(0); }
+    if n == 0 || s == 0 {
+        eprintln!("Empty connectome");
+        std::process::exit(0);
+    }
 
     // ─── Upload to GPU ─────────────────────────────────
-    let ctx = cuda_kernels::GpuContext::new(n, s)
-        .unwrap_or_else(|e| panic!("GpuContext::new: {e}"));
+    let ctx =
+        cuda_kernels::GpuContext::new(n, s).unwrap_or_else(|e| panic!("GpuContext::new: {e}"));
     let ext_I = vec![0.0f32; n];
-    ctx.upload_connectome(&conn.row_ptr, &conn.col_indices, &conn.values,
-                          &conn.nt_types, &ext_I).unwrap();
+    ctx.upload_connectome(
+        &conn.row_ptr,
+        &conn.col_indices,
+        &conn.values,
+        &conn.nt_types,
+        &ext_I,
+    )
+    .unwrap();
     println!("  Uploaded to GPU");
 
     // ─── Init Kuramoto ──────────────────────────────────
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    let init_phases: Vec<f32> = (0..n).map(|_| (rng.gen::<f32>() - 0.5) * std::f32::consts::TAU).collect();
+    let init_phases: Vec<f32> = (0..n)
+        .map(|_| (rng.gen::<f32>() - 0.5) * std::f32::consts::TAU)
+        .collect();
     let omegas: Vec<f32> = (0..n).map(|_| 0.5 + rng.gen::<f32>() * 2.5).collect();
 
     // ─── Allocate GPU trajectory buffers ────────────────
@@ -116,7 +136,8 @@ fn main() {
     let mut d_grad_norm_partial = cuda_kernels::DevicePtr::<f32>::new(n_partial_blocks).unwrap();
 
     // Upload omegas + init phases
-    ctx.upload_kuramoto(&init_phases, &omegas, &vec![0.0f32; n]).unwrap();
+    ctx.upload_kuramoto(&init_phases, &omegas, &vec![0.0f32; n])
+        .unwrap();
 
     // ─── Warmup ─────────────────────────────────────────
     println!("  Warmup...");
@@ -148,7 +169,8 @@ fn main() {
         //  First call captures, subsequent calls replay
         //  (~480 kernel launches → 1 graph launch)
         // ═══════════════════════════════════════════════
-        ctx.upload_kuramoto(&init_phases, &omegas, &vec![0.0f32; n]).unwrap();
+        ctx.upload_kuramoto(&init_phases, &omegas, &vec![0.0f32; n])
+            .unwrap();
 
         ctx.bptt_epoch_graph_replay(
             d_phases_traj.as_mut_ptr(),
@@ -157,8 +179,14 @@ fn main() {
             d_grad_weights.as_mut_ptr(),
             d_grad_norm.as_mut_ptr(),
             d_grad_norm_partial.as_mut_ptr(),
-            n_steps, dt, coherence_start, coherence_w, temporal_w, grad_clip_norm,
-        ).unwrap();
+            n_steps,
+            dt,
+            coherence_start,
+            coherence_w,
+            temporal_w,
+            grad_clip_norm,
+        )
+        .unwrap();
 
         // ═══════════════════════════════════════════════
         //  Phase 5: Weight Update (outside graph — per-epoch scalars)
@@ -171,13 +199,25 @@ fn main() {
         let homeo_diff = mean_abs_w - target_mean_w;
         let homeostasis_scale = 2.0 * homeo_w * homeo_diff / s as f32;
 
-        let sparsity_scale = if sparsity_scale.is_finite() { sparsity_scale } else { 0.0 };
-        let homeostasis_scale = if homeostasis_scale.is_finite() { homeostasis_scale } else { 0.0 };
+        let sparsity_scale = if sparsity_scale.is_finite() {
+            sparsity_scale
+        } else {
+            0.0
+        };
+        let homeostasis_scale = if homeostasis_scale.is_finite() {
+            homeostasis_scale
+        } else {
+            0.0
+        };
 
         ctx.weight_update_async(
             d_grad_weights.as_ptr() as *const f32,
-            lr, sparsity_scale, homeostasis_scale, weight_clamp,
-        ).unwrap();
+            lr,
+            sparsity_scale,
+            homeostasis_scale,
+            weight_clamp,
+        )
+        .unwrap();
         ctx.sync().unwrap();
 
         // ═══════════════════════════════════════════════
@@ -189,7 +229,10 @@ fn main() {
             let epoch_ms = epoch_t0.elapsed().as_secs_f64() * 1000.0;
             let final_off = (n_steps - 1) * n;
             let (sum_s, sum_c): (f64, f64) = h_phases_full[final_off..final_off + n]
-                .iter().fold((0.0, 0.0), |(s, c), &th| (s + th.sin() as f64, c + th.cos() as f64));
+                .iter()
+                .fold((0.0, 0.0), |(s, c), &th| {
+                    (s + th.sin() as f64, c + th.cos() as f64)
+                });
             let coherence = ((sum_s * sum_s + sum_c * sum_c).sqrt() / n as f64) as f32;
 
             println!("  epoch {epoch:>4}/{n_epochs}: R={coherence:.4} mean|w|={mean_abs_w:.4} ({epoch_ms:.0}ms)");
@@ -197,15 +240,17 @@ fn main() {
     }
 
     let total_sec = total_t0.elapsed().as_secs_f64();
-    println!("\n  Total refine time: {total_sec:.2}s ({:.2}s/epoch)",
-             total_sec / n_epochs as f64);
+    println!(
+        "\n  Total refine time: {total_sec:.2}s ({:.2}s/epoch)",
+        total_sec / n_epochs as f64
+    );
 
     // ─── Download refined weights & save ──────────────
     ctx.download_csr_values(&mut conn.values).unwrap();
     println!("\n  Saving to {out_path}...");
 
-    let mut out_f = File::create(&out_path)
-        .unwrap_or_else(|e| panic!("Cannot create {out_path}: {e}"));
+    let mut out_f =
+        File::create(&out_path).unwrap_or_else(|e| panic!("Cannot create {out_path}: {e}"));
     conn.save_baked(&mut out_f)
         .unwrap_or_else(|e| panic!("Cannot save .taas: {e}"));
     println!("  ✅ Saved!\n");

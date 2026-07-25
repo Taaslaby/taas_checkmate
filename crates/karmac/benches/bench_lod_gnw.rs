@@ -17,7 +17,9 @@ fn grid_positions(n: usize, step: f32) -> Vec<(f32, f32, f32)> {
     for i in 0..side {
         for j in 0..side {
             for k in 0..side {
-                if pts.len() >= n { break; }
+                if pts.len() >= n {
+                    break;
+                }
                 pts.push((i as f32 * step, j as f32 * step, k as f32 * step));
             }
         }
@@ -27,7 +29,7 @@ fn grid_positions(n: usize, step: f32) -> Vec<(f32, f32, f32)> {
 
 /// A cluster of spikes near the origin — realistic activity wavefront.
 fn local_spike_indices(n_neurons: usize, n_spikes: usize) -> Vec<usize> {
-    (0..n_spikes.min(n_neurons)).collect()  // first N neurons = near origin
+    (0..n_spikes.min(n_neurons)).collect() // first N neurons = near origin
 }
 
 // ─── GNW Bench: old (alloc+rayon) vs new (zero-alloc) ────────────────────
@@ -40,7 +42,11 @@ fn gnw_forward_old(gnw: &GlobalWorkspace, r: &mut [f32]) {
     for i in 0..ws {
         let row_start = i * n;
         let row = gnw.gate_weights();
-        gates[i] = row[row_start..row_start + n].iter().zip(r.iter()).map(|(w, x)| w * x).sum();
+        gates[i] = row[row_start..row_start + n]
+            .iter()
+            .zip(r.iter())
+            .map(|(w, x)| w * x)
+            .sum();
     }
 
     let max_gate = gates.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -50,13 +56,19 @@ fn gnw_forward_old(gnw: &GlobalWorkspace, r: &mut [f32]) {
         sum += *g;
     }
     let inv_sum = 1.0 / sum;
-    for g in gates.iter_mut() { *g *= inv_sum; }
+    for g in gates.iter_mut() {
+        *g *= inv_sum;
+    }
 
     // HEAP ALLOC every call
     let delta: Vec<f32> = (0..n)
         .map(|i| {
             let row = gnw.broadcast_weights();
-            row[i * ws..(i + 1) * ws].iter().zip(gates.iter()).map(|(w, g)| w * g).sum()
+            row[i * ws..(i + 1) * ws]
+                .iter()
+                .zip(gates.iter())
+                .map(|(w, g)| w * g)
+                .sum()
         })
         .collect();
 
@@ -97,14 +109,17 @@ fn bench_gnw(c: &mut Criterion) {
 
 /// Old O(N×M) BSP update — пишет в bsp.lod чтобы избежать dead-code elimination.
 fn bsp_old_update(bsp: &mut CarmackBsp, spike_indices: &[usize]) {
-    let spike_positions: Vec<(f32, f32, f32)> = spike_indices.iter()
+    let spike_positions: Vec<(f32, f32, f32)> = spike_indices
+        .iter()
         .filter_map(|&idx| {
             let p = bsp.positions.get(idx)?;
             Some((p.x, p.y, p.z))
         })
         .collect();
 
-    if spike_positions.is_empty() { return; }
+    if spike_positions.is_empty() {
+        return;
+    }
 
     let dists = bsp.lod_distances;
     for i in 0..bsp.positions.len() {
@@ -115,14 +130,21 @@ fn bsp_old_update(bsp: &mut CarmackBsp, spike_indices: &[usize]) {
             let dy = p.y - sy;
             let dz = p.z - sz;
             let d2 = dx * dx + dy * dy + dz * dz;
-            if d2 < min_d2 { min_d2 = d2; }
+            if d2 < min_d2 {
+                min_d2 = d2;
+            }
         }
         if min_d2 != f32::MAX {
             let d = min_d2.sqrt();
-            bsp.lod[i] = if d <= dists[0] { LodLevel::HhLut }
-                else if d <= dists[1] { LodLevel::Izhikevich }
-                else if d <= dists[2] { LodLevel::Lif }
-                else { LodLevel::Tanh };
+            bsp.lod[i] = if d <= dists[0] {
+                LodLevel::HhLut
+            } else if d <= dists[1] {
+                LodLevel::Izhikevich
+            } else if d <= dists[2] {
+                LodLevel::Lif
+            } else {
+                LodLevel::Tanh
+            };
         }
     }
 }
@@ -131,7 +153,7 @@ fn bench_bsp(c: &mut Criterion) {
     // Сценарий 1: малая карта (100×100×100), всплеск покрывает всё
     // Octree overhead > benefit, т.к. почти все нейроны в радиусе
     for &(n, label) in &[(100, "small"), (1000, "medium")] {
-        let positions = grid_positions(n, 5.0);  // stride 5 → bounding box ~40-80
+        let positions = grid_positions(n, 5.0); // stride 5 → bounding box ~40-80
         let n_spikes = (n / 20).max(3);
         let spikes = local_spike_indices(n, n_spikes);
 
@@ -141,10 +163,16 @@ fn bench_bsp(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("bsp_{}", label));
 
         group.bench_function("old_O(N×M)", |b| {
-            b.iter(|| { bsp_old_update(&mut old, &spikes); black_box(&old.lod); })
+            b.iter(|| {
+                bsp_old_update(&mut old, &spikes);
+                black_box(&old.lod);
+            })
         });
         group.bench_function("new_octree", |b| {
-            b.iter(|| { new.update_lod(&spikes); black_box(&new.lod); })
+            b.iter(|| {
+                new.update_lod(&spikes);
+                black_box(&new.lod);
+            })
         });
 
         group.finish();
@@ -153,8 +181,8 @@ fn bench_bsp(c: &mut Criterion) {
     // Сценарий 2: большая карта (1000×1000×1000), локальный всплеск
     // Octree должен отсекать >99% нейронов
     for &(n, label) in &[(5000, "large_5k"), (20000, "large_20k")] {
-        let positions = grid_positions(n, 50.0);  // stride 50 → bounding box ~500-800
-        let n_spikes = (n / 100).max(5);           // fewer spikes, localized
+        let positions = grid_positions(n, 50.0); // stride 50 → bounding box ~500-800
+        let n_spikes = (n / 100).max(5); // fewer spikes, localized
         let spikes = local_spike_indices(n, n_spikes);
 
         let mut old = CarmackBsp::new(&positions);
@@ -163,10 +191,16 @@ fn bench_bsp(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("bsp_{}", label));
 
         group.bench_function("old_O(N×M)", |b| {
-            b.iter(|| { bsp_old_update(&mut old, &spikes); black_box(&old.lod); })
+            b.iter(|| {
+                bsp_old_update(&mut old, &spikes);
+                black_box(&old.lod);
+            })
         });
         group.bench_function("new_octree", |b| {
-            b.iter(|| { new.update_lod(&spikes); black_box(&new.lod); })
+            b.iter(|| {
+                new.update_lod(&spikes);
+                black_box(&new.lod);
+            })
         });
 
         group.finish();

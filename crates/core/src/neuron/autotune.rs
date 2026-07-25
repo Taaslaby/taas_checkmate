@@ -29,6 +29,8 @@
 //! factor on weights when computing I_total. All SNR calculations in
 //! this module account for this 10× kernel scale, so `weight_scale`
 //! refers to the **raw** init scale (before kernel multiplication).
+//!
+//! репер тоже любит автонастройку байасов хотя сам их не любит и ненавидит когда ему мешают подумать о своем бытие и и
 
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -93,7 +95,12 @@ fn estimate_signal_std(n_pre: usize, poisson_activity: f32, weight_scale: f32) -
 }
 
 /// Estimate raw weight scale needed to achieve a target SNR after kernel 10×.
-fn target_weight_scale_for_snr(n_pre: usize, poisson_activity: f32, bias: f32, target_snr: f32) -> f32 {
+fn target_weight_scale_for_snr(
+    n_pre: usize,
+    poisson_activity: f32,
+    bias: f32,
+    target_snr: f32,
+) -> f32 {
     // SNR = 10 · σ_raw / bias   →   σ_raw = SNR · bias / 10
     // σ_raw = sqrt(n_pre · w²/3 · α·(1-α))
     // w² = 3 · σ_raw² / (n_pre · α·(1-α))
@@ -156,7 +163,13 @@ pub fn probe_fr(
     // Pre-generate one frozen random input sequence
     let n_total = n_steps * n_pre;
     let frozen_input: Vec<i32> = (0..n_total)
-        .map(|_| if rng.gen::<f32>() < poisson_activity { 1 } else { 0 })
+        .map(|_| {
+            if rng.gen::<f32>() < poisson_activity {
+                1
+            } else {
+                0
+            }
+        })
         .collect();
 
     biases
@@ -276,8 +289,7 @@ pub fn suggest_config(
     // If the re-probed FR is too low (< 0.01), reject the adjustment.
     // This happens when bias is at the probe floor (1) and we reduce
     // weight_scale so much that neurons barely fire.
-    let (final_bias, final_weight_scale, final_expected_fr, final_snr)
-        = if needs_adjustment {
+    let (final_bias, final_weight_scale, final_expected_fr, final_snr) = if needs_adjustment {
         let re_probe = probe_fr(
             n_pre,
             n_post,
@@ -295,7 +307,8 @@ pub fn suggest_config(
             let fallback = probe_points
                 .iter()
                 .filter(|p| {
-                    let snr = estimate_signal_std(n_pre, poisson_activity, base_weight_scale) / p.bias.max(1.0);
+                    let snr = estimate_signal_std(n_pre, poisson_activity, base_weight_scale)
+                        / p.bias.max(1.0);
                     (1.5..=8.0).contains(&snr)
                 })
                 .min_by(|a, b| {
@@ -307,7 +320,8 @@ pub fn suggest_config(
 
             match fallback {
                 Some(fb) => {
-                    let fb_snr = estimate_signal_std(n_pre, poisson_activity, base_weight_scale) / fb.bias.max(1.0);
+                    let fb_snr = estimate_signal_std(n_pre, poisson_activity, base_weight_scale)
+                        / fb.bias.max(1.0);
                     (fb.bias, base_weight_scale, fb.avg_fr, fb_snr)
                 }
                 None => {
@@ -372,7 +386,11 @@ mod tests {
     #[test]
     fn test_suggest_config_reasonable() {
         let cfg = suggest_config(784, 256, 0.2, 0.1, 42);
-        assert!(cfg.bias > 0.0 && cfg.bias < 50.0, "bias={} out of range", cfg.bias);
+        assert!(
+            cfg.bias > 0.0 && cfg.bias < 50.0,
+            "bias={} out of range",
+            cfg.bias
+        );
         assert!(cfg.weight_scale > 0.01 && cfg.weight_scale < 10.0);
         assert!(cfg.lr_in > 0.0 && cfg.lr_in < 0.2);
         assert_eq!(cfg.d, 2.0);
@@ -389,7 +407,11 @@ mod tests {
         // Raw σ without kernel: sqrt(784 * 0.2 * 0.8 * 0.357² / 3) ≈ 2.31
         // With 10× kernel: 10 * 2.31 = 23.1
         let s = estimate_signal_std(784, 0.2, 0.357);
-        assert!((s - 23.1).abs() < 1.0, "std={} expected ~23.1 (with 10× kernel)", s);
+        assert!(
+            (s - 23.1).abs() < 1.0,
+            "std={} expected ~23.1 (with 10× kernel)",
+            s
+        );
     }
 
     #[test]
@@ -401,7 +423,11 @@ mod tests {
         //   = sqrt(1728 / 12544)
         //   = sqrt(0.138) = 0.371
         let w = target_weight_scale_for_snr(784, 0.2, 8.0, 3.0);
-        assert!((w - 0.371).abs() < 0.05, "w={} expected ~0.371 (with 10× kernel)", w);
+        assert!(
+            (w - 0.371).abs() < 0.05,
+            "w={} expected ~0.371 (with 10× kernel)",
+            w
+        );
     }
 
     #[test]
@@ -414,15 +440,27 @@ mod tests {
     fn test_poisson_activity_edge_cases() {
         // With 10× kernel: σ = 10 · sqrt(784 · 0.01·0.99 · 0.357² / 3) ≈ 5.74
         let s_low = estimate_signal_std(784, 0.01, 0.357);
-        assert!(s_low > 0.0 && s_low < 10.0, "low activity std={} out of range", s_low);
+        assert!(
+            s_low > 0.0 && s_low < 10.0,
+            "low activity std={} out of range",
+            s_low
+        );
 
         // α=0.99: σ = 10 · sqrt(784 · 0.99·0.01 · 0.357² / 3) ≈ 5.74 (same due to symmetry)
         let s_high = estimate_signal_std(784, 0.99, 0.357);
-        assert!(s_high > 0.0 && s_high < 10.0, "high activity std={} out of range", s_high);
+        assert!(
+            s_high > 0.0 && s_high < 10.0,
+            "high activity std={} out of range",
+            s_high
+        );
 
         // Very low activity → signal is near-zero → formula may hit max clamp
         let w = target_weight_scale_for_snr(784, 0.001, 8.0, 3.0);
-        assert!(w > 0.0 && w <= 10.0, "low activity clamp w={} out of range", w);
+        assert!(
+            w > 0.0 && w <= 10.0,
+            "low activity clamp w={} out of range",
+            w
+        );
     }
 
     #[test]
@@ -433,7 +471,11 @@ mod tests {
         // With 10× kernel, FR at low bias can be higher, so target_fr=0.015 for safety.
         let cfg = suggest_config(784, 256, 0.2, 0.015, 42);
         // Just check the config is valid
-        assert!(cfg.bias > 0.0 && cfg.bias < 50.0, "bias={} should be reasonable", cfg.bias);
+        assert!(
+            cfg.bias > 0.0 && cfg.bias < 50.0,
+            "bias={} should be reasonable",
+            cfg.bias
+        );
         assert!(cfg.weight_scale > 0.0 && cfg.weight_scale <= 10.0);
         assert!(cfg.snr > 0.0, "snr should be positive");
     }

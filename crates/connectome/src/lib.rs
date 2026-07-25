@@ -40,28 +40,31 @@
 
 pub mod cortical;
 pub mod data;
+pub mod propagate;
 pub mod rcm;
 pub mod record;
 pub mod sim;
+pub mod types;
 
-pub use cortical::{LayerId, LayerAssignment, LaminarRule, ProjectionType,
-    LaminarConnectomeBuilder, LayerStats};
+pub use cortical::{
+    LaminarConnectomeBuilder, LaminarRule, LayerAssignment, LayerId, LayerStats, ProjectionType,
+};
 pub use data::{
-    ConnectomeData, NeuronGroup,
-    BrainIO, InputChannel, InputEncoding, OutputChannel, OutputReadout,
+    BrainIO, ConnectomeData, InputChannel, InputEncoding, NeuronGroup, OutputChannel, OutputReadout,
+};
+pub use rcm::{
+    apply_permutation_to_csr, apply_permutation_to_groups, apply_permutation_to_state, bandwidth,
+    build_adjacency, fiedler_vector, mean_bandwidth, reverse_cuthill_mckee, spectral_ordering,
 };
 pub use record::{SpikeRecorder, SpikeRecordings};
-pub use rcm::{reverse_cuthill_mckee, build_adjacency, bandwidth, mean_bandwidth,
-    apply_permutation_to_csr, apply_permutation_to_state, apply_permutation_to_groups,
-    spectral_ordering, fiedler_vector};
 pub use sim::{
-    BrainState, NeuronModel, LifParams, IzhikevichParams, IzhikevichDualParams, RateParams, PsiParams,
-    sim_lif, sim_lif_synaptic, sim_hh, sim_hh_synaptic,
-    sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic, sim_rate, sim_psi, sim_psi_record,
-    csr_propagate, csr_propagate_from_queue, csr_propagate_conductance_from_queue,
-    push_spikes_to_queue, SpikeQueue,
+    csr_propagate, csr_propagate_conductance_from_queue, csr_propagate_from_queue,
+    push_spikes_to_queue, sim_gco, sim_gco_record, sim_hh, sim_hh_synaptic, sim_izhikevich,
+    sim_izhikevich_dual, sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate, BrainState,
+    GcoParams, IzhikevichDualParams, IzhikevichParams, LifParams, NeuronModel, RateParams,
+    SpikeQueue,
 };
-pub use taas_kernels::neuron::synapse::{SynapticKinetics, DecayFactors, ReceptorType};
+pub use taas_kernels::neuron::synapse::{DecayFactors, ReceptorType, SynapticKinetics};
 
 #[cfg(feature = "cuda")]
-pub use sim::gpu::{sim_lif_gpu, sim_izhikevich_gpu};
+pub use sim::gpu::{sim_izhikevich_gpu, sim_lif_gpu};

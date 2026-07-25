@@ -99,7 +99,11 @@ pub struct BasalGanglia {
 impl BasalGanglia {
     /// Create a new Basal Ganglia with Xavier-initialized weights.
     pub fn new(n_cortical: usize, n_actions: usize) -> Self {
-        Self::with_config(BgConfig { n_cortical, n_actions, ..Default::default() })
+        Self::with_config(BgConfig {
+            n_cortical,
+            n_actions,
+            ..Default::default()
+        })
     }
 
     /// Create with explicit weight matrix (useful for demo/debug/pretrained).
@@ -114,7 +118,11 @@ impl BasalGanglia {
             }
         }
         Self {
-            config: BgConfig { n_cortical, n_actions, ..Default::default() },
+            config: BgConfig {
+                n_cortical,
+                n_actions,
+                ..Default::default()
+            },
             state: vec![0.0; n_cortical],
             cortico_stratial,
             lateral_inhibit,
@@ -181,9 +189,7 @@ impl BasalGanglia {
         for a in 0..n_a {
             let row_start = a * n_c;
             let row = &self.cortico_stratial[row_start..row_start + n_c];
-            self.drive_buf[a] = row.iter().zip(self.state.iter())
-                .map(|(w, s)| w * s)
-                .sum();
+            self.drive_buf[a] = row.iter().zip(self.state.iter()).map(|(w, s)| w * s).sum();
         }
 
         // 3. D1 (Go) vs D2 (NoGo) modulation
@@ -210,19 +216,26 @@ impl BasalGanglia {
         for i in 0..n_a {
             for j in 0..n_a {
                 if i != j {
-                    self.output_buf[i] += self.lateral_inhibit[i * n_a + j] * self.drive_buf[j].max(0.0);
+                    self.output_buf[i] +=
+                        self.lateral_inhibit[i * n_a + j] * self.drive_buf[j].max(0.0);
                 }
             }
         }
 
         // 6. Thalamic relay: re-enable winning channel
         if let Some(prev) = self.prev_action {
-            let max_output = self.output_buf.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max_output = self
+                .output_buf
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
             self.output_buf[prev] += self.config.thalamus_gain * 0.5 * (max_output.abs() + 0.1);
         }
 
         // 7. Winner-take-all: select argmax
-        let winner = self.output_buf.iter()
+        let winner = self
+            .output_buf
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
@@ -242,9 +255,7 @@ impl BasalGanglia {
         for a in 0..n_a {
             let row_start = a * n_c;
             let row = &self.cortico_stratial[row_start..row_start + n_c];
-            drive[a] = row.iter().zip(self.state.iter())
-                .map(|(w, s)| w * s)
-                .sum();
+            drive[a] = row.iter().zip(self.state.iter()).map(|(w, s)| w * s).sum();
         }
         drive
     }
@@ -256,7 +267,9 @@ impl BasalGanglia {
         let mut exps: Vec<f32> = drives.iter().map(|&d| (d - max_d).exp()).collect();
         let sum: f32 = exps.iter().sum();
         if sum > 1e-10 {
-            for e in &mut exps { *e /= sum; }
+            for e in &mut exps {
+                *e /= sum;
+            }
         }
         exps
     }
@@ -267,8 +280,12 @@ impl BasalGanglia {
         self.prev_action = None;
     }
 
-    pub fn n_cortical(&self) -> usize { self.config.n_cortical }
-    pub fn n_actions(&self) -> usize { self.config.n_actions }
+    pub fn n_cortical(&self) -> usize {
+        self.config.n_cortical
+    }
+    pub fn n_actions(&self) -> usize {
+        self.config.n_actions
+    }
 }
 
 #[cfg(test)]
@@ -316,7 +333,11 @@ mod tests {
         let input = vec![0.5, 0.3, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0];
         let probs = bg.softmax(&input);
         let sum: f32 = probs.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "softmax should sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "softmax should sum to 1, got {}",
+            sum
+        );
     }
 
     #[test]

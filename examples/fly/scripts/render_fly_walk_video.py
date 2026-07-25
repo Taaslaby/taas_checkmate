@@ -1,177 +1,111 @@
 #!/usr/bin/env python3
 """
-Atlasov Neuromotor Engine — 3D Drosophila Walking Animation Renderer.
+🎥 Render MuJoCo Fly Walk Animation with Atlasov Neuromotor Engine & CPG
+========================================================================
+Записывает 3D кадры реального движения MuJoCo мухи под управлением
+VNC CPG + Atlasov Ca²⁺ мышц (AtlasovFlyMuJoCo).
 
-Renders 3D offscreen frames of the Drosophila walking under Atlasov Muscle Engine Tripod Gait
-and outputs a high-resolution animated WebP/GIF video.
-
-Author / Concept: Atlasov Anton (Атласов Антон)
+Включает динамическийрасчет крутящих моментов суставов τ = ΔF - K·q - B·q̇,
+благодаря чему лапки отталкиваются от пола и муха физически шагает вперед.
 """
 
+import os
 import sys
 import math
 from pathlib import Path
 import numpy as np
-from PIL import Image
+
+# Offscreen rendering backend for MuJoCo
+os.environ["MUJOCO_GL"] = "egl"
 
 PROJ_ROOT = Path(__file__).parent.parent.parent
 if str(PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJ_ROOT))
 
+# Import CPG & Atlasov Fly Engine
+sys.path.insert(0, str(Path(__file__).parent))
+from vnc_cpg_atlasov_embodied import VNCCPG, AtlasovFlyMuJoCo, SCENE_XML
+
 import mujoco as mu
+from PIL import Image
 
-SCENE_XML = Path(__file__).parent.parent / "models" / "scene.xml"
-OUTPUT_WEBP = Path(__file__).parent.parent / "fly_walk_demo.webp"
+def main():
+    print("🎥 Рендеринг физической ходьбы мухи (Atlasov Ca²⁺ + VNC CPG)...")
+    
+    if not SCENE_XML.exists():
+        print(f"❌ Файл сцены не найден: {SCENE_XML}")
+        sys.exit(1)
 
-def render_walking_animation(n_frames=120, fps=30):
-    print("=" * 80)
-    print("  Atlasov Neuromotor Engine — 3D Offscreen Animation Renderer")
-    print("  Author / Concept: Atlasov Anton (Атласов Антон)")
-    print("=" * 80)
+    # 1. Инициализация полной симуляции AtlasovFlyMuJoCo
+    sim = AtlasovFlyMuJoCo(xml_path=SCENE_XML)
+    cpg = VNCCPG(freq_hz=6.0)
 
-    print(f"\n[1/3] Loading 3D Physical MuJoCo Body from: {SCENE_XML}")
-    model = mu.MjModel.from_xml_path(str(SCENE_XML))
-    data = mu.MjData(model)
+    renderer = mu.Renderer(sim.model, height=480, width=640)
+    thorax_bid = mu.mj_name2id(sim.model, mu.mjtObj.mjOBJ_BODY, 'thorax')
 
-    # Leg actuators
-    leg_joint_names = [
-        'femur_T1_left', 'tibia_T1_left',
-        'femur_T1_right', 'tibia_T1_right',
-        'femur_T2_left', 'tibia_T2_left',
-        'femur_T2_right', 'tibia_T2_right',
-        'femur_T3_left', 'tibia_T3_left',
-        'femur_T3_right', 'tibia_T3_right',
-    ]
+    # Настройка камеры 3D арены
+    cam = mu.MjvCamera()
+    cam.type = mu.mjtCamera.mjCAMERA_FREE
+    cam.distance = 0.95     # Полный вид мухи на поле
+    cam.elevation = -25.0   # 3/4 сверху
+    cam.azimuth = 45.0      # Ракурс сбоку-спереди
 
-    dof_indices = []
-    actuator_indices = []
-    for jname in leg_joint_names:
-        jid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_JOINT, jname)
-        aid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_ACTUATOR, jname)
-        if jid >= 0:
-            dof_indices.append(model.jnt_dofadr[jid])
-        if aid >= 0:
-            actuator_indices.append(aid)
-
-    n_joints = len(dof_indices)
-    n_muscles = math.ceil((n_joints * 2) / 8) * 8
-
-    # Muscle arrays
-    ca = np.zeros(n_muscles, dtype=np.float32)
-    tension = np.zeros(n_muscles, dtype=np.float32)
-    spikes = np.zeros(n_muscles, dtype=np.int32)
-    resets = np.zeros(n_muscles, dtype=np.int32)
-
-    d_ca = np.full(n_muscles, 0.5, dtype=np.float32)
-    tau_pump = np.full(n_muscles, 15.0, dtype=np.float32)
-    eta_reset = np.full(n_muscles, 0.8, dtype=np.float32)
-    t_max = np.full(n_muscles, 0.5, dtype=np.float32)
-    kd = np.full(n_muscles, 0.3, dtype=np.float32)
-
-    joint_df = np.zeros(n_muscles // 2, dtype=np.float32)
-    joint_stf = np.zeros(n_muscles // 2, dtype=np.float32)
-    joint_dmp = np.zeros(n_muscles // 2, dtype=np.float32)
-
-    k0 = np.full(n_muscles // 2, 0.05, dtype=np.float32)
-    beta = np.full(n_muscles // 2, 0.2, dtype=np.float32)
-    b0 = np.full(n_muscles // 2, 0.005, dtype=np.float32)
-    alpha = np.full(n_muscles // 2, 0.02, dtype=np.float32)
-
-    dt = model.opt.timestep
-
-    try:
-        import taas_checkmate
-        step_atlasov_fn = getattr(taas_checkmate, "step_atlasov_neuromotor", None) or getattr(getattr(taas_checkmate, "neurons", None), "step_atlasov_neuromotor", None)
-    except ImportError:
-        step_atlasov_fn = None
-
-    renderer = mu.Renderer(model, height=480, width=640)
     frames = []
+    n_steps = 3000  # 1.5 сек реального времени (dt = 0.5 ms)
+    render_interval = 30  # 100 кадров (~30 FPS)
 
-    print(f"[2/3] Simulating and Rendering {n_frames} Frames of 3D Locomotion...")
+    print(f"🎬 Симуляция {n_steps} физических шагов с мышцами Атласова...")
 
-    substeps_per_frame = int(1.0 / (fps * dt))
-    smooth_ctrl = np.zeros(min(n_joints, len(actuator_indices)), dtype=np.float32)
+    start_pos = sim.data.qpos[:3].copy()
 
-    for frame_idx in range(n_frames):
-        for _ in range(substeps_per_frame):
-            step = int(data.time / dt)
-            # Natural 3.0 Hz biological stride frequency for graceful walking
-            cpg_wave = math.sin(2.0 * math.pi * 3.0 * data.time)
+    for step in range(n_steps):
+        # 1. CPG шаг
+        cpg.step()
 
-            spikes.fill(0)
-            if cpg_wave > 0.0:
-                # Tripod A Flexors active, Tripod B Extensors active
-                spikes[0:4:2] = 1; spikes[13:17:2] = 1; spikes[16:20:2] = 1
-                spikes[5:9:2] = 1; spikes[9:13:2] = 1; spikes[21:25:2] = 1
+        # 2. Собираем углы суставов всех 6 лапок (66 суставов)
+        all_angles = []
+        for leg_idx in range(cpg.n_legs):
+            all_angles.extend(cpg.get_joint_positions(leg_idx))
+
+        # 3. Шаг мышц Атласова + Физика MuJoCo (Atlasov Neuromotor Engine)
+        res = sim.step(all_angles)
+
+        # 4. Запись кадра
+        if step % render_interval == 0:
+            if thorax_bid >= 0:
+                cam.lookat = sim.data.xpos[thorax_bid].copy()
             else:
-                # Tripod B Flexors active, Tripod A Extensors active
-                spikes[4:8:2] = 1; spikes[8:12:2] = 1; spikes[20:24:2] = 1
-                spikes[1:5:2] = 1; spikes[12:16:2] = 1; spikes[17:21:2] = 1
+                cam.lookat = sim.data.qpos[:3].copy()
 
-            if step_atlasov_fn is not None:
-                step_atlasov_fn(
-                    ca, tension, spikes, resets, float(dt * 1000.0),
-                    d_ca, tau_pump, eta_reset, t_max, kd,
-                    joint_df, joint_stf, joint_dmp,
-                    k0, beta, b0, alpha
-                )
-            else:
-                for m in range(n_muscles):
-                    if spikes[m] > 0: ca[m] += d_ca[m]
-                    ca[m] *= math.exp(-dt * 1000.0 / tau_pump[m])
-                    ca2 = ca[m]**2; kd2 = kd[m]**2
-                    tension[m] = t_max[m] * (ca2 / (ca2 + kd2 + 1e-8))
+            renderer.update_scene(sim.data, camera=cam)
+            rgb_frame = renderer.render()
+            frames.append(Image.fromarray(rgb_frame))
 
-                for j in range(n_joints):
-                    flx, ext = 2 * j, 2 * j + 1
-                    joint_df[j] = tension[ext] - tension[flx]
-                    ca_sum = ca[flx] + ca[ext]
-                    joint_stf[j] = k0[j] + beta[j] * ca_sum
-                    joint_dmp[j] = b0[j] + alpha[j] * ca_sum
+    disp_cm = np.linalg.norm(sim.data.qpos[:3] - start_pos)
+    disp_mm = disp_cm * 10.0
+    print(f"🐾 Дистанция ходьбы мухи в видео: {disp_mm:.2f} мм ({disp_cm:.2f} см)!")
 
-            # 3. Apply Atlasov Muscle Drive into MuJoCo Actuators with Temporal Low-Pass Filtering
-            for j in range(min(n_joints, len(actuator_indices))):
-                act_idx = actuator_indices[j]
-                dof_idx = dof_indices[j]
-                q_dot = data.qvel[dof_idx]
+    out_file = Path("/home/taaslab/Проекты/asm_engines/taas_checkmate/examples/fly/fly_walk_cpg.webp")
+    artifact_file = Path("/home/taaslab/.gemini/antigravity-ide/brain/01abdf90-8c04-48e6-8d5c-b8df411d43c4/fly_walk_cpg.webp")
+    out_file.parent.mkdir(parents=True, exist_ok=True)
 
-                df = joint_df[j]
-                b_dmp = joint_dmp[j]
-
-                jname = leg_joint_names[j]
-                bias = 0.25 if 'femur' in jname else (-0.15 if 'tibia' in jname else 0.1)
-
-                raw_target = np.clip(bias + df * 0.15, -0.4, 0.5)
-                # Exponential moving average filter (tau = 40 ms)
-                smooth_ctrl[j] += (dt / 0.04) * (raw_target - smooth_ctrl[j])
-
-                data.ctrl[act_idx] = smooth_ctrl[j]
-                data.qfrc_applied[dof_idx] = -b_dmp * q_dot
-
-            # Enable claw adhesion strictly during stance phase for grounded tripod legs
-            claw_map_a = [72, 75, 76] # T1_left, T2_right, T3_left
-            claw_map_b = [73, 74, 77] # T1_right, T2_left, T3_right
-
-            if cpg_wave > 0.0:
-                for c in claw_map_a: data.ctrl[c] = 0.5
-                for c in claw_map_b: data.ctrl[c] = 0.0
-            else:
-                for c in claw_map_b: data.ctrl[c] = 0.5
-                for c in claw_map_a: data.ctrl[c] = 0.0
-
-            mu.mj_step(model, data)
-
-        renderer.update_scene(data)
-        rgb = renderer.render()
-        frames.append(Image.fromarray(rgb))
-
-        if (frame_idx + 1) % 30 == 0:
-            print(f"      Rendered {frame_idx + 1}/{n_frames} frames (sim_t = {data.time*1000:.1f} ms)")
-
-    print(f"[3/3] Saving Animated WebP to: {OUTPUT_WEBP}")
-    frames[0].save(str(OUTPUT_WEBP), save_all=True, append_images=frames[1:], duration=int(1000 / fps), loop=0)
-    print(f"\n✓ Animated WebP Created Successfully! ({OUTPUT_WEBP.stat().st_size / 1e6:.2f} MB)")
+    print(f"💾 Сохранение {len(frames)} кадров в {out_file.name}...")
+    frames[0].save(
+        out_file,
+        save_all=True,
+        append_images=frames[1:],
+        duration=40,  # 25 FPS
+        loop=0
+    )
+    frames[0].save(
+        artifact_file,
+        save_all=True,
+        append_images=frames[1:],
+        duration=40,  # 25 FPS
+        loop=0
+    )
+    print(f"✅ Видео физической ходьбы мухи сохранено: {out_file}")
+    print(f"✅ Копия в артефактах: {artifact_file}")
 
 if __name__ == "__main__":
-    render_walking_animation(n_frames=120, fps=30)
+    main()

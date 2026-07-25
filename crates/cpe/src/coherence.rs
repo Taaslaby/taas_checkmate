@@ -59,7 +59,10 @@ mod tests {
     fn test_phase_coherence_all_aligned() {
         let phases = vec![0.0f32, 0.0, 0.0, 0.0];
         let r = phase_coherence(&phases);
-        assert!((r - 1.0).abs() < 1e-6, "aligned phases should have R=1, got {r}");
+        assert!(
+            (r - 1.0).abs() < 1e-6,
+            "aligned phases should have R=1, got {r}"
+        );
     }
 
     #[test]
@@ -74,7 +77,10 @@ mod tests {
         let counts = vec![10.0f32; 8];
         let (h, err) = spike_entropy(&counts, 100, 3.0);
         // 8 uniform bins: p=0.1 each, H = -8 * 0.1 * log2(0.1) = 2.658
-        assert!((h - 2.658_f32).abs() < 0.01, "uniform 8-bin entropy should be ~2.658, got {h}");
+        assert!(
+            (h - 2.658_f32).abs() < 0.01,
+            "uniform 8-bin entropy should be ~2.658, got {h}"
+        );
         let expected_err = (2.658_f32 - 3.0_f32).abs();
         assert!((err - expected_err).abs() < 0.01);
     }
@@ -84,6 +90,10 @@ mod tests {
         let phases = vec![0.0f32, 3.0, 1.0, 4.0];
         let prev = vec![0.0f32, 1.0, 0.5, 2.0];
         let spikes = detect_spikes(&phases, &prev, 2.5);
-        assert_eq!(spikes, vec![0, 1, 0, 1], "should detect rising edge through 2.5");
+        assert_eq!(
+            spikes,
+            vec![0, 1, 0, 1],
+            "should detect rising edge through 2.5"
+        );
     }
 }

@@ -15,10 +15,7 @@ const TAAS_VERSION: u32 = 1;
 
 /// Cast any POD slice to &[u8] for raw I/O.
 unsafe fn pod_as_bytes<T>(slice: &[T]) -> &[u8] {
-    std::slice::from_raw_parts(
-        slice.as_ptr() as *const u8,
-        std::mem::size_of_val(slice),
-    )
+    std::slice::from_raw_parts(slice.as_ptr() as *const u8, std::mem::size_of_val(slice))
 }
 
 /// A named group of neuron indices (e.g. "dn", "mn", "visual_afferents").
@@ -79,15 +76,27 @@ impl ConnectomeData {
         nt_types: Vec<f32>,
         groups: Vec<(&str, Vec<usize>)>,
     ) -> Self {
-        let n_neurons = if row_ptr.len() > 1 { row_ptr.len() - 1 } else { 0 };
+        let n_neurons = if row_ptr.len() > 1 {
+            row_ptr.len() - 1
+        } else {
+            0
+        };
         let n_synapses = values.len();
 
-        assert_eq!(row_ptr.len(), n_neurons + 1,
-            "row_ptr must have n_neurons + 1 elements");
-        assert_eq!(col_indices.len(), n_synapses,
-            "col_indices length must match values length");
-        assert!(nt_types.is_empty() || nt_types.len() >= n_neurons,
-            "nt_types must have at least n_neurons elements");
+        assert_eq!(
+            row_ptr.len(),
+            n_neurons + 1,
+            "row_ptr must have n_neurons + 1 elements"
+        );
+        assert_eq!(
+            col_indices.len(),
+            n_synapses,
+            "col_indices length must match values length"
+        );
+        assert!(
+            nt_types.is_empty() || nt_types.len() >= n_neurons,
+            "nt_types must have at least n_neurons elements"
+        );
 
         Self {
             n_neurons,
@@ -95,17 +104,26 @@ impl ConnectomeData {
             row_ptr,
             col_indices,
             values,
-            nt_types: if nt_types.is_empty() { vec![1.0; n_neurons] } else { nt_types },
+            nt_types: if nt_types.is_empty() {
+                vec![1.0; n_neurons]
+            } else {
+                nt_types
+            },
             receptor_types: Vec::new(),
-            groups: groups.into_iter()
-                .map(|(name, indices)| NeuronGroup { name: name.to_string(), indices })
+            groups: groups
+                .into_iter()
+                .map(|(name, indices)| NeuronGroup {
+                    name: name.to_string(),
+                    indices,
+                })
                 .collect(),
         }
     }
 
     /// Get a named group by name. Returns None if not found.
     pub fn group(&self, name: &str) -> Option<&[usize]> {
-        self.groups.iter()
+        self.groups
+            .iter()
             .find(|g| g.name == name)
             .map(|g| g.indices.as_slice())
     }
@@ -141,11 +159,8 @@ impl ConnectomeData {
         if !self.receptor_types.is_empty() {
             return;
         }
-        self.receptor_types = crate::data::build_receptor_types_from_csv(
-            &self.row_ptr,
-            self.n_synapses,
-            nt_labels,
-        );
+        self.receptor_types =
+            crate::data::build_receptor_types_from_csv(&self.row_ptr, self.n_synapses, nt_labels);
     }
 
     /// Build per-synapse receptor_types with FlyWire neurotransmitter mapping.
@@ -187,8 +202,11 @@ impl ConnectomeData {
         let perm = crate::rcm::reverse_cuthill_mckee(&adj);
 
         let (new_rp, new_ci, new_vals, new_nt) = crate::rcm::apply_permutation_to_csr(
-            &self.row_ptr, &self.col_indices, &self.values,
-            &self.nt_types, &perm,
+            &self.row_ptr,
+            &self.col_indices,
+            &self.values,
+            &self.nt_types,
+            &perm,
         );
 
         self.row_ptr = new_rp;
@@ -247,8 +265,10 @@ impl ConnectomeData {
         r.read_exact(&mut buf32)?;
         let magic = u32::from_ne_bytes(buf32);
         if magic != TAAS_MAGIC {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                format!(".taas: bad magic {magic:#x}, expected {TAAS_MAGIC:#x}")));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(".taas: bad magic {magic:#x}, expected {TAAS_MAGIC:#x}"),
+            ));
         }
 
         r.read_exact(&mut buf32)?;
@@ -359,7 +379,11 @@ pub fn build_receptor_types_from_csr(
     nt_types: &[f32],
 ) -> Vec<u8> {
     let mut receptors = vec![0u8; n_synapses.max(1)];
-    let n = if row_ptr.len() > 1 { row_ptr.len() - 1 } else { 0 };
+    let n = if row_ptr.len() > 1 {
+        row_ptr.len() - 1
+    } else {
+        0
+    };
     let mut syn_idx = 0usize;
     for pre in 0..n {
         let nt = nt_types.get(pre).copied().unwrap_or(1.0);
@@ -394,7 +418,11 @@ pub fn build_receptor_types_from_csr_flywire(
     nt_map: &[f32],
 ) -> Vec<u8> {
     let mut receptors = vec![0u8; n_synapses.max(1)];
-    let n = if row_ptr.len() > 1 { row_ptr.len() - 1 } else { 0 };
+    let n = if row_ptr.len() > 1 {
+        row_ptr.len() - 1
+    } else {
+        0
+    };
     let mut syn_idx = 0usize;
     for pre in 0..n {
         let nt = nt_map.get(pre).copied().unwrap_or(1.0);
@@ -403,10 +431,21 @@ pub fn build_receptor_types_from_csr_flywire(
         // -1 = GABA → GABA_A (2, fast inh)
         // +2 = GLUT → GluCl (5, fast inh — Cl⁻ channel!)
         // -2 = DA/SER/OCT → mAChR (6, slow mod)
-        let rec = if nt > 1.5 { 5u8 }      // +2.0 → GluCl (GLUT, inhibitory!)
-              else if nt > 0.5 { 4u8 }     // +1.0 → nAChR (ACh, excitatory)
-              else if nt < -1.5 { 6u8 }    // -2.0 → mAChR (DA/SER/OCT, slow mod)
-              else { 2u8 };                // -1.0 or 0 → GABA_A (GABA, fast inh)
+        let rec = if nt > 1.5 {
+            5u8
+        }
+        // +2.0 → GluCl (GLUT, inhibitory!)
+        else if nt > 0.5 {
+            4u8
+        }
+        // +1.0 → nAChR (ACh, excitatory)
+        else if nt < -1.5 {
+            6u8
+        }
+        // -2.0 → mAChR (DA/SER/OCT, slow mod)
+        else {
+            2u8
+        }; // -1.0 or 0 → GABA_A (GABA, fast inh)
         let start = row_ptr.get(pre).copied().unwrap_or(0).max(0) as usize;
         let end = (row_ptr.get(pre + 1).copied().unwrap_or(0) as usize).min(n_synapses);
         for _ in start..end {
@@ -440,18 +479,22 @@ pub fn build_receptor_types_from_csv(
     nt_labels: &[String],
 ) -> Vec<u8> {
     let mut receptors = vec![0u8; n_synapses.max(1)];
-    let n = if row_ptr.len() > 1 { row_ptr.len() - 1 } else { 0 };
+    let n = if row_ptr.len() > 1 {
+        row_ptr.len() - 1
+    } else {
+        0
+    };
     let mut syn_idx = 0usize;
     for pre in 0..n {
         let rec = if let Some(label) = nt_labels.get(pre) {
             match label.as_str() {
-                "ACh" => 4u8,   // nAChR (fast exc)
-                "GABA" => 2u8,  // GABA_A (fast inh)
-                "GLUT" => 5u8,  // GluCl (fast inh — Cl⁻!)
-                "DA" | "DOPAMINE" => 6u8,   // mAChR (slow mod)
+                "ACh" => 4u8,                       // nAChR (fast exc)
+                "GABA" => 2u8,                      // GABA_A (fast inh)
+                "GLUT" => 5u8,                      // GluCl (fast inh — Cl⁻!)
+                "DA" | "DOPAMINE" => 6u8,           // mAChR (slow mod)
                 "SER" | "SEROTONIN" | "5HT" => 6u8, // mAChR
-                "OCT" | "OCTOPAMINE" => 6u8, // mAChR
-                _ => 0u8,       // AMPA fallback
+                "OCT" | "OCTOPAMINE" => 6u8,        // mAChR
+                _ => 0u8,                           // AMPA fallback
             }
         } else {
             0u8 // AMPA fallback
@@ -496,7 +539,7 @@ mod tests {
         // 4 neurons with different NT types — Drosophila mapping
         let row_ptr = vec![0i32, 1, 2, 3, 4];
         let n_syn = 4;
-        let nt_map = vec![1.0, -1.0, 2.0, -2.0];  // ACh, GABA, GLUT, DA
+        let nt_map = vec![1.0, -1.0, 2.0, -2.0]; // ACh, GABA, GLUT, DA
 
         let rec = build_receptor_types_from_csr_flywire(&row_ptr, n_syn, &nt_map);
         assert_eq!(rec.len(), 4);
@@ -554,10 +597,10 @@ mod tests {
             vec![0i32, 1, 2, 3, 4],
             vec![1i32, 2, 0, 3],
             vec![0.5f32, 1.0, 0.8, 0.3],
-            vec![1.0, -1.0, 1.0, 1.0],  // default nt_types
+            vec![1.0, -1.0, 1.0, 1.0], // default nt_types
             vec![],
         );
-        let nt_map = vec![1.0, -1.0, 2.0, -2.0];  // ACh, GABA, GLUT, DA
+        let nt_map = vec![1.0, -1.0, 2.0, -2.0]; // ACh, GABA, GLUT, DA
         conn.build_receptor_types_flywire(&nt_map);
         assert_eq!(conn.receptor_types.len(), 4);
         assert_eq!(conn.receptor_types[0], 4); // +1.0 (ACh) → nAChR

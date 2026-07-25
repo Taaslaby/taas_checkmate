@@ -31,10 +31,11 @@
 //! | unity      | C ABI for Unity (implies connectome) |
 
 // ─── Internal crate re-exports ─────────────────────────
-pub use taas_kernels as kernels;
 pub use taas_core as core;
-pub use taas_train as train;    pub use taas_format;
+pub use taas_format;
 pub use taas_iit as iit;
+pub use taas_kernels as kernels;
+pub use taas_train as train;
 
 #[cfg(feature = "t3")]
 pub use taas_t3 as t3;
@@ -55,47 +56,37 @@ pub mod python;
 pub mod unity;
 
 // ─── Backward compatibility re-exports ──────────────────
-pub use core::{neuron, kuramoto};
-pub use core::{sparse, koit};
+pub use core::{koit, sparse};
+pub use core::{kuramoto, neuron};
 pub use train::rl;
 
-pub use io::{safety_clamp, LinearDecoder, PwmEncoder};
 pub use core::kuramoto::{
-    kuramoto_step_dense, kuramoto_step_sparse, t3_step_sparse,
-    interference, interference_mean, phase_coherence,
-    batch_coherence_sweep, lazy_sincos_update,
-    band_energy, winding_matrix,
+    band_energy, batch_coherence_sweep, interference, interference_mean, kuramoto_step_dense,
+    kuramoto_step_sparse, lazy_sincos_update, phase_coherence, t3_step_sparse, winding_matrix,
 };
-pub use taas_kernels::spike_entropy;
 pub use core::neuron::{
-    step_izhikevich, step_saw, step_psi_wave, step_lif, step_lif_at,
-    step_adex, step_fhn, step_hr, step_atlasov_neuromotor, AtlasovState, step_wc,
-    stdp_update, stdp_homeostatic, DelayBuffer,
-    intrinsic_plasticity, synaptic_normalization, SornNetwork,
-    bsa_encode, bsa_kernel_hamming, phase_encode,
-    TtfsEncoder, population_rate_decode,
-    EPropLIF, EPropIzhikevich, EPropIzhikevichMulti, EPropAdExMulti, EPropSaw,
-    eprop_update, surrogate_gradient,
-    probe_fr, suggest_config, FrProbePoint, EPropTunerConfig,
-    PoissonGenerator, ShortTermPlasticity, DopamineSTDP, compute_lfp,
-};
-pub use train::rl::{
-    ActorCriticAgent, test_mdp_episode,
+    bsa_encode, bsa_kernel_hamming, compute_lfp, eprop_update, intrinsic_plasticity, phase_encode,
+    population_rate_decode, probe_fr, stdp_homeostatic, stdp_update, step_adex,
+    step_atlasov_neuromotor, step_fhn, step_gco, step_hr, step_izhikevich, step_lif, step_lif_at,
+    step_saw, step_wc, suggest_config, surrogate_gradient, synaptic_normalization, AtlasovState,
+    DelayBuffer, DopamineSTDP, EPropAdExMulti, EPropIzhikevich, EPropIzhikevichMulti, EPropLIF,
+    EPropSaw, EPropTunerConfig, FrProbePoint, PoissonGenerator, ShortTermPlasticity, SornNetwork,
+    TtfsEncoder,
 };
 pub use core::sparse::{
-    propagate_spikes, compute_hamiltonian, step_psi_wave_full, rate_step, apply_stdp_ltd,
+    apply_stdp_ltd, compute_hamiltonian, propagate_spikes, rate_step, step_gco_full,
 };
+pub use io::{safety_clamp, LinearDecoder, PwmEncoder};
+pub use taas_kernels::spike_entropy;
+pub use train::rl::{test_mdp_episode, ActorCriticAgent};
 
 #[cfg(feature = "t3")]
 pub use t3::{
-    TriOscillator, NlmsDecoder, KalmanDecoder, InverseKuramotoDecoder,
-    StdpDecoder, PstDecoder, HybridDecoder, RidgeSolver, TrajectoryBuffer,
-    Decoder, T3Backend, Avx2Backend, ScalarBackend,
-    pst_features, pst_linear_features, pst_linear_dim,
-    compute_pearson, normalize_features,
-    PstControl, PstControlConfig,
-    Spiker, SpikeTrace, HologramEncoder, SpikeStats,
-    NormalizedSpiker, HybridSpiker,
+    compute_pearson, normalize_features, pst_features, pst_linear_dim, pst_linear_features,
+    Avx2Backend, Decoder, HologramEncoder, HybridDecoder, HybridSpiker, InverseKuramotoDecoder,
+    KalmanDecoder, NlmsDecoder, NormalizedSpiker, PstControl, PstControlConfig, PstDecoder,
+    RidgeSolver, ScalarBackend, SpikeStats, SpikeTrace, Spiker, StdpDecoder, T3Backend,
+    TrajectoryBuffer, TriOscillator,
 };
 
 #[cfg(all(feature = "t3", feature = "cuda"))]

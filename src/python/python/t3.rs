@@ -18,8 +18,8 @@ use numpy::{PyArray1, PyArray2, PyArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
-use crate::t3::Decoder;
 use crate::t3::attention_coupling::AttentionCoupling;
+use crate::t3::Decoder;
 
 // ═══════════════════════════════════════════════════════════
 //  T3 TriOscillator
@@ -61,7 +61,12 @@ impl PyTriOscillator {
 impl PyTriOscillator {
     #[new]
     fn new(n: usize, freq_min: f32, freq_max: f32) -> Self {
-        Self::build(crate::t3::TriOscillator::new(n, freq_min, freq_max, crate::t3::Avx2Backend))
+        Self::build(crate::t3::TriOscillator::new(
+            n,
+            freq_min,
+            freq_max,
+            crate::t3::Avx2Backend,
+        ))
     }
 
     // ── coupling setter (как обычный метод, не property — 3 аргумента) ──
@@ -90,9 +95,12 @@ impl PyTriOscillator {
             self.inner.drive2[..n].copy_from_slice(&sl[n..n * 2]);
             self.inner.drive3[..n].copy_from_slice(&sl[n * 2..]);
         } else {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("drive: ожидается (n_osc,)={} или (n_osc*3,)={}, получено {}",
-                        n, n * 3, sl.len())));
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "drive: ожидается (n_osc,)={} или (n_osc*3,)={}, получено {}",
+                n,
+                n * 3,
+                sl.len()
+            )));
         }
         Ok(())
     }
@@ -104,15 +112,17 @@ impl PyTriOscillator {
     /// Если передан drive — сначала установить его.
     /// Возвращает PST-фичи как np.ndarray (18n+12,).
     #[pyo3(signature = (dt, drive=None))]
-    fn step(&mut self, dt: f32, drive: Option<Bound<'_, PyArray1<f32>>>) -> PyResult<Py<PyArray1<f32>>> {
+    fn step(
+        &mut self,
+        dt: f32,
+        drive: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<Py<PyArray1<f32>>> {
         if let Some(d) = drive {
             self.set_drive(d)?;
         }
         self.inner.step(dt);
         crate::t3::pst_linear_features_into(&self.inner, &mut self._fv);
-        Python::with_gil(|py| {
-            Ok(PyArray1::from_vec(py, self._fv.clone()).into())
-        })
+        Python::with_gil(|py| Ok(PyArray1::from_vec(py, self._fv.clone()).into()))
     }
 
     // ── run ──
@@ -122,7 +132,12 @@ impl PyTriOscillator {
     /// Если передан drive — установить его перед запуском.
     /// Возвращает np.ndarray формы (steps, pst_dim).
     #[pyo3(signature = (steps, dt, drive=None))]
-    fn run(&mut self, steps: usize, dt: f32, drive: Option<Bound<'_, PyArray1<f32>>>) -> PyResult<Py<PyArray2<f32>>> {
+    fn run(
+        &mut self,
+        steps: usize,
+        dt: f32,
+        drive: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<Py<PyArray2<f32>>> {
         if let Some(d) = drive {
             self.set_drive(d)?;
         }
@@ -134,8 +149,11 @@ impl PyTriOscillator {
             buf.extend_from_slice(&self._fv);
         }
         Python::with_gil(|py| {
-            let arr = PyArray2::from_vec2(py, &buf.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>())
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+            let arr =
+                PyArray2::from_vec2(py, &buf.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>())
+                    .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e))
+                })?;
             Ok(arr.into())
         })
     }
@@ -176,13 +194,21 @@ impl PyTriOscillator {
 
     /// Фазы популяции pop (1, 2, 3) как список float.
     fn phases(&self, pop: usize) -> Vec<f32> {
-        let src = match pop { 1 => &self.inner.th1, 2 => &self.inner.th2, _ => &self.inner.th3 };
+        let src = match pop {
+            1 => &self.inner.th1,
+            2 => &self.inner.th2,
+            _ => &self.inner.th3,
+        };
         src.clone()
     }
 
     /// Амплитуды (Stuart-Landau r) популяции pop (1, 2, 3) как список float.
     fn amplitudes(&self, pop: usize) -> Vec<f32> {
-        let src = match pop { 1 => &self.inner.r1, 2 => &self.inner.r2, _ => &self.inner.r3 };
+        let src = match pop {
+            1 => &self.inner.r1,
+            2 => &self.inner.r2,
+            _ => &self.inner.r3,
+        };
         src.clone()
     }
 
@@ -190,8 +216,12 @@ impl PyTriOscillator {
         let has_attn = self.inner.attn_coupling1.is_some()
             || self.inner.attn_coupling2.is_some()
             || self.inner.attn_coupling3.is_some();
-        format!("TriOscillator(n={}, pst_dim={}, attention={})",
-            self.inner.n, crate::t3::pst_linear_dim(self.inner.n), has_attn)
+        format!(
+            "TriOscillator(n={}, pst_dim={}, attention={})",
+            self.inner.n,
+            crate::t3::pst_linear_dim(self.inner.n),
+            has_attn
+        )
     }
 
     // ── set_attention_coupling ──
@@ -221,18 +251,42 @@ impl PyTriOscillator {
 
     // ── getters for raw state (for T1→T2 bridge) ──
 
-    fn get_phases1(&self) -> Vec<f32> { self.inner.th1.clone() }
-    fn get_phases2(&self) -> Vec<f32> { self.inner.th2.clone() }
-    fn get_phases3(&self) -> Vec<f32> { self.inner.th3.clone() }
-    fn get_sin1(&self) -> Vec<f32> { self.inner.sin1.clone() }
-    fn get_sin2(&self) -> Vec<f32> { self.inner.sin2.clone() }
-    fn get_sin3(&self) -> Vec<f32> { self.inner.sin3.clone() }
-    fn get_cos1(&self) -> Vec<f32> { self.inner.cos1.clone() }
-    fn get_cos2(&self) -> Vec<f32> { self.inner.cos2.clone() }
-    fn get_cos3(&self) -> Vec<f32> { self.inner.cos3.clone() }
-    fn get_amplitudes1(&self) -> Vec<f32> { self.inner.r1.clone() }
-    fn get_amplitudes2(&self) -> Vec<f32> { self.inner.r2.clone() }
-    fn get_amplitudes3(&self) -> Vec<f32> { self.inner.r3.clone() }
+    fn get_phases1(&self) -> Vec<f32> {
+        self.inner.th1.clone()
+    }
+    fn get_phases2(&self) -> Vec<f32> {
+        self.inner.th2.clone()
+    }
+    fn get_phases3(&self) -> Vec<f32> {
+        self.inner.th3.clone()
+    }
+    fn get_sin1(&self) -> Vec<f32> {
+        self.inner.sin1.clone()
+    }
+    fn get_sin2(&self) -> Vec<f32> {
+        self.inner.sin2.clone()
+    }
+    fn get_sin3(&self) -> Vec<f32> {
+        self.inner.sin3.clone()
+    }
+    fn get_cos1(&self) -> Vec<f32> {
+        self.inner.cos1.clone()
+    }
+    fn get_cos2(&self) -> Vec<f32> {
+        self.inner.cos2.clone()
+    }
+    fn get_cos3(&self) -> Vec<f32> {
+        self.inner.cos3.clone()
+    }
+    fn get_amplitudes1(&self) -> Vec<f32> {
+        self.inner.r1.clone()
+    }
+    fn get_amplitudes2(&self) -> Vec<f32> {
+        self.inner.r2.clone()
+    }
+    fn get_amplitudes3(&self) -> Vec<f32> {
+        self.inner.r3.clone()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -257,7 +311,9 @@ pub struct PyNlmsDecoder {
 impl PyNlmsDecoder {
     #[new]
     fn new(n: usize, lr: f32, eps: f32) -> Self {
-        Self { inner: crate::t3::NlmsDecoder::new(n, lr, eps) }
+        Self {
+            inner: crate::t3::NlmsDecoder::new(n, lr, eps),
+        }
     }
 
     fn predict(&self, states: Bound<'_, PyArray1<f32>>) -> PyResult<f32> {
@@ -273,7 +329,11 @@ impl PyNlmsDecoder {
     }
 
     fn __repr__(&self) -> String {
-        format!("NlmsDecoder(n={}, lr={})", self.inner.weights.len(), self.inner.lr)
+        format!(
+            "NlmsDecoder(n={}, lr={})",
+            self.inner.weights.len(),
+            self.inner.lr
+        )
     }
 }
 
@@ -298,7 +358,9 @@ pub struct PyKalmanDecoder {
 impl PyKalmanDecoder {
     #[new]
     fn new(n: usize, q: f32, r: f32) -> Self {
-        Self { inner: crate::t3::KalmanDecoder::new(n, q, r) }
+        Self {
+            inner: crate::t3::KalmanDecoder::new(n, q, r),
+        }
     }
 
     fn predict(&self, states: Bound<'_, PyArray1<f32>>) -> PyResult<f32> {
@@ -310,7 +372,12 @@ impl PyKalmanDecoder {
     }
 
     fn __repr__(&self) -> String {
-        format!("KalmanDecoder(n={}, q={}, r={})", self.inner.weights.len(), self.inner.q, self.inner.r)
+        format!(
+            "KalmanDecoder(n={}, q={}, r={})",
+            self.inner.weights.len(),
+            self.inner.q,
+            self.inner.r
+        )
     }
 }
 
@@ -380,36 +447,91 @@ pub struct PyT2SpikeGradTrajectory {
 #[pymethods]
 impl PyT2SpikeGradTrajectory {
     fn __repr__(&self) -> String {
-        format!("T2SpikeGradTrajectory(n_osc={}, n_steps={})", self.inner.n_osc, self.inner.n_steps)
+        format!(
+            "T2SpikeGradTrajectory(n_osc={}, n_steps={})",
+            self.inner.n_osc, self.inner.n_steps
+        )
     }
 
-    fn n_osc(&self) -> usize { self.inner.n_osc }
-    fn n_steps(&self) -> usize { self.inner.n_steps }
-    fn dt(&self) -> f32 { self.inner.dt }
-    fn drive_gain(&self) -> f32 { self.inner.drive_gain }
-    fn alpha(&self) -> f32 { self.inner.alpha }
-    fn epsilon(&self) -> f32 { self.inner.epsilon }
-    fn freq_min(&self) -> f32 { self.inner.freq_min }
-    fn freq_max(&self) -> f32 { self.inner.freq_max }
-    fn w12(&self) -> f32 { self.inner.w12 }
-    fn w13(&self) -> f32 { self.inner.w13 }
-    fn w23(&self) -> f32 { self.inner.w23 }
+    fn n_osc(&self) -> usize {
+        self.inner.n_osc
+    }
+    fn n_steps(&self) -> usize {
+        self.inner.n_steps
+    }
+    fn dt(&self) -> f32 {
+        self.inner.dt
+    }
+    fn drive_gain(&self) -> f32 {
+        self.inner.drive_gain
+    }
+    fn alpha(&self) -> f32 {
+        self.inner.alpha
+    }
+    fn epsilon(&self) -> f32 {
+        self.inner.epsilon
+    }
+    fn freq_min(&self) -> f32 {
+        self.inner.freq_min
+    }
+    fn freq_max(&self) -> f32 {
+        self.inner.freq_max
+    }
+    fn w12(&self) -> f32 {
+        self.inner.w12
+    }
+    fn w13(&self) -> f32 {
+        self.inner.w13
+    }
+    fn w23(&self) -> f32 {
+        self.inner.w23
+    }
 
-    fn th1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th1_pre().to_vec()).into() }
-    fn th2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th2_pre().to_vec()).into() }
-    fn th3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th3_pre().to_vec()).into() }
-    fn r1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r1_pre().to_vec()).into() }
-    fn r2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r2_pre().to_vec()).into() }
-    fn r3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r3_pre().to_vec()).into() }
-    fn th1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th1_final.clone()).into() }
-    fn th2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th2_final.clone()).into() }
-    fn th3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.th3_final.clone()).into() }
-    fn r1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r1_final.clone()).into() }
-    fn r2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r2_final.clone()).into() }
-    fn r3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.r3_final.clone()).into() }
-    fn drive1(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive1().to_vec()).into() }
-    fn drive2(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive2().to_vec()).into() }
-    fn drive3(&self, py: Python<'_>) -> Py<PyArray1<f32>>  { PyArray1::from_vec(py, self.inner.drive3().to_vec()).into() }
+    fn th1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th1_pre().to_vec()).into()
+    }
+    fn th2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th2_pre().to_vec()).into()
+    }
+    fn th3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th3_pre().to_vec()).into()
+    }
+    fn r1_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r1_pre().to_vec()).into()
+    }
+    fn r2_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r2_pre().to_vec()).into()
+    }
+    fn r3_pre(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r3_pre().to_vec()).into()
+    }
+    fn th1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th1_final.clone()).into()
+    }
+    fn th2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th2_final.clone()).into()
+    }
+    fn th3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.th3_final.clone()).into()
+    }
+    fn r1_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r1_final.clone()).into()
+    }
+    fn r2_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r2_final.clone()).into()
+    }
+    fn r3_final(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.r3_final.clone()).into()
+    }
+    fn drive1(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.drive1().to_vec()).into()
+    }
+    fn drive2(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.drive2().to_vec()).into()
+    }
+    fn drive3(&self, py: Python<'_>) -> Py<PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.drive3().to_vec()).into()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -452,9 +574,16 @@ pub fn py_t2spike_grad_forward(
     let drives_data = drives.readonly().as_slice()?.to_vec();
 
     let (pst, traj) = crate::train::spike::t3spike_forward(
-        n_osc, n_steps, dt, drive_gain, alpha,
-        freq_min, freq_max,
-        coupling_w12, coupling_w13, coupling_w23,
+        n_osc,
+        n_steps,
+        dt,
+        drive_gain,
+        alpha,
+        freq_min,
+        freq_max,
+        coupling_w12,
+        coupling_w13,
+        coupling_w23,
         &drives_data,
     );
 
@@ -497,17 +626,31 @@ pub fn py_t2spike_grad_backward(
         grad_pst_vec.resize(pst_dim, 0.0);
     }
 
-    let per_step = per_step_grad_pst.map(|arr| {
-        arr.readonly().as_slice().map(|s| s.to_vec())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("per_step_grad_pst: {:?}", e)))
-    }).transpose()?;
+    let per_step = per_step_grad_pst
+        .map(|arr| {
+            arr.readonly().as_slice().map(|s| s.to_vec()).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "per_step_grad_pst: {:?}",
+                    e
+                ))
+            })
+        })
+        .transpose()?;
 
     let grad_drives = crate::train::spike::t3spike_backward_per_step(
-        &grad_pst_vec, &traj.inner, per_step.as_deref(),
+        &grad_pst_vec,
+        &traj.inner,
+        per_step.as_deref(),
     );
 
-    let arr = PyArray2::from_vec2(py, &grad_drives.chunks(3 * n).map(|c| c.to_vec()).collect::<Vec<_>>())
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+    let arr = PyArray2::from_vec2(
+        py,
+        &grad_drives
+            .chunks(3 * n)
+            .map(|c| c.to_vec())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
     Ok(arr.into())
 }
 
@@ -551,10 +694,16 @@ pub fn py_t2spike_grad_backward_cuda(
         grad_pst_vec.resize(pst_dim, 0.0);
     }
 
-    let per_step = per_step_grad_pst.map(|arr| {
-        arr.readonly().as_slice().map(|s| s.to_vec())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("per_step_grad_pst: {:?}", e)))
-    }).transpose()?;
+    let per_step = per_step_grad_pst
+        .map(|arr| {
+            arr.readonly().as_slice().map(|s| s.to_vec()).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "per_step_grad_pst: {:?}",
+                    e
+                ))
+            })
+        })
+        .transpose()?;
 
     // Initialize CUDA device once
     ensure_cuda_device().map_err(|e| {
@@ -568,23 +717,36 @@ pub fn py_t2spike_grad_backward_cuda(
         static CTX: RefCell<Option<(usize, usize, crate::train::spike_cuda::CudaBackwardContext)>> = const { RefCell::new(None) };
     }
 
-    let grad_drives = CTX.with(|cell| -> Result<Vec<f32>, String> {
-        let mut borrow = cell.borrow_mut();
-        let ctx = match borrow.as_mut() {
-            Some((cached_n, cached_ns, ctx)) if *cached_n == n && *cached_ns == n_steps => ctx,
-            _ => {
-                let new_ctx = crate::train::spike_cuda::CudaBackwardContext::new(n, n_steps)?;
-                *borrow = Some((n, n_steps, new_ctx));
-                &mut borrow.as_mut().expect("just set ctx").2
-            }
-        };
-        crate::train::spike_cuda::t3spike_backward_cuda_per_step(
-            &grad_pst_vec, &traj.inner, ctx, per_step.as_deref(),
-        )
-    }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("backward_cuda: {e}")))?;
+    let grad_drives = CTX
+        .with(|cell| -> Result<Vec<f32>, String> {
+            let mut borrow = cell.borrow_mut();
+            let ctx = match borrow.as_mut() {
+                Some((cached_n, cached_ns, ctx)) if *cached_n == n && *cached_ns == n_steps => ctx,
+                _ => {
+                    let new_ctx = crate::train::spike_cuda::CudaBackwardContext::new(n, n_steps)?;
+                    *borrow = Some((n, n_steps, new_ctx));
+                    &mut borrow.as_mut().expect("just set ctx").2
+                }
+            };
+            crate::train::spike_cuda::t3spike_backward_cuda_per_step(
+                &grad_pst_vec,
+                &traj.inner,
+                ctx,
+                per_step.as_deref(),
+            )
+        })
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("backward_cuda: {e}"))
+        })?;
 
-    let arr = PyArray2::from_vec2(py, &grad_drives.chunks(3 * n).map(|c| c.to_vec()).collect::<Vec<_>>())
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+    let arr = PyArray2::from_vec2(
+        py,
+        &grad_drives
+            .chunks(3 * n)
+            .map(|c| c.to_vec())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
     Ok(arr.into())
 }
 
@@ -616,14 +778,22 @@ pub fn py_t2spike_grad_forward_cuda(
     ensure_cuda_device().map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("cuda init: {e}"))
     })?;
-    let backend = crate::t3::CudaBackend::new(n_osc)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("CudaBackend::new: {e}")))?;
+    let backend = crate::t3::CudaBackend::new(n_osc).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("CudaBackend::new: {e}"))
+    })?;
 
     let (pst, traj) = crate::train::spike::t3spike_forward_with_backend(
         backend,
-        n_osc, n_steps, dt, drive_gain, alpha,
-        freq_min, freq_max,
-        coupling_w12, coupling_w13, coupling_w23,
+        n_osc,
+        n_steps,
+        dt,
+        drive_gain,
+        alpha,
+        freq_min,
+        freq_max,
+        coupling_w12,
+        coupling_w13,
+        coupling_w23,
         &drives_data,
     );
 
@@ -647,8 +817,14 @@ pub fn py_t2spike_grad_pst_matrix(
     let n = traj.inner.n_osc;
     let _n_steps = traj.inner.n_steps;
     let pst_dim = crate::t3::pst_linear_dim(n);
-    let arr = PyArray2::from_vec2(py, &result.chunks(pst_dim).map(|c| c.to_vec()).collect::<Vec<_>>())
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+    let arr = PyArray2::from_vec2(
+        py,
+        &result
+            .chunks(pst_dim)
+            .map(|c| c.to_vec())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
     Ok(arr.into())
 }
 
@@ -666,8 +842,11 @@ pub fn py_t2spike_grad_pst_fast_matrix(
     let n = traj.inner.n_osc;
     let _n_steps = traj.inner.n_steps;
     let dim = crate::t3::pst_fast_dim(n);
-    let arr = PyArray2::from_vec2(py, &result.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>())
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+    let arr = PyArray2::from_vec2(
+        py,
+        &result.chunks(dim).map(|c| c.to_vec()).collect::<Vec<_>>(),
+    )
+    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
     Ok(arr.into())
 }
 
@@ -678,7 +857,10 @@ pub fn py_compute_pearson(
     a: Bound<'_, PyArray1<f32>>,
     b: Bound<'_, PyArray1<f32>>,
 ) -> PyResult<f32> {
-    Ok(crate::t3::compute_pearson(a.readonly().as_slice()?, b.readonly().as_slice()?))
+    Ok(crate::t3::compute_pearson(
+        a.readonly().as_slice()?,
+        b.readonly().as_slice()?,
+    ))
 }
 
 /// Нормализовать матрицу фич in-place.
@@ -704,21 +886,44 @@ impl PyPstControl {
     #[pyo3(signature = (n=16, L=2, n_classes=3, ridge_alpha=10.0, inverse_blend=0.3,
                         drive_min=0.0, drive_max=1.5, n_warmup=70, dt=0.01))]
     fn new(
-        n: usize, L: usize, n_classes: usize, ridge_alpha: f32,
-        inverse_blend: f32, drive_min: f32, drive_max: f32,
-        n_warmup: usize, dt: f32,
+        n: usize,
+        L: usize,
+        n_classes: usize,
+        ridge_alpha: f32,
+        inverse_blend: f32,
+        drive_min: f32,
+        drive_max: f32,
+        n_warmup: usize,
+        dt: f32,
     ) -> Self {
         let config = crate::t3::PstControlConfig {
-            n, L, n_classes, ridge_alpha, inverse_blend,
-            drive_min, drive_max, n_warmup, dt,
+            n,
+            L,
+            n_classes,
+            ridge_alpha,
+            inverse_blend,
+            drive_min,
+            drive_max,
+            n_warmup,
+            dt,
         };
-        Self { inner: crate::t3::PstControl::new(config) }
+        Self {
+            inner: crate::t3::PstControl::new(config),
+        }
     }
 
-    fn feat_dim(&self) -> usize { self.inner.feat_dim() }
-    fn base_feat_dim(&self) -> usize { self.inner.base_feat_dim() }
-    fn n_classes(&self) -> usize { self.inner.n_classes() }
-    fn is_fitted(&self) -> bool { self.inner.is_fitted() }
+    fn feat_dim(&self) -> usize {
+        self.inner.feat_dim()
+    }
+    fn base_feat_dim(&self) -> usize {
+        self.inner.base_feat_dim()
+    }
+    fn n_classes(&self) -> usize {
+        self.inner.n_classes()
+    }
+    fn is_fitted(&self) -> bool {
+        self.inner.is_fitted()
+    }
 
     fn predict_from_pst(&self, pst: Bound<'_, PyArray1<f32>>) -> PyResult<(usize, Vec<f32>)> {
         let pst_binding = pst.readonly();
@@ -755,7 +960,8 @@ impl PyPstControl {
         target_class: usize,
         n_trials: usize,
     ) -> (f32, f32) {
-        self.inner.find_drive(&mut tri.inner, target_class, n_trials)
+        self.inner
+            .find_drive(&mut tri.inner, target_class, n_trials)
     }
 
     fn optimize_drive(
@@ -765,7 +971,8 @@ impl PyPstControl {
         steps: usize,
         lr: f32,
     ) -> (f32, usize) {
-        self.inner.optimize_drive(&mut tri.inner, target_class, steps, lr)
+        self.inner
+            .optimize_drive(&mut tri.inner, target_class, steps, lr)
     }
 
     fn drive_for(
@@ -778,7 +985,8 @@ impl PyPstControl {
     }
 
     fn save_to_file(&self, path: &str) -> PyResult<()> {
-        self.inner.save_to_file(path)
+        self.inner
+            .save_to_file(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
@@ -789,13 +997,21 @@ impl PyPstControl {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    fn weights(&self) -> Vec<f32> { self.inner.weights().to_vec() }
-    fn bias(&self) -> Vec<f32> { self.inner.bias().to_vec() }
+    fn weights(&self) -> Vec<f32> {
+        self.inner.weights().to_vec()
+    }
+    fn bias(&self) -> Vec<f32> {
+        self.inner.bias().to_vec()
+    }
 
     fn __repr__(&self) -> String {
-        format!("PstControl(n={}, L={}, classes={}, fitted={})",
-                self.inner.config.n, self.inner.config.L,
-                self.inner.n_classes(), self.inner.is_fitted())
+        format!(
+            "PstControl(n={}, L={}, classes={}, fitted={})",
+            self.inner.config.n,
+            self.inner.config.L,
+            self.inner.n_classes(),
+            self.inner.is_fitted()
+        )
     }
 }
 
@@ -819,9 +1035,15 @@ pub struct PySpiker {
 impl PySpiker {
     #[new]
     fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32) -> PyResult<Self> {
-        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
-            .chunks(2).map(|c| [c[0], c[1]]).collect();
-        Ok(Self { inner: crate::t3::Spiker::new(&pos, tau_ms, dt_ms) })
+        let pos: Vec<[f32; 2]> = positions
+            .readonly()
+            .as_slice()?
+            .chunks(2)
+            .map(|c| [c[0], c[1]])
+            .collect();
+        Ok(Self {
+            inner: crate::t3::Spiker::new(&pos, tau_ms, dt_ms),
+        })
     }
 
     /// Подать спайки и получить голограмму.
@@ -858,20 +1080,34 @@ impl PyHologramEncoder {
     #[new]
     #[pyo3(signature = (positions, k=3))]
     fn new(positions: Bound<'_, PyArray2<f32>>, k: usize) -> PyResult<Self> {
-        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
-            .chunks(2).map(|c| [c[0], c[1]]).collect();
-        Ok(Self { inner: crate::t3::HologramEncoder::with_k(&pos, k) })
+        let pos: Vec<[f32; 2]> = positions
+            .readonly()
+            .as_slice()?
+            .chunks(2)
+            .map(|c| [c[0], c[1]])
+            .collect();
+        Ok(Self {
+            inner: crate::t3::HologramEncoder::with_k(&pos, k),
+        })
     }
 
     fn encode(&self, trace: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
         Ok(self.inner.encode(trace.readonly().as_slice()?))
     }
 
-    fn k(&self) -> usize { self.inner.k() }
-    fn n(&self) -> usize { self.inner.n() }
+    fn k(&self) -> usize {
+        self.inner.k()
+    }
+    fn n(&self) -> usize {
+        self.inner.n()
+    }
 
     fn __repr__(&self) -> String {
-        format!("HologramEncoder(n={}, k={})", self.inner.n(), self.inner.k())
+        format!(
+            "HologramEncoder(n={}, k={})",
+            self.inner.n(),
+            self.inner.k()
+        )
     }
 }
 
@@ -886,10 +1122,21 @@ pub struct PyNormalizedSpiker {
 #[pymethods]
 impl PyNormalizedSpiker {
     #[new]
-    fn new(positions: Bound<'_, PyArray2<f32>>, tau_ms: f32, dt_ms: f32, target_std: f32) -> PyResult<Self> {
-        let pos: Vec<[f32; 2]> = positions.readonly().as_slice()?
-            .chunks(2).map(|c| [c[0], c[1]]).collect();
-        Ok(Self { inner: crate::t3::NormalizedSpiker::new(&pos, tau_ms, dt_ms, target_std) })
+    fn new(
+        positions: Bound<'_, PyArray2<f32>>,
+        tau_ms: f32,
+        dt_ms: f32,
+        target_std: f32,
+    ) -> PyResult<Self> {
+        let pos: Vec<[f32; 2]> = positions
+            .readonly()
+            .as_slice()?
+            .chunks(2)
+            .map(|c| [c[0], c[1]])
+            .collect();
+        Ok(Self {
+            inner: crate::t3::NormalizedSpiker::new(&pos, tau_ms, dt_ms, target_std),
+        })
     }
 
     fn feed(&mut self, spikes: Bound<'_, PyArray1<f32>>) -> PyResult<Vec<f32>> {
@@ -944,17 +1191,31 @@ impl PySpikeGradBridge {
         if zero_init {
             Self {
                 inner: crate::train::spike_grad::SpikeGradBridge::new_zero(
-                    spike_dim, n_osc, dt, drive_gain, alpha,
-                    freq_min, freq_max,
-                    coupling_w12, coupling_w13, coupling_w23,
+                    spike_dim,
+                    n_osc,
+                    dt,
+                    drive_gain,
+                    alpha,
+                    freq_min,
+                    freq_max,
+                    coupling_w12,
+                    coupling_w13,
+                    coupling_w23,
                 ),
             }
         } else {
             Self {
                 inner: crate::train::spike_grad::SpikeGradBridge::new(
-                    spike_dim, n_osc, dt, drive_gain, alpha,
-                    freq_min, freq_max,
-                    coupling_w12, coupling_w13, coupling_w23,
+                    spike_dim,
+                    n_osc,
+                    dt,
+                    drive_gain,
+                    alpha,
+                    freq_min,
+                    freq_max,
+                    coupling_w12,
+                    coupling_w13,
+                    coupling_w23,
                 ),
             }
         }
@@ -981,10 +1242,18 @@ impl PySpikeGradBridge {
         let b = bias.readonly().to_vec().expect("from_weights: bias");
         Self {
             inner: crate::train::spike_grad::SpikeGradBridge::from_weights(
-                spike_dim, n_osc, dt, drive_gain, alpha,
-                freq_min, freq_max,
-                coupling_w12, coupling_w13, coupling_w23,
-                &w, &b,
+                spike_dim,
+                n_osc,
+                dt,
+                drive_gain,
+                alpha,
+                freq_min,
+                freq_max,
+                coupling_w12,
+                coupling_w13,
+                coupling_w23,
+                &w,
+                &b,
             ),
         }
     }
@@ -1004,8 +1273,9 @@ impl PySpikeGradBridge {
         py: Python<'py>,
     ) -> PyResult<PyObject> {
         let spikes_ro = spikes.readonly();
-        let spikes_slice = spikes_ro.as_slice()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e)))?;
+        let spikes_slice = spikes_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e))
+        })?;
 
         let (_, traj) = self.inner.forward(spikes_slice, n_steps);
         let pst_mat = crate::train::spike::t3spike_compute_pst_matrix(&traj);
@@ -1013,8 +1283,12 @@ impl PySpikeGradBridge {
 
         let pst_arr = PyArray2::from_vec2(
             py,
-            &pst_mat.chunks(pst_dim).map(|c| c.to_vec()).collect::<Vec<_>>(),
-        ).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+            &pst_mat
+                .chunks(pst_dim)
+                .map(|c| c.to_vec())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
 
         let py_traj = PyT2SpikeGradTrajectory { inner: traj };
         let tuple = PyTuple::new(py, &[pst_arr.into_py(py), py_traj.into_py(py)])?.unbind();
@@ -1040,28 +1314,38 @@ impl PySpikeGradBridge {
         per_step_grad_pst: Option<Bound<'_, PyArray2<f32>>>,
         py: Python<'_>,
     ) -> PyResult<PyObject> {
-        let gp = grad_pst.readonly().to_vec()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_pst: {:?}", e)))?;
+        let gp = grad_pst.readonly().to_vec().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_pst: {:?}", e))
+        })?;
         let spikes_ro = spikes.readonly();
-        let sp = spikes_ro.as_slice()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e)))?;
+        let sp = spikes_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e))
+        })?;
 
-        let per_step = per_step_grad_pst.map(|arr| {
-            let ro = arr.readonly();
-            ro.as_slice()
-                .map(|s| s.to_vec())
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("per_step_grad_pst: {:?}", e)))
-        }).transpose()?;
+        let per_step = per_step_grad_pst
+            .map(|arr| {
+                let ro = arr.readonly();
+                ro.as_slice().map(|s| s.to_vec()).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "per_step_grad_pst: {:?}",
+                        e
+                    ))
+                })
+            })
+            .transpose()?;
 
-        let (gw, gb) = self.inner.backward(&gp, &traj.inner, sp, per_step.as_deref());
+        let (gw, gb) = self
+            .inner
+            .backward(&gp, &traj.inner, sp, per_step.as_deref());
 
         let _sd = self.inner.spike_dim;
         let dd = self.inner.drive_dim;
 
-        let gw_arr = PyArray2::from_vec2(
-            py,
-            &gw.chunks(dd).map(|c| c.to_vec()).collect::<Vec<_>>(),
-        ).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+        let gw_arr =
+            PyArray2::from_vec2(py, &gw.chunks(dd).map(|c| c.to_vec()).collect::<Vec<_>>())
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e))
+                })?;
 
         let gb_arr = PyArray1::from_vec(py, gb);
         let tuple = PyTuple::new(py, &[gw_arr.into_py(py), gb_arr.into_py(py)])?.unbind();
@@ -1070,36 +1354,60 @@ impl PySpikeGradBridge {
 
     /// Update bridge weights with gradient descent.
     #[pyo3(name = "update")]
-    fn py_update(&mut self, grad_w: Bound<'_, PyArray2<f32>>, grad_b: Bound<'_, PyArray1<f32>>, lr: f32) -> PyResult<()> {
+    fn py_update(
+        &mut self,
+        grad_w: Bound<'_, PyArray2<f32>>,
+        grad_b: Bound<'_, PyArray1<f32>>,
+        lr: f32,
+    ) -> PyResult<()> {
         let gw_ro = grad_w.readonly();
-        let gw = gw_ro.as_slice()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_w: {:?}", e)))?;
+        let gw = gw_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_w: {:?}", e))
+        })?;
         let gb_ro = grad_b.readonly();
-        let gb = gb_ro.to_vec()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_b: {:?}", e)))?;
+        let gb = gb_ro.to_vec().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_b: {:?}", e))
+        })?;
         self.inner.update(gw, &gb, lr);
         Ok(())
     }
 
     /// Compute drives from spikes without running T3.
     #[pyo3(name = "compute_drives")]
-    fn py_compute_drives(&self, spikes: Bound<'_, PyArray2<f32>>, n_steps: usize) -> PyResult<Vec<f32>> {
+    fn py_compute_drives(
+        &self,
+        spikes: Bound<'_, PyArray2<f32>>,
+        n_steps: usize,
+    ) -> PyResult<Vec<f32>> {
         let spikes_ro = spikes.readonly();
-        let sp = spikes_ro.as_slice()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e)))?;
+        let sp = spikes_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e))
+        })?;
         Ok(self.inner.compute_drives(sp, n_steps))
     }
 
     /// Get bridge weights and bias.
-    fn weights(&self) -> Vec<f32> { self.inner.w.clone() }
-    fn bias(&self) -> Vec<f32> { self.inner.b.clone() }
-    fn spike_dim(&self) -> usize { self.inner.spike_dim }
-    fn drive_dim(&self) -> usize { self.inner.drive_dim }
-    fn n_osc(&self) -> usize { self.inner.n_osc }
+    fn weights(&self) -> Vec<f32> {
+        self.inner.w.clone()
+    }
+    fn bias(&self) -> Vec<f32> {
+        self.inner.b.clone()
+    }
+    fn spike_dim(&self) -> usize {
+        self.inner.spike_dim
+    }
+    fn drive_dim(&self) -> usize {
+        self.inner.drive_dim
+    }
+    fn n_osc(&self) -> usize {
+        self.inner.n_osc
+    }
 
     fn __repr__(&self) -> String {
-        format!("SpikeGradBridge(spike_dim={}, n_osc={}, drive_dim={})",
-            self.inner.spike_dim, self.inner.n_osc, self.inner.drive_dim)
+        format!(
+            "SpikeGradBridge(spike_dim={}, n_osc={}, drive_dim={})",
+            self.inner.spike_dim, self.inner.n_osc, self.inner.drive_dim
+        )
     }
 }
 
@@ -1174,8 +1482,15 @@ pub fn py_train_connectome_chase(
         seed,
     );
 
-    let py_bridge = PySpikeGradBridge { inner: result.bridge };
-    Ok((py_bridge, result.decoder_w, result.decoder_b, result.loss_history))
+    let py_bridge = PySpikeGradBridge {
+        inner: result.bridge,
+    };
+    Ok((
+        py_bridge,
+        result.decoder_w,
+        result.decoder_b,
+        result.loss_history,
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1202,7 +1517,9 @@ impl PyAttentionCoupling {
     /// Create attention coupling for `n` oscillators with coupling strength `gamma`.
     #[new]
     fn new(n: usize, gamma: f32) -> Self {
-        Self { inner: AttentionCoupling::new(n, gamma) }
+        Self {
+            inner: AttentionCoupling::new(n, gamma),
+        }
     }
 
     /// Create attention coupling with custom Q/K weights.
@@ -1213,13 +1530,19 @@ impl PyAttentionCoupling {
     ///     q_weight: flattened (state_dim × state_dim) Q projection matrix
     ///     k_weight: flattened (state_dim × state_dim) K projection matrix
     #[staticmethod]
-    fn from_weights(n: usize, gamma: f32, q_weight: Vec<f32>, k_weight: Vec<f32>) -> PyResult<Self> {
+    fn from_weights(
+        n: usize,
+        gamma: f32,
+        q_weight: Vec<f32>,
+        k_weight: Vec<f32>,
+    ) -> PyResult<Self> {
         let expected = 3 * 3; // state_dim = 3
         if q_weight.len() != expected || k_weight.len() != expected {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Q/K weights must be [{expected}] (3×3), got Q={} K={}",
-                    q_weight.len(), k_weight.len())
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Q/K weights must be [{expected}] (3×3), got Q={} K={}",
+                q_weight.len(),
+                k_weight.len()
+            )));
         }
         let mut ac = AttentionCoupling::new(n, gamma);
         ac.q_weight.copy_from_slice(&q_weight);
@@ -1228,18 +1551,30 @@ impl PyAttentionCoupling {
     }
 
     /// Number of oscillators.
-    fn n(&self) -> usize { self.inner.n }
+    fn n(&self) -> usize {
+        self.inner.n
+    }
     /// Coupling strength γ.
-    fn gamma(&self) -> f32 { self.inner.gamma }
+    fn gamma(&self) -> f32 {
+        self.inner.gamma
+    }
     /// State dimension (always 3).
-    fn state_dim(&self) -> usize { self.inner.state_dim }
+    fn state_dim(&self) -> usize {
+        self.inner.state_dim
+    }
     /// Q projection weights as flat list (state_dim × state_dim).
-    fn q_weight(&self) -> Vec<f32> { self.inner.q_weight.clone() }
+    fn q_weight(&self) -> Vec<f32> {
+        self.inner.q_weight.clone()
+    }
     /// K projection weights as flat list (state_dim × state_dim).
-    fn k_weight(&self) -> Vec<f32> { self.inner.k_weight.clone() }
+    fn k_weight(&self) -> Vec<f32> {
+        self.inner.k_weight.clone()
+    }
 
     fn __repr__(&self) -> String {
-        format!("AttentionCoupling(n={}, gamma={})", self.inner.n, self.inner.gamma)
+        format!(
+            "AttentionCoupling(n={}, gamma={})",
+            self.inner.n, self.inner.gamma
+        )
     }
 }
-

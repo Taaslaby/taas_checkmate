@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
+use super::{load8, load8_mut, spike_mask_to_i32, store8};
 use wide::{f32x8, CmpGe};
-use super::{load8, load8_mut, store8, spike_mask_to_i32};
 
 // ═══════════════════════════════════════════════════════
 //  Hindmarsh-Rose (HR) — 3-variable spiking & bursting neuron
@@ -37,8 +37,13 @@ use super::{load8, load8_mut, store8, spike_mask_to_i32};
 /// # Safety
 /// `x[n]`, `y[n]`, `z[n]`, `Ii[n]`, `spikes[n]`, `params[8·n]` must be valid, non-overlapping.
 pub unsafe fn hr_step(
-    x: *mut f32, y: *mut f32, z: *mut f32, Ii: *const f32, spikes: *mut i32,
-    params: *const f32, n: usize,
+    x: *mut f32,
+    y: *mut f32,
+    z: *mut f32,
+    Ii: *const f32,
+    spikes: *mut i32,
+    params: *const f32,
+    n: usize,
 ) {
     let p = std::slice::from_raw_parts(params, n * 8);
     let dt_val = p[0];
@@ -51,7 +56,9 @@ pub unsafe fn hr_step(
         let mut yy = load8_mut(y, off);
         let mut zz = load8_mut(z, off);
 
-        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
 
         let aa = load8(params.wrapping_add(n), off);
         let bb = load8(params.wrapping_add(2 * n), off);
@@ -87,8 +94,14 @@ pub unsafe fn hr_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -167,10 +180,23 @@ mod tests {
 
         let mut spike_count = 0i32;
         for _ in 0..10000 {
-            unsafe { hr_step(x.as_mut_ptr(), y.as_mut_ptr(), z.as_mut_ptr(), I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n) };
+            unsafe {
+                hr_step(
+                    x.as_mut_ptr(),
+                    y.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                )
+            };
             spike_count += spikes.iter().sum::<i32>();
         }
-        assert!(spike_count > 0, "Hindmarsh-Rose should oscillate/burst with I={I_val}");
+        assert!(
+            spike_count > 0,
+            "Hindmarsh-Rose should oscillate/burst with I={I_val}"
+        );
     }
 
     /// HR: verify resting state without current.
@@ -206,9 +232,23 @@ mod tests {
         }
 
         for _ in 0..1000 {
-            unsafe { hr_step(x.as_mut_ptr(), y.as_mut_ptr(), z.as_mut_ptr(), I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n) };
+            unsafe {
+                hr_step(
+                    x.as_mut_ptr(),
+                    y.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                )
+            };
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0, "HR should not spike with I=0");
+        assert_eq!(
+            spikes.iter().sum::<i32>(),
+            0,
+            "HR should not spike with I=0"
+        );
     }
 
     /// HR: verify scalar tail execution for non-aligned N.
@@ -245,7 +285,17 @@ mod tests {
 
         let mut spike_count = 0i32;
         for _ in 0..10000 {
-            unsafe { hr_step(x.as_mut_ptr(), y.as_mut_ptr(), z.as_mut_ptr(), I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n) };
+            unsafe {
+                hr_step(
+                    x.as_mut_ptr(),
+                    y.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                )
+            };
             spike_count += spikes.iter().sum::<i32>();
         }
         assert!(spike_count > 0, "HR non-aligned should burst");

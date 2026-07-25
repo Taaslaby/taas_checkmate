@@ -28,7 +28,7 @@
 //! Результат: `grad_w[k]` — градиент для каждого k (совпадает с форматом `val`).
 
 use crate::spike::trajectory::{
-    T3SpikeTrajectory, OFF_TH1, off_th2, off_th3, off_r1, off_r2, off_r3,
+    off_r1, off_r2, off_r3, off_th2, off_th3, T3SpikeTrajectory, OFF_TH1,
 };
 
 /// Результат sparse coupling backward: градиенты по весам для трёх cross-population пар.
@@ -72,9 +72,24 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
     let _nf = n as f32;
 
     // Offsets per population for sin/cos and r
-    let off_th_source = match POP_SOURCE { 1 => OFF_TH1, 2 => off_th2(n_steps, n), 3 => off_th3(n_steps, n), _ => unreachable!() };
-    let off_th_target = match POP_TARGET { 1 => OFF_TH1, 2 => off_th2(n_steps, n), 3 => off_th3(n_steps, n), _ => unreachable!() };
-    let off_r_source = match POP_SOURCE { 1 => off_r1(n_steps, n), 2 => off_r2(n_steps, n), 3 => off_r3(n_steps, n), _ => unreachable!() };
+    let off_th_source = match POP_SOURCE {
+        1 => OFF_TH1,
+        2 => off_th2(n_steps, n),
+        3 => off_th3(n_steps, n),
+        _ => unreachable!(),
+    };
+    let off_th_target = match POP_TARGET {
+        1 => OFF_TH1,
+        2 => off_th2(n_steps, n),
+        3 => off_th3(n_steps, n),
+        _ => unreachable!(),
+    };
+    let off_r_source = match POP_SOURCE {
+        1 => off_r1(n_steps, n),
+        2 => off_r2(n_steps, n),
+        3 => off_r3(n_steps, n),
+        _ => unreachable!(),
+    };
 
     for step in 0..n_steps {
         let base = step * n;
@@ -83,11 +98,15 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
         let r_source = &traj.flat[off_r_source + base..off_r_source + base + n];
 
         // Pre-compute sin/cos for this step (per-population, once per step)
-        let mut sin_src = vec![0.0f32; n]; let mut cos_src = vec![0.0f32; n];
-        let mut sin_tgt = vec![0.0f32; n]; let mut cos_tgt = vec![0.0f32; n];
+        let mut sin_src = vec![0.0f32; n];
+        let mut cos_src = vec![0.0f32; n];
+        let mut sin_tgt = vec![0.0f32; n];
+        let mut cos_tgt = vec![0.0f32; n];
         for i in 0..n {
-            sin_src[i] = th_source[i].sin(); cos_src[i] = th_source[i].cos();
-            sin_tgt[i] = th_target[i].sin(); cos_tgt[i] = th_target[i].cos();
+            sin_src[i] = th_source[i].sin();
+            cos_src[i] = th_source[i].cos();
+            sin_tgt[i] = th_target[i].sin();
+            cos_tgt[i] = th_target[i].cos();
         }
 
         let g = csr.g_source;
@@ -96,7 +115,9 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
         for pre in 0..n {
             let start = csr.row_ptr[pre] as usize;
             let end = csr.row_ptr[pre + 1] as usize;
-            if start >= end { continue; }
+            if start >= end {
+                continue;
+            }
 
             let r_pre = r_source[pre] as f64;
             let sin_pre = sin_src[pre] as f64;
@@ -105,7 +126,9 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
 
             for k in start..end {
                 let post = csr.col[k] as usize;
-                if post >= n { continue; }
+                if post >= n {
+                    continue;
+                }
 
                 // sin(θ_pre - θ_post) = sin_pre·cos_post - cos_pre·sin_post
                 let sin_diff = sin_pre * cos_tgt[post] as f64 - cos_pre * sin_tgt[post] as f64;
@@ -122,7 +145,9 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
 /// Использует CSR итерацию: только ненулевые entries, без материализации плотной матрицы.
 /// sin/cos вычисляются per-step из траектории (не из BpttWorkspace — он держит только last step).
 pub fn compute_sparse_coupling_gradients(
-    v_th1: &[f32], v_th2: &[f32], _v_th3: &[f32],
+    v_th1: &[f32],
+    v_th2: &[f32],
+    _v_th3: &[f32],
     traj: &T3SpikeTrajectory,
     n_steps: usize,
     csr_12: &SparseCouplingCsr,
@@ -143,7 +168,11 @@ pub fn compute_sparse_coupling_gradients(
     // Pop 2 ← Pop 3
     accumulate_pair::<2, 3>(&mut grad_23, csr_23, v_th2, traj, n, n_steps, dt);
 
-    SparseCouplingGradients { grad_w12: grad_12, grad_w13: grad_13, grad_w23: grad_23 }
+    SparseCouplingGradients {
+        grad_w12: grad_12,
+        grad_w13: grad_13,
+        grad_w23: grad_23,
+    }
 }
 
 #[cfg(test)]
@@ -181,13 +210,27 @@ mod tests {
     fn test_sparse_coupling_identity() {
         let n = 8;
         let n_steps = 3;
-        let traj = T3SpikeTrajectory::new(
-            n, n_steps, 0.05, 10.0, 1.0, 0.1, 0.5, 3.0, 0.3, 0.15, 0.08,
-        );
+        let traj =
+            T3SpikeTrajectory::new(n, n_steps, 0.05, 10.0, 1.0, 0.1, 0.5, 3.0, 0.3, 0.15, 0.08);
         let (r, c, v) = make_csr_identity(n);
-        let csr12 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 1.0 };
-        let csr13 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 0.8 };
-        let csr23 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 0.5 };
+        let csr12 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 1.0,
+        };
+        let csr13 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 0.8,
+        };
+        let csr23 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 0.5,
+        };
 
         let v_th = vec![1.0f32; n];
         let result = compute_sparse_coupling_gradients(
@@ -199,7 +242,12 @@ mod tests {
         assert_eq!(result.grad_w23.len(), n);
 
         // All gradients should be finite (trajectory is all-zero, so sin_diff=0 → grad=0)
-        for g in result.grad_w12.iter().chain(result.grad_w13.iter()).chain(result.grad_w23.iter()) {
+        for g in result
+            .grad_w12
+            .iter()
+            .chain(result.grad_w13.iter())
+            .chain(result.grad_w23.iter())
+        {
             assert!(g.is_finite(), "gradient should be finite: {}", g);
         }
     }
@@ -209,21 +257,41 @@ mod tests {
         // v_th = 0 → все градиенты должны быть 0
         let n = 8;
         let n_steps = 3;
-        let traj = T3SpikeTrajectory::new(
-            n, n_steps, 0.05, 10.0, 1.0, 0.1, 0.5, 3.0, 0.3, 0.15, 0.08,
-        );
+        let traj =
+            T3SpikeTrajectory::new(n, n_steps, 0.05, 10.0, 1.0, 0.1, 0.5, 3.0, 0.3, 0.15, 0.08);
         let (r, c, v) = make_csr_full(n);
-        let csr12 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 1.0 };
-        let csr13 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 0.8 };
-        let csr23 = SparseCouplingCsr { row_ptr: &r, col: &c, val: &v, g_source: 0.5 };
+        let csr12 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 1.0,
+        };
+        let csr13 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 0.8,
+        };
+        let csr23 = SparseCouplingCsr {
+            row_ptr: &r,
+            col: &c,
+            val: &v,
+            g_source: 0.5,
+        };
 
         let zero = vec![0.0f32; n];
         let result = compute_sparse_coupling_gradients(
             &zero, &zero, &zero, &traj, n_steps, &csr12, &csr13, &csr23, 0.05,
         );
 
-        for g in &result.grad_w12 { assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g); }
-        for g in &result.grad_w13 { assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g); }
-        for g in &result.grad_w23 { assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g); }
+        for g in &result.grad_w12 {
+            assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g);
+        }
+        for g in &result.grad_w13 {
+            assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g);
+        }
+        for g in &result.grad_w23 {
+            assert!(g.abs() < 1e-10, "zero v_th → grad=0: {}", g);
+        }
     }
 }

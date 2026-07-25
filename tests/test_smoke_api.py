@@ -180,7 +180,7 @@ h_real = np.zeros(n, dtype=np.float32)
 h_imag = np.zeros(n, dtype=np.float32)
 i_ext = np.zeros(n, dtype=np.float32)
 speed = np.zeros(n, dtype=np.float32)
-tcm.step_psi_wave(v_psi, u_psi, h_real, h_imag, i_ext, speed, 0.05, 1.0)
+tcm.step_gco(v_psi, u_psi, h_real, h_imag, i_ext, speed, 0.05, 1.0)
 norms = np.sqrt(v_psi**2 + u_psi**2)
 check(np.all(np.abs(norms - 1.0) < 0.1), f"ψ-wave norm ~1: {norms[0]:.3f}")
 
@@ -340,7 +340,7 @@ check(np.any(h_real_sp != 0), f"Hamiltonian h_real has non-zero (u was ones)")
 check(np.any(h_imag_sp != 0), f"Hamiltonian h_imag has non-zero")
 
 # ψ-wave full step on ring CSR
-tcm.step_psi_wave_full(v_sp, u_sp, row_ptr, col_indices, values, 0.05, 1.0)
+tcm.step_gco_full(v_sp, u_sp, row_ptr, col_indices, values, 0.05, 1.0)
 norms_sp = np.sqrt(v_sp**2 + u_sp**2)
 check(np.all(np.abs(norms_sp - 1.0) < 0.1), "ψ-wave full step preserves norm")
 

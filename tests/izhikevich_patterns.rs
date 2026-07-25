@@ -23,8 +23,14 @@ fn make_padded(n: usize) -> usize {
 /// Run a single Izhikevich neuron for `n_steps` at `dt` and return spike times (in ms).
 /// `tau_ref` = refractory period (ms). 0 = no refractory.
 fn simulate_one_neuron(
-    a: f32, b: f32, c: f32, d: f32,
-    I: f32, dt: f32, tau_ref: f32, n_steps: usize,
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    I: f32,
+    dt: f32,
+    tau_ref: f32,
+    n_steps: usize,
 ) -> Vec<f32> {
     let n = make_padded(1); // padded to 8 for SIMD
     let mut v = vec![-65.0f32; n];
@@ -43,10 +49,19 @@ fn simulate_one_neuron(
 
     for step in 0..n_steps {
         neuron::step_izhikevich(
-            &mut v, &mut u, &mut trace,
-            &a_arr, &b_arr, &mut i_arr,
-            dt, trace_decay, &mut spikes,
-            &c_arr, &d_arr, &mut refr, tau_ref,
+            &mut v,
+            &mut u,
+            &mut trace,
+            &a_arr,
+            &b_arr,
+            &mut i_arr,
+            dt,
+            trace_decay,
+            &mut spikes,
+            &c_arr,
+            &d_arr,
+            &mut refr,
+            tau_ref,
         );
         if spikes[0] != 0 {
             spike_times.push(step as f32 * dt);
@@ -74,41 +89,68 @@ fn test_rs_regular_spiking() {
     let n_steps = (1000.0 / dt) as usize; // 1000 ms simulation
     let spike_times = simulate_one_neuron(0.02, 0.2, -65.0, 8.0, 10.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 15,
-        "RS: expected ≥15 spikes in 1s at I=10, got {}", spike_times.len());
-    assert!(spike_times.len() <= 120,
-        "RS: expected ≤120 spikes in 1s at I=10, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 15,
+        "RS: expected ≥15 spikes in 1s at I=10, got {}",
+        spike_times.len()
+    );
+    assert!(
+        spike_times.len() <= 120,
+        "RS: expected ≤120 spikes in 1s at I=10, got {}",
+        spike_times.len()
+    );
 
     // Compute ISIs and firing rate
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi > 0 {
-        let mean_isi = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .sum::<f32>() / n_isi as f32;
+        let mean_isi = spike_times.windows(2).map(|w| w[1] - w[0]).sum::<f32>() / n_isi as f32;
 
         let firing_rate = 1000.0 / mean_isi;
-        println!("  RS: {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
+        println!(
+            "  RS: {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
 
         // Expect 15-40 Hz (Izhikevich 2004: ~40 Hz at I=10;
         // but actual rate with dt=0.5 is ~22 Hz per reference Python)
-        assert!(firing_rate >= 12.0 && firing_rate <= 40.0,
-            "RS firing rate {:.0} Hz outside expected [12, 40] Hz", firing_rate);
+        assert!(
+            firing_rate >= 12.0 && firing_rate <= 40.0,
+            "RS firing rate {:.0} Hz outside expected [12, 40] Hz",
+            firing_rate
+        );
 
         // CV should be < 0.5 for regular spiking
         let mean = mean_isi;
-        let variance = spike_times.windows(2)
-            .map(|w| { let d = (w[1] - w[0]) - mean; d * d })
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean > 0.0 { variance.sqrt() / mean } else { 0.0 };
+        let variance = spike_times
+            .windows(2)
+            .map(|w| {
+                let d = (w[1] - w[0]) - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean > 0.0 {
+            variance.sqrt() / mean
+        } else {
+            0.0
+        };
         println!("  RS: CV(ISI) = {:.3}", cv);
 
-        assert!(cv < 0.8, "RS: CV too high ({:.3}), expected < 0.8 for regular firing", cv);
+        assert!(
+            cv < 0.8,
+            "RS: CV too high ({:.3}), expected < 0.8 for regular firing",
+            cv
+        );
 
         // Check adaptation: first ISI should be shorter than average
         if spike_times.len() >= 3 {
             let first_isi = spike_times[1] - spike_times[0];
-            println!("  RS: first ISI = {:.2} ms, mean ISI = {:.2} ms", first_isi, mean_isi);
+            println!(
+                "  RS: first ISI = {:.2} ms, mean ISI = {:.2} ms",
+                first_isi, mean_isi
+            );
         }
     }
 }
@@ -131,31 +173,52 @@ fn test_fs_fast_spiking() {
     let n_steps = (500.0 / dt) as usize; // 500 ms
     let spike_times = simulate_one_neuron(0.1, 0.2, -65.0, 2.0, 10.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 50,
-        "FS: expected ≥50 spikes in 500ms at I=10, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 50,
+        "FS: expected ≥50 spikes in 500ms at I=10, got {}",
+        spike_times.len()
+    );
 
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi > 0 {
-        let mean_isi = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .sum::<f32>() / n_isi as f32;
+        let mean_isi = spike_times.windows(2).map(|w| w[1] - w[0]).sum::<f32>() / n_isi as f32;
         let firing_rate = 1000.0 / mean_isi;
-        println!("  FS(I=10): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
+        println!(
+            "  FS(I=10): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
 
         // Fast spiking: 80-350 Hz at I=10
         // Reference Python with dt=0.5, tau_ref=0: ~113 Hz
-        assert!(firing_rate >= 80.0 && firing_rate <= 350.0,
-            "FS firing rate {:.0} Hz outside expected [80, 350] Hz", firing_rate);
+        assert!(
+            firing_rate >= 80.0 && firing_rate <= 350.0,
+            "FS firing rate {:.0} Hz outside expected [80, 350] Hz",
+            firing_rate
+        );
 
         // CV should be very low (highly regular) — FS is the most regular type
         let mean = mean_isi;
-        let variance = spike_times.windows(2)
-            .map(|w| { let d = (w[1] - w[0]) - mean; d * d })
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean > 0.0 { variance.sqrt() / mean } else { 0.0 };
+        let variance = spike_times
+            .windows(2)
+            .map(|w| {
+                let d = (w[1] - w[0]) - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean > 0.0 {
+            variance.sqrt() / mean
+        } else {
+            0.0
+        };
         println!("  FS: CV(ISI) = {:.3}", cv);
-        assert!(cv < 0.3, "FS: CV too high ({:.3}), expected < 0.3 for fast regular firing", cv);
+        assert!(
+            cv < 0.3,
+            "FS: CV too high ({:.3}), expected < 0.3 for fast regular firing",
+            cv
+        );
     }
 }
 
@@ -173,33 +236,53 @@ fn test_rs_at_i20_produces_40hz() {
     let n_steps = (1000.0 / dt) as usize;
     let spike_times = simulate_one_neuron(0.02, 0.2, -65.0, 8.0, 20.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 25,
-        "RS(I=20): expected ≥25 spikes in 1s, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 25,
+        "RS(I=20): expected ≥25 spikes in 1s, got {}",
+        spike_times.len()
+    );
 
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi > 0 {
-        let mean_isi = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .sum::<f32>() / n_isi as f32;
+        let mean_isi = spike_times.windows(2).map(|w| w[1] - w[0]).sum::<f32>() / n_isi as f32;
         let firing_rate = 1000.0 / mean_isi;
-        println!("  RS(I=20): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
+        println!(
+            "  RS(I=20): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
 
         // Expect ~44 Hz at I=20
-        assert!(firing_rate >= 30.0 && firing_rate <= 60.0,
-            "RS(I=20) rate {:.0} Hz outside expected [30, 60] Hz", firing_rate);
+        assert!(
+            firing_rate >= 30.0 && firing_rate <= 60.0,
+            "RS(I=20) rate {:.0} Hz outside expected [30, 60] Hz",
+            firing_rate
+        );
 
         let mean = mean_isi;
-        let variance = spike_times.windows(2)
-            .map(|w| { let d = (w[1] - w[0]) - mean; d * d })
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean > 0.0 { variance.sqrt() / mean } else { 0.0 };
+        let variance = spike_times
+            .windows(2)
+            .map(|w| {
+                let d = (w[1] - w[0]) - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean > 0.0 {
+            variance.sqrt() / mean
+        } else {
+            0.0
+        };
         assert!(cv < 0.8, "RS(I=20): CV too high ({:.3})", cv);
 
         // Show adaptation: first ISI < mean ISI
         if spike_times.len() >= 3 {
             let first_isi = spike_times[1] - spike_times[0];
-            println!("  RS(I=20): first ISI = {:.2} ms, mean ISI = {:.2} ms", first_isi, mean_isi);
+            println!(
+                "  RS(I=20): first ISI = {:.2} ms, mean ISI = {:.2} ms",
+                first_isi, mean_isi
+            );
         }
     }
 }
@@ -221,28 +304,45 @@ fn test_fs_at_i15_produces_200hz() {
     let n_steps = (500.0 / dt) as usize;
     let spike_times = simulate_one_neuron(0.1, 0.2, -65.0, 2.0, 15.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 80,
-        "FS(I=15): expected ≥80 spikes in 500ms, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 80,
+        "FS(I=15): expected ≥80 spikes in 500ms, got {}",
+        spike_times.len()
+    );
 
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi > 0 {
-        let mean_isi = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .sum::<f32>() / n_isi as f32;
+        let mean_isi = spike_times.windows(2).map(|w| w[1] - w[0]).sum::<f32>() / n_isi as f32;
         let firing_rate = 1000.0 / mean_isi;
-        println!("  FS(I=15): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
+        println!(
+            "  FS(I=15): {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
 
         // Expect ~200 Hz at I=15
-        assert!(firing_rate >= 150.0 && firing_rate <= 300.0,
-            "FS(I=15) rate {:.0} Hz outside expected [150, 300] Hz", firing_rate);
+        assert!(
+            firing_rate >= 150.0 && firing_rate <= 300.0,
+            "FS(I=15) rate {:.0} Hz outside expected [150, 300] Hz",
+            firing_rate
+        );
 
         // Ultra-low CV for regular fast spiking
         let mean = mean_isi;
-        let variance = spike_times.windows(2)
-            .map(|w| { let d = (w[1] - w[0]) - mean; d * d })
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean > 0.0 { variance.sqrt() / mean } else { 0.0 };
+        let variance = spike_times
+            .windows(2)
+            .map(|w| {
+                let d = (w[1] - w[0]) - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean > 0.0 {
+            variance.sqrt() / mean
+        } else {
+            0.0
+        };
         assert!(cv < 0.3, "FS(I=15): CV too high ({:.3})", cv);
     }
 }
@@ -267,26 +367,40 @@ fn test_ib_intrinsically_bursting() {
     let n_steps = 2000; // 1000 ms
     let spike_times = simulate_one_neuron(0.02, 0.2, -55.0, 4.0, 10.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 15,
-        "IB: expected ≥15 spikes in 1s, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 15,
+        "IB: expected ≥15 spikes in 1s, got {}",
+        spike_times.len()
+    );
 
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi >= 5 {
-        let isi_values: Vec<f32> = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .collect();
+        let isi_values: Vec<f32> = spike_times.windows(2).map(|w| w[1] - w[0]).collect();
 
         let mean_isi = isi_values.iter().sum::<f32>() / n_isi as f32;
         let firing_rate = 1000.0 / mean_isi;
-        println!("  IB: {} spikes in 1s, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
-        println!("  IB: first 10 ISIs (ms): {:?}", &isi_values[..isi_values.len().min(10)]);
+        println!(
+            "  IB: {} spikes in 1s, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
+        println!(
+            "  IB: first 10 ISIs (ms): {:?}",
+            &isi_values[..isi_values.len().min(10)]
+        );
 
         // Compute CV
-        let variance = isi_values.iter()
+        let variance = isi_values
+            .iter()
             .map(|&d| (d - mean_isi).powi(2))
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean_isi > 0.0 { variance.sqrt() / mean_isi } else { 0.0 };
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean_isi > 0.0 {
+            variance.sqrt() / mean_isi
+        } else {
+            0.0
+        };
         println!("  IB: CV(ISI) = {:.3}", cv);
 
         // Check for burst signature: consecutive ISIs differing by ≥1.8×
@@ -303,7 +417,11 @@ fn test_ib_intrinsically_bursting() {
         }
 
         // At minimum: firing rate is measurable
-        assert!(firing_rate > 10.0, "IB: firing rate too low: {:.0} Hz", firing_rate);
+        assert!(
+            firing_rate > 10.0,
+            "IB: firing rate too low: {:.0} Hz",
+            firing_rate
+        );
     }
 }
 
@@ -323,29 +441,43 @@ fn test_ch_chattering() {
     let n_steps = 500; // 500 ms
     let spike_times = simulate_one_neuron(0.02, 0.2, -50.0, 2.0, 10.0, dt, tau_ref, n_steps);
 
-    assert!(spike_times.len() >= 6,
-        "CH: expected ≥6 spikes in 500ms, got {}", spike_times.len());
+    assert!(
+        spike_times.len() >= 6,
+        "CH: expected ≥6 spikes in 500ms, got {}",
+        spike_times.len()
+    );
 
     let n_isi = spike_times.len().saturating_sub(1);
     if n_isi >= 3 {
-        let isi_values: Vec<f32> = spike_times.windows(2)
-            .map(|w| w[1] - w[0])
-            .collect();
+        let isi_values: Vec<f32> = spike_times.windows(2).map(|w| w[1] - w[0]).collect();
 
         let mean_isi = isi_values.iter().sum::<f32>() / n_isi as f32;
         let firing_rate = 1000.0 / mean_isi;
-        println!("  CH: {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
-            spike_times.len(), mean_isi, firing_rate);
+        println!(
+            "  CH: {} spikes, mean ISI = {:.2} ms, rate = {:.0} Hz",
+            spike_times.len(),
+            mean_isi,
+            firing_rate
+        );
 
-        let variance = isi_values.iter()
+        let variance = isi_values
+            .iter()
             .map(|&d| (d - mean_isi).powi(2))
-            .sum::<f32>() / (n_isi.saturating_sub(1)) as f32;
-        let cv = if mean_isi > 0.0 { variance.sqrt() / mean_isi } else { 0.0 };
+            .sum::<f32>()
+            / (n_isi.saturating_sub(1)) as f32;
+        let cv = if mean_isi > 0.0 {
+            variance.sqrt() / mean_isi
+        } else {
+            0.0
+        };
         println!("  CH: CV(ISI) = {:.3}", cv);
 
         // Chattering: burst-like → CV > 0.5
-        assert!(cv > 0.4,
-            "CH: CV too low ({:.3}), expected > 0.4 for chattering", cv);
+        assert!(
+            cv > 0.4,
+            "CH: CV too low ({:.3}), expected > 0.4 for chattering",
+            cv
+        );
     }
 }
 
@@ -378,10 +510,19 @@ fn test_raster_to_csv_integration() {
 
     for step in 0..n_steps {
         neuron::step_izhikevich(
-            &mut v, &mut u, &mut trace,
-            &a, &b, &mut I,
-            dt, trace_decay, &mut spikes,
-            &c, &d, &mut refr, tau_ref,
+            &mut v,
+            &mut u,
+            &mut trace,
+            &a,
+            &b,
+            &mut I,
+            dt,
+            trace_decay,
+            &mut spikes,
+            &c,
+            &d,
+            &mut refr,
+            tau_ref,
         );
         raster.record(step, &spikes, 4);
     }

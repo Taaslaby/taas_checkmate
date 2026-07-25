@@ -16,48 +16,58 @@
 //!
 //! Root-level aliases (backward compat) maintained for all public functions + classes.
 
-pub mod neuron;
-pub mod kuramoto;
-pub mod io;
-pub mod sparse;
-pub mod koit;
-pub mod t3;
-pub mod snn;
-pub mod eprop;
 pub mod autotune;
-pub mod trainer;
 pub mod connectome;
-pub mod lif_connectome;
-pub mod poisson_stp;
-pub mod rl_agent;
-pub mod taas_format;
-pub mod vnc;
 pub mod connectome_brain;
 pub mod cpe;
+pub mod eprop;
 pub mod hh;
 #[cfg(feature = "cuda")]
 pub mod hh_gpu;
-pub mod iit;
+pub mod io;
+pub mod koit;
+pub mod kuramoto;
+pub mod lif_connectome;
+pub mod neuron;
+pub mod poisson_stp;
+pub mod rl_agent;
+pub mod snn;
+pub mod sparse;
+pub mod t3;
+pub mod taas_format;
+pub mod trainer;
+pub mod vnc;
+// pub mod depth_wave;
+pub mod karmac;
+// pub mod iit;
+#[cfg(feature = "cuda")]
+pub mod gpu_refiner;
 pub mod hologram;
 pub mod spaun;
 #[cfg(feature = "cuda")]
 pub mod spaun_gpu;
-#[cfg(feature = "cuda")]
-pub mod gpu_refiner;
 
 use pyo3::prelude::*;
 use pyo3::types::PyCFunction;
 use pyo3::wrap_pyfunction;
 
 /// Helper: add a function to a sub-module AND the root module (backward compat).
-fn export_fn(m: &Bound<'_, PyModule>, sub: &Bound<'_, PyModule>, func: &Bound<'_, PyCFunction>) -> PyResult<()> {
+fn export_fn(
+    m: &Bound<'_, PyModule>,
+    sub: &Bound<'_, PyModule>,
+    func: &Bound<'_, PyCFunction>,
+) -> PyResult<()> {
     sub.add_function(func.clone())?;
     m.add_function(func.clone())?;
     Ok(())
 }
 
 /// Create a sub-module and return it.
-fn make_sub<'py>(py: Python<'py>, parent: &Bound<'py, PyModule>, name: &str) -> PyResult<Bound<'py, PyModule>> {
+fn make_sub<'py>(
+    py: Python<'py>,
+    parent: &Bound<'py, PyModule>,
+    name: &str,
+) -> PyResult<Bound<'py, PyModule>> {
     let sub = PyModule::new(py, name)?;
     parent.add_submodule(&sub)?;
     Ok(sub)
@@ -78,14 +88,16 @@ macro_rules! export_class {
 fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── neurons ──────────────────────────────────────
     let neurons = make_sub(m.py(), m, "neurons")?;
-    macro_rules! add_fn { ($mod:expr, $func:path) => {
-        let __f = wrap_pyfunction!($func, &$mod)?;
-        export_fn(m, &$mod, &__f)?;
-    }}
+    macro_rules! add_fn {
+        ($mod:expr, $func:path) => {
+            let __f = wrap_pyfunction!($func, &$mod)?;
+            export_fn(m, &$mod, &__f)?;
+        };
+    }
 
     add_fn!(neurons, neuron::py_step_izhikevich);
     add_fn!(neurons, neuron::py_step_saw);
-    add_fn!(neurons, neuron::py_step_psi_wave);
+    add_fn!(neurons, neuron::py_step_gco);
     add_fn!(neurons, neuron::py_step_lif);
     add_fn!(neurons, neuron::py_step_adex);
     add_fn!(neurons, neuron::py_step_fhn);
@@ -93,6 +105,13 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(neurons, neuron::py_step_atlasov_neuromotor);
     add_fn!(neurons, neuron::py_stdp_update);
     add_fn!(neurons, neuron::py_stdp_homeostatic);
+    add_fn!(neurons, neuron::step_eprop);
+    export_class!(m, neurons, neuron::PySomatoDendriticNeuron);
+    // export_class!(m, neurons, depth_wave::PyDepthWave);
+
+    // ─── karmac ────────────────────────────────────────
+    let karmac_sub = make_sub(m.py(), m, "karmac")?;
+    export_class!(m, karmac_sub, karmac::PyCarmackBsp);
 
     // ─── kuramoto ──────────────────────────────────────
     let kuramoto = make_sub(m.py(), m, "kuramoto")?;
@@ -137,7 +156,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── sparse ────────────────────────────────────────
     let sparse = make_sub(m.py(), m, "sparse")?;
     add_fn!(sparse, sparse::py_compute_hamiltonian);
-    add_fn!(sparse, sparse::py_step_psi_wave_full);
+    add_fn!(sparse, sparse::py_step_gco_full);
     add_fn!(sparse, sparse::py_propagate_spikes);
     add_fn!(sparse, sparse::py_sim_step);
     add_fn!(sparse, sparse::py_rate_step);
@@ -185,6 +204,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── snn ───────────────────────────────────────────
     let snn = make_sub(m.py(), m, "snn")?;
     export_class!(m, snn, snn::PyLifNeuron);
+    export_class!(m, snn, neuron::PySomatoDendriticNeuron);
     export_class!(m, snn, snn::PySornNetwork);
     export_class!(m, snn, snn::PyTtfsEncoder);
     add_fn!(snn, snn::py_intrinsic_plasticity);
@@ -219,8 +239,8 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(connectome, connectome::py_bench_connectome_gpu_recording);
     add_fn!(connectome, connectome::py_bench_connectome_gpu_stdp);
     #[cfg(feature = "cuda")]
-    add_fn!(connectome, connectome::py_bench_psi_wave_gpu);
-    add_fn!(connectome, connectome::py_bench_psi_aberton_gpu);
+    add_fn!(connectome, connectome::py_bench_gco_gpu);
+    add_fn!(connectome, connectome::py_bench_gco_aberton_gpu);
 
     // ─── stp ───────────────────────────────────────────
     let stp = make_sub(m.py(), m, "stp")?;
@@ -264,8 +284,8 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(cpe, cpe::py_cpe_stdp_update);
 
     // ─── iit ─────────────────────────────────────────────
-    let iit = make_sub(m.py(), m, "iit")?;
-    export_class!(m, iit, iit::PyIITConsciousness);
+    // let iit = make_sub(m.py(), m, "iit")?;
+    // export_class!(m, iit, iit::PyIITConsciousness);
 
     // ─── hh ─────────────────────────────────────────────
     let hh = make_sub(m.py(), m, "hh")?;

@@ -155,9 +155,16 @@ pub fn py_lif_sim_cpu_recording(
 
         // ─── 1. LIF step (SIMD + rayon) ───
         neuron::step_lif(
-            v, I_buf, spikes, dt,
-            tau_m, v_rest, v_thresh, v_reset,
-            &mut refractory, neuron::DEFAULT_TAU_REF,
+            v,
+            I_buf,
+            spikes,
+            dt,
+            tau_m,
+            v_rest,
+            v_thresh,
+            v_reset,
+            &mut refractory,
+            neuron::DEFAULT_TAU_REF,
         );
 
         // ─── 2. Record to spike_buffer + reset g_syn на spike ───
@@ -168,7 +175,7 @@ pub fn py_lif_sim_cpu_recording(
         for i in 0..n_neurons.min(spikes.len()) {
             if spikes[i] != 0 {
                 if use_alpha && i < g_syn.len() {
-                    g_syn[i] = 0.0;  // Brian2: g = 0 on spike
+                    g_syn[i] = 0.0; // Brian2: g = 0 on spike
                 }
                 let idx = buf_offset + i;
                 if idx < spike_buffer.len() {
@@ -218,15 +225,28 @@ pub fn py_lif_sim_cpu_recording(
                                 let t1 = col_indices[j + 1] as usize;
                                 let t2 = col_indices[j + 2] as usize;
                                 let t3 = col_indices[j + 3] as usize;
-                                if t0 < n { delay_buf[write_offset + t0] += values[j] * mult * syn_scale; }
-                                if t1 < n { delay_buf[write_offset + t1] += values[j + 1] * mult * syn_scale; }
-                                if t2 < n { delay_buf[write_offset + t2] += values[j + 2] * mult * syn_scale; }
-                                if t3 < n { delay_buf[write_offset + t3] += values[j + 3] * mult * syn_scale; }
+                                if t0 < n {
+                                    delay_buf[write_offset + t0] += values[j] * mult * syn_scale;
+                                }
+                                if t1 < n {
+                                    delay_buf[write_offset + t1] +=
+                                        values[j + 1] * mult * syn_scale;
+                                }
+                                if t2 < n {
+                                    delay_buf[write_offset + t2] +=
+                                        values[j + 2] * mult * syn_scale;
+                                }
+                                if t3 < n {
+                                    delay_buf[write_offset + t3] +=
+                                        values[j + 3] * mult * syn_scale;
+                                }
                                 j += 4;
                             }
                             for j in j..end {
                                 let col = col_indices[j] as usize;
-                                if col < n { delay_buf[write_offset + col] += values[j] * mult * syn_scale; }
+                                if col < n {
+                                    delay_buf[write_offset + col] += values[j] * mult * syn_scale;
+                                }
                             }
                         }
                     }
@@ -249,15 +269,25 @@ pub fn py_lif_sim_cpu_recording(
                             let t1 = col_indices[j + 1] as usize;
                             let t2 = col_indices[j + 2] as usize;
                             let t3 = col_indices[j + 3] as usize;
-                            if t0 < n { g_syn[t0] += values[j] * mult * syn_scale; }
-                            if t1 < n { g_syn[t1] += values[j + 1] * mult * syn_scale; }
-                            if t2 < n { g_syn[t2] += values[j + 2] * mult * syn_scale; }
-                            if t3 < n { g_syn[t3] += values[j + 3] * mult * syn_scale; }
+                            if t0 < n {
+                                g_syn[t0] += values[j] * mult * syn_scale;
+                            }
+                            if t1 < n {
+                                g_syn[t1] += values[j + 1] * mult * syn_scale;
+                            }
+                            if t2 < n {
+                                g_syn[t2] += values[j + 2] * mult * syn_scale;
+                            }
+                            if t3 < n {
+                                g_syn[t3] += values[j + 3] * mult * syn_scale;
+                            }
                             j += 4;
                         }
                         for j in j..end {
                             let col = col_indices[j] as usize;
-                            if col < n { g_syn[col] += values[j] * mult * syn_scale; }
+                            if col < n {
+                                g_syn[col] += values[j] * mult * syn_scale;
+                            }
                         }
                     }
                 }
@@ -285,15 +315,25 @@ pub fn py_lif_sim_cpu_recording(
                         let t1 = col_indices[j + 1] as usize;
                         let t2 = col_indices[j + 2] as usize;
                         let t3 = col_indices[j + 3] as usize;
-                        if t0 < n { I_buf[t0] += values[j] * mult; }
-                        if t1 < n { I_buf[t1] += values[j + 1] * mult; }
-                        if t2 < n { I_buf[t2] += values[j + 2] * mult; }
-                        if t3 < n { I_buf[t3] += values[j + 3] * mult; }
+                        if t0 < n {
+                            I_buf[t0] += values[j] * mult;
+                        }
+                        if t1 < n {
+                            I_buf[t1] += values[j + 1] * mult;
+                        }
+                        if t2 < n {
+                            I_buf[t2] += values[j + 2] * mult;
+                        }
+                        if t3 < n {
+                            I_buf[t3] += values[j + 3] * mult;
+                        }
                         j += 4;
                     }
                     for j in j..end {
                         let col = col_indices[j] as usize;
-                        if col < n { I_buf[col] += values[j] * mult; }
+                        if col < n {
+                            I_buf[col] += values[j] * mult;
+                        }
                     }
                 }
             }
@@ -303,7 +343,6 @@ pub fn py_lif_sim_cpu_recording(
     let elapsed = t0.elapsed().as_secs_f64();
     Ok((elapsed, total_spikes))
 }
-
 
 // ─── GPU: LIF connectome with per-step spike recording ─────
 
@@ -336,11 +375,23 @@ pub fn py_lif_sim_gpu_recording(
 ) -> PyResult<(f64, usize)> {
     #[cfg(not(feature = "cuda"))]
     {
-        let _ = (row_ptr, col_indices, values, n_steps, dt,
-                 v, tau_m, v_rest, v_thresh, v_reset,
-                 nt_types, external_I, spike_buffer);
+        let _ = (
+            row_ptr,
+            col_indices,
+            values,
+            n_steps,
+            dt,
+            v,
+            tau_m,
+            v_rest,
+            v_thresh,
+            v_reset,
+            nt_types,
+            external_I,
+            spike_buffer,
+        );
         return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            "CUDA not available — rebuild with --features cuda".to_string()
+            "CUDA not available — rebuild with --features cuda".to_string(),
         ));
     }
 
@@ -375,76 +426,103 @@ pub fn py_lif_sim_gpu_recording(
 
         // ── Persistent GPU context ──
         // Lock once, hold for entire simulation. Thread-safe: Python calls are serial.
-        let mut cache = GPU_CTX.lock().map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("GPU_CTX lock: {e}")
-        ))?;
+        let mut cache = GPU_CTX.lock().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("GPU_CTX lock: {e}"))
+        })?;
 
-        let (gpu_ctx, needs_init, dummy_u, dummy_a, dummy_b, dummy_c, dummy_d) = match cache.take() {
+        let (gpu_ctx, needs_init, dummy_u, dummy_a, dummy_b, dummy_c, dummy_d) = match cache.take()
+        {
             Some((ctx, cached_n, cached_s, uploaded))
                 if cached_n == n_neurons && cached_s == n_synapses =>
             {
-                (ctx, !uploaded,
-                 vec![0.0f32; n_neurons], vec![0.02f32; n_neurons],
-                 vec![0.2f32; n_neurons], vec![-70.0f32; n_neurons],
-                 vec![2.0f32; n_neurons])
+                (
+                    ctx,
+                    !uploaded,
+                    vec![0.0f32; n_neurons],
+                    vec![0.02f32; n_neurons],
+                    vec![0.2f32; n_neurons],
+                    vec![-70.0f32; n_neurons],
+                    vec![2.0f32; n_neurons],
+                )
             }
             _ => {
-                let ctx = GpuContext::new(n_neurons, n_synapses)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        format!("GpuContext::new failed: {e}")
-                    ))?;
-                (ctx, true,
-                 vec![0.0f32; n_neurons], vec![0.02f32; n_neurons],
-                 vec![0.2f32; n_neurons], vec![-70.0f32; n_neurons],
-                 vec![2.0f32; n_neurons])
+                let ctx = GpuContext::new(n_neurons, n_synapses).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "GpuContext::new failed: {e}"
+                    ))
+                })?;
+                (
+                    ctx,
+                    true,
+                    vec![0.0f32; n_neurons],
+                    vec![0.02f32; n_neurons],
+                    vec![0.2f32; n_neurons],
+                    vec![-70.0f32; n_neurons],
+                    vec![2.0f32; n_neurons],
+                )
             }
         };
 
         // Upload v (state — changes every call)
-        gpu_ctx.upload_neurons(&v_host, &dummy_u, &dummy_a, &dummy_b, &dummy_c, &dummy_d)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_neurons: {e}")
-            ))?;
+        gpu_ctx
+            .upload_neurons(&v_host, &dummy_u, &dummy_a, &dummy_b, &dummy_c, &dummy_d)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("upload_neurons: {e}"))
+            })?;
 
         if needs_init {
             // One-time: LIF params + connectome
-            gpu_ctx.upload_lif_params(dt, tau_m_sl, v_rest_sl, v_thresh_sl, v_reset_sl)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("upload_lif_params: {e}")
-                ))?;
-            gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl, nt_types_sl, external_I_sl)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("upload_connectome: {e}")
-                ))?;
+            gpu_ctx
+                .upload_lif_params(dt, tau_m_sl, v_rest_sl, v_thresh_sl, v_reset_sl)
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "upload_lif_params: {e}"
+                    ))
+                })?;
+            gpu_ctx
+                .upload_connectome(
+                    row_ptr_sl,
+                    col_indices_sl,
+                    values_sl,
+                    nt_types_sl,
+                    external_I_sl,
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "upload_connectome: {e}"
+                    ))
+                })?;
         }
 
         // Upload I (current input)
-        gpu_ctx.upload_I(external_I_sl)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_I: {e}")
-            ))?;
+        gpu_ctx.upload_I(external_I_sl).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("upload_I: {e}"))
+        })?;
 
         // Allocate device-side spike counter
-        let d_spike_counter = gpu_ctx.alloc_spike_counter()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("alloc_spike_counter: {e}")
-            ))?;
+        let d_spike_counter = gpu_ctx.alloc_spike_counter().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("alloc_spike_counter: {e}"))
+        })?;
 
         let mut total_spikes: usize = 0;
         let mut step_spikes = vec![0i32; n_neurons];
         let t0 = std::time::Instant::now();
 
         for step in 0..n_steps {
-            gpu_ctx.connectome_lif_step(Some(d_spike_counter))
-                .inspect_err(|_e| { gpu_ctx.free_spike_counter(d_spike_counter); })
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("connectome_lif_step: {e}")
-                ))?;
+            gpu_ctx
+                .connectome_lif_step(Some(d_spike_counter))
+                .inspect_err(|_e| {
+                    gpu_ctx.free_spike_counter(d_spike_counter);
+                })
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "connectome_lif_step: {e}"
+                    ))
+                })?;
 
-            gpu_ctx.download_spikes(&mut step_spikes)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("download_spikes: {e}")
-                ))?;
+            gpu_ctx.download_spikes(&mut step_spikes).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("download_spikes: {e}"))
+            })?;
 
             let buf_offset = step * n_neurons;
             for i in 0..n_neurons {

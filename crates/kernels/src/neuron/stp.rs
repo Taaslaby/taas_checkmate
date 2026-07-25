@@ -52,20 +52,21 @@ pub(crate) unsafe fn stp_step(
         // s = 1 where pre_spike, else 0
         let s_one = sp.cmp_gt(zero).blend(one, zero);
 
-        // Save pre-update values for spike-dependent terms
+        // Save pre-update values for both facilitation and depression
+        // Tsodyks & Markram (1997): all spike-dependent terms use pre-spike u/x
         let uu0 = uu;
         let xx0 = xx;
 
         // Common decay (always applied): u += dt·(u0-u)/τ_f
-        uu = uu + dt_s * (u0v - uu) / tf;
+        uu += dt_s * (u0v - uu0) / tf;
         // Common decay (always applied): x += dt·(1-x)/τ_d
-        xx = xx + dt_s * (one - xx) / td;
+        xx += dt_s * (one - xx0) / td;
 
-        // Facilitation on spike: + u0·(1-u_old)  (uses pre-decay u)
+        // Facilitation on spike: + u0·(1-u_old)  (pre-spike u)
         uu += s_one * u0v * (one - uu0);
-        // Depression on spike: − u_new · x_old  (uses new u, pre-decay x)
-        xx += s_one * (-uu * xx0);
-        // Synaptic current: + A·u_new·x_new where spike
+        // Depression on spike: − u_old · x_old  (both pre-spike)
+        xx += s_one * (-uu0 * xx0); // u_old here — parallel Euler
+                                    // Synaptic current: + A·u_new·x_new where spike
         io += s_one * av * uu * xx;
 
         store8(x, off, xx);
@@ -88,15 +89,15 @@ pub(crate) unsafe fn stp_step(
             let s = if pre[i] != 0 { 1.0 } else { 0.0 };
             let tf_i = tf[i].max(1e-10);
             let td_i = td[i].max(1e-10);
-            // Save pre-decay values for spike-dependent terms (matching SIMD)
+            // Save pre-spike values for BOTH facilitation and depression (Tsodyks-Markram 1997)
             let u_pre = u_sl[i];
             let x_pre = x_sl[i];
             // Decay (always applied)
-            u_sl[i] += dt * (u0v[i] - u_sl[i]) / tf_i;
-            x_sl[i] += dt * (1.0 - x_sl[i]) / td_i;
-            // Spike-dependent terms (using PRE-decay values, like SIMD)
+            u_sl[i] += dt * (u0v[i] - u_pre) / tf_i;
+            x_sl[i] += dt * (1.0 - x_pre) / td_i;
+            // Spike-dependent terms (PRE-spike values for both u and x — parallel Euler)
             u_sl[i] += u0v[i] * (1.0 - u_pre) * s;
-            x_sl[i] -= u_sl[i] * x_pre * s;  // uses NEW u, PRE-decay x — matches SIMD
+            x_sl[i] -= u_pre * x_pre * s; // u_pre here — parallel Euler
             io[i] += av[i] * u_sl[i] * x_sl[i] * s;
         }
     }

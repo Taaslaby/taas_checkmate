@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
-use wide::{f32x8, CmpGt};
 use super::{load8, load8_mut, store8};
+use wide::{f32x8, CmpGt};
 
 // ═══════════════════════════════════════════════════════
 //  Wilson-Cowan (WC) — excitatory-inhibitory rate model
@@ -33,9 +33,7 @@ use super::{load8, load8_mut, store8};
 #[inline(always)]
 fn sigmoid_simd(x: f32x8, beta: f32x8) -> f32x8 {
     let one = f32x8::splat(1.0);
-    let neg = (-x * beta)
-        .max(f32x8::splat(-10.0))
-        .min(f32x8::splat(10.0));
+    let neg = (-x * beta).max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
     one / (one + super::fast_exp_simd(neg))
 }
 
@@ -50,10 +48,14 @@ fn sigmoid_simd(x: f32x8, beta: f32x8) -> f32x8 {
 /// `e[n]`, `i[n]`, `i_e[n]`, `i_i[n]`, `spikes_e[n]`, `spikes_i[n]`, `params[8·n]`
 /// must be valid, non-overlapping.
 pub(crate) unsafe fn wc_step(
-    e: *mut f32, i: *mut f32,
-    i_e: *const f32, i_i: *const f32,
-    spikes_e: *mut f32, spikes_i: *mut f32,
-    params: *const f32, n: usize,
+    e: *mut f32,
+    i: *mut f32,
+    i_e: *const f32,
+    i_i: *const f32,
+    spikes_e: *mut f32,
+    spikes_i: *mut f32,
+    params: *const f32,
+    n: usize,
 ) {
     let p = std::slice::from_raw_parts(params, n * 8);
     let dt_val = p[0];
@@ -64,8 +66,12 @@ pub(crate) unsafe fn wc_step(
     for off in (0..n8).step_by(8) {
         let mut ee = load8_mut(e, off);
         let mut ii = load8_mut(i, off);
-        let ie_ext = load8(i_e, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
-        let ii_ext = load8(i_i, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ie_ext = load8(i_e, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
+        let ii_ext = load8(i_i, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
 
         // Load parameters
         let tau_E = load8(params.wrapping_add(n), off);
@@ -102,8 +108,8 @@ pub(crate) unsafe fn wc_step(
         // Output: rates (0 to 1 via sigmoid)
         store8(e, off, ee);
         store8(i, off, ii);
-        store8(spikes_e, off, f_e);  // continuous rate output
-        store8(spikes_i, off, f_i);  // continuous rate output
+        store8(spikes_e, off, f_e); // continuous rate output
+        store8(spikes_i, off, f_i); // continuous rate output
     }
 
     // Scalar tail
@@ -185,13 +191,32 @@ mod tests {
 
         // Run for 500 steps (50 time units)
         for _ in 0..500 {
-            unsafe { wc_step(e.as_mut_ptr(), ii.as_mut_ptr(), i_e.as_ptr(), i_i.as_ptr(), spikes_e.as_mut_ptr(), spikes_i.as_mut_ptr(), params.as_ptr(), n) };
+            unsafe {
+                wc_step(
+                    e.as_mut_ptr(),
+                    ii.as_mut_ptr(),
+                    i_e.as_ptr(),
+                    i_i.as_ptr(),
+                    spikes_e.as_mut_ptr(),
+                    spikes_i.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                )
+            };
         }
 
         // After convergence, E and I should be in (0, 1) and stable
         for idx in 0..n {
-            assert!(e[idx] > 0.0 && e[idx] < 1.0, "E should be in (0,1): e[{idx}]={}", e[idx]);
-            assert!(ii[idx] > 0.0 && ii[idx] < 1.0, "I should be in (0,1): i[{idx}]={}", ii[idx]);
+            assert!(
+                e[idx] > 0.0 && e[idx] < 1.0,
+                "E should be in (0,1): e[{idx}]={}",
+                e[idx]
+            );
+            assert!(
+                ii[idx] > 0.0 && ii[idx] < 1.0,
+                "I should be in (0,1): i[{idx}]={}",
+                ii[idx]
+            );
         }
 
         // Check convergence (variance should be small)
@@ -232,14 +257,31 @@ mod tests {
         }
 
         for _ in 0..100 {
-            unsafe { wc_step(e.as_mut_ptr(), ii.as_mut_ptr(), i_e.as_ptr(), i_i.as_ptr(), spikes_e.as_mut_ptr(), spikes_i.as_mut_ptr(), params.as_ptr(), n) };
+            unsafe {
+                wc_step(
+                    e.as_mut_ptr(),
+                    ii.as_mut_ptr(),
+                    i_e.as_ptr(),
+                    i_i.as_ptr(),
+                    spikes_e.as_mut_ptr(),
+                    spikes_i.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                )
+            };
         }
 
         for idx in 0..n {
-            assert!(spikes_e[idx] > 0.0 && spikes_e[idx] < 1.0,
-                "spikes_e[{idx}] should be in (0,1): {}", spikes_e[idx]);
-            assert!(spikes_i[idx] > 0.0 && spikes_i[idx] < 1.0,
-                "spikes_i[{idx}] should be in (0,1): {}", spikes_i[idx]);
+            assert!(
+                spikes_e[idx] > 0.0 && spikes_e[idx] < 1.0,
+                "spikes_e[{idx}] should be in (0,1): {}",
+                spikes_e[idx]
+            );
+            assert!(
+                spikes_i[idx] > 0.0 && spikes_i[idx] < 1.0,
+                "spikes_i[{idx}] should be in (0,1): {}",
+                spikes_i[idx]
+            );
         }
     }
 }

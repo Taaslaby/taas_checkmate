@@ -30,7 +30,9 @@ impl PyPoissonGenerator {
     #[new]
     #[pyo3(signature = (n, dt=1.0, seed=42))]
     fn new(n: usize, dt: f32, seed: u32) -> Self {
-        Self { inner: neuron::PoissonGenerator::new(n, dt, seed) }
+        Self {
+            inner: neuron::PoissonGenerator::new(n, dt, seed),
+        }
     }
 
     fn step(&mut self, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
@@ -39,16 +41,22 @@ impl PyPoissonGenerator {
         Ok(())
     }
 
-    fn set_rate(&mut self, idx: usize, rate_hz: f32) { self.inner.set_rate(idx, rate_hz); }
+    fn set_rate(&mut self, idx: usize, rate_hz: f32) {
+        self.inner.set_rate(idx, rate_hz);
+    }
 
     fn set_rates(&mut self, rates: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         self.inner.set_rates(rates.readonly().as_slice()?);
         Ok(())
     }
 
-    fn n_neurons(&self) -> usize { self.inner.n_neurons() }
+    fn n_neurons(&self) -> usize {
+        self.inner.n_neurons()
+    }
 
-    fn __repr__(&self) -> String { format!("PoissonGenerator(n={})", self.inner.n_neurons()) }
+    fn __repr__(&self) -> String {
+        format!("PoissonGenerator(n={})", self.inner.n_neurons())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -74,16 +82,25 @@ impl PyShortTermPlasticity {
     #[pyo3(signature = (n, dt=1.0, heterogeneous=false, seed=42))]
     fn new(n: usize, dt: f32, heterogeneous: bool, seed: u32) -> Self {
         if heterogeneous {
-            Self { inner: neuron::ShortTermPlasticity::new_heterogeneous(n, dt, seed) }
+            Self {
+                inner: neuron::ShortTermPlasticity::new_heterogeneous(n, dt, seed),
+            }
         } else {
-            Self { inner: neuron::ShortTermPlasticity::new(n, dt) }
+            Self {
+                inner: neuron::ShortTermPlasticity::new(n, dt),
+            }
         }
     }
 
-    fn step(&mut self, pre_spikes: Bound<'_, PyArray1<i32>>, I_out: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        pre_spikes: Bound<'_, PyArray1<i32>>,
+        I_out: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<()> {
         let pre_spikes = pre_spikes.readonly();
         let mut I_out = I_out.readwrite();
-        self.inner.step(pre_spikes.as_slice()?, I_out.as_slice_mut()?);
+        self.inner
+            .step(pre_spikes.as_slice()?, I_out.as_slice_mut()?);
         Ok(())
     }
 
@@ -113,11 +130,17 @@ impl PyShortTermPlasticity {
         Ok(())
     }
 
-    fn reset(&mut self) { self.inner.reset(); }
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
 
-    fn __repr__(&self) -> String { format!("ShortTermPlasticity(n={})", self.inner.n) }
+    fn __repr__(&self) -> String {
+        format!("ShortTermPlasticity(n={})", self.inner.n)
+    }
 
-    fn n_neurons(&self) -> usize { self.inner.n }
+    fn n_neurons(&self) -> usize {
+        self.inner.n
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -138,6 +161,11 @@ pub fn py_compute_lfp(
     let spikes = spikes.readonly();
     let electrode_map = electrode_map.readonly();
     let mut lfp_out = lfp_out.readwrite();
-    neuron::compute_lfp(spikes.as_slice()?, electrode_map.as_slice()?, lfp_out.as_slice_mut()?, n_electrodes);
+    neuron::compute_lfp(
+        spikes.as_slice()?,
+        electrode_map.as_slice()?,
+        lfp_out.as_slice_mut()?,
+        n_electrodes,
+    );
     Ok(())
 }

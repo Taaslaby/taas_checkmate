@@ -23,11 +23,14 @@
 //! θ' = θ + dt · (ω + coupling + drive · gain / (r + ε))
 //! ```
 use wide::f32x8;
-use wide::{CmpLt, CmpGt};
+use wide::{CmpGt, CmpLt};
 
-use crate::t3::pst_linear_dim;
 use crate::spike::pst_jacobian::{pst_jacobian_v_jit, PstGradients};
-use crate::spike::trajectory::{T3SpikeTrajectory, OFF_TH1, off_th2, off_th3, off_r1, off_r2, off_r3, off_drive1, off_drive2, off_drive3};
+use crate::spike::trajectory::{
+    off_drive1, off_drive2, off_drive3, off_r1, off_r2, off_r3, off_th2, off_th3,
+    T3SpikeTrajectory, OFF_TH1,
+};
+use crate::t3::pst_linear_dim;
 
 const EPS: f32 = 0.1;
 const PG_GAIN: f32 = 4.0;
@@ -47,9 +50,14 @@ fn phase_gate_from_sincos(sin: &[f32], cos: &[f32], n: usize, gamma: f32) -> f32
 // ─── r-factor gate (branchless SIMD) ─────────────────────
 
 fn r_clamp_effect(r: f32, drive: f32, dt: f32, gain: f32, alpha: f32) -> f32 {
-    let rp = r as f64 + (dt as f64) * ((alpha as f64 - r as f64 * r as f64) * r as f64
-                                        + drive as f64 * gain as f64);
-    if !(0.001..=10.0).contains(&rp) { 0.0 } else { 1.0 }
+    let rp = r as f64
+        + (dt as f64)
+            * ((alpha as f64 - r as f64 * r as f64) * r as f64 + drive as f64 * gain as f64);
+    if !(0.001..=10.0).contains(&rp) {
+        0.0
+    } else {
+        1.0
+    }
 }
 
 #[inline]
@@ -59,7 +67,8 @@ fn r_factor_gate(r: f32, drive: f32, dt: f32, gain: f32, alpha: f32) -> f32 {
 
 #[inline]
 fn r_factor_gate_f32x8(r: f32x8, drive: f32x8, dt: f32, gain: f32, alpha: f32) -> f32x8 {
-    let rp = r + f32x8::splat(dt) * ((f32x8::splat(alpha) - r * r) * r + drive * f32x8::splat(gain));
+    let rp =
+        r + f32x8::splat(dt) * ((f32x8::splat(alpha) - r * r) * r + drive * f32x8::splat(gain));
     let mask_lo = rp.cmp_lt(f32x8::splat(0.001));
     let mask_hi = rp.cmp_gt(f32x8::splat(10.0));
     (mask_lo | mask_hi).blend(f32x8::splat(0.0), f32x8::splat(1.0))
@@ -72,12 +81,19 @@ fn r_factor_gate_f32x8(r: f32x8, drive: f32x8, dt: f32, gain: f32, alpha: f32) -
 /// Все буферы растут только при необходимости и никогда не сжимаются.
 pub struct BpttWorkspace {
     /// Recurrent gradient buffers (size n, 3 pops each)
-    pub v_th1: Vec<f32>, pub v_th2: Vec<f32>, pub v_th3: Vec<f32>,
-    pub v_r1: Vec<f32>, pub v_r2: Vec<f32>, pub v_r3: Vec<f32>,
+    pub v_th1: Vec<f32>,
+    pub v_th2: Vec<f32>,
+    pub v_th3: Vec<f32>,
+    pub v_r1: Vec<f32>,
+    pub v_r2: Vec<f32>,
+    pub v_r3: Vec<f32>,
     /// Temp sin/cos buffers (n per pop)
-    sin1: Vec<f32>, cos1: Vec<f32>,
-    sin2: Vec<f32>, cos2: Vec<f32>,
-    sin3: Vec<f32>, cos3: Vec<f32>,
+    sin1: Vec<f32>,
+    cos1: Vec<f32>,
+    sin2: Vec<f32>,
+    cos2: Vec<f32>,
+    sin3: Vec<f32>,
+    cos3: Vec<f32>,
     /// Grad drives [n_steps × 3n]
     pub grad_drives: Vec<f32>,
     /// Pre-allocated PST gradient buffers (for SPIGRAD K1/K1')
@@ -88,11 +104,18 @@ impl BpttWorkspace {
     /// Create workspace pre-sized for `n` oscillators and `n_steps` time steps.
     pub fn new(n: usize, n_steps: usize) -> Self {
         Self {
-            v_th1: vec![0.0; n], v_th2: vec![0.0; n], v_th3: vec![0.0; n],
-            v_r1: vec![0.0; n], v_r2: vec![0.0; n], v_r3: vec![0.0; n],
-            sin1: vec![0.0; n], cos1: vec![0.0; n],
-            sin2: vec![0.0; n], cos2: vec![0.0; n],
-            sin3: vec![0.0; n], cos3: vec![0.0; n],
+            v_th1: vec![0.0; n],
+            v_th2: vec![0.0; n],
+            v_th3: vec![0.0; n],
+            v_r1: vec![0.0; n],
+            v_r2: vec![0.0; n],
+            v_r3: vec![0.0; n],
+            sin1: vec![0.0; n],
+            cos1: vec![0.0; n],
+            sin2: vec![0.0; n],
+            cos2: vec![0.0; n],
+            sin3: vec![0.0; n],
+            cos3: vec![0.0; n],
             grad_drives: vec![0.0; n_steps * 3 * n],
             pst_v: PstGradients::new(n),
         }
@@ -101,13 +124,22 @@ impl BpttWorkspace {
     /// Grow buffers if needed — keep existing contents, only zero-extend.
     pub fn resize(&mut self, n: usize, n_steps: usize) {
         let grow = |v: &mut Vec<f32>, len: usize| {
-            if v.len() < len { v.resize(len, 0.0); }
+            if v.len() < len {
+                v.resize(len, 0.0);
+            }
         };
-        grow(&mut self.v_th1, n); grow(&mut self.v_th2, n); grow(&mut self.v_th3, n);
-        grow(&mut self.v_r1, n); grow(&mut self.v_r2, n); grow(&mut self.v_r3, n);
-        grow(&mut self.sin1, n); grow(&mut self.cos1, n);
-        grow(&mut self.sin2, n); grow(&mut self.cos2, n);
-        grow(&mut self.sin3, n); grow(&mut self.cos3, n);
+        grow(&mut self.v_th1, n);
+        grow(&mut self.v_th2, n);
+        grow(&mut self.v_th3, n);
+        grow(&mut self.v_r1, n);
+        grow(&mut self.v_r2, n);
+        grow(&mut self.v_r3, n);
+        grow(&mut self.sin1, n);
+        grow(&mut self.cos1, n);
+        grow(&mut self.sin2, n);
+        grow(&mut self.cos2, n);
+        grow(&mut self.sin3, n);
+        grow(&mut self.cos3, n);
         grow(&mut self.grad_drives, n_steps * 3 * n);
         self.pst_v.resize(n);
     }
@@ -118,15 +150,21 @@ impl BpttWorkspace {
 #[inline]
 fn ld(slice: &[f32], i: usize) -> f32x8 {
     f32x8::new([
-        slice[i], slice[i+1], slice[i+2], slice[i+3],
-        slice[i+4], slice[i+5], slice[i+6], slice[i+7],
+        slice[i],
+        slice[i + 1],
+        slice[i + 2],
+        slice[i + 3],
+        slice[i + 4],
+        slice[i + 5],
+        slice[i + 6],
+        slice[i + 7],
     ])
 }
 
 #[inline]
 fn st(slice: &mut [f32], i: usize, v: f32x8) {
     let arr = v.as_array_ref();
-    slice[i..i+8].copy_from_slice(arr);
+    slice[i..i + 8].copy_from_slice(arr);
 }
 
 /// Helper: get step slice from flat trajectory
@@ -146,68 +184,131 @@ fn step_slice_mut(data: &mut [f32], off: usize, n: usize, step: usize) -> &mut [
 /// Returns (r_acc_sin, r_acc_cos, sin_acc, cos_acc, v_sin_acc, v_cos_acc).
 fn simd_pass1_pop(
     n: usize,
-    pre_th: &[f32], pre_r: &[f32], v_th: &[f32],
-    sin: &mut [f32], cos: &mut [f32],
+    pre_th: &[f32],
+    pre_r: &[f32],
+    v_th: &[f32],
+    sin: &mut [f32],
+    cos: &mut [f32],
 ) -> (f32, f32, f32, f32, f32, f32) {
     let n_chunks = n / 8;
-    let mut r_ss_v = f32x8::splat(0.0); let mut r_cc_v = f32x8::splat(0.0);
-    let mut s_acc_v = f32x8::splat(0.0); let mut c_acc_v = f32x8::splat(0.0);
-    let mut v_ss_v = f32x8::splat(0.0); let mut v_cc_v = f32x8::splat(0.0);
+    let mut r_ss_v = f32x8::splat(0.0);
+    let mut r_cc_v = f32x8::splat(0.0);
+    let mut s_acc_v = f32x8::splat(0.0);
+    let mut c_acc_v = f32x8::splat(0.0);
+    let mut v_ss_v = f32x8::splat(0.0);
+    let mut v_cc_v = f32x8::splat(0.0);
 
     for ch in 0..n_chunks {
         let i = ch * 8;
         let (s, c) = ld(pre_th, i).sin_cos();
-        st(sin, i, s); st(cos, i, c);
+        st(sin, i, s);
+        st(cos, i, c);
         let r = ld(pre_r, i);
         let v = ld(v_th, i);
-        r_ss_v += r * s; r_cc_v += r * c;
-        s_acc_v += s; c_acc_v += c;
-        v_ss_v += v * s; v_cc_v += v * c;
+        r_ss_v += r * s;
+        r_cc_v += r * c;
+        s_acc_v += s;
+        c_acc_v += c;
+        v_ss_v += v * s;
+        v_cc_v += v * c;
     }
 
-    let mut r_ss_s = 0.0; let mut r_cc_s = 0.0;
-    let mut s_acc_s = 0.0; let mut c_acc_s = 0.0;
-    let mut v_ss_s = 0.0; let mut v_cc_s = 0.0;
+    let mut r_ss_s = 0.0;
+    let mut r_cc_s = 0.0;
+    let mut s_acc_s = 0.0;
+    let mut c_acc_s = 0.0;
+    let mut v_ss_s = 0.0;
+    let mut v_cc_s = 0.0;
     let rem = n % 8;
     if rem > 0 {
         let base = n_chunks * 8;
         for j in 0..rem {
             let idx = base + j;
-            let s = pre_th[idx].sin(); sin[idx] = s;
-            let c = pre_th[idx].cos(); cos[idx] = c;
-            let r = pre_r[idx]; let v = v_th[idx];
-            r_ss_s += r * s; r_cc_s += r * c;
-            s_acc_s += s; c_acc_s += c;
-            v_ss_s += v * s; v_cc_s += v * c;
+            let s = pre_th[idx].sin();
+            sin[idx] = s;
+            let c = pre_th[idx].cos();
+            cos[idx] = c;
+            let r = pre_r[idx];
+            let v = v_th[idx];
+            r_ss_s += r * s;
+            r_cc_s += r * c;
+            s_acc_s += s;
+            c_acc_s += c;
+            v_ss_s += v * s;
+            v_cc_s += v * c;
         }
     }
 
-    (r_ss_v.reduce_add() + r_ss_s, r_cc_v.reduce_add() + r_cc_s,
-     s_acc_v.reduce_add() + s_acc_s, c_acc_v.reduce_add() + c_acc_s,
-     v_ss_v.reduce_add() + v_ss_s, v_cc_v.reduce_add() + v_cc_s)
+    (
+        r_ss_v.reduce_add() + r_ss_s,
+        r_cc_v.reduce_add() + r_cc_s,
+        s_acc_v.reduce_add() + s_acc_s,
+        c_acc_v.reduce_add() + c_acc_s,
+        v_ss_v.reduce_add() + v_ss_s,
+        v_cc_v.reduce_add() + v_cc_s,
+    )
 }
 
 /// Pass 2: SIMD BPTT arithmetic — update v_th/v_r + write grad_drives.
 #[allow(clippy::too_many_arguments)]
 fn simd_pass2(
-    n: usize, dt: f32, gain: f32, alpha: f32,
-    pre_r1: &[f32], d1: &[f32],
-    pre_r2: &[f32], d2: &[f32],
-    pre_r3: &[f32], d3: &[f32],
-    sin1: &[f32], cos1: &[f32],
-    sin2: &[f32], cos2: &[f32],
-    sin3: &[f32], cos3: &[f32],
-    r1s1: f32, r1c1: f32, r2s2: f32, r2c2: f32, r3s3: f32, r3c3: f32,
-    svs1: f32, svc1: f32, svs2: f32, svc2: f32, svs3: f32, svc3: f32,
-    sin1_sum: f32, cos1_sum: f32, sin2_sum: f32, cos2_sum: f32, sin3_sum: f32, cos3_sum: f32,
-    g1: f32, g2: f32, g3: f32,
-    pg_pre1: f32, pg_pre2: f32, pg_pre3: f32,
-    cross_gate1: f32, cross_gate2: f32, cross_gate3: f32,
-    w12: f32, w13: f32, w23: f32,
-    grad_drives: &mut [f32], d_off: usize,
-    v_th1: &mut [f32], v_th2: &mut [f32], v_th3: &mut [f32],
-    v_r1: &mut [f32], v_r2: &mut [f32], v_r3: &mut [f32],
-    step: usize, n_steps: usize, grad_pst: &[f32],
+    n: usize,
+    dt: f32,
+    gain: f32,
+    alpha: f32,
+    pre_r1: &[f32],
+    d1: &[f32],
+    pre_r2: &[f32],
+    d2: &[f32],
+    pre_r3: &[f32],
+    d3: &[f32],
+    sin1: &[f32],
+    cos1: &[f32],
+    sin2: &[f32],
+    cos2: &[f32],
+    sin3: &[f32],
+    cos3: &[f32],
+    r1s1: f32,
+    r1c1: f32,
+    r2s2: f32,
+    r2c2: f32,
+    r3s3: f32,
+    r3c3: f32,
+    svs1: f32,
+    svc1: f32,
+    svs2: f32,
+    svc2: f32,
+    svs3: f32,
+    svc3: f32,
+    sin1_sum: f32,
+    cos1_sum: f32,
+    sin2_sum: f32,
+    cos2_sum: f32,
+    sin3_sum: f32,
+    cos3_sum: f32,
+    g1: f32,
+    g2: f32,
+    g3: f32,
+    pg_pre1: f32,
+    pg_pre2: f32,
+    pg_pre3: f32,
+    cross_gate1: f32,
+    cross_gate2: f32,
+    cross_gate3: f32,
+    w12: f32,
+    w13: f32,
+    w23: f32,
+    grad_drives: &mut [f32],
+    d_off: usize,
+    v_th1: &mut [f32],
+    v_th2: &mut [f32],
+    v_th3: &mut [f32],
+    v_r1: &mut [f32],
+    v_r2: &mut [f32],
+    v_r3: &mut [f32],
+    step: usize,
+    n_steps: usize,
+    grad_pst: &[f32],
 ) {
     let s_dt = f32x8::splat(dt);
     let _s_gain = f32x8::splat(gain);
@@ -254,19 +355,31 @@ fn simd_pass2(
     let n_chunks = n / 8;
     for c in 0..n_chunks {
         let i = c * 8;
-        let s1 = ld(sin1, i); let c1 = ld(cos1, i);
-        let s2 = ld(sin2, i); let c2 = ld(cos2, i);
-        let s3 = ld(sin3, i); let c3 = ld(cos3, i);
-        let r1 = ld(pre_r1, i); let d1v = ld(d1, i);
-        let r2 = ld(pre_r2, i); let d2v = ld(d2, i);
-        let r3 = ld(pre_r3, i); let d3v = ld(d3, i);
-        let vth1 = ld(v_th1, i); let vr1 = ld(v_r1, i);
-        let vth2 = ld(v_th2, i); let vr2 = ld(v_r2, i);
-        let vth3 = ld(v_th3, i); let vr3 = ld(v_r3, i);
+        let s1 = ld(sin1, i);
+        let c1 = ld(cos1, i);
+        let s2 = ld(sin2, i);
+        let c2 = ld(cos2, i);
+        let s3 = ld(sin3, i);
+        let c3 = ld(cos3, i);
+        let r1 = ld(pre_r1, i);
+        let d1v = ld(d1, i);
+        let r2 = ld(pre_r2, i);
+        let d2v = ld(d2, i);
+        let r3 = ld(pre_r3, i);
+        let d3v = ld(d3, i);
+        let vth1 = ld(v_th1, i);
+        let vr1 = ld(v_r1, i);
+        let vth2 = ld(v_th2, i);
+        let vr2 = ld(v_r2, i);
+        let vth3 = ld(v_th3, i);
+        let vr3 = ld(v_r3, i);
 
-        let dcpl1 = -(s_w12g2 * (c1 * s_r2c2 + s1 * s_r2s2) + s_w13g3 * (c1 * s_r3c3 + s1 * s_r3s3));
-        let dcpl2 = -(s_w12_2 * (c2 * s_r1c1 + s2 * s_r1s1) + s_w23_2 * (c2 * s_r3c3 + s2 * s_r3s3));
-        let dcpl3 = -(s_w13_3 * (c3 * s_r1c1 + s3 * s_r1s1) + s_w23_3 * (c3 * s_r2c2 + s3 * s_r2s2));
+        let dcpl1 =
+            -(s_w12g2 * (c1 * s_r2c2 + s1 * s_r2s2) + s_w13g3 * (c1 * s_r3c3 + s1 * s_r3s3));
+        let dcpl2 =
+            -(s_w12_2 * (c2 * s_r1c1 + s2 * s_r1s1) + s_w23_2 * (c2 * s_r3c3 + s2 * s_r3s3));
+        let dcpl3 =
+            -(s_w13_3 * (c3 * s_r1c1 + s3 * s_r1s1) + s_w23_3 * (c3 * s_r2c2 + s3 * s_r2s2));
 
         let vt1_self = vth1 * (s_one + s_dt * dcpl1);
         let vt2_self = vth2 * (s_one + s_dt * dcpl2);
@@ -276,30 +389,35 @@ fn simd_pass2(
         let dg2 = s_pg2_sc * c2 - s_pg2_cs * s2;
         let dg3 = s_pg3_sc * c3 - s_pg3_cs * s3;
 
-        let vt1_cross = s_dt * (
-            r1 * (s_w12g1 * (c1 * s_svc2 + s1 * s_svs2) + s_w13g1 * (c1 * s_svc3 + s1 * s_svs3))
-            + dg1 * s_cross1
-        );
-        let vt2_cross = s_dt * (
-            r2 * (s_w12g1_2 * (c2 * s_svc1 + s2 * s_svs1) + s_w23g3 * (c2 * s_svc3 + s2 * s_svs3))
-            + dg2 * s_cross2
-        );
-        let vt3_cross = s_dt * (
-            r3 * (s_w13g1_2 * (c3 * s_svc1 + s3 * s_svs1) + s_w23g2 * (c3 * s_svc2 + s3 * s_svs2))
-            + dg3 * s_cross3
-        );
+        let vt1_cross = s_dt
+            * (r1
+                * (s_w12g1 * (c1 * s_svc2 + s1 * s_svs2) + s_w13g1 * (c1 * s_svc3 + s1 * s_svs3))
+                + dg1 * s_cross1);
+        let vt2_cross = s_dt
+            * (r2
+                * (s_w12g1_2 * (c2 * s_svc1 + s2 * s_svs1)
+                    + s_w23g3 * (c2 * s_svc3 + s2 * s_svs3))
+                + dg2 * s_cross2);
+        let vt3_cross = s_dt
+            * (r3
+                * (s_w13g1_2 * (c3 * s_svc1 + s3 * s_svs1)
+                    + s_w23g2 * (c3 * s_svc2 + s3 * s_svs2))
+                + dg3 * s_cross3);
 
         let r_factor1 = s_one + s_dt * (s_alpha - s_three * r1 * r1);
         let rg1 = r_factor_gate_f32x8(r1, d1v, dt, gain, alpha);
-        let vr1_out = vr1 * r_factor1 * rg1 + vth1 * (-s_dt_gain * d1v / ((r1 + s_eps) * (r1 + s_eps)));
+        let vr1_out =
+            vr1 * r_factor1 * rg1 + vth1 * (-s_dt_gain * d1v / ((r1 + s_eps) * (r1 + s_eps)));
 
         let r_factor2 = s_one + s_dt * (s_alpha - s_three * r2 * r2);
         let rg2 = r_factor_gate_f32x8(r2, d2v, dt, gain, alpha);
-        let vr2_out = vr2 * r_factor2 * rg2 + vth2 * (-s_dt_gain * d2v / ((r2 + s_eps) * (r2 + s_eps)));
+        let vr2_out =
+            vr2 * r_factor2 * rg2 + vth2 * (-s_dt_gain * d2v / ((r2 + s_eps) * (r2 + s_eps)));
 
         let r_factor3 = s_one + s_dt * (s_alpha - s_three * r3 * r3);
         let rg3 = r_factor_gate_f32x8(r3, d3v, dt, gain, alpha);
-        let vr3_out = vr3 * r_factor3 * rg3 + vth3 * (-s_dt_gain * d3v / ((r3 + s_eps) * (r3 + s_eps)));
+        let vr3_out =
+            vr3 * r_factor3 * rg3 + vth3 * (-s_dt_gain * d3v / ((r3 + s_eps) * (r3 + s_eps)));
 
         st(v_th1, i, vt1_self + vt1_cross);
         st(v_th2, i, vt2_self + vt2_cross);
@@ -311,9 +429,21 @@ fn simd_pass2(
         let dth_dd1 = s_dt_gain / (r1 + s_eps);
         let dth_dd2 = s_dt_gain / (r2 + s_eps);
         let dth_dd3 = s_dt_gain / (r3 + s_eps);
-        st(grad_drives, d_off + i, vth1 * dth_dd1 + vr1 * s_dt_gain * rg1);
-        st(grad_drives, d_off + n + i, vth2 * dth_dd2 + vr2 * s_dt_gain * rg2);
-        st(grad_drives, d_off + 2*n + i, vth3 * dth_dd3 + vr3 * s_dt_gain * rg3);
+        st(
+            grad_drives,
+            d_off + i,
+            vth1 * dth_dd1 + vr1 * s_dt_gain * rg1,
+        );
+        st(
+            grad_drives,
+            d_off + n + i,
+            vth2 * dth_dd2 + vr2 * s_dt_gain * rg2,
+        );
+        st(
+            grad_drives,
+            d_off + 2 * n + i,
+            vth3 * dth_dd3 + vr3 * s_dt_gain * rg3,
+        );
     }
 
     let rem = n % 8;
@@ -356,15 +486,24 @@ fn simd_pass2(
 
         for j in 0..rem {
             let i = start + j;
-            let s1_f = sin1[i] as f64; let c1_f = cos1[i] as f64;
-            let s2_f = sin2[i] as f64; let c2_f = cos2[i] as f64;
-            let s3_f = sin3[i] as f64; let c3_f = cos3[i] as f64;
-            let r1_f = pre_r1[i] as f64; let d1v_f = d1[i] as f64;
-            let r2_f = pre_r2[i] as f64; let d2v_f = d2[i] as f64;
-            let r3_f = pre_r3[i] as f64; let d3v_f = d3[i] as f64;
-            let vth1_f = v_th1[i] as f64; let vr1_f = v_r1[i] as f64;
-            let vth2_f = v_th2[i] as f64; let vr2_f = v_r2[i] as f64;
-            let vth3_f = v_th3[i] as f64; let vr3_f = v_r3[i] as f64;
+            let s1_f = sin1[i] as f64;
+            let c1_f = cos1[i] as f64;
+            let s2_f = sin2[i] as f64;
+            let c2_f = cos2[i] as f64;
+            let s3_f = sin3[i] as f64;
+            let c3_f = cos3[i] as f64;
+            let r1_f = pre_r1[i] as f64;
+            let d1v_f = d1[i] as f64;
+            let r2_f = pre_r2[i] as f64;
+            let d2v_f = d2[i] as f64;
+            let r3_f = pre_r3[i] as f64;
+            let d3v_f = d3[i] as f64;
+            let vth1_f = v_th1[i] as f64;
+            let vr1_f = v_r1[i] as f64;
+            let vth2_f = v_th2[i] as f64;
+            let vr2_f = v_r2[i] as f64;
+            let vth3_f = v_th3[i] as f64;
+            let vr3_f = v_r3[i] as f64;
 
             let dth_dd1_f = dt_f * gain_f / (r1_f + eps_f);
             let dth_dd2_f = dt_f * gain_f / (r2_f + eps_f);
@@ -374,43 +513,53 @@ fn simd_pass2(
             let rce3 = r_clamp_effect(pre_r3[i], d3[i], dt, gain, alpha) as f64;
             grad_drives[d_off + i] = (vth1_f * dth_dd1_f + vr1_f * dt_f * gain_f * rce1) as f32;
             grad_drives[d_off + n + i] = (vth2_f * dth_dd2_f + vr2_f * dt_f * gain_f * rce2) as f32;
-            grad_drives[d_off + 2*n + i] = (vth3_f * dth_dd3_f + vr3_f * dt_f * gain_f * rce3) as f32;
+            grad_drives[d_off + 2 * n + i] =
+                (vth3_f * dth_dd3_f + vr3_f * dt_f * gain_f * rce3) as f32;
 
-            let dcpl1 = -(w12_f * g2_f * (c1_f * r2c2_f + s1_f * r2s2_f) + w13_f * g3_f * (c1_f * r3c3_f + s1_f * r3s3_f));
-            let dcpl2 = -(w12_f * g1_f * (c2_f * r1c1_f + s2_f * r1s1_f) + w23_f * g3_f * (c2_f * r3c3_f + s2_f * r3s3_f));
-            let dcpl3 = -(w13_f * g1_f * (c3_f * r1c1_f + s3_f * r1s1_f) + w23_f * g2_f * (c3_f * r2c2_f + s3_f * r2s2_f));
+            let dcpl1 = -(w12_f * g2_f * (c1_f * r2c2_f + s1_f * r2s2_f)
+                + w13_f * g3_f * (c1_f * r3c3_f + s1_f * r3s3_f));
+            let dcpl2 = -(w12_f * g1_f * (c2_f * r1c1_f + s2_f * r1s1_f)
+                + w23_f * g3_f * (c2_f * r3c3_f + s2_f * r3s3_f));
+            let dcpl3 = -(w13_f * g1_f * (c3_f * r1c1_f + s3_f * r1s1_f)
+                + w23_f * g2_f * (c3_f * r2c2_f + s3_f * r2s2_f));
 
             let vt1_self = vth1_f * (1.0 + dt_f * dcpl1);
             let vt2_self = vth2_f * (1.0 + dt_f * dcpl2);
             let vt3_self = vth3_f * (1.0 + dt_f * dcpl3);
 
             let dg1 = pp1_f * (sc1_f * c1_f - cc1_f * s1_f);
-            let vt1_cross = dt_f * (
-                r1_f * (w12_f * g1_f * (c1_f * svc2_f + s1_f * svs2_f) + w13_f * g1_f * (c1_f * svc3_f + s1_f * svs3_f))
-                + dg1 * cg1_f
-            );
+            let vt1_cross = dt_f
+                * (r1_f
+                    * (w12_f * g1_f * (c1_f * svc2_f + s1_f * svs2_f)
+                        + w13_f * g1_f * (c1_f * svc3_f + s1_f * svs3_f))
+                    + dg1 * cg1_f);
             let dg2 = pp2_f * (sc2_f * c2_f - cc2_f * s2_f);
-            let vt2_cross = dt_f * (
-                r2_f * (w12_f * g2_f * (c2_f * svc1_f + s2_f * svs1_f) + w23_f * g2_f * (c2_f * svc3_f + s2_f * svs3_f))
-                + dg2 * cg2_f
-            );
+            let vt2_cross = dt_f
+                * (r2_f
+                    * (w12_f * g2_f * (c2_f * svc1_f + s2_f * svs1_f)
+                        + w23_f * g2_f * (c2_f * svc3_f + s2_f * svs3_f))
+                    + dg2 * cg2_f);
             let dg3 = pp3_f * (sc3_f * c3_f - cc3_f * s3_f);
-            let vt3_cross = dt_f * (
-                r3_f * (w13_f * g3_f * (c3_f * svc1_f + s3_f * svs1_f) + w23_f * g3_f * (c3_f * svc2_f + s3_f * svs2_f))
-                + dg3 * cg3_f
-            );
+            let vt3_cross = dt_f
+                * (r3_f
+                    * (w13_f * g3_f * (c3_f * svc1_f + s3_f * svs1_f)
+                        + w23_f * g3_f * (c3_f * svc2_f + s3_f * svs2_f))
+                    + dg3 * cg3_f);
 
             let rg1 = r_factor_gate(pre_r1[i], d1[i], dt, gain, alpha) as f64;
             let r_factor1 = 1.0 + dt_f * (alpha_f - 3.0 * r1_f * r1_f);
-            let vr1_out = vr1_f * r_factor1 * rg1 + vth1_f * (-dt_f * gain_f * d1v_f / (r1_f + eps_f).powi(2));
+            let vr1_out = vr1_f * r_factor1 * rg1
+                + vth1_f * (-dt_f * gain_f * d1v_f / (r1_f + eps_f).powi(2));
 
             let rg2 = r_factor_gate(pre_r2[i], d2[i], dt, gain, alpha) as f64;
             let r_factor2 = 1.0 + dt_f * (alpha_f - 3.0 * r2_f * r2_f);
-            let vr2_out = vr2_f * r_factor2 * rg2 + vth2_f * (-dt_f * gain_f * d2v_f / (r2_f + eps_f).powi(2));
+            let vr2_out = vr2_f * r_factor2 * rg2
+                + vth2_f * (-dt_f * gain_f * d2v_f / (r2_f + eps_f).powi(2));
 
             let rg3 = r_factor_gate(pre_r3[i], d3[i], dt, gain, alpha) as f64;
             let r_factor3 = 1.0 + dt_f * (alpha_f - 3.0 * r3_f * r3_f);
-            let vr3_out = vr3_f * r_factor3 * rg3 + vth3_f * (-dt_f * gain_f * d3v_f / (r3_f + eps_f).powi(2));
+            let vr3_out = vr3_f * r_factor3 * rg3
+                + vth3_f * (-dt_f * gain_f * d3v_f / (r3_f + eps_f).powi(2));
 
             v_th1[i] = (vt1_self + vt1_cross) as f32;
             v_th2[i] = (vt2_self + vt2_cross) as f32;
@@ -467,9 +616,12 @@ pub fn bptt_loop_into(
     let v_r2 = &mut ws.v_r2[..n];
     let v_r3 = &mut ws.v_r3[..n];
 
-    let sin1 = &mut ws.sin1[..n]; let cos1 = &mut ws.cos1[..n];
-    let sin2 = &mut ws.sin2[..n]; let cos2 = &mut ws.cos2[..n];
-    let sin3 = &mut ws.sin3[..n]; let cos3 = &mut ws.cos3[..n];
+    let sin1 = &mut ws.sin1[..n];
+    let cos1 = &mut ws.cos1[..n];
+    let sin2 = &mut ws.sin2[..n];
+    let cos2 = &mut ws.cos2[..n];
+    let sin3 = &mut ws.sin3[..n];
+    let cos3 = &mut ws.cos3[..n];
 
     for step in (0..n_steps).rev() {
         // Read from flat trajectory
@@ -507,20 +659,36 @@ pub fn bptt_loop_into(
             let base = step * pst_dim;
             if (base..base + pst_dim).any(|k| ps[k] != 0.0) {
                 let (pth1, pr1, pth2, pr2, pth3, pr3) = if step == n_steps - 1 {
-                    (&traj.th1_final[..], &traj.r1_final[..],
-                     &traj.th2_final[..], &traj.r2_final[..],
-                     &traj.th3_final[..], &traj.r3_final[..])
+                    (
+                        &traj.th1_final[..],
+                        &traj.r1_final[..],
+                        &traj.th2_final[..],
+                        &traj.r2_final[..],
+                        &traj.th3_final[..],
+                        &traj.r3_final[..],
+                    )
                 } else {
                     let nxt = step + 1;
-                    (step_slice(&traj.flat, OFF_TH1, n, nxt),
-                     step_slice(&traj.flat, off_r1(n_steps, n), n, nxt),
-                     step_slice(&traj.flat, off_th2(n_steps, n), n, nxt),
-                     step_slice(&traj.flat, off_r2(n_steps, n), n, nxt),
-                     step_slice(&traj.flat, off_th3(n_steps, n), n, nxt),
-                     step_slice(&traj.flat, off_r3(n_steps, n), n, nxt))
+                    (
+                        step_slice(&traj.flat, OFF_TH1, n, nxt),
+                        step_slice(&traj.flat, off_r1(n_steps, n), n, nxt),
+                        step_slice(&traj.flat, off_th2(n_steps, n), n, nxt),
+                        step_slice(&traj.flat, off_r2(n_steps, n), n, nxt),
+                        step_slice(&traj.flat, off_th3(n_steps, n), n, nxt),
+                        step_slice(&traj.flat, off_r3(n_steps, n), n, nxt),
+                    )
                 };
-                pst_jacobian_v_jit(pth1, pr1, pth2, pr2, pth3, pr3, n,
-                    &ps[base..base + pst_dim], &mut ws.pst_v);
+                pst_jacobian_v_jit(
+                    pth1,
+                    pr1,
+                    pth2,
+                    pr2,
+                    pth3,
+                    pr3,
+                    n,
+                    &ps[base..base + pst_dim],
+                    &mut ws.pst_v,
+                );
                 for i in 0..n {
                     v_th1[i] += ws.pst_v.v_th1[i];
                     v_th2[i] += ws.pst_v.v_th2[i];
@@ -536,28 +704,84 @@ pub fn bptt_loop_into(
         let r1_op = (sin1_sum * sin1_sum + cos1_sum * cos1_sum).sqrt() / nf;
         let r2_op = (sin2_sum * sin2_sum + cos2_sum * cos2_sum).sqrt() / nf;
         let r3_op = (sin3_sum * sin3_sum + cos3_sum * cos3_sum).sqrt() / nf;
-        let pg_pre1 = if r1_op > 1e-10 { PG_GAIN * g1 * (1.0 - g1) / (nf * nf * r1_op) } else { 0.0 };
-        let pg_pre2 = if r2_op > 1e-10 { PG_GAIN * g2 * (1.0 - g2) / (nf * nf * r2_op) } else { 0.0 };
-        let pg_pre3 = if r3_op > 1e-10 { PG_GAIN * g3 * (1.0 - g3) / (nf * nf * r3_op) } else { 0.0 };
+        let pg_pre1 = if r1_op > 1e-10 {
+            PG_GAIN * g1 * (1.0 - g1) / (nf * nf * r1_op)
+        } else {
+            0.0
+        };
+        let pg_pre2 = if r2_op > 1e-10 {
+            PG_GAIN * g2 * (1.0 - g2) / (nf * nf * r2_op)
+        } else {
+            0.0
+        };
+        let pg_pre3 = if r3_op > 1e-10 {
+            PG_GAIN * g3 * (1.0 - g3) / (nf * nf * r3_op)
+        } else {
+            0.0
+        };
         let cross_gate1 = w12 * (r1s1 * svc2 - r1c1 * svs2) + w13 * (r1s1 * svc3 - r1c1 * svs3);
         let cross_gate2 = w12 * (r2s2 * svc1 - r2c2 * svs1) + w23 * (r2s2 * svc3 - r2c2 * svs3);
         let cross_gate3 = w13 * (r3s3 * svc1 - r3c3 * svs1) + w23 * (r3s3 * svc2 - r3c3 * svs2);
 
         // ── Pass 2: SIMD arithmetic ──
         simd_pass2(
-            n, dt, gain, alpha,
-            pre_r1, d1, pre_r2, d2, pre_r3, d3,
-            sin1, cos1, sin2, cos2, sin3, cos3,
-            r1s1, r1c1, r2s2, r2c2, r3s3, r3c3,
-            svs1, svc1, svs2, svc2, svs3, svc3,
-            sin1_sum, cos1_sum, sin2_sum, cos2_sum, sin3_sum, cos3_sum,
-            g1, g2, g3,
-            pg_pre1, pg_pre2, pg_pre3,
-            cross_gate1, cross_gate2, cross_gate3,
-            w12, w13, w23,
-            &mut ws.grad_drives[..], d_off,
-            v_th1, v_th2, v_th3, v_r1, v_r2, v_r3,
-            step, n_steps, grad_pst,
+            n,
+            dt,
+            gain,
+            alpha,
+            pre_r1,
+            d1,
+            pre_r2,
+            d2,
+            pre_r3,
+            d3,
+            sin1,
+            cos1,
+            sin2,
+            cos2,
+            sin3,
+            cos3,
+            r1s1,
+            r1c1,
+            r2s2,
+            r2c2,
+            r3s3,
+            r3c3,
+            svs1,
+            svc1,
+            svs2,
+            svc2,
+            svs3,
+            svc3,
+            sin1_sum,
+            cos1_sum,
+            sin2_sum,
+            cos2_sum,
+            sin3_sum,
+            cos3_sum,
+            g1,
+            g2,
+            g3,
+            pg_pre1,
+            pg_pre2,
+            pg_pre3,
+            cross_gate1,
+            cross_gate2,
+            cross_gate3,
+            w12,
+            w13,
+            w23,
+            &mut ws.grad_drives[..],
+            d_off,
+            v_th1,
+            v_th2,
+            v_th3,
+            v_r1,
+            v_r2,
+            v_r3,
+            step,
+            n_steps,
+            grad_pst,
         );
     }
 }
@@ -607,8 +831,12 @@ pub struct TruncatedBptt {
     /// BPTT workspace
     pub ws: BpttWorkspace,
     /// Hot-start recurrent state (наследуется между windows)
-    pub v_th1: Vec<f32>, pub v_th2: Vec<f32>, pub v_th3: Vec<f32>,
-    pub v_r1: Vec<f32>, pub v_r2: Vec<f32>, pub v_r3: Vec<f32>,
+    pub v_th1: Vec<f32>,
+    pub v_th2: Vec<f32>,
+    pub v_th3: Vec<f32>,
+    pub v_r1: Vec<f32>,
+    pub v_r2: Vec<f32>,
+    pub v_r3: Vec<f32>,
     /// Accumulated PST Jacobian v
     pub pst_v: PstGradients,
     /// Счётчик обработанных шагов
@@ -621,7 +849,7 @@ impl TruncatedBptt {
     /// Create new TruncatedBptt with window_size шагов.
     ///
     /// Память: O(window_size · n) для trajectory + O(n) для workspace.
-        pub fn new(
+    pub fn new(
         n: usize,
         window_size: usize,
         dt: f32,
@@ -634,29 +862,48 @@ impl TruncatedBptt {
         w13: f32,
         w23: f32,
     ) -> Self {
-        let mut tri = crate::t3::TriOscillator::new(
-            n, freq_min, freq_max, crate::t3::backend::Avx2Backend,
-        );
+        let mut tri =
+            crate::t3::TriOscillator::new(n, freq_min, freq_max, crate::t3::backend::Avx2Backend);
         tri.drive_gain = drive_gain;
         tri.alpha = alpha;
         tri.epsilon = epsilon;
         tri.set_uniform_coupling(w12, w13, w23);
 
         let traj = T3SpikeTrajectory::new(
-            n, window_size, dt, drive_gain, alpha, epsilon,
-            freq_min, freq_max, w12, w13, w23,
+            n,
+            window_size,
+            dt,
+            drive_gain,
+            alpha,
+            epsilon,
+            freq_min,
+            freq_max,
+            w12,
+            w13,
+            w23,
         );
 
         Self {
             n,
             window_size,
-            dt, drive_gain, alpha, epsilon,
-            freq_min, freq_max, w12, w13, w23,
+            dt,
+            drive_gain,
+            alpha,
+            epsilon,
+            freq_min,
+            freq_max,
+            w12,
+            w13,
+            w23,
             tri,
             traj,
             ws: BpttWorkspace::new(n, window_size),
-            v_th1: vec![0.0; n], v_th2: vec![0.0; n], v_th3: vec![0.0; n],
-            v_r1: vec![0.0; n], v_r2: vec![0.0; n], v_r3: vec![0.0; n],
+            v_th1: vec![0.0; n],
+            v_th2: vec![0.0; n],
+            v_th3: vec![0.0; n],
+            v_r1: vec![0.0; n],
+            v_r2: vec![0.0; n],
+            v_r3: vec![0.0; n],
             pst_v: PstGradients::new(n),
             n_processed: 0,
             grad_buf: vec![0.0; window_size * 3 * n],
@@ -743,10 +990,15 @@ impl TruncatedBptt {
 
         // PST Jacobian (JIT) на последнем шаге
         crate::spike::pst_jacobian::pst_jacobian_v_jit(
-            &self.traj.th1_final, &self.traj.r1_final,
-            &self.traj.th2_final, &self.traj.r2_final,
-            &self.traj.th3_final, &self.traj.r3_final,
-            n, grad_pst, &mut self.pst_v,
+            &self.traj.th1_final,
+            &self.traj.r1_final,
+            &self.traj.th2_final,
+            &self.traj.r2_final,
+            &self.traj.th3_final,
+            &self.traj.r3_final,
+            n,
+            grad_pst,
+            &mut self.pst_v,
         );
 
         // Hot-start: v_th/v_r = pst_v (TRUNCATED BPTT: нет state propagation между окнами)
@@ -763,7 +1015,8 @@ impl TruncatedBptt {
         bptt_loop_into(grad_pst, &self.traj, None, &mut self.ws);
 
         // Копируем результат
-        self.grad_buf.copy_from_slice(&self.ws.grad_drives[..n_steps * 3 * n]);
+        self.grad_buf
+            .copy_from_slice(&self.ws.grad_drives[..n_steps * 3 * n]);
     }
 
     /// Последний backward результат: [window_size × 3n] grad_drives.
@@ -819,17 +1072,26 @@ pub fn t3spike_backward_per_step_with_ws(
 
     // K1: v = J^T · grad_pst — JIT, без матрицы
     pst_jacobian_v_jit(
-        &traj.th1_final, &traj.r1_final,
-        &traj.th2_final, &traj.r2_final,
-        &traj.th3_final, &traj.r3_final,
-        n, grad_pst, &mut ws.pst_v,
+        &traj.th1_final,
+        &traj.r1_final,
+        &traj.th2_final,
+        &traj.r2_final,
+        &traj.th3_final,
+        &traj.r3_final,
+        n,
+        grad_pst,
+        &mut ws.pst_v,
     );
 
     ws.resize(n, traj.n_steps);
     // pst_v already filled by pst_jacobian_v_jit
     ws.pst_v.copy_to_slices(
-        &mut ws.v_th1, &mut ws.v_th2, &mut ws.v_th3,
-        &mut ws.v_r1, &mut ws.v_r2, &mut ws.v_r3,
+        &mut ws.v_th1,
+        &mut ws.v_th2,
+        &mut ws.v_th3,
+        &mut ws.v_r1,
+        &mut ws.v_r2,
+        &mut ws.v_r3,
     );
 
     bptt_loop_into(grad_pst, traj, per_step_grad_pst, ws);

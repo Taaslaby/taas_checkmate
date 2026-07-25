@@ -28,7 +28,10 @@ impl SpikeTrace {
     /// Create exponential trace with time constant `tau_ms`, simulation step `dt_ms`.
     pub fn new(n_neurons: usize, tau_ms: f32, dt_ms: f32) -> Self {
         let alpha = (-dt_ms / tau_ms).exp();
-        Self { trace: vec![0.0; n_neurons], alpha }
+        Self {
+            trace: vec![0.0; n_neurons],
+            alpha,
+        }
     }
 
     /// Update trace with one step of spikes (in-place EMA).
@@ -41,7 +44,9 @@ impl SpikeTrace {
     }
 
     /// Current trace values (read-only).
-    pub fn get(&self) -> &[f32] { &self.trace }
+    pub fn get(&self) -> &[f32] {
+        &self.trace
+    }
 }
 
 // ─── HologramEncoder ───────────────────────────────────────
@@ -54,7 +59,7 @@ impl SpikeTrace {
 /// direction_k — k-я главная компонента распределения позиций,
 /// что гарантирует декоррелированные каналы.
 pub struct HologramEncoder {
-    proj: Vec<Vec<f32>>,  // [N][K]
+    proj: Vec<Vec<f32>>, // [N][K]
     n: usize,
     k: usize,
 }
@@ -69,7 +74,11 @@ impl HologramEncoder {
     pub fn with_k(positions: &[[f32; 2]], k: usize) -> Self {
         let n = positions.len();
         if n == 0 || k == 0 {
-            return Self { proj: vec![vec![]; n], n, k };
+            return Self {
+                proj: vec![vec![]; n],
+                n,
+                k,
+            };
         }
         let dirs = Self::pca_directions(positions, k);
         let mut proj = Vec::with_capacity(n);
@@ -89,7 +98,11 @@ impl HologramEncoder {
         let n = positions.len();
         let k = directions.len();
         if n == 0 || k == 0 {
-            return Self { proj: vec![vec![]; n], n, k };
+            return Self {
+                proj: vec![vec![]; n],
+                n,
+                k,
+            };
         }
         let mut proj = Vec::with_capacity(n);
         for &pos in positions {
@@ -105,16 +118,30 @@ impl HologramEncoder {
     /// PCA directions: до K главных компонент 2D позиций.
     fn pca_directions(positions: &[[f32; 2]], k: usize) -> Vec<[f32; 2]> {
         let n = positions.len();
-        if n == 0 { return vec![]; }
-        let mut mx = 0.0f64; let mut my = 0.0f64;
-        for &p in positions { mx += p[0] as f64; my += p[1] as f64; }
-        mx /= n as f64; my /= n as f64;
-        let mut cxx = 0.0f64; let mut cxy = 0.0f64; let mut cyy = 0.0f64;
-        for &p in positions {
-            let dx = p[0] as f64 - mx; let dy = p[1] as f64 - my;
-            cxx += dx * dx; cxy += dx * dy; cyy += dy * dy;
+        if n == 0 {
+            return vec![];
         }
-        cxx /= n as f64; cxy /= n as f64; cyy /= n as f64;
+        let mut mx = 0.0f64;
+        let mut my = 0.0f64;
+        for &p in positions {
+            mx += p[0] as f64;
+            my += p[1] as f64;
+        }
+        mx /= n as f64;
+        my /= n as f64;
+        let mut cxx = 0.0f64;
+        let mut cxy = 0.0f64;
+        let mut cyy = 0.0f64;
+        for &p in positions {
+            let dx = p[0] as f64 - mx;
+            let dy = p[1] as f64 - my;
+            cxx += dx * dx;
+            cxy += dx * dy;
+            cyy += dy * dy;
+        }
+        cxx /= n as f64;
+        cxy /= n as f64;
+        cyy /= n as f64;
 
         let trace = cxx + cyy;
         let delta = ((cxx - cyy) * (cxx - cyy) + 4.0 * cxy * cxy).sqrt();
@@ -122,13 +149,25 @@ impl HologramEncoder {
         let _l2 = (trace - delta) / 2.0;
 
         let mut dirs: Vec<[f32; 2]> = Vec::with_capacity(k);
-        let (e1x, e1y) = if cxy.abs() > 1e-12 { (cxy, l1 - cxx) } else { (1.0, 0.0) };
+        let (e1x, e1y) = if cxy.abs() > 1e-12 {
+            (cxy, l1 - cxx)
+        } else {
+            (1.0, 0.0)
+        };
         let n1 = (e1x * e1x + e1y * e1y).sqrt();
-        if n1 > 1e-12 { dirs.push([(e1x / n1) as f32, (e1y / n1) as f32]); }
+        if n1 > 1e-12 {
+            dirs.push([(e1x / n1) as f32, (e1y / n1) as f32]);
+        }
         if k > 1 {
-            let (e2x, e2y) = if cxy.abs() > 1e-12 { (l1 - cyy, cxy) } else { (0.0, 1.0) };
+            let (e2x, e2y) = if cxy.abs() > 1e-12 {
+                (l1 - cyy, cxy)
+            } else {
+                (0.0, 1.0)
+            };
             let n2 = (e2x * e2x + e2y * e2y).sqrt();
-            if n2 > 1e-12 { dirs.push([(e2x / n2) as f32, (e2y / n2) as f32]); }
+            if n2 > 1e-12 {
+                dirs.push([(e2x / n2) as f32, (e2y / n2) as f32]);
+            }
         }
         while dirs.len() < k {
             let angle = (dirs.len() as f64) * PI as f64 / k as f64;
@@ -167,10 +206,14 @@ impl HologramEncoder {
 
     /// Number of hologram channels.
     #[inline]
-    pub fn k(&self) -> usize { self.k }
+    pub fn k(&self) -> usize {
+        self.k
+    }
     /// Number of input neurons.
     #[inline]
-    pub fn n(&self) -> usize { self.n }
+    pub fn n(&self) -> usize {
+        self.n
+    }
 }
 
 // ─── Spiker — полный pipeline ─────────────────────────────
@@ -237,7 +280,9 @@ impl SpikeStats {
         let mut diffs = 0.0;
         let mut prev = 0.0f32;
         for &s in spikes {
-            if (s - prev).abs() > 0.5 { diffs += 1.0; }
+            if (s - prev).abs() > 0.5 {
+                diffs += 1.0;
+            }
             prev = s;
         }
         let burstiness = if n > 1.0 { diffs / (n - 1.0) } else { 0.0 };
@@ -250,7 +295,11 @@ impl SpikeStats {
         }
         let synchrony = (var / n).sqrt();
 
-        Self { mean_rate, burstiness, synchrony }
+        Self {
+            mean_rate,
+            burstiness,
+            synchrony,
+        }
     }
 
     /// Scale base gain down when synchrony or firing rate is high.
@@ -314,7 +363,9 @@ impl NormalizedSpiker {
     }
 
     /// Current raw trace (read-only).
-    pub fn trace(&self) -> &[f32] { self.inner.trace() }
+    pub fn trace(&self) -> &[f32] {
+        self.inner.trace()
+    }
 
     /// Reset online statistics (running mean/var).
     pub fn reset_stats(&mut self) {
@@ -336,7 +387,13 @@ pub struct HybridSpiker {
 
 impl HybridSpiker {
     /// Create hybrid spiker with adaptive gain from spike statistics.
-    pub fn new(positions: &[[f32; 2]], tau_ms: f32, dt_ms: f32, sample_rate: f32, base_gain: f32) -> Self {
+    pub fn new(
+        positions: &[[f32; 2]],
+        tau_ms: f32,
+        dt_ms: f32,
+        sample_rate: f32,
+        base_gain: f32,
+    ) -> Self {
         Self {
             inner: NormalizedSpiker::new(positions, tau_ms, dt_ms, 1.0),
             sample_rate,
@@ -358,7 +415,9 @@ impl HybridSpiker {
     }
 
     /// Current normalised trace (read-only).
-    pub fn trace(&self) -> &[f32] { self.inner.trace() }
+    pub fn trace(&self) -> &[f32] {
+        self.inner.trace()
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────
@@ -434,8 +493,16 @@ mod tests {
 
     #[test]
     fn test_adaptive_gain_decreases_with_synchrony() {
-        let high_sync = SpikeStats { mean_rate: 10.0, burstiness: 0.5, synchrony: 0.8 };
-        let low_sync = SpikeStats { mean_rate: 10.0, burstiness: 0.5, synchrony: 0.1 };
+        let high_sync = SpikeStats {
+            mean_rate: 10.0,
+            burstiness: 0.5,
+            synchrony: 0.8,
+        };
+        let low_sync = SpikeStats {
+            mean_rate: 10.0,
+            burstiness: 0.5,
+            synchrony: 0.1,
+        };
         let g_high = high_sync.adaptive_gain(1.0);
         let g_low = low_sync.adaptive_gain(1.0);
         assert!(g_high < g_low, "high synchrony → lower gain");

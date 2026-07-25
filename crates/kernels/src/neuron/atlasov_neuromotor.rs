@@ -1,13 +1,13 @@
 #![allow(non_snake_case)]
-use wide::f32x8;
 use super::{load8, load8_i32, store8};
+use wide::{f32x8, CmpGe};
 
 // ═══════════════════════════════════════════════════════
 //  Atlasov Neuromotor Kernel (Discrete Ca²⁺ & Active Reset Engine)
 // ═══════════════════════════════════════════════════════
 //
 // Biomechanical & Neurophysiological Engine for Muscle Tissue:
-// 1. Quantum Calcium Injection: ca += spike * d_ca
+// 1. Calcium Injection: ca += spike * d_ca
 // 2. Pump Clearance & Active Mechanical Reset: ca = ca * decay * (1 - reset * eta_reset)
 // 3. Cooperative Saturation Tension: T = T_max * (ca² / (ca² + Kd²))
 // 4. Antagonistic Tug-of-War (Flexor vs Extensor Pairs):
@@ -18,21 +18,26 @@ use super::{load8, load8_i32, store8};
 
 /// Step `n` Atlasov Neuromotor Muscle Channels. Uses `f32x8` SIMD.
 ///
-/// Muscle Params layout (column-major, size `6 * n`):
+/// Muscle Params layout (column-major, size `8 * n`):
 ///   - params[0..n]: dt (ms)
-///   - params[n..2n]: d_ca (calcium quantum per spike)
+///   - params[n..2n]: d_ca (calcium influx per spike)
 ///   - params[2n..3n]: tau_pump (calcium pump clearance time constant in ms)
 ///   - params[3n..4n]: eta_reset (active mechanical reset efficiency, 0.0..1.0)
 ///   - params[4n..5n]: T_max (maximum isometric tension)
 ///   - params[5n..6n]: K_d (calcium sensitivity threshold)
+///   - params[6n..7n]: L_0 (optimal length, meters or relative)
+///   - params[7n..8n]: V_max (maximum contraction velocity)
 ///
 /// # Safety
 /// All pointers must be valid for `n` elements (or joint arrays `n / 2`).
+/// `lengths` and `velocities` can be null (defaults to L_0 and 0.0).
 pub unsafe fn atlasov_neuromotor_step(
     ca: *mut f32,
     tension: *mut f32,
     spikes: *const i32,
     resets: *const i32,
+    lengths: *const f32,
+    velocities: *const f32,
     params: *const f32,
     n: usize,
     joint_delta_f: *mut f32,
@@ -40,7 +45,7 @@ pub unsafe fn atlasov_neuromotor_step(
     joint_damping: *mut f32,
     joint_params: *const f32,
 ) {
-    let p = std::slice::from_raw_parts(params, n * 6);
+    let p = std::slice::from_raw_parts(params, n * 8);
     let dt_val = p[0];
     let n8 = n & !7;
 
@@ -50,7 +55,7 @@ pub unsafe fn atlasov_neuromotor_step(
     for off in (0..n8).step_by(8) {
         let mut ca_v = load8(ca, off);
 
-        // 1. Spike input -> Quantum Ca²⁺ Injection
+        // 1. Spike input -> Ca²⁺ injection
         let spk_v = load8_i32(spikes, off); // 1.0 if spiked, 0.0 otherwise
         let d_ca_v = load8(params.wrapping_add(n), off);
         ca_v += spk_v * d_ca_v;
@@ -67,13 +72,42 @@ pub unsafe fn atlasov_neuromotor_step(
         ca_v *= reset_factor;
         ca_v = ca_v.max(zero); // Non-negative Ca²⁺
 
-        // 4. Cooperative Saturation Tension: T = T_max * (ca² / (ca² + Kd²))
+        // 4. Cooperative Saturation Ca2+ factor
         let t_max_v = load8(params.wrapping_add(4 * n), off);
         let kd_v = load8(params.wrapping_add(5 * n), off);
         let ca2 = ca_v * ca_v;
         let kd2 = kd_v * kd_v;
         let denom = (ca2 + kd2).max(f32x8::splat(1e-8));
-        let tens_v = t_max_v * (ca2 / denom);
+        let ca_factor = ca2 / denom;
+
+        // 5. Hill-type Biomechanics
+        let l0_v = load8(params.wrapping_add(6 * n), off);
+        let vmax_v = load8(params.wrapping_add(7 * n), off).max(f32x8::splat(1e-6));
+
+        let mut f_l = one;
+        if !lengths.is_null() {
+            let l_v = load8(lengths, off);
+            let width = (l0_v * f32x8::splat(0.5)).max(f32x8::splat(1e-6));
+            let diff = (l_v - l0_v) / width;
+            let diff2 = diff * diff;
+            f_l = (one - diff2).max(zero);
+        }
+
+        let mut f_v = one;
+        if !velocities.is_null() {
+            let v_v = load8(velocities, off);
+            // Standard Hill convention: V > 0 = shortening (concentric)
+            // Concentric (V > 0): force drops with speed — classic Hill equation
+            let c = f32x8::splat(3.0); // Hill's a/F₀ constant (~0.33 for mammal)
+            let conc = ((vmax_v - v_v) / (vmax_v + c * v_v)).max(zero);
+            // Eccentric (V < 0, lengthening): force rises above isometric
+            let ecc = one + (-v_v / vmax_v).min(f32x8::splat(0.5));
+            let is_conc = v_v.cmp_ge(zero); // V >= 0 = shortening/concentric
+            f_v = is_conc.blend(conc, ecc);
+        }
+
+        // Final Tension = T_max * Ca_factor * f(L) * f(V)
+        let tens_v = t_max_v * ca_factor * f_l * f_v;
 
         store8(ca, off, ca_v);
         store8(tension, off, tens_v);
@@ -85,6 +119,16 @@ pub unsafe fn atlasov_neuromotor_step(
         let tens_slice = std::slice::from_raw_parts_mut(tension, n);
         let spk_slice = std::slice::from_raw_parts(spikes, n);
         let rst_slice = std::slice::from_raw_parts(resets, n);
+        let len_slice = if !lengths.is_null() {
+            Some(std::slice::from_raw_parts(lengths, n))
+        } else {
+            None
+        };
+        let vel_slice = if !velocities.is_null() {
+            Some(std::slice::from_raw_parts(velocities, n))
+        } else {
+            None
+        };
 
         for i in n8..n {
             let d_ca = p[n + i];
@@ -92,8 +136,10 @@ pub unsafe fn atlasov_neuromotor_step(
             let eta_reset = p[3 * n + i];
             let t_max = p[4 * n + i];
             let kd = p[5 * n + i];
+            let l0 = p[6 * n + i];
+            let vmax = p[7 * n + i].max(1e-6);
 
-            // 1. Quantum Injection
+            // 1. Calcium injection
             if spk_slice[i] > 0 {
                 ca_slice[i] += d_ca;
             }
@@ -110,14 +156,35 @@ pub unsafe fn atlasov_neuromotor_step(
                 ca_slice[i] = 0.0;
             }
 
-            // 4. Tension
+            // 4. Calcium factor
             let ca2 = ca_slice[i] * ca_slice[i];
             let kd2 = kd * kd;
-            tens_slice[i] = t_max * (ca2 / (ca2 + kd2 + 1e-8));
+            let ca_factor = ca2 / (ca2 + kd2 + 1e-8);
+
+            // 5. Hill biomechanics
+            let mut f_l = 1.0;
+            if let Some(lens) = len_slice {
+                let width = (l0 * 0.5).max(1e-6);
+                let diff = (lens[i] - l0) / width;
+                f_l = (1.0 - diff * diff).max(0.0);
+            }
+
+            let mut f_v = 1.0;
+            if let Some(vels) = vel_slice {
+                let v = vels[i];
+                // Standard Hill convention: V > 0 = shortening (concentric)
+                if v > 0.0 {
+                    f_v = ((vmax - v) / (vmax + 3.0 * v)).max(0.0);
+                } else {
+                    f_v = 1.0 + (-v / vmax).min(0.5);
+                }
+            }
+
+            tens_slice[i] = t_max * ca_factor * f_l * f_v;
         }
     }
 
-    // 5. Antagonistic Joint Tug-of-War (Pairs: Even = Flexor, Odd = Extensor)
+    // 6. Antagonistic Joint Tug-of-War (Pairs: Even = Flexor, Odd = Extensor)
     if !joint_delta_f.is_null() && !joint_stiffness.is_null() && !joint_params.is_null() {
         let n_joints = n / 2;
         let tens = std::slice::from_raw_parts(tension, n);
@@ -172,25 +239,35 @@ mod tests {
         let mut tension = vec![0.0f32; n];
         let mut spikes = vec![0i32; n];
         let resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
-            params[n + i] = 0.5;      // d_ca = 0.5
-            params[2 * n + i] = 20.0;  // tau_pump = 20ms
-            params[3 * n + i] = 0.8;   // eta_reset = 0.8
-            params[4 * n + i] = 10.0;  // T_max = 10 N
-            params[5 * n + i] = 0.3;   // Kd = 0.3
+            params[n + i] = 0.5; // d_ca = 0.5
+            params[2 * n + i] = 20.0; // tau_pump = 20ms
+            params[3 * n + i] = 0.8; // eta_reset = 0.8
+            params[4 * n + i] = 10.0; // T_max = 10 N
+            params[5 * n + i] = 0.3; // Kd = 0.3
+            params[6 * n + i] = 1.0; // L0 = 1.0
+            params[7 * n + i] = 5.0; // V_max = 5.0
         }
 
         // Single spike -> twitch response
         spikes[0] = 1;
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
@@ -202,14 +279,25 @@ mod tests {
         spikes[0] = 1;
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
-        assert!(tension[0] > t_single, "Repeated spikes should cause twitch summation (T2 > T1)");
+        assert!(
+            tension[0] > t_single,
+            "Repeated spikes should cause twitch summation (T2 > T1)"
+        );
     }
 
     #[test]
@@ -220,15 +308,17 @@ mod tests {
         let mut tension = vec![0.0f32; n];
         let spikes = vec![0i32; n];
         let mut resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
             params[n + i] = 0.5;
-            params[2 * n + i] = 50.0;  // slow pump
-            params[3 * n + i] = 0.9;   // 90% reset efficiency
+            params[2 * n + i] = 50.0; // slow pump
+            params[3 * n + i] = 0.9; // 90% reset efficiency
             params[4 * n + i] = 10.0;
             params[5 * n + i] = 0.3;
+            params[6 * n + i] = 1.0; // L0
+            params[7 * n + i] = 5.0; // V_max
         }
 
         let ca_before = ca[0];
@@ -236,14 +326,25 @@ mod tests {
 
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
-        assert!(ca[0] < ca_before * 0.2, "Active reset should rapidly clear Ca2+");
+        assert!(
+            ca[0] < ca_before * 0.2,
+            "Active reset should rapidly clear Ca2+"
+        );
     }
 
     #[test]
@@ -254,7 +355,7 @@ mod tests {
         let mut tension = vec![0.0f32; n];
         let spikes = vec![0i32; n];
         let resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
@@ -263,6 +364,8 @@ mod tests {
             params[3 * n + i] = 0.5;
             params[4 * n + i] = 10.0; // T_max
             params[5 * n + i] = 0.3; // Kd
+            params[6 * n + i] = 1.0;
+            params[7 * n + i] = 5.0;
         }
 
         let mut joint_df = vec![0.0f32; 1];
@@ -272,18 +375,35 @@ mod tests {
 
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                joint_df.as_mut_ptr(), joint_stf.as_mut_ptr(), joint_dmp.as_mut_ptr(), joint_params.as_ptr(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                joint_df.as_mut_ptr(),
+                joint_stf.as_mut_ptr(),
+                joint_dmp.as_mut_ptr(),
+                joint_params.as_ptr(),
             );
         }
 
         // Extensor Ca = 1.0 > Flexor Ca = 0.5 => Delta Force > 0
-        assert!(joint_df[0] > 0.0, "Net force should favor extensor when Ca_ext > Ca_flex");
+        assert!(
+            joint_df[0] > 0.0,
+            "Net force should favor extensor when Ca_ext > Ca_flex"
+        );
         // Joint stiffness K = K0 + beta * (Ca_flex + Ca_ext) = 1.0 + 2.0 * (ca_flex + ca_ext)
-        assert!(joint_stf[0] > 1.0, "Co-contraction of calcium should increase joint stiffness");
-        assert!(joint_dmp[0] > 0.1, "Co-contraction of calcium should increase joint damping to prevent oscillations");
+        assert!(
+            joint_stf[0] > 1.0,
+            "Co-contraction of calcium should increase joint stiffness"
+        );
+        assert!(
+            joint_dmp[0] > 0.1,
+            "Co-contraction of calcium should increase joint damping to prevent oscillations"
+        );
     }
 
     #[test]
@@ -294,7 +414,7 @@ mod tests {
         let mut tension = vec![0.0f32; n];
         let spikes = vec![0i32; n];
         let resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
@@ -305,19 +425,32 @@ mod tests {
             // Channel 0 (fast fiber): Kd = 0.15 uM
             // Channel 1 (slow fiber): Kd = 0.60 uM
             params[5 * n + i] = if i == 0 { 0.15 } else { 0.60 };
+            params[6 * n + i] = 1.0;
+            params[7 * n + i] = 5.0;
         }
 
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
         // Fast fiber (smaller Kd) should generate higher tension for identical Ca2+=0.2
-        assert!(tension[0] > tension[1], "Fast fiber (smaller Kd) must generate higher tension at subthreshold Ca2+");
+        assert!(
+            tension[0] > tension[1],
+            "Fast fiber (smaller Kd) must generate higher tension at subthreshold Ca2+"
+        );
     }
 
     #[test]
@@ -334,27 +467,74 @@ mod tests {
 
         let spikes = vec![0i32; n];
         let resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
             params[n + i] = 0.0;
             params[2 * n + i] = 1000.0; // no decay
             params[3 * n + i] = 0.0;
-            params[4 * n + i] = 10.0;  // T_max = 10
-            params[5 * n + i] = 0.3;   // Kd = 0.3
+            params[4 * n + i] = 10.0; // T_max = 10
+            params[5 * n + i] = 0.3; // Kd = 0.3
+            params[6 * n + i] = 1.0;
+            params[7 * n + i] = 5.0;
         }
 
         unsafe {
-            atlasov_neuromotor_step(ca1.as_mut_ptr(), tens1.as_mut_ptr(), spikes.as_ptr(), resets.as_ptr(), params.as_ptr(), n, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
-            atlasov_neuromotor_step(ca2.as_mut_ptr(), tens2.as_mut_ptr(), spikes.as_ptr(), resets.as_ptr(), params.as_ptr(), n, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
-            atlasov_neuromotor_step(ca3.as_mut_ptr(), tens3.as_mut_ptr(), spikes.as_ptr(), resets.as_ptr(), params.as_ptr(), n, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
+            atlasov_neuromotor_step(
+                ca1.as_mut_ptr(),
+                tens1.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
+            atlasov_neuromotor_step(
+                ca2.as_mut_ptr(),
+                tens2.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
+            atlasov_neuromotor_step(
+                ca3.as_mut_ptr(),
+                tens3.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
         }
 
         // At Ca = Kd = 0.3, T should be 50% of T_max (5.0 N)
-        assert!((tens2[0] - 5.0).abs() < 0.2, "Tension at Kd should be ~50% of T_max");
+        assert!(
+            (tens2[0] - 5.0).abs() < 0.2,
+            "Tension at Kd should be ~50% of T_max"
+        );
         // Non-linear Hill saturation: tens3 should approach T_max = 10.0 but not exceed it
-        assert!(tens3[0] > 9.0 && tens3[0] <= 10.0, "Tension at high Ca2+ must saturate at T_max");
+        assert!(
+            tens3[0] > 9.0 && tens3[0] <= 10.0,
+            "Tension at high Ca2+ must saturate at T_max"
+        );
     }
 
     #[test]
@@ -365,38 +545,59 @@ mod tests {
         let mut ca_both = vec![1.0f32; n];
         let mut tension = vec![0.0f32; n];
         let spikes = vec![0i32; n];
-        let mut resets_none = vec![0i32; n];
+        let resets_none = vec![0i32; n];
         let mut resets_active = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
             params[n + i] = 0.5;
-            params[2 * n + i] = 10.0;  // tau_pump = 10ms
-            params[3 * n + i] = 0.5;   // eta_reset = 0.5
+            params[2 * n + i] = 10.0; // tau_pump = 10ms
+            params[3 * n + i] = 0.5; // eta_reset = 0.5
             params[4 * n + i] = 10.0;
             params[5 * n + i] = 0.3;
+            params[6 * n + i] = 1.0;
+            params[7 * n + i] = 5.0;
             resets_active[i] = 1;
         }
 
         unsafe {
             atlasov_neuromotor_step(
-                ca_decay_only.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets_none.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca_decay_only.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets_none.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
             atlasov_neuromotor_step(
-                ca_both.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets_active.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca_both.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets_active.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
         // Decay only: ca = 1.0 * exp(-1/10) ~ 0.9048
         // Both: ca = 1.0 * exp(-1/10) * (1 - 0.5) ~ 0.4524
-        assert!(ca_both[0] < ca_decay_only[0] * 0.6, "Active reset + pump clearance interplay should compound linearly");
+        assert!(
+            ca_both[0] < ca_decay_only[0] * 0.6,
+            "Active reset + pump clearance interplay should compound linearly"
+        );
     }
 
     #[test]
@@ -407,7 +608,7 @@ mod tests {
         let mut tension = vec![0.0f32; n];
         let spikes = vec![1i32; n];
         let resets = vec![0i32; n];
-        let mut params = vec![0.0f32; n * 6];
+        let mut params = vec![0.0f32; n * 8];
 
         for i in 0..n {
             params[i] = dt;
@@ -416,21 +617,37 @@ mod tests {
             params[3 * n + i] = 0.7;
             params[4 * n + i] = 12.0;
             params[5 * n + i] = 0.25;
+            params[6 * n + i] = 1.0;
+            params[7 * n + i] = 5.0;
         }
 
         unsafe {
             atlasov_neuromotor_step(
-                ca.as_mut_ptr(), tension.as_mut_ptr(),
-                spikes.as_ptr(), resets.as_ptr(),
-                params.as_ptr(), n,
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null(),
+                ca.as_mut_ptr(),
+                tension.as_mut_ptr(),
+                spikes.as_ptr(),
+                resets.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
             );
         }
 
         // SIMD element 0 vs scalar tail element 8 should produce identical math (within f32 precision)
         let diff_ca = (ca[0] - ca[8]).abs();
         let diff_t = (tension[0] - tension[8]).abs();
-        assert!(diff_ca < 1e-5, "SIMD vs scalar tail Ca2+ parity error: diff={diff_ca}");
-        assert!(diff_t < 1e-5, "SIMD vs scalar tail Tension parity error: diff={diff_t}");
+        assert!(
+            diff_ca < 1e-5,
+            "SIMD vs scalar tail Ca2+ parity error: diff={diff_ca}"
+        );
+        assert!(
+            diff_t < 1e-5,
+            "SIMD vs scalar tail Tension parity error: diff={diff_t}"
+        );
     }
 }

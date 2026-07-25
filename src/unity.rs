@@ -58,9 +58,9 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
-use crate::connectome::{ConnectomeData, BrainState, NeuronModel};
+use crate::connectome::{csr_propagate_from_queue, push_spikes_to_queue};
+use crate::connectome::{BrainState, ConnectomeData, NeuronModel};
 use crate::kernels::safe;
-use crate::connectome::{push_spikes_to_queue, csr_propagate_from_queue};
 
 // ═══════════════════════════════════════════════════════════
 //  Constants
@@ -89,7 +89,7 @@ pub const STEP_SET_INPUT: i32 = 1;
 pub const STEP_NEURON: i32 = 2;
 pub const STEP_PUSH: i32 = 4;
 pub const STEP_PROPAGATE: i32 = 8;
-pub const STEP_FULL: i32 = 15;  // all stages
+pub const STEP_FULL: i32 = 15; // all stages
 
 // Default LIF params
 const DEFAULT_TAU_M: f32 = 10.0;
@@ -120,7 +120,7 @@ enum BrainParams {
 
 /// LIF model storage — packed params matching SIMD kernel layout.
 struct LifStorage {
-    packed: Vec<f32>,   // [n_padded * 5]
+    packed: Vec<f32>, // [n_padded * 5]
     tau_ref: f32,
 }
 
@@ -156,18 +156,26 @@ fn pad_to(v: &[f32], n_padded: usize) -> Vec<f32> {
 
 /// Pack LIF params into the SIMD kernel format.
 fn pack_lif(
-    tau_m: &[f32], v_rest: &[f32], v_thresh: &[f32], v_reset: &[f32],
-    dt_ms: f32, n_padded: usize,
+    tau_m: &[f32],
+    v_rest: &[f32],
+    v_thresh: &[f32],
+    v_reset: &[f32],
+    dt_ms: f32,
+    n_padded: usize,
 ) -> Vec<f32> {
-    let n = tau_m.len().min(v_rest.len()).min(v_thresh.len()).min(v_reset.len());
+    let n = tau_m
+        .len()
+        .min(v_rest.len())
+        .min(v_thresh.len())
+        .min(v_reset.len());
     let mut packed = Vec::with_capacity(n_padded * 5);
     for i in 0..n_padded {
         let idx = if i < n { i } else { n - 1 };
-        packed.push(dt_ms);                            // slot 0: dt
-        packed.push(tau_m[idx]);                       // slot 1: tau_m
-        packed.push(v_rest[idx]);                      // slot 2: v_rest
-        packed.push(v_thresh[idx]);                    // slot 3: v_thresh
-        packed.push(v_reset[idx]);                     // slot 4: v_reset
+        packed.push(dt_ms); // slot 0: dt
+        packed.push(tau_m[idx]); // slot 1: tau_m
+        packed.push(v_rest[idx]); // slot 2: v_rest
+        packed.push(v_thresh[idx]); // slot 3: v_thresh
+        packed.push(v_reset[idx]); // slot 4: v_reset
     }
     packed
 }
@@ -190,26 +198,44 @@ fn create_brain(n_neurons: usize, model: NeuronModel) -> Box<BrainHandle> {
             let v_rest = vec![DEFAULT_V_REST; n_neurons];
             let v_thresh = vec![DEFAULT_V_THRESH; n_neurons];
             let v_reset = vec![DEFAULT_V_RESET; n_neurons];
-            let packed = pack_lif(&tau_m, &v_rest, &v_thresh, &v_reset, DEFAULT_DT_MS, n_padded);
-            BrainParams::Lif(LifStorage { packed, tau_ref: DEFAULT_TAU_REF })
-        }
-        NeuronModel::Izhikevich => {
-            BrainParams::Izhikevich(IzhikevichStorage {
-                a: pad_to(&[DEFAULT_A], n_padded),
-                b: pad_to(&[DEFAULT_B], n_padded),
-                c: pad_to(&[DEFAULT_C], n_padded),
-                d: pad_to(&[DEFAULT_D], n_padded),
+            let packed = pack_lif(
+                &tau_m,
+                &v_rest,
+                &v_thresh,
+                &v_reset,
+                DEFAULT_DT_MS,
+                n_padded,
+            );
+            BrainParams::Lif(LifStorage {
+                packed,
                 tau_ref: DEFAULT_TAU_REF,
             })
         }
+        NeuronModel::Izhikevich => BrainParams::Izhikevich(IzhikevichStorage {
+            a: pad_to(&[DEFAULT_A], n_padded),
+            b: pad_to(&[DEFAULT_B], n_padded),
+            c: pad_to(&[DEFAULT_C], n_padded),
+            d: pad_to(&[DEFAULT_D], n_padded),
+            tau_ref: DEFAULT_TAU_REF,
+        }),
         _ => {
             // Fallback: LIF
             let tau_m = vec![DEFAULT_TAU_M; n_neurons];
             let v_rest = vec![DEFAULT_V_REST; n_neurons];
             let v_thresh = vec![DEFAULT_V_THRESH; n_neurons];
             let v_reset = vec![DEFAULT_V_RESET; n_neurons];
-            let packed = pack_lif(&tau_m, &v_rest, &v_thresh, &v_reset, DEFAULT_DT_MS, n_padded);
-            BrainParams::Lif(LifStorage { packed, tau_ref: DEFAULT_TAU_REF })
+            let packed = pack_lif(
+                &tau_m,
+                &v_rest,
+                &v_thresh,
+                &v_reset,
+                DEFAULT_DT_MS,
+                n_padded,
+            );
+            BrainParams::Lif(LifStorage {
+                packed,
+                tau_ref: DEFAULT_TAU_REF,
+            })
         }
     };
 
@@ -226,25 +252,37 @@ fn create_brain(n_neurons: usize, model: NeuronModel) -> Box<BrainHandle> {
 
 /// Validate a brain handle pointer.
 fn as_brain<'a>(ptr: *mut c_void) -> Option<&'a mut BrainHandle> {
-    if ptr.is_null() { return None; }
+    if ptr.is_null() {
+        return None;
+    }
     let brain = unsafe { &mut *(ptr as *mut BrainHandle) };
-    if brain.magic != MAGIC_BRAIN { return None; }
+    if brain.magic != MAGIC_BRAIN {
+        return None;
+    }
     Some(brain)
 }
 
 /// Validate a connectome handle pointer.
 fn as_connectome<'a>(ptr: *mut c_void) -> Option<&'a ConnectomeHandle> {
-    if ptr.is_null() { return None; }
+    if ptr.is_null() {
+        return None;
+    }
     let conn = unsafe { &*(ptr as *const ConnectomeHandle) };
-    if conn.magic != MAGIC_CONN { return None; }
+    if conn.magic != MAGIC_CONN {
+        return None;
+    }
     Some(conn)
 }
 
 /// Validate a connectome handle pointer (mutable).
 fn as_connectome_mut<'a>(ptr: *mut c_void) -> Option<&'a mut ConnectomeHandle> {
-    if ptr.is_null() { return None; }
+    if ptr.is_null() {
+        return None;
+    }
     let conn = unsafe { &mut *(ptr as *mut ConnectomeHandle) };
-    if conn.magic != MAGIC_CONN { return None; }
+    if conn.magic != MAGIC_CONN {
+        return None;
+    }
     Some(conn)
 }
 
@@ -275,11 +313,15 @@ pub extern "C" fn brain_new(n_neurons: i32, model: *const c_char) -> *mut c_void
 
 #[no_mangle]
 pub extern "C" fn brain_free(ptr: *mut c_void) {
-    if ptr.is_null() { return; }
+    if ptr.is_null() {
+        return;
+    }
     if let Some(brain) = as_brain(ptr) {
         brain.magic = 0;
     }
-    unsafe { let _ = Box::from_raw(ptr as *mut BrainHandle); }
+    unsafe {
+        let _ = Box::from_raw(ptr as *mut BrainHandle);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -295,8 +337,11 @@ pub extern "C" fn connectome_load(
     nt_types: *const f32,
     n_synapses: i32,
 ) -> *mut c_void {
-    if row_ptr.is_null() || col_indices.is_null() || values.is_null()
-        || n_neurons <= 0 || n_synapses <= 0
+    if row_ptr.is_null()
+        || col_indices.is_null()
+        || values.is_null()
+        || n_neurons <= 0
+        || n_synapses <= 0
     {
         return ptr::null_mut();
     }
@@ -338,11 +383,15 @@ pub extern "C" fn connectome_load(
 
 #[no_mangle]
 pub extern "C" fn connectome_free(ptr: *mut c_void) {
-    if ptr.is_null() { return; }
+    if ptr.is_null() {
+        return;
+    }
     if let Some(conn) = as_connectome_mut(ptr) {
         conn.magic = 0;
     }
-    unsafe { let _ = Box::from_raw(ptr as *mut ConnectomeHandle); }
+    unsafe {
+        let _ = Box::from_raw(ptr as *mut ConnectomeHandle);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -507,7 +556,13 @@ pub extern "C" fn brain_step_ex(
     let spike_count = if (flags & STEP_PUSH) != 0 {
         push_spikes_to_queue(&brain.state.spikes, n_neurons, &mut brain.state.queue)
     } else {
-        brain.state.spikes.iter().take(n_neurons).filter(|&&s| s > 0).count() as u32
+        brain
+            .state
+            .spikes
+            .iter()
+            .take(n_neurons)
+            .filter(|&&s| s > 0)
+            .count() as u32
     };
 
     if (flags & STEP_PROPAGATE) != 0 {
@@ -601,9 +656,8 @@ pub extern "C" fn brain_step_n(
             }
         }
 
-        let spike_count = push_spikes_to_queue(
-            &brain.state.spikes, n_neurons, &mut brain.state.queue,
-        );
+        let spike_count =
+            push_spikes_to_queue(&brain.state.spikes, n_neurons, &mut brain.state.queue);
         total_spikes += spike_count;
 
         csr_propagate_from_queue(
@@ -747,23 +801,40 @@ pub extern "C" fn brain_set_lif_params(
     }
 
     if let Some(arr) = tau_m_arr {
-        for i in 0..nn.min(arr.len()) { cur_tau_m[i] = arr[i]; }
+        for i in 0..nn.min(arr.len()) {
+            cur_tau_m[i] = arr[i];
+        }
     }
     if let Some(arr) = v_rest_arr {
-        for i in 0..nn.min(arr.len()) { cur_v_rest[i] = arr[i]; }
+        for i in 0..nn.min(arr.len()) {
+            cur_v_rest[i] = arr[i];
+        }
     }
     if let Some(arr) = v_thresh_arr {
-        for i in 0..nn.min(arr.len()) { cur_v_thresh[i] = arr[i]; }
+        for i in 0..nn.min(arr.len()) {
+            cur_v_thresh[i] = arr[i];
+        }
     }
     if let Some(arr) = v_reset_arr {
-        for i in 0..nn.min(arr.len()) { cur_v_reset[i] = arr[i]; }
+        for i in 0..nn.min(arr.len()) {
+            cur_v_reset[i] = arr[i];
+        }
     }
 
-    if tau_ref > 0.0 { storage.tau_ref = tau_ref; }
+    if tau_ref > 0.0 {
+        storage.tau_ref = tau_ref;
+    }
     let dt = if dt_ms > 0.0 { dt_ms } else { brain.dt_ms };
     brain.dt_ms = dt;
 
-    storage.packed = pack_lif(&cur_tau_m, &cur_v_rest, &cur_v_thresh, &cur_v_reset, dt, brain.n_padded);
+    storage.packed = pack_lif(
+        &cur_tau_m,
+        &cur_v_rest,
+        &cur_v_thresh,
+        &cur_v_reset,
+        dt,
+        brain.n_padded,
+    );
 
     OK
 }
@@ -794,23 +865,35 @@ pub extern "C" fn brain_set_izhikevich_params(
 
     if !a.is_null() {
         let arr = unsafe { std::slice::from_raw_parts(a, nn) };
-        for i in 0..nn { storage.a[i] = arr[i]; }
+        for i in 0..nn {
+            storage.a[i] = arr[i];
+        }
     }
     if !b.is_null() {
         let arr = unsafe { std::slice::from_raw_parts(b, nn) };
-        for i in 0..nn { storage.b[i] = arr[i]; }
+        for i in 0..nn {
+            storage.b[i] = arr[i];
+        }
     }
     if !c.is_null() {
         let arr = unsafe { std::slice::from_raw_parts(c, nn) };
-        for i in 0..nn { storage.c[i] = arr[i]; }
+        for i in 0..nn {
+            storage.c[i] = arr[i];
+        }
     }
     if !d.is_null() {
         let arr = unsafe { std::slice::from_raw_parts(d, nn) };
-        for i in 0..nn { storage.d[i] = arr[i]; }
+        for i in 0..nn {
+            storage.d[i] = arr[i];
+        }
     }
 
-    if tau_ref > 0.0 { storage.tau_ref = tau_ref; }
-    if dt_ms > 0.0 { brain.dt_ms = dt_ms; }
+    if tau_ref > 0.0 {
+        storage.tau_ref = tau_ref;
+    }
+    if dt_ms > 0.0 {
+        brain.dt_ms = dt_ms;
+    }
 
     OK
 }
@@ -962,14 +1045,21 @@ mod tests {
         assert!(!brain.is_null());
 
         let I: Vec<f32> = vec![30.0; n];
-        let spikes = brain_step_ex(brain, ptr::null_mut(), I.as_ptr(), 0.5,
-            STEP_SET_INPUT | STEP_NEURON);
+        let spikes = brain_step_ex(
+            brain,
+            ptr::null_mut(),
+            I.as_ptr(),
+            0.5,
+            STEP_SET_INPUT | STEP_NEURON,
+        );
         assert!(spikes >= 0);
 
         let mut v_buf = vec![0.0f32; n];
         brain_get_v(brain, v_buf.as_mut_ptr(), n as i32);
-        assert!((v_buf[0] - (-52.0)).abs() > 0.01,
-            "v should have changed after neuron step");
+        assert!(
+            (v_buf[0] - (-52.0)).abs() > 0.01,
+            "v should have changed after neuron step"
+        );
 
         brain_free(brain);
     }
@@ -1032,8 +1122,11 @@ mod tests {
 
         let mut out = vec![0.0f32; n];
         brain_get_v(brain, out.as_mut_ptr(), n as i32);
-        assert!((out[0] - (-60.0)).abs() < 1.0,
-            "v after write should be -60, got {}", out[0]);
+        assert!(
+            (out[0] - (-60.0)).abs() < 1.0,
+            "v after write should be -60, got {}",
+            out[0]
+        );
 
         brain_free(brain);
     }
@@ -1051,8 +1144,11 @@ mod tests {
 
         let mut out = vec![0.0f32; n];
         brain_get_u(brain, out.as_mut_ptr(), n as i32);
-        assert!((out[0] - 5.0).abs() < 0.01,
-            "u after write should be 5, got {}", out[0]);
+        assert!(
+            (out[0] - 5.0).abs() < 0.01,
+            "u after write should be 5, got {}",
+            out[0]
+        );
 
         brain_free(brain);
     }
@@ -1070,8 +1166,11 @@ mod tests {
 
         let mut out = vec![0.0f32; n];
         brain_get_I_buf(brain, out.as_mut_ptr(), n as i32);
-        assert!((out[0] - 50.0).abs() < 0.01,
-            "I_buf after write should be 50, got {}", out[0]);
+        assert!(
+            (out[0] - 50.0).abs() < 0.01,
+            "I_buf after write should be 50, got {}",
+            out[0]
+        );
 
         brain_free(brain);
     }
@@ -1088,10 +1187,16 @@ mod tests {
 
         let mut out = vec![0.0f32; n];
         brain_get_I_buf(brain, out.as_mut_ptr(), n as i32);
-        assert!((out[42] - 100.0).abs() < 0.01,
-            "I_buf[42] should be 100, got {}", out[42]);
-        assert!((out[0]).abs() < 0.01,
-            "I_buf[0] should be 0, got {}", out[0]);
+        assert!(
+            (out[42] - 100.0).abs() < 0.01,
+            "I_buf[42] should be 100, got {}",
+            out[42]
+        );
+        assert!(
+            (out[0]).abs() < 0.01,
+            "I_buf[0] should be 0, got {}",
+            out[0]
+        );
 
         let ret = brain_inject_current(brain, -1, 10.0);
         assert_eq!(ret, ERR_PARAM);
@@ -1144,8 +1249,11 @@ mod tests {
         let mut v_buf = vec![0.0f32; n];
         brain_get_v(brain, v_buf.as_mut_ptr(), n as i32);
         // BrainState::new initializes LIF to -58.0 + small noise from reset_with_noise
-        assert!((v_buf[0] - (-58.0)).abs() < 1.0,
-            "v after reset should be near -58, got {}", v_buf[0]);
+        assert!(
+            (v_buf[0] - (-58.0)).abs() < 1.0,
+            "v after reset should be near -58, got {}",
+            v_buf[0]
+        );
 
         connectome_free(conn);
         brain_free(brain);
@@ -1203,7 +1311,14 @@ mod tests {
         let vals: Vec<f32> = vec![0.5; nn];
         let nt: Vec<f32> = vec![1.0; nn];
 
-        let ptr = connectome_load(rp.as_ptr(), n as i32, ci.as_ptr(), vals.as_ptr(), nt.as_ptr(), n as i32);
+        let ptr = connectome_load(
+            rp.as_ptr(),
+            n as i32,
+            ci.as_ptr(),
+            vals.as_ptr(),
+            nt.as_ptr(),
+            n as i32,
+        );
         assert!(!ptr.is_null());
         assert_eq!(connectome_n_neurons(ptr), n as i32);
         assert_eq!(connectome_n_synapses(ptr), n as i32);
@@ -1256,7 +1371,11 @@ mod tests {
         let n_v = brain_get_v(brain, v_buf.as_mut_ptr(), n as i32);
         assert_eq!(n_v, n as i32);
 
-        assert!(v_buf[0] > -70.0, "v[0] should have increased, got {}", v_buf[0]);
+        assert!(
+            v_buf[0] > -70.0,
+            "v[0] should have increased, got {}",
+            v_buf[0]
+        );
 
         connectome_free(conn);
         brain_free(brain);
@@ -1279,7 +1398,10 @@ mod tests {
             total_spikes += brain_step(brain, conn, I.as_ptr(), 0.5);
         }
 
-        assert!(total_spikes > 0, "expected spikes after 50 steps, got {total_spikes}");
+        assert!(
+            total_spikes > 0,
+            "expected spikes after 50 steps, got {total_spikes}"
+        );
 
         connectome_free(conn);
         brain_free(brain);
@@ -1306,8 +1428,11 @@ mod tests {
         let mut v_after = vec![0.0f32; n];
         brain_get_v(brain, v_after.as_mut_ptr(), n as i32);
         // BrainState::new initializes LIF to -58.0 + small noise from reset_with_noise
-        assert!((v_after[0] - (-58.0)).abs() < 1.0,
-            "v after reset should be near -58, got {}", v_after[0]);
+        assert!(
+            (v_after[0] - (-58.0)).abs() < 1.0,
+            "v after reset should be near -58, got {}",
+            v_after[0]
+        );
 
         connectome_free(conn);
         brain_free(brain);
@@ -1338,7 +1463,10 @@ mod tests {
         let brain = brain_new(10i32, model.as_ptr());
         assert!(!brain.is_null());
 
-        assert_eq!(brain_step(brain, ptr::null_mut(), ptr::null(), 0.5), ERR_MAGIC);
+        assert_eq!(
+            brain_step(brain, ptr::null_mut(), ptr::null(), 0.5),
+            ERR_MAGIC
+        );
 
         brain_free(brain);
     }
@@ -1357,8 +1485,13 @@ mod tests {
 
         let ret = brain_set_lif_params(
             brain,
-            tau_m.as_ptr(), v_rest.as_ptr(), v_thresh.as_ptr(), v_reset.as_ptr(),
-            n as i32, 3.0, 1.0,
+            tau_m.as_ptr(),
+            v_rest.as_ptr(),
+            v_thresh.as_ptr(),
+            v_reset.as_ptr(),
+            n as i32,
+            3.0,
+            1.0,
         );
         assert_eq!(ret, OK);
 
@@ -1378,8 +1511,14 @@ mod tests {
         let d: Vec<f32> = vec![10.0; n];
 
         let ret = brain_set_izhikevich_params(
-            brain, a.as_ptr(), b.as_ptr(), c.as_ptr(), d.as_ptr(),
-            n as i32, 1.0, 0.5,
+            brain,
+            a.as_ptr(),
+            b.as_ptr(),
+            c.as_ptr(),
+            d.as_ptr(),
+            n as i32,
+            1.0,
+            0.5,
         );
         assert_eq!(ret, OK);
 
@@ -1394,8 +1533,14 @@ mod tests {
 
         let a: Vec<f32> = vec![0.02; 10usize];
         let ret = brain_set_izhikevich_params(
-            brain, a.as_ptr(), ptr::null(), ptr::null(), ptr::null(),
-            10, 0.0, 0.0,
+            brain,
+            a.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            10,
+            0.0,
+            0.0,
         );
         assert_eq!(ret, ERR_MODEL);
 
@@ -1408,7 +1553,15 @@ mod tests {
         let brain = brain_new(10i32, model.as_ptr());
         assert!(!brain.is_null());
 
-        assert!(connectome_load(ptr::null_mut(), 10, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), 0).is_null());
+        assert!(connectome_load(
+            ptr::null_mut(),
+            10,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0
+        )
+        .is_null());
         assert_eq!(connectome_n_neurons(ptr::null_mut()), ERR_MAGIC);
 
         brain_free(brain);

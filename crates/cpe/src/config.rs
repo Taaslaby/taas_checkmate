@@ -17,26 +17,26 @@ pub struct CpeConfig {
 
     // ── STDP ──
     pub lr_stdp: f32,
-    pub elig_decay: f32,   // per-step eligibility decay (0.90 → τ≈85ms @ DT=0.01)
-    pub elig_add: f32,     // per-spike eligibility increment
+    pub elig_decay: f32, // per-step eligibility decay (0.90 → τ≈85ms @ DT=0.01)
+    pub elig_add: f32,   // per-spike eligibility increment
     pub w_min: f32,
     pub w_max: f32,
 
     // ── Dopamine gate ──
-    pub alpha: f32,        // entropy penalty weight
-    pub beta: f32,         // chaos/pattern gap weight
-    pub h_target: f32,     // target entropy
+    pub alpha: f32,    // entropy penalty weight
+    pub beta: f32,     // chaos/pattern gap weight
+    pub h_target: f32, // target entropy
 
     // ── T2-SPIGRAD ──
     pub t2_lr: f32,
-    pub t2_n_osc: usize,   // oscillators per population (×3 populations)
+    pub t2_n_osc: usize, // oscillators per population (×3 populations)
     pub t2_drive_gain: f32,
     pub t2_alpha: f32,
     pub t2_freq_min: f32,
     pub t2_freq_max: f32,
-    pub t2_c12: f32,       // coupling pop1→pop2
-    pub t2_c13: f32,       // coupling pop1→pop3
-    pub t2_c23: f32,       // coupling pop2→pop3
+    pub t2_c12: f32, // coupling pop1→pop2
+    pub t2_c13: f32, // coupling pop1→pop3
+    pub t2_c23: f32, // coupling pop2→pop3
 }
 
 impl Default for CpeConfig {

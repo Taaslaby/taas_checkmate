@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
+use super::{
+    fast_exp_simd, load8, load8_i32, load8_mut, spike_mask_to_i32, store8, surrogate_gradient,
+};
 use wide::{f32x8, CmpGe, CmpGt};
-use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i32, surrogate_gradient};
 
 // ═══════════════════════════════════════════════════════
 //  Izhikevich
@@ -19,11 +21,20 @@ use super::{fast_exp_simd, load8, load8_mut, load8_i32, store8, spike_mask_to_i3
 /// # Safety
 /// All pointer args must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn izhikevich_step(
-    v: *mut f32, u: *mut f32, trace: *mut f32,
-    a: *const f32, b: *const f32, Ii: *const f32,
-    dt: f32, trace_decay: f32,
-    spikes: *mut i32, c: *const f32, d: *const f32,
-    refractory: *mut f32, tau_ref: f32, n: usize,
+    v: *mut f32,
+    u: *mut f32,
+    trace: *mut f32,
+    a: *const f32,
+    b: *const f32,
+    Ii: *const f32,
+    dt: f32,
+    trace_decay: f32,
+    spikes: *mut i32,
+    c: *const f32,
+    d: *const f32,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
     let td_s = f32x8::splat(trace_decay);
@@ -44,7 +55,9 @@ pub(crate) unsafe fn izhikevich_step(
         let aa = load8(a, off);
         let bb = load8(b, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let cc = load8(c, off);
         let dd = load8(d, off);
 
@@ -55,7 +68,7 @@ pub(crate) unsafe fn izhikevich_step(
         let v5 = vv.mul_add(c04, c5);
         let dv = v5.mul_add(vv, c140) - uu + ii;
         let du = aa * (bb * vv - uu);
-        vv += refr_mask.blend(zero, dt_s * dv);  // skip if refractory
+        vv += refr_mask.blend(zero, dt_s * dv); // skip if refractory
         uu += refr_mask.blend(zero, dt_s * du);
 
         // Spike detection only for non-refractory
@@ -67,9 +80,9 @@ pub(crate) unsafe fn izhikevich_step(
         uu = refr_mask.blend(uu, uu + sm.blend(dd, zero));
 
         // Decrement refractory counter for all, set to tau_ref on spike
-        refr -= dt_s;  // Always decrement
-        refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
-        refr = refr.max(zero);  // clamp to 0
+        refr -= dt_s; // Always decrement
+        refr = sm.blend(tr_s, refr); // Set to tau_ref on spike
+        refr = refr.max(zero); // clamp to 0
 
         // trace update (only non-refractory)
         let tr_s_val = tr.mul_add(td_s, one - tr);
@@ -83,8 +96,14 @@ pub(crate) unsafe fn izhikevich_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -161,14 +180,22 @@ pub(crate) unsafe fn izhikevich_step(
 /// # Safety
 /// All pointer args must be valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn izhikevich_dual_step(
-    v: *mut f32, u: *mut f32, trace: *mut f32,
-    a: *const f32, b: *const f32, Ii: *const f32,
-    dt: f32, trace_decay: f32,
-    spikes: *mut i32, c: *const f32, d: *const f32,
-    refractory: *mut f32, tau_ref: f32,
-    m: *mut f32,           // slow state per neuron
-    tau_m: f32,            // slow state time constant
-    w_m: f32,              // memory-to-current weight
+    v: *mut f32,
+    u: *mut f32,
+    trace: *mut f32,
+    a: *const f32,
+    b: *const f32,
+    Ii: *const f32,
+    dt: f32,
+    trace_decay: f32,
+    spikes: *mut i32,
+    c: *const f32,
+    d: *const f32,
+    refractory: *mut f32,
+    tau_ref: f32,
+    m: *mut f32, // slow state per neuron
+    tau_m: f32,  // slow state time constant
+    w_m: f32,    // memory-to-current weight
     n: usize,
 ) {
     let dt_s = f32x8::splat(dt);
@@ -191,11 +218,13 @@ pub(crate) unsafe fn izhikevich_dual_step(
         let mut uu = load8_mut(u, off);
         let mut tr = load8_mut(trace, off);
         let mut refr = load8_mut(refractory, off);
-        let mut mm = load8_mut(m, off);  // ← slow state loaded
+        let mut mm = load8_mut(m, off); // ← slow state loaded
         let aa = load8(a, off);
         let bb = load8(b, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let mut ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let mut ii = load8(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let cc = load8(c, off);
         let dd = load8(d, off);
 
@@ -243,12 +272,18 @@ pub(crate) unsafe fn izhikevich_dual_step(
         store8(u, off, uu);
         store8(trace, off, tr);
         store8(refractory, off, refr);
-        store8(m, off, mm);  // ← slow state stored
+        store8(m, off, mm); // ← slow state stored
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -334,14 +369,22 @@ pub(crate) unsafe fn izhikevich_dual_step(
 /// All pointer args valid for given dimensions; `e[n_pre·n]`, `z_pre[n_pre]`,
 /// `I_ext[n]`, `weights[n_pre·n]` column-major; `v[n]`, `u[n]`, `psi[n]`, `spikes[n]`.
 pub(crate) unsafe fn eprop_izhikevich_step_multi(
-    v: *mut f32, u: *mut f32, psi: *mut f32,
-    e: *mut f32,          // [n_pre × n] column-major
-    z_pre: *const i32,    // [n_pre]
-    I_ext: *const f32,    // [n]
-    weights: *const f32,  // [n_pre × n] column-major
-    n: usize,             // n_post (also column stride)
+    v: *mut f32,
+    u: *mut f32,
+    psi: *mut f32,
+    e: *mut f32,         // [n_pre × n] column-major
+    z_pre: *const i32,   // [n_pre]
+    I_ext: *const f32,   // [n]
+    weights: *const f32, // [n_pre × n] column-major
+    n: usize,            // n_post (also column stride)
     n_pre: usize,
-    dt: f32, tau_e: f32, a: f32, b: f32, c: f32, d: f32, tau_sg: f32,
+    dt: f32,
+    tau_e: f32,
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    tau_sg: f32,
     spikes: *mut i32,
 ) -> usize {
     assert!(n_pre > 0);
@@ -378,7 +421,7 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
         for i in 0..n_pre {
             if *z_pre.add(i) != 0 {
                 let w = load8(weights, i * n + off);
-                I_s = w.mul_add(scale, I_s);  // I_s += w * 10.0
+                I_s = w.mul_add(scale, I_s); // I_s += w * 10.0
             }
         }
 
@@ -402,7 +445,9 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
 
         // Count spikes
         for &val in sm.to_array().iter() {
-            if val.to_bits() != 0 { total_spikes += 1; }
+            if val.to_bits() != 0 {
+                total_spikes += 1;
+            }
         }
 
         store8(v, off, vv);
@@ -424,8 +469,14 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -501,9 +552,20 @@ pub(crate) unsafe fn eprop_izhikevich_step_multi(
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn eprop_izhikevich_step(
-    v: *mut f32, u: *mut f32, eligibility: *mut f32, psi: *mut f32,
-    Ii: *const f32, spikes: *mut i32, pre_spikes: *const i32,
-    dt: f32, tau_e: f32, a: f32, b: f32, c: f32, d: f32, tau_sg: f32,
+    v: *mut f32,
+    u: *mut f32,
+    eligibility: *mut f32,
+    psi: *mut f32,
+    Ii: *const f32,
+    spikes: *mut i32,
+    pre_spikes: *const i32,
+    dt: f32,
+    tau_e: f32,
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    tau_sg: f32,
     n: usize,
 ) -> usize {
     let dt_s = f32x8::splat(dt);
@@ -554,12 +616,14 @@ pub(crate) unsafe fn eprop_izhikevich_step(
 
         // Spike detection: v ≥ 30
         let sm = vv.cmp_ge(v_th);
-        vv = sm.blend(c_s, vv);    // v = c where spike
+        vv = sm.blend(c_s, vv); // v = c where spike
         uu += sm.blend(d_s, zero); // u += d where spike
 
         // Count spikes
         for &val in sm.to_array().iter() {
-            if val.to_bits() != 0 { total_spikes += 1; }
+            if val.to_bits() != 0 {
+                total_spikes += 1;
+            }
         }
 
         store8(v, off, vv);
@@ -569,8 +633,14 @@ pub(crate) unsafe fn eprop_izhikevich_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -636,15 +706,15 @@ pub(crate) unsafe fn eprop_izhikevich_step(
 /// # Safety
 /// All pointer args valid for their respective lengths.
 pub(crate) unsafe fn hebbian_csr_step(
-    values: *mut f32,  // CSR synaptic weights [n_synapses] — mutated in-place
-    col_indices: *const i32,  // CSR column indices [n_synapses]
+    values: *mut f32,        // CSR synaptic weights [n_synapses] — mutated in-place
+    col_indices: *const i32, // CSR column indices [n_synapses]
     row_ptr: *const i32,     // CSR row pointer [n_neurons + 1]
     m: *const f32,           // slow state per neuron [n_neurons]
     n_neurons: usize,
     n_synapses: usize,
-    lr: f32,                 // Hebbian learning rate
-    decay: f32,              // weight decay
-    dt: f32,                 // timestep
+    lr: f32,    // Hebbian learning rate
+    decay: f32, // weight decay
+    dt: f32,    // timestep
 ) {
     let _zero = f32x8::splat(0.0);
     let lr_s = f32x8::splat(lr);
@@ -655,7 +725,9 @@ pub(crate) unsafe fn hebbian_csr_step(
     for pre in 0..n_neurons {
         let start = (*row_ptr.add(pre)).max(0) as usize;
         let end = (*row_ptr.add(pre + 1) as usize).min(n_synapses);
-        if start >= end { continue; }
+        if start >= end {
+            continue;
+        }
 
         let m_pre = f32x8::splat(*m.add(pre));
 
@@ -668,7 +740,11 @@ pub(crate) unsafe fn hebbian_csr_step(
             let mut w_arr = [0.0f32; 8];
             for j in 0..batch_n {
                 let post_idx = *col_indices.add(off + j) as usize;
-                post_arr[j] = if post_idx < n_neurons { *m.add(post_idx) } else { 0.0 };
+                post_arr[j] = if post_idx < n_neurons {
+                    *m.add(post_idx)
+                } else {
+                    0.0
+                };
                 w_arr[j] = *values.add(off + j);
             }
             // Fill remaining with last valid value (avoids zero-bias on partial blocks)
@@ -716,9 +792,24 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..50 {
-            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
-                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            unsafe {
+                izhikevich_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    n,
+                );
+            }
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "Expected spikes with I=30");
@@ -739,9 +830,24 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..50 {
-            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
-                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            unsafe {
+                izhikevich_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    n,
+                );
+            }
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert_eq!(total_spikes, 0, "No spikes with I=-20");
@@ -762,9 +868,24 @@ mod tests {
         let mut refractory = vec![0.0f32; n];
         let mut total_spikes = 0i32;
         for _ in 0..50 {
-            unsafe { izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5, spikes.as_mut_ptr(),
-                c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), 3.0, n); }
+            unsafe {
+                izhikevich_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    n,
+                );
+            }
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "Spikes with I=30, n=13");
@@ -780,33 +901,53 @@ mod tests {
         let mut trace = vec![0.0f32; n];
         let a = vec![0.02f32; n];
         let b = vec![0.2f32; n];
-        let I = vec![10.0f32; n];  // moderate current
+        let I = vec![10.0f32; n]; // moderate current
         let mut spikes = vec![0i32; n];
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
         let mut refractory = vec![0.0f32; n];
-        let mut m = vec![0.5f32; n];  // slow state starts at 0.5
-        let tau_m = 0.99;              // slow memory (~100ms at dt=1)
-        let w_m = 5.0;                // memory-to-current weight
+        let mut m = vec![0.5f32; n]; // slow state starts at 0.5
+        let tau_m = 0.99; // slow memory (~100ms at dt=1)
+        let w_m = 5.0; // memory-to-current weight
 
         let mut total_spikes = 0i32;
         for _ in 0..100 {
-            unsafe { izhikevich_dual_step(
-                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
-                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
-                refractory.as_mut_ptr(), 3.0,
-                m.as_mut_ptr(), tau_m, w_m, n,
-            ); }
+            unsafe {
+                izhikevich_dual_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    m.as_mut_ptr(),
+                    tau_m,
+                    w_m,
+                    n,
+                );
+            }
             total_spikes += spikes.iter().sum::<i32>();
         }
 
         // With w_m=5.0 and I=10, the slow state modulation should help spiking
-        assert!(total_spikes > 0, "Dual memory Izhikevich should spike with I=10, w_m=5");
+        assert!(
+            total_spikes > 0,
+            "Dual memory Izhikevich should spike with I=10, w_m=5"
+        );
 
         // Slow state should have evolved from 0.5
         let m_mean: f32 = m.iter().sum::<f32>() / n as f32;
-        assert!(m_mean > 0.45 && m_mean < 1.0, "Slow state should be in (0.45, 1.0), got {m_mean}");
+        assert!(
+            m_mean > 0.45 && m_mean < 1.0,
+            "Slow state should be in (0.45, 1.0), got {m_mean}"
+        );
     }
 
     #[test]
@@ -822,19 +963,33 @@ mod tests {
         let c = vec![-65.0f32; n];
         let d = vec![8.0f32; n];
         let mut refractory = vec![0.0f32; n];
-        let mut m = vec![0.0f32; n];  // start at 0 (no history)
-        let tau_m = 0.9f32;            // fast decay for testing
+        let mut m = vec![0.0f32; n]; // start at 0 (no history)
+        let tau_m = 0.9f32; // fast decay for testing
         let w_m = 1.0f32;
 
         // Run 20 steps — slow state should increase from spiking
         for _ in 0..20 {
-            unsafe { izhikevich_dual_step(
-                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
-                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
-                refractory.as_mut_ptr(), 3.0,
-                m.as_mut_ptr(), tau_m, w_m, n,
-            ); }
+            unsafe {
+                izhikevich_dual_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    m.as_mut_ptr(),
+                    tau_m,
+                    w_m,
+                    n,
+                );
+            }
         }
 
         // Slow state should be > 0 (accumulated spiking)
@@ -861,13 +1016,27 @@ mod tests {
 
         let mut total_spikes = 0i32;
         for _ in 0..100 {
-            unsafe { izhikevich_dual_step(
-                v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
-                a.as_ptr(), b.as_ptr(), I.as_ptr(), 1.0, 0.5,
-                spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(),
-                refractory.as_mut_ptr(), 3.0,
-                m.as_mut_ptr(), tau_m, w_m, n,
-            ); }
+            unsafe {
+                izhikevich_dual_step(
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    trace.as_mut_ptr(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    I.as_ptr(),
+                    1.0,
+                    0.5,
+                    spikes.as_mut_ptr(),
+                    c.as_ptr(),
+                    d.as_ptr(),
+                    refractory.as_mut_ptr(),
+                    3.0,
+                    m.as_mut_ptr(),
+                    tau_m,
+                    w_m,
+                    n,
+                );
+            }
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "Dual memory n=13 should spike");
@@ -883,7 +1052,7 @@ mod tests {
         let mut values = vec![0.5f32, 0.3, 0.7];
         let col_indices = vec![1i32, 2, 0];
         let row_ptr = vec![0i32, 1, 2, 3];
-        let m = vec![0.8f32, 0.2, 0.6];  // slow states
+        let m = vec![0.8f32, 0.2, 0.6]; // slow states
         let lr = 0.01f32;
         let decay = 0.001f32;
         let dt = 1.0f32;
@@ -910,8 +1079,12 @@ mod tests {
             let post = col_indices[i] as usize;
             let expected_dw = lr * m[pre] * m[post] - decay * old_values[i] * dt;
             let expected = (old_values[i] + expected_dw).clamp(-1.0, 1.0);
-            assert!((values[i] - expected).abs() < 1e-5,
-                "Hebbian CSR [{i}]: got {}, expected {}", values[i], expected);
+            assert!(
+                (values[i] - expected).abs() < 1e-5,
+                "Hebbian CSR [{i}]: got {}, expected {}",
+                values[i],
+                expected
+            );
         }
     }
 }

@@ -2,6 +2,9 @@
 //!
 //! Safe Rust wrappers over SIMD kernels (`kernels::lif_step`,
 //! `kernels::lif_at_step`, `kernels::eprop_lif_step`).
+//!
+//! ради бога не используйте это в своих нейроинтерфейсах это не так точно как HH или Ижикевич но
+//! для базовых моделей подойдет  точно тут грузить свой мозг не стоит ахахах
 
 use crate::kernels;
 use rayon::prelude::*;
@@ -17,15 +20,34 @@ use super::eprop::surrogate_gradient;
 /// v >= V_th + θ → spike, v = v_reset, θ += beta
 /// dθ/dt = -θ / tau_theta
 pub fn step_lif_at(
-    v: &mut [f32], theta: &mut [f32], I: &mut [f32], spikes: &mut [i32],
-    dt: f32, tau_m: &[f32], v_rest: &[f32], v_thresh: &[f32],
-    v_reset: &[f32], tau_theta: &[f32], beta: &[f32],
-    refractory: &mut [f32], tau_ref: f32,
+    v: &mut [f32],
+    theta: &mut [f32],
+    I: &mut [f32],
+    spikes: &mut [i32],
+    dt: f32,
+    tau_m: &[f32],
+    v_rest: &[f32],
+    v_thresh: &[f32],
+    v_reset: &[f32],
+    tau_theta: &[f32],
+    beta: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
 ) {
     let n = v.len();
-    assert!(n.is_multiple_of(8) && n == theta.len() && n == I.len() && n == spikes.len()
-        && n == tau_m.len() && n == v_rest.len() && n == v_thresh.len()
-        && n == v_reset.len() && n == tau_theta.len() && n == beta.len() && n == refractory.len());
+    assert!(
+        n.is_multiple_of(8)
+            && n == theta.len()
+            && n == I.len()
+            && n == spikes.len()
+            && n == tau_m.len()
+            && n == v_rest.len()
+            && n == v_thresh.len()
+            && n == v_reset.len()
+            && n == tau_theta.len()
+            && n == beta.len()
+            && n == refractory.len()
+    );
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     v.par_chunks_exact_mut(8)
@@ -54,13 +76,28 @@ pub fn step_lif_at(
 
 /// Step `n` LIF neurons. Parallel. n must be multiple of 8.
 pub fn step_lif(
-    v: &mut [f32], I: &mut [f32], spikes: &mut [i32],
-    dt: f32, tau_m: &[f32], v_rest: &[f32], v_thresh: &[f32], v_reset: &[f32],
-    refractory: &mut [f32], tau_ref: f32,
+    v: &mut [f32],
+    I: &mut [f32],
+    spikes: &mut [i32],
+    dt: f32,
+    tau_m: &[f32],
+    v_rest: &[f32],
+    v_thresh: &[f32],
+    v_reset: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
 ) {
     let n = v.len();
-    assert!(n.is_multiple_of(8) && n == I.len() && n == spikes.len() && n == tau_m.len()
-        && n == v_rest.len() && n == v_thresh.len() && n == v_reset.len() && n == refractory.len());
+    assert!(
+        n.is_multiple_of(8)
+            && n == I.len()
+            && n == spikes.len()
+            && n == tau_m.len()
+            && n == v_rest.len()
+            && n == v_thresh.len()
+            && n == v_reset.len()
+            && n == refractory.len()
+    );
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     v.par_chunks_exact_mut(8)
@@ -117,9 +154,14 @@ impl EPropLIF {
             eligibility: vec![0.0; n_pad],
             psi: vec![0.0; n_pad],
             refractory: vec![0.0; n_pad],
-            n: n_pad, dt, tau_m, tau_e,
+            n: n_pad,
+            dt,
+            tau_m,
+            tau_e,
             tau_ref: 3.0,
-            v_rest: -65.0, v_thresh: -50.0, v_reset: -70.0,
+            v_rest: -65.0,
+            v_thresh: -50.0,
+            v_reset: -70.0,
             tau_surrogate: 2.0,
         }
     }
@@ -131,9 +173,12 @@ impl EPropLIF {
     pub fn step(&mut self, I: &[f32], spikes: &mut [i32], pre_spikes: &[i32]) -> usize {
         let n = self.n.min(I.len()).min(spikes.len()).min(pre_spikes.len());
         let n8 = n & !7;
-        if n8 == 0 { return 0; }
+        if n8 == 0 {
+            return 0;
+        }
 
-        let total: usize = self.v[..n8].par_chunks_exact_mut(8)
+        let total: usize = self.v[..n8]
+            .par_chunks_exact_mut(8)
             .zip(self.eligibility[..n8].par_chunks_exact_mut(8))
             .zip(self.psi[..n8].par_chunks_exact_mut(8))
             .zip(I[..n8].par_chunks_exact(8))
@@ -142,11 +187,21 @@ impl EPropLIF {
             .zip(self.refractory[..n8].par_chunks_exact_mut(8))
             .map(|((((((v8, e8), ps8), I8), sp8), pre8), refr8)| {
                 kernels::eprop_lif_step(
-                    v8, e8, ps8,
-                    I8, sp8, pre8,
+                    v8,
+                    e8,
+                    ps8,
+                    I8,
+                    sp8,
+                    pre8,
                     refr8,
-                    self.dt, self.tau_m, self.tau_e, self.tau_ref,
-                    self.v_rest, self.v_thresh, self.v_reset, self.tau_surrogate,
+                    self.dt,
+                    self.tau_m,
+                    self.tau_e,
+                    self.tau_ref,
+                    self.v_rest,
+                    self.v_thresh,
+                    self.v_reset,
+                    self.tau_surrogate,
                     None,
                 )
             })
@@ -174,7 +229,8 @@ impl EPropLIF {
                 self.psi[i] = surrogate_gradient(self.v[i], v_thresh, tau_sg);
                 let z_pre = if pre_spikes[i] != 0 { 1.0 } else { 0.0 };
                 let e_decay = (-dt / tau_e).exp();
-                self.eligibility[i] = self.eligibility[i] * e_decay + self.psi[i] * z_pre * tau_e * (1.0 - e_decay);
+                self.eligibility[i] =
+                    self.eligibility[i] * e_decay + self.psi[i] * z_pre * tau_e * (1.0 - e_decay);
                 if self.v[i] >= v_thresh {
                     spikes[i] = 1;
                     tail_count += 1;
@@ -194,7 +250,8 @@ impl EPropLIF {
         let n = self.n.min(weights.len()).min(learning_signals.len());
         let chunks = n / 8;
         if chunks > 0 {
-            weights[..chunks * 8].par_chunks_exact_mut(8)
+            weights[..chunks * 8]
+                .par_chunks_exact_mut(8)
                 .zip(self.eligibility[..chunks * 8].par_chunks_exact(8))
                 .zip(learning_signals[..chunks * 8].par_chunks_exact(8))
                 .for_each(|((w8, e8), l8)| {

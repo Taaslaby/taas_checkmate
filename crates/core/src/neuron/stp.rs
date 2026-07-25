@@ -1,6 +1,11 @@
 //! Short-Term Plasticity (Tsodyks-Markram) + LFP proxy.
 //!
 //! Safe Rust wrappers over SIMD kernel (`kernels::stp_step`).
+//!
+//! ну хотя бы не пластелин чутка хотя бы это не точно
+//!
+//! за депрессию не не переживайте
+//!
 
 use crate::kernels;
 use rayon::prelude::*;
@@ -32,7 +37,8 @@ impl ShortTermPlasticity {
             tau_f: vec![600.0; n_pad],
             u0: vec![0.2; n_pad],
             a: vec![1.0; n_pad],
-            n: n_pad, dt,
+            n: n_pad,
+            dt,
         }
     }
 
@@ -54,9 +60,12 @@ impl ShortTermPlasticity {
     pub fn step(&mut self, pre_spikes: &[i32], I_out: &mut [f32]) {
         let n = self.n.min(pre_spikes.len()).min(I_out.len());
         let n8 = n & !7;
-        if n8 == 0 { return; }
+        if n8 == 0 {
+            return;
+        }
 
-        self.x[..n8].par_chunks_exact_mut(8)
+        self.x[..n8]
+            .par_chunks_exact_mut(8)
             .zip(self.u[..n8].par_chunks_exact_mut(8))
             .zip(pre_spikes[..n8].par_chunks_exact(8))
             .zip(self.tau_d[..n8].par_chunks_exact(8))
@@ -65,11 +74,7 @@ impl ShortTermPlasticity {
             .zip(self.a[..n8].par_chunks_exact(8))
             .zip(I_out[..n8].par_chunks_exact_mut(8))
             .for_each(|(((((((x8, u8), pre8), td8), tf8), u08), a8), io8)| {
-                kernels::stp_step(
-                    x8, u8, pre8,
-                    td8, tf8, u08, a8,
-                    io8, self.dt,
-                );
+                kernels::stp_step(x8, u8, pre8, td8, tf8, u08, a8, io8, self.dt);
             });
 
         // Scalar tail (n & 7)
@@ -84,11 +89,11 @@ impl ShortTermPlasticity {
                 let u_pre = self.u[i];
                 let x_pre = self.x[i];
                 // Decay (always applied)
-                self.u[i] += dt * (self.u0[i] - self.u[i]) / tf_i;
-                self.x[i] += dt * (1.0 - self.x[i]) / td_i;
-                // Spike-dependent terms using PRE-decay values (matching SIMD)
+                self.u[i] += dt * (self.u0[i] - u_pre) / tf_i;
+                self.x[i] += dt * (1.0 - x_pre) / td_i;
+                // Spike-dependent terms: PRE-spike u and x — parallel Euler (Tsodyks-Markram 1997)
                 self.u[i] += self.u0[i] * (1.0 - u_pre) * s;
-                self.x[i] -= self.u[i] * x_pre * s;  // NEW u, PRE-decay x
+                self.x[i] -= u_pre * x_pre * s; // u_pre here — matches SIMD kernel
                 I_out[i] += self.a[i] * self.u[i] * self.x[i] * s;
             }
         }
@@ -96,7 +101,10 @@ impl ShortTermPlasticity {
 
     pub fn reset(&mut self) {
         self.x.fill(1.0);
-        self.u.iter_mut().zip(self.u0.iter()).for_each(|(u, &u0)| *u = u0);
+        self.u
+            .iter_mut()
+            .zip(self.u0.iter())
+            .for_each(|(u, &u0)| *u = u0);
     }
 }
 
@@ -124,12 +132,16 @@ pub fn compute_lfp(
     n_electrodes: usize,
 ) {
     let n_out = n_electrodes.min(lfp_out.len());
-    for e in 0..n_out { lfp_out[e] = 0.0; }
+    for e in 0..n_out {
+        lfp_out[e] = 0.0;
+    }
     let n = spikes.len().min(electrode_map.len());
     for i in 0..n {
         if spikes[i] != 0 {
             let e = electrode_map[i] as usize;
-            if e < n_electrodes { lfp_out[e] += 1.0; }
+            if e < n_electrodes {
+                lfp_out[e] += 1.0;
+            }
         }
     }
 }

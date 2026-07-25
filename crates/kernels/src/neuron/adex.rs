@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
+use super::{fast_exp_simd, load8, load8_mut, spike_mask_to_i32, store8, surrogate_gradient};
 use wide::{f32x8, CmpGe, CmpGt, CmpNe};
-use super::{load8, load8_mut, store8, spike_mask_to_i32, fast_exp_simd, surrogate_gradient};
 
 // ═══════════════════════════════════════════════════════
 //  AdEx (Adaptive Exponential Integrate-and-Fire)
@@ -16,9 +16,14 @@ use super::{load8, load8_mut, store8, spike_mask_to_i32, fast_exp_simd, surrogat
 /// # Safety
 /// `v[n]`, `u[n]`, `Ii[n]`, `spikes[n]`, `params[9·n]`, `refractory[n]` must be valid.
 pub(crate) unsafe fn adex_step(
-    v: *mut f32, u: *mut f32, Ii: *mut f32, spikes: *mut i32,
+    v: *mut f32,
+    u: *mut f32,
+    Ii: *mut f32,
+    spikes: *mut i32,
     params: *const f32,
-    refractory: *mut f32, tau_ref: f32, n: usize,
+    refractory: *mut f32,
+    tau_ref: f32,
+    n: usize,
 ) {
     let p = std::slice::from_raw_parts(params, n * 9);
     let dt_val = p[0];
@@ -33,7 +38,9 @@ pub(crate) unsafe fn adex_step(
         let mut uu = load8_mut(u, off);
         let mut refr = load8_mut(refractory, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8_mut(Ii, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(3 * n), off);
         let v_th = load8(params.wrapping_add(4 * n), off);
         let v_reset = load8(params.wrapping_add(5 * n), off);
@@ -48,7 +55,8 @@ pub(crate) unsafe fn adex_step(
 
         // Exponential term: Δ·exp((v − v_T) / Δ) — only for non-refractory
         let exp_arg = ((vv - v_th) / delta_t.max(f32x8::splat(1.0)))
-            .max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
+            .max(f32x8::splat(-10.0))
+            .min(f32x8::splat(10.0));
         let exp_val = fast_exp_simd(exp_arg);
         let exp_term = delta_t * exp_val;
         let v_gt_mask = vv.cmp_gt(v_th - f32x8::splat(20.0));
@@ -57,15 +65,17 @@ pub(crate) unsafe fn adex_step(
         let exp_term = refr_mask.blend(zero, exp_term);
 
         // Membrane potential (skip if refractory)
+        // Save v(t) for use in dw — parallel Forward Euler (Brette & Gerstner 2005)
+        let vv_old = vv;
         let mask_tm = tau_m.cmp_gt(zero);
         let inv_tm = mask_tm.blend(one / tau_m, zero);
-        let dv = (v_rest - vv + exp_term - uu + ii) * inv_tm * dt_s;
+        let dv = (v_rest - vv_old + exp_term - uu + ii) * inv_tm * dt_s;
         vv += refr_mask.blend(zero, mask_tm.blend(dv, zero));
 
-        // Adaptation current (still decays during refractory)
+        // Adaptation current (uses vv_old = v(t), still decays during refractory)
         let mask_tw = tau_w.cmp_gt(zero);
         let inv_tw = mask_tw.blend(one / tau_w, zero);
-        let dw = (aa * (vv - v_rest) - uu) * inv_tw * dt_s;
+        let dw = (aa * (vv_old - v_rest) - uu) * inv_tw * dt_s;
         uu += mask_tw.blend(dw, zero);
 
         // Spike detection (only non-refractory)
@@ -76,8 +86,8 @@ pub(crate) unsafe fn adex_step(
         uu += sm.blend(bb, zero);
 
         // Decrement refractory for all, set to tau_ref on spike
-        refr -= dt_s;  // Always decrement
-        refr = sm.blend(tr_s, refr);  // Set to tau_ref on spike
+        refr -= dt_s; // Always decrement
+        refr = sm.blend(tr_s, refr); // Set to tau_ref on spike
         refr = refr.max(zero);
 
         store8(v, off, vv);
@@ -86,8 +96,14 @@ pub(crate) unsafe fn adex_step(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     if n8 < n {
@@ -119,13 +135,17 @@ pub(crate) unsafe fn adex_step(
             let bb = p[8 * n + i];
             let exp_term = if v[i] > v_thresh - 20.0 {
                 delta_t * ((v[i] - v_thresh) / delta_t.max(1.0)).exp()
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let i_clamped = ii[i].clamp(-100.0, 100.0);
+            // Save v(t) before update — parallel Forward Euler
+            let v_old = v[i];
             if tau_m > 0.0 {
-                v[i] += (v_rest - v[i] + exp_term - u_sl[i] + i_clamped) / tau_m * dt_val;
+                v[i] += (v_rest - v_old + exp_term - u_sl[i] + i_clamped) / tau_m * dt_val;
             }
             if tau_w > 0.0 {
-                u_sl[i] += (aa * (v[i] - v_rest) - u_sl[i]) / tau_w * dt_val;
+                u_sl[i] += (aa * (v_old - v_rest) - u_sl[i]) / tau_w * dt_val; // v_old = v(t)
             }
             if v[i] >= v_thresh || v[i].is_nan() {
                 spikes[i] = 1;
@@ -160,17 +180,26 @@ pub(crate) unsafe fn adex_step(
 /// All pointer args valid for given dimensions; `e[n_pre·n]`, `z_pre[n_pre]`,
 /// `I_ext[n]`, `weights[n_pre·n]`, `v[n]`, `w[n]`, `psi[n]`, `spikes[n]`.
 pub(crate) unsafe fn eprop_adex_step_multi(
-    v: *mut f32, w: *mut f32, psi: *mut f32,
-    e: *mut f32,          // [n_pre × n] column-major
-    z_pre: *const i32,    // [n_pre]
-    I_ext: *const f32,    // [n]
-    weights: *const f32,  // [n_pre × n] column-major
-    n: usize,             // n_post (column stride)
+    v: *mut f32,
+    w: *mut f32,
+    psi: *mut f32,
+    e: *mut f32,         // [n_pre × n] column-major
+    z_pre: *const i32,   // [n_pre]
+    I_ext: *const f32,   // [n]
+    weights: *const f32, // [n_pre × n] column-major
+    n: usize,            // n_post (column stride)
     n_pre: usize,
-    dt: f32, tau_m: f32, tau_w: f32,
-    v_rest: f32, v_thresh: f32, v_reset: f32, delta_t: f32,
-    a: f32, b: f32,
-    tau_e: f32, tau_sg: f32,
+    dt: f32,
+    tau_m: f32,
+    tau_w: f32,
+    v_rest: f32,
+    v_thresh: f32,
+    v_reset: f32,
+    delta_t: f32,
+    a: f32,
+    b: f32,
+    tau_e: f32,
+    tau_sg: f32,
     spikes: *mut i32,
 ) -> usize {
     assert!(n_pre > 0);
@@ -199,7 +228,9 @@ pub(crate) unsafe fn eprop_adex_step_multi(
         let mut vv = load8_mut(v, off);
         let mut ww = load8_mut(w, off);
         // Fused Ii clamp — предотвращает saturation cascade от oversized weights
-        let ii = load8(I_ext, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii = load8(I_ext, off)
+            .max(f32x8::splat(-100.0))
+            .min(f32x8::splat(100.0));
 
         // Compute I_total = I_ext + Σ_i weights[i·n + j] · z_pre[i]
         let mut I_s = ii;
@@ -215,7 +246,8 @@ pub(crate) unsafe fn eprop_adex_step_multi(
         // dv = (v_rest - v + Δ·exp((v - v_T)/Δ) - w + I) / τ_m · dt
         // Clamp exp arg to avoid overflow
         let exp_arg = ((vv - v_th_s) / delta_t_s.max(f32x8::splat(1.0)))
-            .max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
+            .max(f32x8::splat(-10.0))
+            .min(f32x8::splat(10.0));
         let exp_val = fast_exp_simd(exp_arg);
         let exp_term = delta_t_s * exp_val;
         // Zero out where v ≤ v_T - 20
@@ -240,7 +272,9 @@ pub(crate) unsafe fn eprop_adex_step_multi(
 
         // Count spikes
         for &val in sm.to_array().iter() {
-            if val.to_bits() != 0 { total_spikes += 1; }
+            if val.to_bits() != 0 {
+                total_spikes += 1;
+            }
         }
 
         store8(v, off, vv);
@@ -262,8 +296,14 @@ pub(crate) unsafe fn eprop_adex_step_multi(
 
         let sp_i = spike_mask_to_i32(sm);
         let sp8 = spikes.add(off);
-        *sp8 = sp_i[0]; *sp8.add(1) = sp_i[1]; *sp8.add(2) = sp_i[2]; *sp8.add(3) = sp_i[3];
-        *sp8.add(4) = sp_i[4]; *sp8.add(5) = sp_i[5]; *sp8.add(6) = sp_i[6]; *sp8.add(7) = sp_i[7];
+        *sp8 = sp_i[0];
+        *sp8.add(1) = sp_i[1];
+        *sp8.add(2) = sp_i[2];
+        *sp8.add(3) = sp_i[3];
+        *sp8.add(4) = sp_i[4];
+        *sp8.add(5) = sp_i[5];
+        *sp8.add(6) = sp_i[6];
+        *sp8.add(7) = sp_i[7];
     }
 
     // Scalar tail (n & 7)
@@ -291,7 +331,9 @@ pub(crate) unsafe fn eprop_adex_step_multi(
             // AdEx dynamics
             let exp_term = if vv > v_thresh - 20.0 {
                 delta_t * ((vv - v_thresh) / delta_t.max(1.0)).exp()
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let dv = (v_rest - vv + exp_term - ww + I_total) / tau_m * dt;
             let dw = (a * (vv - v_rest) - ww) / tau_w * dt;
             vv += dv;

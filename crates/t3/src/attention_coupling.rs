@@ -37,7 +37,6 @@
 
 #![allow(non_snake_case)]
 
-
 /// Attention-based Kuramoto coupling for one oscillator population.
 ///
 /// Replaces uniform `w/N · Σ r_j · sin(θ_j - θ_i)` with
@@ -76,7 +75,10 @@ impl AttentionCoupling {
     /// `gamma` is the coupling strength (typically 0.01-0.1).
     pub fn new(n: usize, gamma: f32) -> Self {
         let state_dim = 3;
-        assert!(state_dim == 3, "AttentionCoupling: state_dim must be 3 [sin, cos, r]");
+        assert!(
+            state_dim == 3,
+            "AttentionCoupling: state_dim must be 3 [sin, cos, r]"
+        );
         let mut q_weight = vec![0.0; state_dim * state_dim];
         let mut k_weight = vec![0.0; state_dim * state_dim];
         // Identity initialization: Q = K = I (attention = cosine similarity)
@@ -111,7 +113,12 @@ impl AttentionCoupling {
     /// out[i] = γ · Σ_j A_ij · r_j · sin(θ_j - θ_i)
     /// ```
     pub fn compute(&self, sin_ph: &[f32], cos_ph: &[f32], r: &[f32], out: &mut [f32]) {
-        let n = self.n.min(sin_ph.len()).min(cos_ph.len()).min(r.len()).min(out.len());
+        let n = self
+            .n
+            .min(sin_ph.len())
+            .min(cos_ph.len())
+            .min(r.len())
+            .min(out.len());
         let d = self.state_dim;
         let scale = self.scale;
         let gamma = self.gamma;
@@ -161,7 +168,9 @@ impl AttentionCoupling {
                 }
                 s *= scale;
                 scores[j] = s;
-                if s > max_score { max_score = s; }
+                if s > max_score {
+                    max_score = s;
+                }
             }
 
             // Softmax: stable exp(s - max)
@@ -183,7 +192,9 @@ impl AttentionCoupling {
             let mut coupling = 0.0;
             for j in 0..n {
                 let attn = scores[j];
-                if attn < 1e-6 { continue; }
+                if attn < 1e-6 {
+                    continue;
+                }
                 let sin_diff = sin_ph[j] * cos_i - cos_ph[j] * sin_i;
                 coupling += attn * r[j] * sin_diff;
             }
@@ -207,7 +218,11 @@ pub struct AttentionCouplingConfig {
 impl AttentionCouplingConfig {
     /// All populations use uniform coupling (default).
     pub fn new() -> Self {
-        Self { pop1: None, pop2: None, pop3: None }
+        Self {
+            pop1: None,
+            pop2: None,
+            pop3: None,
+        }
     }
 
     /// All populations use attention coupling with scaled gamma per population.
@@ -250,8 +265,8 @@ impl AttentionCouplingConfig {
 pub struct CrossAttentionCoupling {
     pub n: usize,
     pub state_dim: usize,
-    pub q_weight: Vec<f32>,  // projection for source population (Q)
-    pub k_weight: Vec<f32>,  // projection for target population (K)
+    pub q_weight: Vec<f32>, // projection for source population (Q)
+    pub k_weight: Vec<f32>, // projection for target population (K)
     pub gamma: f32,
     pub scale: f32,
 }
@@ -266,7 +281,11 @@ impl CrossAttentionCoupling {
             k_weight[i * state_dim + i] = 1.0;
         }
         Self {
-            n, state_dim, q_weight, k_weight, gamma,
+            n,
+            state_dim,
+            q_weight,
+            k_weight,
+            gamma,
             scale: (state_dim as f32).sqrt().recip(),
         }
     }
@@ -275,12 +294,21 @@ impl CrossAttentionCoupling {
     /// `coupling` is written for the source population (being coupled into).
     pub fn compute(
         &self,
-        sin_src: &[f32], cos_src: &[f32], r_src: &[f32],   // source (Q)
-        sin_tgt: &[f32], cos_tgt: &[f32], r_tgt: &[f32],   // target (K, value)
+        sin_src: &[f32],
+        cos_src: &[f32],
+        r_src: &[f32], // source (Q)
+        sin_tgt: &[f32],
+        cos_tgt: &[f32],
+        r_tgt: &[f32], // target (K, value)
         coupling: &mut [f32],
     ) {
-        let n = self.n.min(sin_src.len()).min(r_src.len())
-                       .min(sin_tgt.len()).min(r_tgt.len()).min(coupling.len());
+        let n = self
+            .n
+            .min(sin_src.len())
+            .min(r_src.len())
+            .min(sin_tgt.len())
+            .min(r_tgt.len())
+            .min(coupling.len());
         let d = self.state_dim;
         let scale = self.scale;
         let gamma = self.gamma;
@@ -294,7 +322,11 @@ impl CrossAttentionCoupling {
             for j in 0..d {
                 let mut sum = 0.0;
                 for k in 0..d {
-                    let state_k = match k { 0 => si, 1 => ci, _ => ri };
+                    let state_k = match k {
+                        0 => si,
+                        1 => ci,
+                        _ => ri,
+                    };
                     sum += self.k_weight[j * d + k] * state_k;
                 }
                 k_vecs[i * d + j] = sum;
@@ -310,7 +342,11 @@ impl CrossAttentionCoupling {
             for j in 0..d {
                 let mut sum = 0.0;
                 for k in 0..d {
-                    let state_k = match k { 0 => si, 1 => ci, _ => ri };
+                    let state_k = match k {
+                        0 => si,
+                        1 => ci,
+                        _ => ri,
+                    };
                     sum += self.q_weight[j * d + k] * state_k;
                 }
                 q_vec[j] = sum;
@@ -322,10 +358,14 @@ impl CrossAttentionCoupling {
             for j in 0..n {
                 let k_base = j * d;
                 let mut s = 0.0;
-                for h in 0..d { s += q_vec[h] * k_vecs[k_base + h]; }
+                for h in 0..d {
+                    s += q_vec[h] * k_vecs[k_base + h];
+                }
                 s *= scale;
                 scores[j] = s;
-                if s > max_score { max_score = s; }
+                if s > max_score {
+                    max_score = s;
+                }
             }
 
             // Softmax
@@ -336,7 +376,9 @@ impl CrossAttentionCoupling {
                 sum_exp += e;
             }
             let inv_sum = if sum_exp > 1e-12 { 1.0 / sum_exp } else { 0.0 };
-            for j in 0..n { scores[j] *= inv_sum; }
+            for j in 0..n {
+                scores[j] *= inv_sum;
+            }
 
             // Cross-population coupling: γ · Σ_j A_ij · r_tgt_j · sin(θ_tgt_j - θ_src_i)
             let cos_src_i = cos_src[i];
@@ -344,7 +386,9 @@ impl CrossAttentionCoupling {
             let mut cpl = 0.0;
             for j in 0..n {
                 let attn = scores[j];
-                if attn < 1e-6 { continue; }
+                if attn < 1e-6 {
+                    continue;
+                }
                 let sin_diff = sin_tgt[j] * cos_src_i - cos_tgt[j] * sin_src_i;
                 cpl += attn * r_tgt[j] * sin_diff;
             }
@@ -361,7 +405,7 @@ impl CrossAttentionCoupling {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TriOscillator, Avx2Backend};
+    use crate::{Avx2Backend, TriOscillator};
 
     // ─── 1. Attention coupling produces non-zero output ──
 
@@ -379,8 +423,10 @@ mod tests {
         attn.compute(&sin_ph, &cos_ph, &r, &mut out);
 
         // All outputs should be non-zero (phases differ)
-        assert!(out.iter().any(|&c| c.abs() > 1e-6),
-            "Attention coupling should produce non-zero output");
+        assert!(
+            out.iter().any(|&c| c.abs() > 1e-6),
+            "Attention coupling should produce non-zero output"
+        );
     }
 
     // ─── 2. All-identical oscillators → zero coupling (Kuramoto property) ──
@@ -399,8 +445,12 @@ mod tests {
         attn.compute(&sin_ph, &cos_ph, &r, &mut out);
 
         for i in 0..n {
-            assert!(out[i].abs() < 1e-6,
-                "Identical phases should give zero coupling: out[{}]={}", i, out[i]);
+            assert!(
+                out[i].abs() < 1e-6,
+                "Identical phases should give zero coupling: out[{}]={}",
+                i,
+                out[i]
+            );
         }
     }
 
@@ -416,9 +466,9 @@ mod tests {
         let sin_ph = vec![phase.sin(); n];
         let cos_ph = vec![phase.cos(); n];
         let mut r = vec![0.0; n];
-        r[0] = 2.0;  // oscillator 0 has high amplitude
-        r[1] = 1.0;  // oscillator 1 has medium amplitude
-        // rest have 0 amplitude → ignored in coupling
+        r[0] = 2.0; // oscillator 0 has high amplitude
+        r[1] = 1.0; // oscillator 1 has medium amplitude
+                    // rest have 0 amplitude → ignored in coupling
 
         let mut out = vec![0.0; n];
         attn.compute(&sin_ph, &cos_ph, &r, &mut out);
@@ -430,8 +480,12 @@ mod tests {
         //
         // Since all sin_diff = 0 (same phase), coupling should be 0
         for i in 0..n {
-            assert!(out[i].abs() < 1e-6,
-                "Same phase → zero coupling even with different r: out[{}]={}", i, out[i]);
+            assert!(
+                out[i].abs() < 1e-6,
+                "Same phase → zero coupling even with different r: out[{}]={}",
+                i,
+                out[i]
+            );
         }
 
         // Now oscillators 0 and 1 have same high r, oscillator 3 has different phase
@@ -442,22 +496,25 @@ mod tests {
         attn.compute(&sin_ph2, &cos_ph2, &r2, &mut out2);
 
         // Oscillator 3 has different phase → should get non-zero coupling
-        assert!(out2[3].abs() > 1e-6,
-            "Different phase oscillator should get coupling: out2[3]={}", out2[3]);
+        assert!(
+            out2[3].abs() > 1e-6,
+            "Different phase oscillator should get coupling: out2[3]={}",
+            out2[3]
+        );
     }
 
     // ─── 4. TriOscillator with attention coupling ──
 
     #[test]
     fn test_tri_oscillator_with_attention_coupling() {
-        
-
         let n = 16;
         let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
 
         // First spread phases with uniform coupling
         tri.set_uniform_coupling(0.3, 0.15, 0.08);
-        for _ in 0..20 { tri.step(0.01); }
+        for _ in 0..20 {
+            tri.step(0.01);
+        }
 
         // Now switch to attention-only coupling
         let config = AttentionCouplingConfig::all(n, 0.05);
@@ -466,15 +523,22 @@ mod tests {
 
         tri.step(0.01);
 
-        assert!(tri.th1.iter().any(|&p| p.abs() > 0.001),
-            "Phases should update with attention coupling");
+        assert!(
+            tri.th1.iter().any(|&p| p.abs() > 0.001),
+            "Phases should update with attention coupling"
+        );
         // With spread phases, attention coupling should be non-zero
-        assert!(tri.coupling1.iter().any(|&c| c.abs() > 1e-8),
-            "Coupling should be non-zero with attention when phases differ");
+        assert!(
+            tri.coupling1.iter().any(|&c| c.abs() > 1e-8),
+            "Coupling should be non-zero with attention when phases differ"
+        );
         // Log coupling stats
         let max_cpl = tri.coupling1.iter().cloned().fold(0.0f32, f32::max);
         let mean_cpl = tri.coupling1.iter().sum::<f32>() / n as f32;
-        println!("Attention coupling: max={:.6}, mean={:.6}", max_cpl, mean_cpl);
+        println!(
+            "Attention coupling: max={:.6}, mean={:.6}",
+            max_cpl, mean_cpl
+        );
     }
 
     // ─── 5. Attention coupling vs uniform coupling ──
@@ -486,25 +550,40 @@ mod tests {
         // Uniform coupling
         let mut tri_uniform = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
         tri_uniform.set_uniform_coupling(0.3, 0.15, 0.08);
-        for _ in 0..10 { tri_uniform.step(0.01); }
+        for _ in 0..10 {
+            tri_uniform.step(0.01);
+        }
 
         // Attention coupling (identity init → similar to cosine similarity)
         let mut tri_attn = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
         let config = AttentionCouplingConfig::all(n, 0.05);
         tri_attn.set_attention_coupling(config.pop1, config.pop2, config.pop3);
         tri_attn.set_uniform_coupling(0.0, 0.0, 0.0); // no uniform coupling
-        for _ in 0..10 { tri_attn.step(0.01); }
+        for _ in 0..10 {
+            tri_attn.step(0.01);
+        }
 
         // Dynamics should differ (attention coupling is data-dependent)
         // At minimum, verify both produce non-zero phases
         let r1_uniform = tri_uniform.order_parameter(&tri_uniform.th1);
         let r1_attn = tri_attn.order_parameter(&tri_attn.th1);
 
-        println!("Uniform: R1={:.4}, Attention: R1={:.4}", r1_uniform, r1_attn);
+        println!(
+            "Uniform: R1={:.4}, Attention: R1={:.4}",
+            r1_uniform, r1_attn
+        );
 
         // Both should have non-trivial synchronization
-        assert!(r1_uniform > 0.0 && r1_uniform <= 1.0, "Uniform R1 in [0,1]: {}", r1_uniform);
-        assert!(r1_attn > 0.0 && r1_attn <= 1.0, "Attention R1 in [0,1]: {}", r1_attn);
+        assert!(
+            r1_uniform > 0.0 && r1_uniform <= 1.0,
+            "Uniform R1 in [0,1]: {}",
+            r1_uniform
+        );
+        assert!(
+            r1_attn > 0.0 && r1_attn <= 1.0,
+            "Attention R1 in [0,1]: {}",
+            r1_attn
+        );
     }
 
     // ─── 6. Cross-population attention ──
@@ -526,8 +605,10 @@ mod tests {
         cross.compute(&sin1, &cos1, &r1, &sin2, &cos2, &r2, &mut out);
 
         // Coupling from pop2 into pop1
-        assert!(out.iter().any(|&c| c.abs() > 1e-6),
-            "Cross-pop attention should produce non-zero coupling");
+        assert!(
+            out.iter().any(|&c| c.abs() > 1e-6),
+            "Cross-pop attention should produce non-zero coupling"
+        );
     }
 
     // ─── 7. Scalar backend with attention ──
@@ -543,8 +624,10 @@ mod tests {
 
         tri.step(0.01);
 
-        assert!(tri.th1.iter().any(|&p| p.abs() > 0.001),
-            "Scalar backend + attention should update phases");
+        assert!(
+            tri.th1.iter().any(|&p| p.abs() > 0.001),
+            "Scalar backend + attention should update phases"
+        );
     }
 
     // ─── 8. Phase gate still works with attention ──
@@ -555,16 +638,16 @@ mod tests {
         let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
 
         // Enable attention AND keep some uniform coupling + phase gate
-        let config = AttentionCouplingConfig::pop1_only(
-            AttentionCoupling::new(n, 0.05)
-        );
+        let config = AttentionCouplingConfig::pop1_only(AttentionCoupling::new(n, 0.05));
         tri.set_attention_coupling(config.pop1, config.pop2, config.pop3);
         tri.set_uniform_coupling(0.1, 0.05, 0.02); // uniform for pop2, pop3
 
         tri.step(0.01);
 
-        assert!(tri.th1.iter().any(|&p| p.abs() > 0.001),
-            "Attention + phase gate should work together");
+        assert!(
+            tri.th1.iter().any(|&p| p.abs() > 0.001),
+            "Attention + phase gate should work together"
+        );
         let r = tri.order_parameter(&tri.th1);
         assert!(r >= 0.0 && r <= 1.0, "Order param in [0,1]: {}", r);
     }
@@ -590,8 +673,10 @@ mod tests {
 
         tri.step(0.01);
         let cpl_before = tri.coupling1.iter().cloned().fold(0.0f32, f32::max);
-        assert!(cpl_before > 1e-8,
-            "Pre-reset: attention coupling should be non-zero with spread phases");
+        assert!(
+            cpl_before > 1e-8,
+            "Pre-reset: attention coupling should be non-zero with spread phases"
+        );
 
         tri.reset();
 
@@ -604,9 +689,14 @@ mod tests {
 
         tri.step(0.01);
         let cpl_after = tri.coupling1.iter().cloned().fold(0.0f32, f32::max);
-        println!("Pre-reset coupling: max={:.6}, Post-reset coupling: max={:.6}", cpl_before, cpl_after);
-        assert!(cpl_after > 1e-8,
-            "Attention coupling should work after reset (attention config preserved)");
+        println!(
+            "Pre-reset coupling: max={:.6}, Post-reset coupling: max={:.6}",
+            cpl_before, cpl_after
+        );
+        assert!(
+            cpl_after > 1e-8,
+            "Attention coupling should work after reset (attention config preserved)"
+        );
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -622,32 +712,40 @@ mod tests {
     //   3. Reconstruction accuracy — Pearson R восстановленного сигнала
     //   4. Drive separation — различимость разных уровней драйва
 
-    use crate::{NlmsDecoder, Decoder, compute_pearson, pst_linear_features, pst_fast, pst_fast_dim};
+    use crate::{
+        compute_pearson, pst_fast, pst_fast_dim, pst_linear_features, Decoder, NlmsDecoder,
+    };
 
     /// PST feature variance: mean std across all features.
     /// Высокая variance = богаче динамика = больше информации для декодера.
     fn pst_feature_variance(features: &[Vec<f32>]) -> f32 {
-        if features.is_empty() || features[0].is_empty() { return 0.0; }
+        if features.is_empty() || features[0].is_empty() {
+            return 0.0;
+        }
         let n_frames = features.len();
         let dim = features[0].len();
         let mut variances = 0.0f32;
         let mut count = 0;
         for d in 0..dim {
             let mean: f32 = features.iter().map(|fv| fv[d]).sum::<f32>() / n_frames as f32;
-            let var: f32 = features.iter().map(|fv| (fv[d] - mean).powi(2)).sum::<f32>() / n_frames as f32;
+            let var: f32 = features
+                .iter()
+                .map(|fv| (fv[d] - mean).powi(2))
+                .sum::<f32>()
+                / n_frames as f32;
             variances += var;
             count += 1;
         }
-        if count > 0 { variances / count as f32 } else { 0.0 }
+        if count > 0 {
+            variances / count as f32
+        } else {
+            0.0
+        }
     }
 
     /// Train NLMS decoder to reconstruct drive signal from PST features.
     /// Returns (predictions, pearson_r).
-    fn train_decode_pst(
-        pst_frames: &[Vec<f32>],
-        target: &[f32],
-        lr: f32,
-    ) -> (Vec<f32>, f32) {
+    fn train_decode_pst(pst_frames: &[Vec<f32>], target: &[f32], lr: f32) -> (Vec<f32>, f32) {
         let dim = pst_frames[0].len();
         let n = pst_frames.len();
         let mut dec = NlmsDecoder::new(dim, lr, 1e-6);
@@ -710,11 +808,14 @@ mod tests {
 
         // Drive signal: sine wave + noise
         let mut rng = rand::thread_rng();
-        let drive_signal: Vec<f32> = (0..n_steps).map(|i| {
-            let t = i as f32 * dt;
-            (2.0 * std::f32::consts::PI * 1.0 * t).sin() * 3.0
-                + rand::Rng::gen::<f32>(&mut rng) * 0.5 - 0.25
-        }).collect();
+        let drive_signal: Vec<f32> = (0..n_steps)
+            .map(|i| {
+                let t = i as f32 * dt;
+                (2.0 * std::f32::consts::PI * 1.0 * t).sin() * 3.0
+                    + rand::Rng::gen::<f32>(&mut rng) * 0.5
+                    - 0.25
+            })
+            .collect();
 
         // Collect PST features
         let frames_uniform = collect_pst_frames(&mut tri_uniform, &drive_signal, n_warmup, dt);
@@ -726,7 +827,10 @@ mod tests {
         println!("═══ PST Feature Variance ═══");
         println!("  Uniform coupling:   var = {:.6}", var_uniform);
         println!("  Attention coupling: var = {:.6}", var_attn);
-        println!("  Ratio (attn/uniform): {:.3}x", var_attn / var_uniform.max(1e-10));
+        println!(
+            "  Ratio (attn/uniform): {:.3}x",
+            var_attn / var_uniform.max(1e-10)
+        );
 
         // Attention should produce richer dynamics (higher variance) or at least different
         // The test passes as long as variance is non-zero for both
@@ -753,14 +857,16 @@ mod tests {
         tri_attn.set_attention_coupling(config.pop1, config.pop2, config.pop3);
 
         // Drive signal: multi-frequency sine + step changes
-        let drive_signal: Vec<f32> = (0..n_steps).map(|i| {
-            let t = i as f32 * dt;
-            let slow = (2.0 * std::f32::consts::PI * 0.5 * t).sin() * 2.0;
-            let fast = (2.0 * std::f32::consts::PI * 3.0 * t).sin() * 1.0;
-            // Step change at middle
-            let step = if i > n_steps / 2 { 1.0 } else { -1.0 };
-            slow + fast + step
-        }).collect();
+        let drive_signal: Vec<f32> = (0..n_steps)
+            .map(|i| {
+                let t = i as f32 * dt;
+                let slow = (2.0 * std::f32::consts::PI * 0.5 * t).sin() * 2.0;
+                let fast = (2.0 * std::f32::consts::PI * 3.0 * t).sin() * 1.0;
+                // Step change at middle
+                let step = if i > n_steps / 2 { 1.0 } else { -1.0 };
+                slow + fast + step
+            })
+            .collect();
 
         // Collect PST features
         let frames_uniform = collect_pst_frames(&mut tri_uniform, &drive_signal, n_warmup, dt);
@@ -777,8 +883,16 @@ mod tests {
         println!("  Difference: {:.4}", r_attn - r_uni);
 
         // Both should have positive correlation (signal is reconstructable)
-        assert!(r_uni > 0.3, "Uniform decoding R should be > 0.3, got {}", r_uni);
-        assert!(r_attn > 0.3, "Attention decoding R should be > 0.3, got {}", r_attn);
+        assert!(
+            r_uni > 0.3,
+            "Uniform decoding R should be > 0.3, got {}",
+            r_uni
+        );
+        assert!(
+            r_attn > 0.3,
+            "Attention decoding R should be > 0.3, got {}",
+            r_attn
+        );
 
         // Log convergence: track error over time
         let dim = frames_uniform[0].len();
@@ -796,7 +910,12 @@ mod tests {
         }
         println!("  Convergence (error every 20 steps):");
         for k in 0..errors_uni.len().min(10) {
-            println!("    step {}: uniform={:.4}  attention={:.4}", k * 20, errors_uni[k], errors_attn[k]);
+            println!(
+                "    step {}: uniform={:.4}  attention={:.4}",
+                k * 20,
+                errors_uni[k],
+                errors_attn[k]
+            );
         }
     }
 
@@ -862,7 +981,7 @@ mod tests {
             let mut total_dist = 0.0;
             let mut pairs = 0;
             for a in 0..drive_levels.len() {
-                for b in (a+1)..drive_levels.len() {
+                for b in (a + 1)..drive_levels.len() {
                     let dist: f32 = (0..mean_pst_per_drive[a].len())
                         .map(|d| (mean_pst_per_drive[a][d] - mean_pst_per_drive[b][d]).powi(2))
                         .sum::<f32>()
@@ -872,12 +991,17 @@ mod tests {
                 }
             }
             let avg_dist = total_dist / pairs as f32;
-            println!("  {coupling_type}: avg pairwise PST distance between drives = {:.4}", avg_dist);
+            println!(
+                "  {coupling_type}: avg pairwise PST distance between drives = {:.4}",
+                avg_dist
+            );
 
             // Verify different drives produce measurably different PST
             // The distance between most different drives should be > distance between most similar
-            assert!(avg_dist > 0.001,
-                "{coupling_type}: different drives should produce distinct PST");
+            assert!(
+                avg_dist > 0.001,
+                "{coupling_type}: different drives should produce distinct PST"
+            );
         }
     }
 
@@ -897,12 +1021,18 @@ mod tests {
         tri.set_attention_coupling(None, None, None);
 
         for _ in 0..n_warmup {
-            for i in 0..n { tri.drive1[i] = 1.0; tri.drive2[i] = 0.0; tri.drive3[i] = 0.0; }
+            for i in 0..n {
+                tri.drive1[i] = 1.0;
+                tri.drive2[i] = 0.0;
+                tri.drive3[i] = 0.0;
+            }
             tri.step(dt);
         }
         let mut uniform_frames = Vec::new();
         for _ in 0..n_steps {
-            for i in 0..n { tri.drive1[i] = (i as f32 * 0.02).sin() * 2.0; }
+            for i in 0..n {
+                tri.drive1[i] = (i as f32 * 0.02).sin() * 2.0;
+            }
             tri.step(dt);
             uniform_frames.push(pst_fast(&tri));
         }
@@ -916,12 +1046,18 @@ mod tests {
         );
 
         for _ in 0..n_warmup {
-            for i in 0..n { tri.drive1[i] = 1.0; tri.drive2[i] = 0.0; tri.drive3[i] = 0.0; }
+            for i in 0..n {
+                tri.drive1[i] = 1.0;
+                tri.drive2[i] = 0.0;
+                tri.drive3[i] = 0.0;
+            }
             tri.step(dt);
         }
         let mut attn_frames = Vec::new();
         for _ in 0..n_steps {
-            for i in 0..n { tri.drive1[i] = (i as f32 * 0.02).sin() * 2.0; }
+            for i in 0..n {
+                tri.drive1[i] = (i as f32 * 0.02).sin() * 2.0;
+            }
             tri.step(dt);
             attn_frames.push(pst_fast(&tri));
         }
@@ -973,11 +1109,23 @@ mod tests {
 
         let r_std_uni = {
             let mean_r = tri_uniform.r1.iter().sum::<f32>() / n as f32;
-            (tri_uniform.r1.iter().map(|r| (r - mean_r).powi(2)).sum::<f32>() / n as f32).sqrt()
+            (tri_uniform
+                .r1
+                .iter()
+                .map(|r| (r - mean_r).powi(2))
+                .sum::<f32>()
+                / n as f32)
+                .sqrt()
         };
         let r_std_attn = {
             let mean_r = tri_attn.r1.iter().sum::<f32>() / n as f32;
-            (tri_attn.r1.iter().map(|r| (r - mean_r).powi(2)).sum::<f32>() / n as f32).sqrt()
+            (tri_attn
+                .r1
+                .iter()
+                .map(|r| (r - mean_r).powi(2))
+                .sum::<f32>()
+                / n as f32)
+                .sqrt()
         };
 
         println!("═══ Phase-Amplitude Analysis ═══");

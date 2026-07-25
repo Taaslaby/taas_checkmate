@@ -12,8 +12,8 @@
 //! └── HybridDecoder           — PST + InverseKuramoto + NLMS (zero-shot init)
 //! ```
 
+use super::ridge::{compute_pearson, solve_cg};
 use crate::{T3Backend, TriOscillator};
-use super::ridge::{solve_cg, compute_pearson};
 use std::slice;
 
 // ─── Free functions (composable, no trait overhead) ──────
@@ -27,7 +27,14 @@ pub fn nlms_decode(weights: &[f32], bias: f32, states: &[f32]) -> f32 {
 /// NLMS train step: returns error, updates weights and bias in place.
 /// Delegates to SIMD kernel.
 #[inline]
-pub fn nlms_update(weights: &mut [f32], bias: &mut f32, states: &[f32], target: f32, lr: f32, eps: f32) -> f32 {
+pub fn nlms_update(
+    weights: &mut [f32],
+    bias: &mut f32,
+    states: &[f32],
+    target: f32,
+    lr: f32,
+    eps: f32,
+) -> f32 {
     let y = nlms_decode(weights, *bias, states);
     let error = target - y;
     crate::kernels::nlms_train(weights, slice::from_mut(bias), states, error, lr, eps);
@@ -44,21 +51,37 @@ pub fn kalman_decode(weights: &[f32], bias: f32, states: &[f32]) -> f32 {
 /// Formula: drive = (r_dot - (α - r²)·r) / gain
 /// `prev_amps` is mutated in place for the next call.
 #[inline]
-pub fn inverse_kuramoto_decode(prev_amps: &mut [f32], amps: &[f32], alpha: f32, drive_gain: f32, dt: f32) -> f32 {
+pub fn inverse_kuramoto_decode(
+    prev_amps: &mut [f32],
+    amps: &[f32],
+    alpha: f32,
+    drive_gain: f32,
+    dt: f32,
+) -> f32 {
     let n = prev_amps.len().min(amps.len());
     let mut sum_d = 0.0;
     let mut count = 0;
     for i in 0..n {
         let r = amps[i];
-        let r_dot = if dt > 1e-12 { (r - prev_amps[i]) / dt } else { 0.0 };
+        let r_dot = if dt > 1e-12 {
+            (r - prev_amps[i]) / dt
+        } else {
+            0.0
+        };
         let drive = if drive_gain.abs() > 1e-10 {
             (r_dot - (alpha - r * r) * r) / drive_gain
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         sum_d += drive.clamp(-10.0, 10.0);
         prev_amps[i] = r;
         count += 1;
     }
-    if count > 0 { sum_d / count as f32 } else { 0.0 }
+    if count > 0 {
+        sum_d / count as f32
+    } else {
+        0.0
+    }
 }
 
 /// STDP prediction: dot(weights, states) + bias.
@@ -103,25 +126,47 @@ pub struct NlmsDecoder {
 impl NlmsDecoder {
     /// Create NLMS decoder with `n` features, learning rate `lr`, normalisation floor `eps`.
     pub fn new(n: usize, lr: f32, eps: f32) -> Self {
-        Self { weights: vec![0.0; n], bias: vec![0.0; 1], lr, eps }
+        Self {
+            weights: vec![0.0; n],
+            bias: vec![0.0; 1],
+            lr,
+            eps,
+        }
     }
 }
 
 impl Decoder for NlmsDecoder {
-    fn dim(&self) -> usize { self.weights.len() }
+    fn dim(&self) -> usize {
+        self.weights.len()
+    }
 
     fn predict(&self, states: &[f32]) -> f32 {
-        self.weights.iter().zip(states).map(|(w, s)| w * s).sum::<f32>() + self.bias[0]
+        self.weights
+            .iter()
+            .zip(states)
+            .map(|(w, s)| w * s)
+            .sum::<f32>()
+            + self.bias[0]
     }
 
     fn train(&mut self, states: &[f32], target: f32) -> f32 {
         let y = self.predict(states);
         let error = target - y;
-        crate::kernels::nlms_train(&mut self.weights, &mut self.bias, states, error, self.lr, self.eps);
+        crate::kernels::nlms_train(
+            &mut self.weights,
+            &mut self.bias,
+            states,
+            error,
+            self.lr,
+            self.eps,
+        );
         error
     }
 
-    fn reset(&mut self) { self.weights.fill(0.0); self.bias[0] = 0.0; }
+    fn reset(&mut self) {
+        self.weights.fill(0.0);
+        self.bias[0] = 0.0;
+    }
 }
 
 // ─── KalmanDecoder ───────────────────────────────────────
@@ -149,24 +194,40 @@ impl KalmanDecoder {
         Self {
             weights: vec![0.0; n],
             cov: vec![10.0; n],
-            bias: 0.0, q, r,
+            bias: 0.0,
+            q,
+            r,
         }
     }
 }
 
 impl Decoder for KalmanDecoder {
-    fn dim(&self) -> usize { self.weights.len() }
+    fn dim(&self) -> usize {
+        self.weights.len()
+    }
 
     fn predict(&self, states: &[f32]) -> f32 {
-        self.weights.iter().zip(states).map(|(w, s)| w * s).sum::<f32>() + self.bias
+        self.weights
+            .iter()
+            .zip(states)
+            .map(|(w, s)| w * s)
+            .sum::<f32>()
+            + self.bias
     }
 
     fn train(&mut self, states: &[f32], target: f32) -> f32 {
-        for c in self.cov.iter_mut() { *c += self.q; }
+        for c in self.cov.iter_mut() {
+            *c += self.q;
+        }
         let y = self.predict(states);
         let error = target - y;
-        let s: f32 = self.r + self.cov.iter().zip(states.iter())
-            .map(|(&c, &st)| c * st * st).sum::<f32>();
+        let s: f32 = self.r
+            + self
+                .cov
+                .iter()
+                .zip(states.iter())
+                .map(|(&c, &st)| c * st * st)
+                .sum::<f32>();
         if s > 1e-12 {
             crate::kernels::kalman_update(&mut self.weights, &mut self.cov, states, error, s);
             let k_bias = 10.0 / (s + 10.0);
@@ -216,7 +277,7 @@ impl InverseKuramotoDecoder {
             epsilon: 0.1,
             weights: vec![1.0; n],
             initialised: false,
-            dt: 1.0,  // default: preserves old behavior
+            dt: 1.0, // default: preserves old behavior
         }
     }
 
@@ -243,14 +304,24 @@ impl InverseKuramotoDecoder {
             // ⇒ drive = (r_dot − (α − r²)·r) / gain
             let drive = if self.drive_gain.abs() > 1e-10 {
                 (r_dot - (self.alpha - r * r) * r) / self.drive_gain
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let drive = drive.clamp(-10.0, 10.0);
-            let w = if i < self.weights.len() { self.weights[i] } else { 1.0 };
+            let w = if i < self.weights.len() {
+                self.weights[i]
+            } else {
+                1.0
+            };
             sum_d += drive * w;
             sum_w += w.abs();
             self.prev_amps[i] = r;
         }
-        if sum_w > 1e-10 { sum_d / sum_w } else { 0.0 }
+        if sum_w > 1e-10 {
+            sum_d / sum_w
+        } else {
+            0.0
+        }
     }
 
     /// Batch-decode multiple frames. `amps` length must be `n × n_frames`.
@@ -266,9 +337,13 @@ impl InverseKuramotoDecoder {
 }
 
 impl Decoder for InverseKuramotoDecoder {
-    fn dim(&self) -> usize { self.n }
+    fn dim(&self) -> usize {
+        self.n
+    }
 
-    fn predict(&self, _states: &[f32]) -> f32 { 0.0 }
+    fn predict(&self, _states: &[f32]) -> f32 {
+        0.0
+    }
 
     fn train(&mut self, states: &[f32], _target: f32) -> f32 {
         self.decode(states)
@@ -301,17 +376,27 @@ impl StdpDecoder {
             weights: vec![0.0; n],
             traces: vec![0.0; n],
             prev_states: vec![0.0; n],
-            bias: 0.0, lr, decay, sparsity,
+            bias: 0.0,
+            lr,
+            decay,
+            sparsity,
             initialised: false,
         }
     }
 }
 
 impl Decoder for StdpDecoder {
-    fn dim(&self) -> usize { self.weights.len() }
+    fn dim(&self) -> usize {
+        self.weights.len()
+    }
 
     fn predict(&self, states: &[f32]) -> f32 {
-        self.weights.iter().zip(states).map(|(w, s)| w * s).sum::<f32>() + self.bias
+        self.weights
+            .iter()
+            .zip(states)
+            .map(|(w, s)| w * s)
+            .sum::<f32>()
+            + self.bias
     }
 
     fn train(&mut self, states: &[f32], target: f32) -> f32 {
@@ -328,7 +413,11 @@ impl Decoder for StdpDecoder {
             self.traces[i] = self.decay * self.traces[i] + ds.abs();
             self.prev_states[i] = states[i];
             let delta = self.lr * error * self.traces[i];
-            let penalty = if self.weights[i] > 0.0 { self.sparsity } else { -self.sparsity };
+            let penalty = if self.weights[i] > 0.0 {
+                self.sparsity
+            } else {
+                -self.sparsity
+            };
             self.weights[i] += delta - penalty;
             self.weights[i] = self.weights[i].clamp(-5.0, 5.0);
         }
@@ -367,7 +456,10 @@ impl PstDecoder {
         let n_weights = feat_dim * L;
         Self {
             weights: vec![0.0; n_weights],
-            bias: 0.0, alpha, feat_dim, L,
+            bias: 0.0,
+            alpha,
+            feat_dim,
+            L,
         }
     }
 
@@ -375,7 +467,9 @@ impl PstDecoder {
     /// Returns Pearson R on training data.
     pub fn train_batch(&mut self, X: &[f32], y: &[f32], n_samples: usize) -> f32 {
         let d = self.feat_dim * self.L;
-        if n_samples == 0 || d == 0 { return 0.0; }
+        if n_samples == 0 || d == 0 {
+            return 0.0;
+        }
 
         // Build XᵀX + αI and Xᵀy
         let mut a = vec![0.0f32; d * d];
@@ -393,7 +487,9 @@ impl PstDecoder {
                 }
             }
         }
-        for j in 0..d { a[j * d + j] += self.alpha; }
+        for j in 0..d {
+            a[j * d + j] += self.alpha;
+        }
 
         // Solve via CG
         let w = solve_cg(&a, &b, d, 100, 1e-6);
@@ -404,8 +500,12 @@ impl PstDecoder {
         let mut y_pred = Vec::with_capacity(n_samples);
         for i in 0..n_samples {
             let row_start = i * d;
-            let pred: f32 = self.weights.iter().enumerate()
-                .map(|(j, w)| w * X[row_start + j]).sum();
+            let pred: f32 = self
+                .weights
+                .iter()
+                .enumerate()
+                .map(|(j, w)| w * X[row_start + j])
+                .sum();
             y_pred.push(pred);
         }
         compute_pearson(&y_pred, y)
@@ -413,7 +513,12 @@ impl PstDecoder {
 
     /// Predict from concatenated trajectory features.
     pub fn predict(&self, trajectory: &[f32]) -> f32 {
-        self.weights.iter().zip(trajectory).map(|(w, x)| w * x).sum::<f32>() + self.bias
+        self.weights
+            .iter()
+            .zip(trajectory)
+            .map(|(w, x)| w * x)
+            .sum::<f32>()
+            + self.bias
     }
 }
 
@@ -477,7 +582,10 @@ impl HybridDecoder {
         ik.set_dt(dt);
 
         Self {
-            n, pst_dim, nlms, ik,
+            n,
+            pst_dim,
+            nlms,
+            ik,
             fv: Vec::with_capacity(total_dim),
             amps_buf: vec![0.0f32; 3 * n],
         }
@@ -537,12 +645,14 @@ impl HybridDecoder {
     pub fn reset(&mut self) {
         self.nlms.reset();
         self.ik.reset();
-        self.nlms.weights[self.pst_dim] = 1.0;  // restore IK init
+        self.nlms.weights[self.pst_dim] = 1.0; // restore IK init
     }
 }
 
 impl Decoder for HybridDecoder {
-    fn dim(&self) -> usize { self.pst_dim + 1 }
+    fn dim(&self) -> usize {
+        self.pst_dim + 1
+    }
 
     fn predict(&self, states: &[f32]) -> f32 {
         self.nlms.predict(states)
@@ -562,7 +672,7 @@ impl Decoder for HybridDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TriOscillator, Avx2Backend};
+    use crate::{Avx2Backend, TriOscillator};
 
     // ─── HybridDecoder tests ──────────────────────────
 
@@ -574,11 +684,18 @@ mod tests {
         assert_eq!(dec.dim(), total_dim);
         // IK weight = 1.0 (zero-shot init), rest = 0.0
         for i in 0..pst_dim {
-            assert!((dec.nlms.weights[i] - 0.0).abs() < 1e-8,
-                "pst weight[{}] should be 0, got {}", i, dec.nlms.weights[i]);
+            assert!(
+                (dec.nlms.weights[i] - 0.0).abs() < 1e-8,
+                "pst weight[{}] should be 0, got {}",
+                i,
+                dec.nlms.weights[i]
+            );
         }
-        assert!((dec.nlms.weights[pst_dim] - 1.0).abs() < 1e-8,
-            "IK weight should be 1.0, got {}", dec.nlms.weights[pst_dim]);
+        assert!(
+            (dec.nlms.weights[pst_dim] - 1.0).abs() < 1e-8,
+            "IK weight should be 1.0, got {}",
+            dec.nlms.weights[pst_dim]
+        );
     }
 
     #[test]
@@ -590,8 +707,11 @@ mod tests {
         tri.step(0.01);
         // First call: IK not initialised → returns 0.0 → prediction = 0.0
         let pred = dec.predict_from_tri(&tri);
-        assert!((pred - 0.0).abs() < 1e-6,
-            "zero-shot first step should be 0.0 (IK init), got {}", pred);
+        assert!(
+            (pred - 0.0).abs() < 1e-6,
+            "zero-shot first step should be 0.0 (IK init), got {}",
+            pred
+        );
     }
 
     #[test]
@@ -612,8 +732,11 @@ mod tests {
 
         // Now prediction should use non-zero IK drive (physics-based)
         let pred = dec.predict_from_tri(&tri);
-        assert!(pred != 0.0,
-            "zero-shot step 2 should have non-zero IK drive, got {}", pred);
+        assert!(
+            pred != 0.0,
+            "zero-shot step 2 should have non-zero IK drive, got {}",
+            pred
+        );
     }
 
     #[test]
@@ -628,11 +751,19 @@ mod tests {
         for step in 0..100 {
             if step % 2 == 0 {
                 // Alternate drive pattern
-                for i in 0..tri.n.min(4) { tri.drive1[i] = 3.0; }
-                for i in 4..tri.n.min(8) { tri.drive1[i] = 0.0; }
+                for i in 0..tri.n.min(4) {
+                    tri.drive1[i] = 3.0;
+                }
+                for i in 4..tri.n.min(8) {
+                    tri.drive1[i] = 0.0;
+                }
             } else {
-                for i in 0..tri.n.min(4) { tri.drive1[i] = 0.0; }
-                for i in 4..tri.n.min(8) { tri.drive1[i] = 3.0; }
+                for i in 0..tri.n.min(4) {
+                    tri.drive1[i] = 0.0;
+                }
+                for i in 4..tri.n.min(8) {
+                    tri.drive1[i] = 3.0;
+                }
             }
             tri.step(0.01);
 
@@ -641,13 +772,18 @@ mod tests {
             let target = mean_phase.sin();
 
             let err = dec.train_from_tri(&tri, target);
-            if step > 10 { errors.push(err.abs()); }
+            if step > 10 {
+                errors.push(err.abs());
+            }
         }
 
         // After training, error should be low
         let avg_err: f32 = errors.iter().sum::<f32>() / errors.len() as f32;
-        assert!(avg_err < 0.6,
-            "HybridDecoder should learn: avg error = {}", avg_err);
+        assert!(
+            avg_err < 0.6,
+            "HybridDecoder should learn: avg error = {}",
+            avg_err
+        );
     }
 
     #[test]
@@ -660,28 +796,31 @@ mod tests {
         let fv = dec.build_features(&tri).to_vec();
 
         let pst_dim = crate::pst_linear_dim(8);
-        assert_eq!(fv.len(), pst_dim + 1,
-            "feature vector should be pst_dim + 1, got {}", fv.len());
+        assert_eq!(
+            fv.len(),
+            pst_dim + 1,
+            "feature vector should be pst_dim + 1, got {}",
+            fv.len()
+        );
         // Last element should be the IK drive
-        assert_eq!(fv[pst_dim], 0.0,
-            "first IK drive should be 0.0 (init), got {}", fv[pst_dim]);
+        assert_eq!(
+            fv[pst_dim], 0.0,
+            "first IK drive should be 0.0 (init), got {}",
+            fv[pst_dim]
+        );
     }
 
     #[test]
-    fn test_quantum_echo_drive_recovery() {
-        // Демонстрация "Quantum Echo": подаём сигнал → T3 кодирует →
-        // Inverse Kuramoto восстанавливает zero-shot без обучения.
-        //
-        // Это классический аналог Google Quantum Echo (Nature 2025):
-        //   Google: возмущение → scrambling → OTOC
-        //   T3:     drive → Stuart-Landau → ṙ → drive_recovery
+    fn test_ik_drive_recovery() {
+        // Inverse Kuramoto: подаём сигнал → T3 кодирует →
+        // восстанавливает zero-shot без обучения.
         //
         // Ожидание: корреляция > 0.3 (zero-shot через хаотическую динамику).
 
         let n = 32;
         let dt = 0.05;
         let n_steps = 200;
-        let freq = 2.0;  // Hz
+        let freq = 2.0; // Hz
 
         let mut tri = TriOscillator::new(n, 1.0, 2.0, Avx2Backend);
         tri.set_uniform_coupling(0.3, 0.15, 0.08);
@@ -715,18 +854,15 @@ mod tests {
 
         // Pearson correlation
         let r_pearson = compute_pearson(valid, rec_valid);
-        println!("Quantum Echo: Pearson R = {:.4}", r_pearson);
-        println!("  Original first 10: {:?}", &valid[..5]);
-        println!("  Recovered first 10: {:?}", &rec_valid[..5]);
+        println!("IK drive recovery: Pearson R = {:.4}", r_pearson);
 
         // Inverse Kuramoto извлекает физическое "эхо" сигнала.
         // Это ДО обучения — чистый zero-shot из физики Stuart-Landau.
-        //
-        // Проверяем, что есть корреляция (эхо обнаружено).
-        // Даже слабая корреляция — успех, т.к. это zero-shot через хаотическую
-        // динамику 32 осцилляторов (классический аналог Quantum Echo).
-        assert!(r_pearson > 0.3,
-            "Quantum Echo: expected R > 0.3 (zero-shot), got R = {}", r_pearson);
+        assert!(
+            r_pearson > 0.3,
+            "IK recovery: expected R > 0.3 (zero-shot), got R = {}",
+            r_pearson
+        );
     }
 
     #[test]
@@ -746,8 +882,11 @@ mod tests {
         dec.reset();
         let pred_after_reset = dec.predict(&states);
         // After reset, IK weight = 1.0, so predict = 1.0 * 0.5 = 0.5
-        assert!((pred_after_reset - 0.5).abs() < 1e-6,
-            "after reset predict should use IK weight: got {}", pred_after_reset);
+        assert!(
+            (pred_after_reset - 0.5).abs() < 1e-6,
+            "after reset predict should use IK weight: got {}",
+            pred_after_reset
+        );
     }
 
     #[test]
@@ -795,9 +934,13 @@ mod tests {
             let f1 = i as f32 * 0.1;
             let f2 = i as f32 * 0.2;
             let f3 = i as f32 * 0.3;
-            X.push(f1); X.push(f2); X.push(f3); // frame t
-            X.push(f1*2.0); X.push(f2*2.0); X.push(f3*2.0); // frame t+1 (fake)
-            y.push(f1 + 2.0*f2 + 3.0*f3);
+            X.push(f1);
+            X.push(f2);
+            X.push(f3); // frame t
+            X.push(f1 * 2.0);
+            X.push(f2 * 2.0);
+            X.push(f3 * 2.0); // frame t+1 (fake)
+            y.push(f1 + 2.0 * f2 + 3.0 * f3);
         }
         let r = dec.train_batch(&X, &y, 10);
         assert!(r > 0.95, "PST decoder R≈1.0: {}", r);

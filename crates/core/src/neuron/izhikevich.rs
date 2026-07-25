@@ -2,6 +2,11 @@
 //!
 //! Safe Rust wrappers over SIMD kernels (`kernels::izhikevich_step`,
 //! `kernels::eprop_izhikevich_step`, `kernels::eprop_izhikevich_step_multi`).
+//!
+//! this module is an aproximation of the izhikevich neuron model
+//! this module is not a medical or clinical tool
+//! This is not a conscious entity
+//!
 
 #![allow(non_snake_case)]
 
@@ -16,15 +21,33 @@ use super::eprop::surrogate_gradient;
 ///
 /// Supports refractory period via `refractory` buffer (0 = not refractory).
 pub fn step_izhikevich(
-    v: &mut [f32], u: &mut [f32], trace: &mut [f32],
-    a: &[f32], b: &[f32], I: &mut [f32],
-    dt: f32, trace_decay: f32,
-    spikes: &mut [i32], c: &[f32], d: &[f32],
-    refractory: &mut [f32], tau_ref: f32,
+    v: &mut [f32],
+    u: &mut [f32],
+    trace: &mut [f32],
+    a: &[f32],
+    b: &[f32],
+    I: &mut [f32],
+    dt: f32,
+    trace_decay: f32,
+    spikes: &mut [i32],
+    c: &[f32],
+    d: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
 ) {
     let n = v.len();
-    assert!(n.is_multiple_of(8) && n == u.len() && n == trace.len() && n == a.len() && n == b.len()
-        && n == I.len() && n == spikes.len() && n == c.len() && n == d.len() && n == refractory.len());
+    assert!(
+        n.is_multiple_of(8)
+            && n == u.len()
+            && n == trace.len()
+            && n == a.len()
+            && n == b.len()
+            && n == I.len()
+            && n == spikes.len()
+            && n == c.len()
+            && n == d.len()
+            && n == refractory.len()
+    );
 
     v.par_chunks_exact_mut(8)
         .zip(u.par_chunks_exact_mut(8))
@@ -32,20 +55,32 @@ pub fn step_izhikevich(
         .zip(I.par_chunks_exact_mut(8))
         .zip(spikes.par_chunks_exact_mut(8))
         .zip(refractory.par_chunks_exact_mut(8))
-        .zip(a.par_chunks_exact(8)
-            .zip(b.par_chunks_exact(8))
-            .zip(c.par_chunks_exact(8))
-            .zip(d.par_chunks_exact(8)))
-        .for_each(|((((((v8, u8), tr8), I8), sp8), refr8), (((a8, b8), c8), d8))| {
-            kernels::izhikevich_step(
-                v8, u8, tr8,
-                a8, b8, I8,
-                dt, trace_decay,
-                sp8, c8, d8,
-                refr8, tau_ref,
-                None,
-            );
-        });
+        .zip(
+            a.par_chunks_exact(8)
+                .zip(b.par_chunks_exact(8))
+                .zip(c.par_chunks_exact(8))
+                .zip(d.par_chunks_exact(8)),
+        )
+        .for_each(
+            |((((((v8, u8), tr8), I8), sp8), refr8), (((a8, b8), c8), d8))| {
+                kernels::izhikevich_step(
+                    v8,
+                    u8,
+                    tr8,
+                    a8,
+                    b8,
+                    I8,
+                    dt,
+                    trace_decay,
+                    sp8,
+                    c8,
+                    d8,
+                    refr8,
+                    tau_ref,
+                    None,
+                );
+            },
+        );
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -76,8 +111,13 @@ impl EPropIzhikevich {
             u: vec![-13.0; n_pad],
             eligibility: vec![0.0; n_pad],
             psi: vec![0.0; n_pad],
-            n: n_pad, dt, tau_e,
-            a: 0.02, b: 0.2, c: -65.0, d: 8.0,
+            n: n_pad,
+            dt,
+            tau_e,
+            a: 0.02,
+            b: 0.2,
+            c: -65.0,
+            d: 8.0,
             tau_surrogate: 2.0,
         }
     }
@@ -87,9 +127,12 @@ impl EPropIzhikevich {
     pub fn step(&mut self, I: &[f32], spikes: &mut [i32], pre_spikes: &[i32]) -> usize {
         let n = self.n.min(I.len()).min(spikes.len()).min(pre_spikes.len());
         let n8 = n & !7;
-        if n8 == 0 { return 0; }
+        if n8 == 0 {
+            return 0;
+        }
 
-        let total: usize = self.v[..n8].par_chunks_exact_mut(8)
+        let total: usize = self.v[..n8]
+            .par_chunks_exact_mut(8)
             .zip(self.u[..n8].par_chunks_exact_mut(8))
             .zip(self.eligibility[..n8].par_chunks_exact_mut(8))
             .zip(self.psi[..n8].par_chunks_exact_mut(8))
@@ -98,9 +141,20 @@ impl EPropIzhikevich {
             .zip(pre_spikes[..n8].par_chunks_exact(8))
             .map(|((((((v8, u8), e8), ps8), I8), sp8), pre8)| {
                 kernels::eprop_izhikevich_step(
-                    v8, u8, e8, ps8,
-                    I8, sp8, pre8,
-                    self.dt, self.tau_e, self.a, self.b, self.c, self.d, self.tau_surrogate,
+                    v8,
+                    u8,
+                    e8,
+                    ps8,
+                    I8,
+                    sp8,
+                    pre8,
+                    self.dt,
+                    self.tau_e,
+                    self.a,
+                    self.b,
+                    self.c,
+                    self.d,
+                    self.tau_surrogate,
                     None,
                 )
             })
@@ -125,7 +179,8 @@ impl EPropIzhikevich {
                 self.u[i] += dt * du;
                 self.psi[i] = surrogate_gradient(self.v[i], 30.0, tau_sg);
                 let z_pre = if pre_spikes[i] != 0 { 1.0 } else { 0.0 };
-                self.eligibility[i] = self.eligibility[i] * e_decay + self.psi[i] * z_pre * tau_e * (1.0 - e_decay);
+                self.eligibility[i] =
+                    self.eligibility[i] * e_decay + self.psi[i] * z_pre * tau_e * (1.0 - e_decay);
                 if self.v[i] >= 30.0 {
                     spikes[i] = 1;
                     tail_count += 1;
@@ -145,7 +200,8 @@ impl EPropIzhikevich {
         let n = self.n.min(weights.len()).min(learning_signals.len());
         let chunks = n / 8;
         if chunks > 0 {
-            weights[..chunks * 8].par_chunks_exact_mut(8)
+            weights[..chunks * 8]
+                .par_chunks_exact_mut(8)
                 .zip(self.eligibility[..chunks * 8].par_chunks_exact(8))
                 .zip(learning_signals[..chunks * 8].par_chunks_exact(8))
                 .for_each(|((w8, e8), l8)| {
@@ -179,7 +235,7 @@ pub struct EPropIzhikevichMulti {
     pub v: Vec<f32>,
     pub u: Vec<f32>,
     pub psi: Vec<f32>,
-    pub e: Vec<f32>,       // [n_pre × n_post] column-major
+    pub e: Vec<f32>, // [n_pre × n_post] column-major
     pub n_pre: usize,
     pub n_post: usize,
     pub dt: f32,
@@ -201,8 +257,12 @@ impl EPropIzhikevichMulti {
             e: vec![0.0; n_pre * n_pad],
             n_pre,
             n_post: n_pad,
-            dt, tau_e,
-            a: 0.02, b: 0.2, c: -65.0, d: 2.0,
+            dt,
+            tau_e,
+            a: 0.02,
+            b: 0.2,
+            c: -65.0,
+            d: 2.0,
             tau_surrogate: 5.0,
         }
     }
@@ -216,7 +276,9 @@ impl EPropIzhikevichMulti {
         spikes: &mut [i32],
     ) -> usize {
         let n = self.n_post.min(I_ext.len()).min(spikes.len());
-        if n == 0 { return 0; }
+        if n == 0 {
+            return 0;
+        }
 
         let n_pre = self.n_pre;
         let dt = self.dt;
@@ -228,30 +290,40 @@ impl EPropIzhikevichMulti {
         let tau_sg = self.tau_surrogate;
 
         kernels::eprop_izhikevich_step_multi(
-            &mut self.v, &mut self.u, &mut self.psi, &mut self.e,
-            z_pre, I_ext, weights,
+            &mut self.v,
+            &mut self.u,
+            &mut self.psi,
+            &mut self.e,
+            z_pre,
+            I_ext,
+            weights,
             n_pre,
-            dt, tau_e, a, b, c, d, tau_sg,
+            dt,
+            tau_e,
+            a,
+            b,
+            c,
+            d,
+            tau_sg,
             spikes,
             None,
         )
     }
 
     /// Apply E-Prop weight update for column-major weight matrix.
-    pub fn update_weights_multi(
-        &self,
-        weights: &mut [f32],
-        learning_signals: &[f32],
-        lr: f32,
-    ) {
+    pub fn update_weights_multi(&self, weights: &mut [f32], learning_signals: &[f32], lr: f32) {
         let n_post = self.n_post;
         let n8 = n_post & !7;
-        if n8 == 0 { return; }
+        if n8 == 0 {
+            return;
+        }
 
-        self.e.par_chunks_exact(n_post)
+        self.e
+            .par_chunks_exact(n_post)
             .zip(weights.par_chunks_exact_mut(n_post))
             .for_each(|(e_row, w_row)| {
-                w_row[..n8].chunks_exact_mut(8)
+                w_row[..n8]
+                    .chunks_exact_mut(8)
                     .zip(e_row[..n8].chunks_exact(8))
                     .zip(learning_signals[..n8].chunks_exact(8))
                     .for_each(|((w8, e8), l8)| {

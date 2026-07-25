@@ -13,9 +13,9 @@
 //! Before: 3–5 syncs per step (one inside each upload/download call).
 //! After:  1 sync per step (explicit at the end).
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use crate::T3Backend;
 use crate::cuda::GpuContext;
+use crate::T3Backend;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// CUDA GPU backend for T3 computations with async transfers.
 pub struct CudaBackend {
@@ -26,35 +26,52 @@ pub struct CudaBackend {
 
 impl CudaBackend {
     pub fn new(n: usize) -> Result<Self, String> {
-        if n == 0 { return Err("CudaBackend: n must be > 0".into()); }
+        if n == 0 {
+            return Err("CudaBackend: n must be > 0".into());
+        }
         let ctx = GpuContext::new(n, n)?;
-        Ok(Self { ctx, n, state_on_gpu: AtomicBool::new(false) })
+        Ok(Self {
+            ctx,
+            n,
+            state_on_gpu: AtomicBool::new(false),
+        })
     }
 
     pub fn is_available() -> bool {
         crate::cuda::get_device_count().unwrap_or(0) > 0
     }
 
-    pub fn sync(&self) -> Result<(), String> { self.ctx.sync() }
+    pub fn sync(&self) -> Result<(), String> {
+        self.ctx.sync()
+    }
 
-    pub fn size(&self) -> usize { self.n }
+    pub fn size(&self) -> usize {
+        self.n
+    }
 }
 
 impl T3Backend for CudaBackend {
     fn prepare(&self, phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [f32]) {
-        let n = self.n.min(phases.len()).min(cos_out.len()).min(sin_out.len());
+        let n = self
+            .n
+            .min(phases.len())
+            .min(cos_out.len())
+            .min(sin_out.len());
 
         if self.state_on_gpu.load(Ordering::Relaxed) {
-            if let Err(e) = self.ctx.t3_prepare()
-                .and_then(|()| self.ctx.t3_download_cos_sin_async(&mut cos_out[..n], &mut sin_out[..n]))
+            if let Err(e) = self
+                .ctx
+                .t3_prepare()
+                .and_then(|()| {
+                    self.ctx
+                        .t3_download_cos_sin_async(&mut cos_out[..n], &mut sin_out[..n])
+                })
                 .and_then(|()| self.ctx.sync())
             {
                 eprintln!("CudaBackend::prepare failed: {e}");
             }
         } else {
-            let _ = crate::cuda::t3_prepare(
-                &mut phases[..n], &mut cos_out[..n], &mut sin_out[..n],
-            );
+            let _ = crate::cuda::t3_prepare(&mut phases[..n], &mut cos_out[..n], &mut sin_out[..n]);
         }
     }
 
@@ -72,34 +89,54 @@ impl T3Backend for CudaBackend {
         let n = self.n.min(phases.len()).min(amplitudes.len());
         // Always upload — each call may be a different population (pop1/pop2/pop3)
         // with its own phases/amplitudes/omegas. GPU buffers are shared.
-        if let Err(e) = self.ctx.t3_upload_async(&phases[..n], &amplitudes[..n], &omegas[..n])
+        if let Err(e) = self
+            .ctx
+            .t3_upload_async(&phases[..n], &amplitudes[..n], &omegas[..n])
             .and_then(|()| self.ctx.t3_upload_drives_async(&drives[..n]))
             .and_then(|()| self.ctx.t3_upload_coupling_async(&coupling[..n]))
             .and_then(|()| self.ctx.t3_update(dt, alpha, gain))
-            .and_then(|()| self.ctx.t3_download_async(&mut phases[..n], &mut amplitudes[..n]))
+            .and_then(|()| {
+                self.ctx
+                    .t3_download_async(&mut phases[..n], &mut amplitudes[..n])
+            })
             .and_then(|()| self.ctx.sync())
         {
             eprintln!("CudaBackend::update failed: {e}");
         }
     }
 
-    fn nlms_train(&self, weights: &mut [f32], bias: &mut [f32],
-        states: &[f32], error: f32, lr: f32, eps: f32)
-    {
+    fn nlms_train(
+        &self,
+        weights: &mut [f32],
+        bias: &mut [f32],
+        states: &[f32],
+        error: f32,
+        lr: f32,
+        eps: f32,
+    ) {
         if weights.len() < 1024 {
             let norm_sq: f32 = states.iter().map(|&x| x * x).sum();
             let mu = lr / (norm_sq + eps);
-            for (w, &s) in weights.iter_mut().zip(states.iter()) { *w += mu * error * s; }
+            for (w, &s) in weights.iter_mut().zip(states.iter()) {
+                *w += mu * error * s;
+            }
             bias[0] += mu * error;
         } else {
             let _ = crate::cuda::nlms_train(weights, bias, states, error, lr, eps);
         }
     }
 
-    fn kalman_update(&self, weights: &mut [f32], cov: &mut [f32],
-        states: &[f32], error: f32, s: f32)
-    {
-        if s <= 1e-12 { return; }
+    fn kalman_update(
+        &self,
+        weights: &mut [f32],
+        cov: &mut [f32],
+        states: &[f32],
+        error: f32,
+        s: f32,
+    ) {
+        if s <= 1e-12 {
+            return;
+        }
         if weights.len() < 1024 {
             for i in 0..weights.len() {
                 let k = cov[i] * states[i] / s;

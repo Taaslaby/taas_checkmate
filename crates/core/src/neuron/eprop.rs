@@ -14,14 +14,24 @@ pub fn surrogate_gradient(v: f32, v_thresh: f32, tau_surrogate: f32) -> f32 {
 ///
 /// Parallelized via rayon.
 pub fn eprop_update(weights: &mut [f32], eligibility: &[f32], learning_signals: &[f32], lr: f32) {
-    let n = weights.len().min(eligibility.len()).min(learning_signals.len());
+    let n = weights
+        .len()
+        .min(eligibility.len())
+        .min(learning_signals.len());
     let chunks = n / 8;
-    if chunks == 0 { return; }
-    weights[..chunks * 8].par_chunks_exact_mut(8)
+    if chunks == 0 {
+        return;
+    }
+    weights[..chunks * 8]
+        .par_chunks_exact_mut(8)
         .zip(eligibility[..chunks * 8].par_chunks_exact(8))
         .zip(learning_signals[..chunks * 8].par_chunks_exact(8))
         .for_each(|((w8, e8), l8)| {
-            for i in 0..8 { w8[i] += lr * l8[i] * e8[i]; }
+            for i in 0..8 {
+                w8[i] += lr * l8[i] * e8[i];
+            }
         });
-    for i in chunks * 8..n { weights[i] += lr * learning_signals[i] * eligibility[i]; }
+    for i in chunks * 8..n {
+        weights[i] += lr * learning_signals[i] * eligibility[i];
+    }
 }

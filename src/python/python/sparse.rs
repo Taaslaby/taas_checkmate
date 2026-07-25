@@ -10,14 +10,14 @@ use crate::core::sparse;
 
 // ─── Sparse bindings ────────────────────────────────────
 
-/// Вычислить ψ-wave гамильтониан: H_real = W·u, H_imag = -W·v.
+/// Вычислить гамильтониан GCO: H_real = W·u, H_imag = -W·v.
 ///
 /// Для разреженной матрицы связности (CSR).
-/// H·ψ = W·(u + i·v) — гамильтониан для уравнения Шрёдингера на графе.
+/// H·ψ = W·(u + i·v) — гамильтониан для coupled oscillator на графе.
 ///
 /// Args:
 ///     row_ptr, col_indices, values: CSR матрица связности
-///     v, u: действительная и мнимая части ψ
+///     v, u: действительная и мнимая части
 ///     h_real, h_imag: выход (будет заполнен)
 #[pyfunction]
 #[pyo3(name = "compute_hamiltonian")]
@@ -38,43 +38,50 @@ pub fn py_compute_hamiltonian(
     let mut h_real = h_real.readwrite();
     let mut h_imag = h_imag.readwrite();
     sparse::compute_hamiltonian(
-        row_ptr.as_slice()?, col_indices.as_slice()?, values.as_slice()?,
-        v.as_slice()?, u.as_slice()?,
-        h_real.as_slice_mut()?, h_imag.as_slice_mut()?,
+        row_ptr.as_slice()?,
+        col_indices.as_slice()?,
+        values.as_slice()?,
+        v.as_slice()?,
+        u.as_slice()?,
+        h_real.as_slice_mut()?,
+        h_imag.as_slice_mut()?,
     );
     Ok(())
 }
 
-/// Полный ψ-wave шаг: Hψ + L2 нормализация, один проход.
+/// Полный GCO шаг: Hψ + L2 нормализация, один проход.
 ///
-/// Отличается от step_psi_wave тем, что включает вычисление
-/// гамильтониана (CSR × ψ) и L2 нормализацию в одном вызове.
+/// Включает вычисление гамильтониана (CSR × ψ) и L2 нормализацию в одном вызове.
 ///
 /// Args:
-///     v, u: ψ (будет изменён)
+///     v, u: состояние осциллятора (будет изменён)
 ///     row_ptr, col_indices, values: CSR матрица
 ///     dt: шаг по времени
-///     hbar: квант действия
+///     scale: фактор масштабирования времени-энергии
 #[pyfunction]
-#[pyo3(name = "step_psi_wave_full")]
-pub fn py_step_psi_wave_full(
+#[pyo3(name = "step_gco_full")]
+pub fn py_step_gco_full(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
     values: Bound<'_, PyArray1<f32>>,
     dt: f32,
-    hbar: f32,
+    tau: f32,
 ) -> PyResult<()> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
     let row_ptr = row_ptr.readonly();
     let col_indices = col_indices.readonly();
     let values = values.readonly();
-    sparse::step_psi_wave_full(
-        v.as_slice_mut()?, u.as_slice_mut()?,
-        row_ptr.as_slice()?, col_indices.as_slice()?, values.as_slice()?,
-        dt, hbar,
+    sparse::step_gco_full(
+        v.as_slice_mut()?,
+        u.as_slice_mut()?,
+        row_ptr.as_slice()?,
+        col_indices.as_slice()?,
+        values.as_slice()?,
+        dt,
+        tau,
     );
     Ok(())
 }
@@ -108,9 +115,13 @@ pub fn py_propagate_spikes(
     let nt_types = nt_types.readonly();
     let mut input_buffer = input_buffer.readwrite();
     sparse::propagate_spikes(
-        row_ptr.as_slice()?, col_indices.as_slice()?, values.as_slice()?,
-        spiked_indices.as_slice()?, nt_types.as_slice()?,
-        input_buffer.as_slice_mut()?, weight_scale,
+        row_ptr.as_slice()?,
+        col_indices.as_slice()?,
+        values.as_slice()?,
+        spiked_indices.as_slice()?,
+        nt_types.as_slice()?,
+        input_buffer.as_slice_mut()?,
+        weight_scale,
     );
     Ok(())
 }
@@ -254,7 +265,21 @@ pub fn py_sim_step(
 
     // 1. Izhikevich step (on I_buf which includes propagated current from previous step)
     let mut refractory = vec![0.0f32; n];
-    neuron::step_izhikevich(v, u, trace, a, b, I_buf, dt, trace_decay, spikes, c, d, &mut refractory, neuron::DEFAULT_TAU_REF);
+    neuron::step_izhikevich(
+        v,
+        u,
+        trace,
+        a,
+        b,
+        I_buf,
+        dt,
+        trace_decay,
+        spikes,
+        c,
+        d,
+        &mut refractory,
+        neuron::DEFAULT_TAU_REF,
+    );
 
     // 2. Extract spikes and count
     let mut total_spikes: usize = 0;

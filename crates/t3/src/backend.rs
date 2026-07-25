@@ -105,7 +105,9 @@ impl T3Backend for Avx2Backend {
         alpha: f32,
         gain: f32,
     ) {
-        crate::kernels::t3_update(phases, amplitudes, omegas, coupling, drives, dt, 0.0, alpha, gain);
+        crate::kernels::t3_update(
+            phases, amplitudes, omegas, coupling, drives, dt, 0.0, alpha, gain,
+        );
     }
 
     fn nlms_train(
@@ -219,7 +221,9 @@ impl T3Backend for ScalarBackend {
         error: f32,
         s: f32,
     ) {
-        if s <= 1e-12 { return; }
+        if s <= 1e-12 {
+            return;
+        }
         for i in 0..weights.len() {
             let k = cov[i] * states[i] / s;
             weights[i] += k * error;
@@ -265,9 +269,22 @@ mod tests {
         let omegas = vec![1.0; 8];
         let coupling = vec![0.0; 8];
         let drives = vec![0.0; 8];
-        backend.update(&mut phases, &mut amps, &omegas, &coupling, &drives, 0.5, 1.0, 10.0);
+        backend.update(
+            &mut phases,
+            &mut amps,
+            &omegas,
+            &coupling,
+            &drives,
+            0.5,
+            1.0,
+            10.0,
+        );
         assert!(phases.iter().any(|&p| p != 0.0), "phases should update");
-        assert!((amps[0] - 0.1).abs() > 0.001, "amps should update: {:.6}", amps[0]);
+        assert!(
+            (amps[0] - 0.1).abs() > 0.001,
+            "amps should update: {:.6}",
+            amps[0]
+        );
     }
 
     #[test]
@@ -302,9 +319,22 @@ mod tests {
         let omegas = vec![1.0; 4];
         let coupling = vec![0.0; 4];
         let drives = vec![0.0; 4];
-        backend.update(&mut phases, &mut amps, &omegas, &coupling, &drives, 0.5, 1.0, 10.0);
+        backend.update(
+            &mut phases,
+            &mut amps,
+            &omegas,
+            &coupling,
+            &drives,
+            0.5,
+            1.0,
+            10.0,
+        );
         assert!(phases.iter().any(|&p| p != 0.0), "phases should update");
-        assert!((amps[0] - 0.1).abs() > 0.001, "amps should update: {:.6}", amps[0]);
+        assert!(
+            (amps[0] - 0.1).abs() > 0.001,
+            "amps should update: {:.6}",
+            amps[0]
+        );
     }
 
     #[test]
@@ -340,8 +370,11 @@ mod tests {
         backend.prepare(&mut phases, &mut cos_out, &mut sin_out);
 
         for i in 0..4 {
-            assert!(phases[i] >= -std::f32::consts::PI && phases[i] <= std::f32::consts::PI,
-                "phase {i} not wrapped: {}", phases[i]);
+            assert!(
+                phases[i] >= -std::f32::consts::PI && phases[i] <= std::f32::consts::PI,
+                "phase {i} not wrapped: {}",
+                phases[i]
+            );
             let pyth = (sin_out[i] * sin_out[i] + cos_out[i] * cos_out[i] - 1.0).abs();
             assert!(pyth < 0.001, "sin²+cos²≠1 at {i}: {}", pyth);
         }

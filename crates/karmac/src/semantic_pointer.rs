@@ -57,14 +57,20 @@ impl SemanticPointer {
         assert!(dim.is_power_of_two(), "dim must be power of 2, got {}", dim);
         let twiddles = Self::compute_twiddles(dim);
         let bit_rev = Self::compute_bit_rev(dim);
-        Self { dim, twiddles, bit_rev }
+        Self {
+            dim,
+            twiddles,
+            bit_rev,
+        }
     }
 
     /// Generate a random unit vector (semantic pointer).
     pub fn random_vector(&self) -> Vec<f32> {
         use rand::SeedableRng;
         let mut rng = rand::rngs::StdRng::seed_from_u64(rand::thread_rng().gen());
-        let v: Vec<f32> = (0..self.dim).map(|_| rng.gen::<f32>() * 2.0 - 1.0).collect();
+        let v: Vec<f32> = (0..self.dim)
+            .map(|_| rng.gen::<f32>() * 2.0 - 1.0)
+            .collect();
         self.normalize(&v);
         v
     }
@@ -87,10 +93,10 @@ impl SemanticPointer {
         let fb = self.fft(b);
 
         // Element-wise complex multiply
-        let fc: Vec<(f32, f32)> = fa.iter().zip(fb.iter())
-            .map(|(&(ar, ai), &(br, bi))| {
-                (ar * br - ai * bi, ar * bi + ai * br)
-            })
+        let fc: Vec<(f32, f32)> = fa
+            .iter()
+            .zip(fb.iter())
+            .map(|(&(ar, ai), &(br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
             .collect();
 
         // IFFT
@@ -108,7 +114,9 @@ impl SemanticPointer {
         let fa = self.fft(a);
 
         // Circular correlation: F(c) ⊙ conj(F(a))
-        let fr: Vec<(f32, f32)> = fc.iter().zip(fa.iter())
+        let fr: Vec<(f32, f32)> = fc
+            .iter()
+            .zip(fa.iter())
             .map(|(&(cr, ci), &(ar, ai))| {
                 // (cr + i·ci) · (ar - i·ai) = (cr·ar + ci·ai) + i·(ci·ar - cr·ai)
                 (cr * ar + ci * ai, ci * ar - cr * ai)
@@ -139,7 +147,11 @@ impl SemanticPointer {
         let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_a < 1e-10 || norm_b < 1e-10 { 0.0 } else { dot / (norm_a * norm_b) }
+        if norm_a < 1e-10 || norm_b < 1e-10 {
+            0.0
+        } else {
+            dot / (norm_a * norm_b)
+        }
     }
 
     /// Normalize vector to unit length.
@@ -165,15 +177,17 @@ impl SemanticPointer {
 
     fn compute_bit_rev(n: usize) -> Vec<usize> {
         let bits = (n as f32).log2() as u32;
-        (0..n).map(|i| {
-            let mut r = 0u32;
-            let mut x = i as u32;
-            for _ in 0..bits {
-                r = (r << 1) | (x & 1);
-                x >>= 1;
-            }
-            r as usize
-        }).collect()
+        (0..n)
+            .map(|i| {
+                let mut r = 0u32;
+                let mut x = i as u32;
+                for _ in 0..bits {
+                    r = (r << 1) | (x & 1);
+                    x >>= 1;
+                }
+                r as usize
+            })
+            .collect()
     }
 
     fn fft(&self, input: &[f32]) -> Vec<(f32, f32)> {
@@ -181,9 +195,7 @@ impl SemanticPointer {
         assert_eq!(input.len(), n);
 
         // Bit-reverse reorder
-        let mut buf: Vec<(f32, f32)> = self.bit_rev.iter()
-            .map(|&i| (input[i], 0.0))
-            .collect();
+        let mut buf: Vec<(f32, f32)> = self.bit_rev.iter().map(|&i| (input[i], 0.0)).collect();
 
         // Cooley-Tukey butterfly
         let mut len = 2;
@@ -311,7 +323,11 @@ mod tests {
         let sp = SemanticPointer::new(256);
         let a = sp.random_vector();
         let sim_self = sp.similarity(&a, &a);
-        assert!(close(sim_self, 1.0, 1e-5), "self-similarity should be 1.0, got {}", sim_self);
+        assert!(
+            close(sim_self, 1.0, 1e-5),
+            "self-similarity should be 1.0, got {}",
+            sim_self
+        );
     }
 
     #[test]
@@ -321,7 +337,11 @@ mod tests {
         let b = sp.random_vector();
         let sim = sp.similarity(&a, &b);
         // Random vectors in high-dim should be nearly orthogonal
-        assert!(sim.abs() < 0.2, "random vectors should be near-orthogonal, sim={}", sim);
+        assert!(
+            sim.abs() < 0.2,
+            "random vectors should be near-orthogonal, sim={}",
+            sim
+        );
     }
 
     #[test]

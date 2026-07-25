@@ -20,19 +20,51 @@
 //! Safe Rust wrappers over SIMD kernels (`kernels::stdp_update`,
 //! `kernels::stdp_homeostatic`, `kernels::dopamine_traces_step`,
 //! `kernels::dopamine_weight_update`).
+//!
+//! это когда в столовке услышал пачку чипсов и ты бежишь сломя голову за ним
 
 use crate::kernels;
 
 // ─── STDP ────────────────────────────────────────────────
 
-pub fn stdp_update(weights: &mut [f32], traces_pre: &[f32], traces_post: &[f32],
-    lr_ltd: f32, lr_ltp: f32, w_min: f32, w_max: f32) {
-    kernels::stdp_update(weights, traces_pre, traces_post, lr_ltd, lr_ltp, w_min, w_max);
+pub fn stdp_update(
+    weights: &mut [f32],
+    traces_pre: &[f32],
+    traces_post: &[f32],
+    lr_ltd: f32,
+    lr_ltp: f32,
+    w_min: f32,
+    w_max: f32,
+) {
+    kernels::stdp_update(
+        weights,
+        traces_pre,
+        traces_post,
+        lr_ltd,
+        lr_ltp,
+        w_min,
+        w_max,
+    );
 }
 
-pub fn stdp_homeostatic(weights: &mut [f32], traces_pre: &[f32], traces_post: &[f32],
-    lr_ltd: f32, lr_ltp: f32, target_sum: f32, w_max: f32) {
-    kernels::stdp_homeostatic(weights, traces_pre, traces_post, lr_ltd, lr_ltp, target_sum, w_max);
+pub fn stdp_homeostatic(
+    weights: &mut [f32],
+    traces_pre: &[f32],
+    traces_post: &[f32],
+    lr_ltd: f32,
+    lr_ltp: f32,
+    target_sum: f32,
+    w_max: f32,
+) {
+    kernels::stdp_homeostatic(
+        weights,
+        traces_pre,
+        traces_post,
+        lr_ltd,
+        lr_ltp,
+        target_sum,
+        w_max,
+    );
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -102,7 +134,9 @@ impl DopamineSTDP {
     pub fn step(&mut self, pre_spikes: &[i32], post_spikes: &[i32]) {
         let n = self.n.min(pre_spikes.len()).min(post_spikes.len());
         let n8 = n & !7;
-        if n8 == 0 { return; }
+        if n8 == 0 {
+            return;
+        }
 
         kernels::dopamine_traces_step(
             &mut self.trace_pre[..n8],
@@ -130,10 +164,22 @@ impl DopamineSTDP {
             for i in n8..n {
                 self.trace_pre[i] *= decay_pre;
                 self.trace_post[i] *= decay_post;
-                if pre_spikes[i] != 0 { self.trace_pre[i] += 1.0; }
-                if post_spikes[i] != 0 { self.trace_post[i] += 1.0; }
-                let ltp = if post_spikes[i] != 0 { self.a_ltp * self.trace_pre[i] } else { 0.0 };
-                let ltd = if pre_spikes[i] != 0 { self.a_ltd * self.trace_post[i] } else { 0.0 };
+                if pre_spikes[i] != 0 {
+                    self.trace_pre[i] += 1.0;
+                }
+                if post_spikes[i] != 0 {
+                    self.trace_post[i] += 1.0;
+                }
+                let ltp = if post_spikes[i] != 0 {
+                    self.a_ltp * self.trace_pre[i]
+                } else {
+                    0.0
+                };
+                let ltd = if pre_spikes[i] != 0 {
+                    self.a_ltd * self.trace_post[i]
+                } else {
+                    0.0
+                };
                 self.eligibility[i] += ltp - ltd;
                 self.eligibility[i] *= decay_e;
             }
@@ -144,7 +190,9 @@ impl DopamineSTDP {
     pub fn apply_dopamine(&self, weights: &mut [f32], dopamine: f32, lr: f32) {
         let n = self.n.min(weights.len());
         let n8 = n & !7;
-        if n8 == 0 { return; }
+        if n8 == 0 {
+            return;
+        }
 
         kernels::dopamine_weight_update(
             &mut weights[..n8],

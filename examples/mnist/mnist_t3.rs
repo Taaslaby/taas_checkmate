@@ -19,15 +19,13 @@ use std::path::Path;
 use std::time::Instant;
 
 use taas_checkmate::t3::{
-    TriOscillator, Avx2Backend,
-    pst_linear_features_into, pst_linear_dim,
-    InverseKuramotoDecoder,
-    NlmsDecoder, Decoder,
+    pst_linear_dim, pst_linear_features_into, Avx2Backend, Decoder, InverseKuramotoDecoder,
+    NlmsDecoder, TriOscillator,
 };
 
 // ─── Constants ────────────────────────────────────────────
 
-const N_OSCILLATORS: usize = 64;   // per population
+const N_OSCILLATORS: usize = 64; // per population
 const N_INPUT: usize = 784;
 const N_ACTIONS: usize = 10;
 const N_T3_STEPS: usize = 15;
@@ -46,7 +44,7 @@ const LR: f32 = 0.02;
 // ─── Random projection: 784 → 64, fixed seed ─────────────
 
 struct RandomProjection {
-    mat: Vec<f32>,  // [64 × 784]
+    mat: Vec<f32>, // [64 × 784]
     n_out: usize,
     n_in: usize,
 }
@@ -108,7 +106,9 @@ fn load_labels(path: &str) -> Vec<u8> {
 }
 
 fn check_data_file(path: &str) {
-    if Path::new(path).exists() { return; }
+    if Path::new(path).exists() {
+        return;
+    }
     println!("  ✗ {path} not found!");
     println!("  Run: python3 examples/download_mnist.py");
     panic!("missing MNIST data file: {path}");
@@ -129,9 +129,13 @@ fn fast_exp(x: f32) -> f32 {
     let poly = ((c4 * f + c3) * f + c2) * f + c1;
     let exp2f = poly * f + 1.0;
     let biased = n.wrapping_add(127);
-    let exp2n = if biased <= 0 { 0.0 }
-        else if biased >= 255 { f32::INFINITY }
-        else { f32::from_bits((biased as u32) << 23) };
+    let exp2n = if biased <= 0 {
+        0.0
+    } else if biased >= 255 {
+        f32::INFINITY
+    } else {
+        f32::from_bits((biased as u32) << 23)
+    };
     exp2n * exp2f
 }
 
@@ -139,9 +143,10 @@ fn fast_exp(x: f32) -> f32 {
 
 fn softmax(logits: &[f32]) -> Vec<f32> {
     let max_v = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let mut exps: Vec<f32> = logits.iter().map(|&x| {
-        fast_exp((x - max_v).max(-50.0).min(50.0))
-    }).collect();
+    let mut exps: Vec<f32> = logits
+        .iter()
+        .map(|&x| fast_exp((x - max_v).max(-50.0).min(50.0)))
+        .collect();
     let sum: f32 = exps.iter().sum();
     if sum > 1e-20 {
         exps.iter_mut().for_each(|e| *e /= sum);
@@ -182,8 +187,15 @@ struct MultiHybridDecoder {
 }
 
 impl MultiHybridDecoder {
-    fn new(n: usize, n_classes: usize, lr: f32, eps: f32,
-           alpha: f32, drive_gain: f32, dt: f32) -> Self {
+    fn new(
+        n: usize,
+        n_classes: usize,
+        lr: f32,
+        eps: f32,
+        alpha: f32,
+        drive_gain: f32,
+        dt: f32,
+    ) -> Self {
         let pst_dim = pst_linear_dim(n);
         let total_dim = pst_dim + 1; // +1 for IK drive
 
@@ -201,8 +213,10 @@ impl MultiHybridDecoder {
         ik.set_dt(dt);
 
         Self {
-            n, pst_dim,
-            nlms, ik,
+            n,
+            pst_dim,
+            nlms,
+            ik,
             amps_buf: vec![0.0f32; 3 * n],
             fv: vec![0.0f32; total_dim],
         }
@@ -232,7 +246,10 @@ impl MultiHybridDecoder {
 
     /// Predict logits for all classes from TriOscillator state.
     /// Zero-shot (before training): predict = pure IK physics.
-    fn predict_all<B: taas_checkmate::t3::T3Backend>(&mut self, tri: &TriOscillator<B>) -> Vec<f32> {
+    fn predict_all<B: taas_checkmate::t3::T3Backend>(
+        &mut self,
+        tri: &TriOscillator<B>,
+    ) -> Vec<f32> {
         self.build_fv(tri);
         let mut out = Vec::with_capacity(self.nlms.len());
         for d in &self.nlms {
@@ -243,7 +260,11 @@ impl MultiHybridDecoder {
 
     /// Train all decoders from TriOscillator state.
     /// Returns RMS error across all classes.
-    fn train_all<B: taas_checkmate::t3::T3Backend>(&mut self, tri: &TriOscillator<B>, target_class: usize) -> f32 {
+    fn train_all<B: taas_checkmate::t3::T3Backend>(
+        &mut self,
+        tri: &TriOscillator<B>,
+        target_class: usize,
+    ) -> f32 {
         self.build_fv(tri);
         let mut total_err = 0.0;
         for (c, d) in self.nlms.iter_mut().enumerate() {
@@ -291,8 +312,12 @@ fn main() {
     // 1. Load data
     println!("─── Loading MNIST data ───");
     fs::create_dir_all(DATA_DIR).ok();
-    for f in &["train-images-idx3-ubyte", "train-labels-idx1-ubyte",
-               "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"] {
+    for f in &[
+        "train-images-idx3-ubyte",
+        "train-labels-idx1-ubyte",
+        "t10k-images-idx3-ubyte",
+        "t10k-labels-idx1-ubyte",
+    ] {
         check_data_file(&format!("{DATA_DIR}/{f}"));
     }
 
@@ -310,9 +335,7 @@ fn main() {
 
     // 3. Create T3 oscillator system
     println!("─── Initialising T3 ───");
-    let mut tri = TriOscillator::new(
-        N_OSCILLATORS, FREQ_MIN, FREQ_MAX, Avx2Backend,
-    );
+    let mut tri = TriOscillator::new(N_OSCILLATORS, FREQ_MIN, FREQ_MAX, Avx2Backend);
     tri.set_uniform_coupling(0.3, 0.15, 0.08);
     tri.drive_gain = 8.0;
     tri.alpha = 1.0;
@@ -323,9 +346,7 @@ fn main() {
     tri.phase_gate_gain = 6.0;
 
     // 4. Create MultiHybridDecoder
-    let mut cls = MultiHybridDecoder::new(
-        N_OSCILLATORS, N_ACTIONS, LR, 1e-8, 1.0, 8.0, DT,
-    );
+    let mut cls = MultiHybridDecoder::new(N_OSCILLATORS, N_ACTIONS, LR, 1e-8, 1.0, 8.0, DT);
     println!("  Zero-shot init: IK weight = 1.0 → first predict = pure physics");
 
     // 5. Zero-shot accuracy (pure IK physics, NO training)
@@ -343,18 +364,23 @@ fn main() {
         // Step 1: init IK prev_amps for this image (returns 0)
         cls.ik.reset();
         tri.step(DT);
-        let _ = cls.predict_all(&tri);  // IK init: copies amps, returns 0
-        // Steps 2..N: burn-in — IK measures step(N-1)→step(N)
-        for _ in 1..N_T3_STEPS { tri.step(DT); }
+        let _ = cls.predict_all(&tri); // IK init: copies amps, returns 0
+                                       // Steps 2..N: burn-in — IK measures step(N-1)→step(N)
+        for _ in 1..N_T3_STEPS {
+            tri.step(DT);
+        }
 
         let logits = cls.predict_all(&tri);
         let probs = softmax(&logits);
-        let pred = probs.iter()
+        let pred = probs
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap_or(0);
-        if pred == test_labels[i] as usize { zs_correct += 1; }
+        if pred == test_labels[i] as usize {
+            zs_correct += 1;
+        }
     }
     let zs_acc = zs_correct as f64 / 1000.0 * 100.0;
     println!("  Zero-shot accuracy (first 1000 test): {zs_acc:.1}%");
@@ -374,7 +400,9 @@ fn main() {
             tri.drive2[i] = 0.0;
             tri.drive3[i] = 0.0;
         }
-        for _ in 0..N_T3_STEPS { tri.step(DT); }
+        for _ in 0..N_T3_STEPS {
+            tri.step(DT);
+        }
 
         let label = train_labels[img_idx] as usize;
         let _rmse = cls.train_all(&tri, label);
@@ -382,12 +410,15 @@ fn main() {
         // Predict immediately (online learning)
         let logits = cls.predict_all(&tri);
         let probs = softmax(&logits);
-        let pred = probs.iter()
+        let pred = probs
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap_or(0);
-        if pred == label { total_correct += 1; }
+        if pred == label {
+            total_correct += 1;
+        }
 
         if (img_idx + 1) % BATCH_SIZE == 0 {
             let accuracy = total_correct as f64 / (img_idx + 1) as f64 * 100.0;
@@ -395,8 +426,11 @@ fn main() {
             let img_per_sec = (img_idx + 1) as f64 / elapsed.as_secs_f64();
             println!(
                 "  [{:5}/{}] acc={:.1}% | {:.0} img/s | {:.1}s",
-                img_idx + 1, N_TRAIN, accuracy,
-                img_per_sec, elapsed.as_secs_f64(),
+                img_idx + 1,
+                N_TRAIN,
+                accuracy,
+                img_per_sec,
+                elapsed.as_secs_f64(),
             );
         }
     }
@@ -406,7 +440,8 @@ fn main() {
     println!();
     println!("─── Training Done ───");
     println!("  Final accuracy:  {final_accuracy:.1}% ({total_correct}/{N_TRAIN})");
-    println!("  Total time:      {:.1}s ({:.0} img/s)",
+    println!(
+        "  Total time:      {:.1}s ({:.0} img/s)",
         total_elapsed.as_secs_f64(),
         N_TRAIN as f64 / total_elapsed.as_secs_f64(),
     );
@@ -423,21 +458,27 @@ fn main() {
             tri.drive2[j] = 0.0;
             tri.drive3[j] = 0.0;
         }
-        for _ in 0..N_T3_STEPS { tri.step(DT); }
+        for _ in 0..N_T3_STEPS {
+            tri.step(DT);
+        }
 
         let logits = cls.predict_all(&tri);
         let probs = softmax(&logits);
-        let pred = probs.iter()
+        let pred = probs
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap_or(0);
-        if pred == test_labels[i] as usize { test_correct += 1; }
+        if pred == test_labels[i] as usize {
+            test_correct += 1;
+        }
     }
     let test_elapsed = test_start.elapsed();
     let test_accuracy = test_correct as f64 / N_TEST as f64 * 100.0;
     println!("  Test accuracy:   {test_accuracy:.1}% ({test_correct}/{N_TEST})");
-    println!("  Test time:       {:.1}s ({:.0} img/s)",
+    println!(
+        "  Test time:       {:.1}s ({:.0} img/s)",
         test_elapsed.as_secs_f64(),
         N_TEST as f64 / test_elapsed.as_secs_f64(),
     );
@@ -446,8 +487,13 @@ fn main() {
     println!();
     println!("─── Summary ───");
     println!("  Zero-shot (IK physics):     {zs_acc:.1}%");
-    println!("  After training:              {final_accuracy:.1}% (train) → {test_accuracy:.1}% (test)");
-    println!("  IK improvement:              {:.1}×", final_accuracy / zs_acc.max(1.0));
+    println!(
+        "  After training:              {final_accuracy:.1}% (train) → {test_accuracy:.1}% (test)"
+    );
+    println!(
+        "  IK improvement:              {:.1}×",
+        final_accuracy / zs_acc.max(1.0)
+    );
     println!();
     println!("═══ Done ═══");
 }

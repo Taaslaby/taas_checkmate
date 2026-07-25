@@ -40,11 +40,11 @@ use wide::f32x8;
 /// |------|----------|--------|---------|-------|-----|
 /// | 0 | AMPA | Fast exc (mammalian fallback) | 2ms | 0mV | default exc |
 /// | 1 | NMDA | Slow exc (Ca²⁺, Mg²⁺ block) | 50ms | 0mV | — |
-    /// | 2 | GABA_A | Shunting inh (insect) | 10ms | -65mV | GABA |
-    /// | 3 | GABA_B | Slow inh (G-protein) | 200ms | -90mV | — |
-    /// | 4 | nAChR | Fast exc (insect ACh) | 3ms | 0mV | ACh |
-    /// | 5 | GluCl | Mildly depol (insect GLUT, Cl⁻) | 5ms | -50mV | GLUT |
-    /// | 6 | mAChR | Slow mod (GPCR, DA/SER/OCT) | 150ms | -90mV | DA/SER/OCT |
+/// | 2 | GABA_A | Shunting inh (insect) | 10ms | -65mV | GABA |
+/// | 3 | GABA_B | Slow inh (G-protein) | 200ms | -90mV | — |
+/// | 4 | nAChR | Fast exc (insect ACh) | 3ms | 0mV | ACh |
+/// | 5 | GluCl | Mildly depol (insect GLUT, Cl⁻) | 5ms | -50mV | GLUT |
+/// | 6 | mAChR | Slow mod (GPCR, DA/SER/OCT) | 150ms | -90mV | DA/SER/OCT |
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 #[allow(non_camel_case_types)]
@@ -124,20 +124,34 @@ impl ReceptorType {
     /// - `-1` (inhibitory) → GABA_A
     #[inline(always)]
     pub fn from_nt_type(nt: f32) -> Self {
-        if nt > 0.0 { ReceptorType::AMPA } else { ReceptorType::GABA_A }
+        if nt > 0.0 {
+            ReceptorType::AMPA
+        } else {
+            ReceptorType::GABA_A
+        }
     }
 
     /// True if this receptor produces inward (depolarizing) current.
     /// Used to compute local E/I balance per neuron.
     #[inline(always)]
     pub fn is_excitatory(self) -> bool {
-        matches!(self, ReceptorType::AMPA | ReceptorType::NMDA | ReceptorType::nAChR)
+        matches!(
+            self,
+            ReceptorType::AMPA | ReceptorType::NMDA | ReceptorType::nAChR
+        )
     }
 
     /// All receptor variants for iteration, including AMPA as default fallback.
     pub fn all() -> [ReceptorType; 7] {
-        [ReceptorType::AMPA, ReceptorType::NMDA, ReceptorType::GABA_A, ReceptorType::GABA_B,
-         ReceptorType::nAChR, ReceptorType::GluCl, ReceptorType::mAChR]
+        [
+            ReceptorType::AMPA,
+            ReceptorType::NMDA,
+            ReceptorType::GABA_A,
+            ReceptorType::GABA_B,
+            ReceptorType::nAChR,
+            ReceptorType::GluCl,
+            ReceptorType::mAChR,
+        ]
     }
 }
 
@@ -268,13 +282,41 @@ impl SynapticKinetics {
 
         unsafe {
             for off in (0..n8).step_by(8) {
-                store8(self.g_ampa.as_mut_ptr(), off, load8(self.g_ampa.as_ptr(), off) * d_ampa);
-                store8(self.g_nmda.as_mut_ptr(), off, load8(self.g_nmda.as_ptr(), off) * d_nmda);
-                store8(self.g_gaba_a.as_mut_ptr(), off, load8(self.g_gaba_a.as_ptr(), off) * d_gaba_a);
-                store8(self.g_gaba_b.as_mut_ptr(), off, load8(self.g_gaba_b.as_ptr(), off) * d_gaba_b);
-                store8(self.g_nachr.as_mut_ptr(), off, load8(self.g_nachr.as_ptr(), off) * d_nachr);
-                store8(self.g_glucl.as_mut_ptr(), off, load8(self.g_glucl.as_ptr(), off) * d_glucl);
-                store8(self.g_machr.as_mut_ptr(), off, load8(self.g_machr.as_ptr(), off) * d_machr);
+                store8(
+                    self.g_ampa.as_mut_ptr(),
+                    off,
+                    load8(self.g_ampa.as_ptr(), off) * d_ampa,
+                );
+                store8(
+                    self.g_nmda.as_mut_ptr(),
+                    off,
+                    load8(self.g_nmda.as_ptr(), off) * d_nmda,
+                );
+                store8(
+                    self.g_gaba_a.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_a.as_ptr(), off) * d_gaba_a,
+                );
+                store8(
+                    self.g_gaba_b.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_b.as_ptr(), off) * d_gaba_b,
+                );
+                store8(
+                    self.g_nachr.as_mut_ptr(),
+                    off,
+                    load8(self.g_nachr.as_ptr(), off) * d_nachr,
+                );
+                store8(
+                    self.g_glucl.as_mut_ptr(),
+                    off,
+                    load8(self.g_glucl.as_ptr(), off) * d_glucl,
+                );
+                store8(
+                    self.g_machr.as_mut_ptr(),
+                    off,
+                    load8(self.g_machr.as_ptr(), off) * d_machr,
+                );
             }
         }
 
@@ -296,13 +338,13 @@ impl SynapticKinetics {
     /// For NMDA, the voltage-dependent Mg²⁺ block modulates `g_nmda` in-place.
     pub fn compute_currents(&self, v: &[f32], i_out: &mut [f32]) {
         let n = self.n.min(v.len()).min(i_out.len());
-        let e_ampa = f32x8::splat(ReceptorType::AMPA.e_rev());     // 0
-        let e_nmda = f32x8::splat(ReceptorType::NMDA.e_rev());     // 0
+        let e_ampa = f32x8::splat(ReceptorType::AMPA.e_rev()); // 0
+        let e_nmda = f32x8::splat(ReceptorType::NMDA.e_rev()); // 0
         let e_gaba_a = f32x8::splat(ReceptorType::GABA_A.e_rev()); // -65
         let e_gaba_b = f32x8::splat(ReceptorType::GABA_B.e_rev());
-        let e_nachr = f32x8::splat(ReceptorType::nAChR.e_rev());   // 0
-        let e_glucl = f32x8::splat(ReceptorType::GluCl.e_rev());   // -50
-        let e_machr = f32x8::splat(ReceptorType::mAChR.e_rev());   // -90
+        let e_nachr = f32x8::splat(ReceptorType::nAChR.e_rev()); // 0
+        let e_glucl = f32x8::splat(ReceptorType::GluCl.e_rev()); // -50
+        let e_machr = f32x8::splat(ReceptorType::mAChR.e_rev()); // -90
         let n8 = n & !7;
 
         unsafe {
@@ -334,19 +376,21 @@ impl SynapticKinetics {
         for i in n8..n {
             let vi = v[i];
             i_out[i] += self.g_ampa[i] * (ReceptorType::AMPA.e_rev() - vi)
-                      + self.g_nmda[i] * nmda_mg_block(vi) * (ReceptorType::NMDA.e_rev() - vi)
-                      + self.g_gaba_a[i] * (ReceptorType::GABA_A.e_rev() - vi)
-                      + self.g_gaba_b[i] * (ReceptorType::GABA_B.e_rev() - vi)
-                      + self.g_nachr[i] * (ReceptorType::nAChR.e_rev() - vi)
-                      + self.g_glucl[i] * (ReceptorType::GluCl.e_rev() - vi)
-                      + self.g_machr[i] * (ReceptorType::mAChR.e_rev() - vi);
+                + self.g_nmda[i] * nmda_mg_block(vi) * (ReceptorType::NMDA.e_rev() - vi)
+                + self.g_gaba_a[i] * (ReceptorType::GABA_A.e_rev() - vi)
+                + self.g_gaba_b[i] * (ReceptorType::GABA_B.e_rev() - vi)
+                + self.g_nachr[i] * (ReceptorType::nAChR.e_rev() - vi)
+                + self.g_glucl[i] * (ReceptorType::GluCl.e_rev() - vi)
+                + self.g_machr[i] * (ReceptorType::mAChR.e_rev() - vi);
         }
     }
 
     /// Jump a post-synaptic conductance by `amount` (triggered by pre-spike).
     #[inline(always)]
     pub fn jump(&mut self, neuron: usize, receptor: ReceptorType, amount: f32) {
-        if neuron >= self.n { return; }
+        if neuron >= self.n {
+            return;
+        }
         match receptor {
             ReceptorType::AMPA => self.g_ampa[neuron] += amount,
             ReceptorType::NMDA => self.g_nmda[neuron] += amount,
@@ -360,9 +404,16 @@ impl SynapticKinetics {
 
     /// Read total conductance for a neuron across all receptor types.
     pub fn total_conductance(&self, i: usize) -> f32 {
-        if i >= self.n { return 0.0; }
-        self.g_ampa[i] + self.g_nmda[i] + self.g_gaba_a[i] + self.g_gaba_b[i]
-            + self.g_nachr[i] + self.g_glucl[i] + self.g_machr[i]
+        if i >= self.n {
+            return 0.0;
+        }
+        self.g_ampa[i]
+            + self.g_nmda[i]
+            + self.g_gaba_a[i]
+            + self.g_gaba_b[i]
+            + self.g_nachr[i]
+            + self.g_glucl[i]
+            + self.g_machr[i]
     }
 }
 
@@ -445,10 +496,14 @@ impl AstrocyteState {
                 let a_cur = load8(self.a.as_ptr(), off);
                 // Convert i32 spikes to f32 properly (NOT bit-reinterpretation)
                 let sp = f32x8::new([
-                    pre_spikes[off] as f32, pre_spikes[off + 1] as f32,
-                    pre_spikes[off + 2] as f32, pre_spikes[off + 3] as f32,
-                    pre_spikes[off + 4] as f32, pre_spikes[off + 5] as f32,
-                    pre_spikes[off + 6] as f32, pre_spikes[off + 7] as f32,
+                    pre_spikes[off] as f32,
+                    pre_spikes[off + 1] as f32,
+                    pre_spikes[off + 2] as f32,
+                    pre_spikes[off + 3] as f32,
+                    pre_spikes[off + 4] as f32,
+                    pre_spikes[off + 5] as f32,
+                    pre_spikes[off + 6] as f32,
+                    pre_spikes[off + 7] as f32,
                 ]);
                 let a_new = a_cur * decay + sp * influx;
                 store8(self.a.as_mut_ptr(), off, a_new.max(zero).min(max_a));
@@ -460,7 +515,8 @@ impl AstrocyteState {
             let a_cur = self.a[i];
             let sp = pre_spikes[i] as f32;
             self.a[i] = (a_cur * (1.0 - dt / self.tau_astro) + sp * dt * self.ca_per_spike)
-                .max(0.0).min(10.0);
+                .max(0.0)
+                .min(10.0);
         }
     }
 
@@ -506,13 +562,41 @@ impl SynapticKinetics {
             for off in (0..n8).step_by(8) {
                 let a_v = load8(astro.a.as_ptr(), off);
                 let g = one + a_v * alpha;
-                store8(self.g_ampa.as_mut_ptr(), off, load8(self.g_ampa.as_ptr(), off) * g);
-                store8(self.g_nmda.as_mut_ptr(), off, load8(self.g_nmda.as_ptr(), off) * g);
-                store8(self.g_gaba_a.as_mut_ptr(), off, load8(self.g_gaba_a.as_ptr(), off) * g);
-                store8(self.g_gaba_b.as_mut_ptr(), off, load8(self.g_gaba_b.as_ptr(), off) * g);
-                store8(self.g_nachr.as_mut_ptr(), off, load8(self.g_nachr.as_ptr(), off) * g);
-                store8(self.g_glucl.as_mut_ptr(), off, load8(self.g_glucl.as_ptr(), off) * g);
-                store8(self.g_machr.as_mut_ptr(), off, load8(self.g_machr.as_ptr(), off) * g);
+                store8(
+                    self.g_ampa.as_mut_ptr(),
+                    off,
+                    load8(self.g_ampa.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_nmda.as_mut_ptr(),
+                    off,
+                    load8(self.g_nmda.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_gaba_a.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_a.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_gaba_b.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_b.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_nachr.as_mut_ptr(),
+                    off,
+                    load8(self.g_nachr.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_glucl.as_mut_ptr(),
+                    off,
+                    load8(self.g_glucl.as_ptr(), off) * g,
+                );
+                store8(
+                    self.g_machr.as_mut_ptr(),
+                    off,
+                    load8(self.g_machr.as_ptr(), off) * g,
+                );
             }
         }
 
@@ -539,13 +623,13 @@ impl SynapticKinetics {
 ///
 /// `nt_to_receptor` maps nt value to a specific receptor (not just ±1).
 /// If `None`, uses default: exc → AMPA, inh → GABA_A.
-pub fn build_receptor_types(
-    row_ptr: &[i32],
-    n_synapses: usize,
-    nt_types: &[f32],
-) -> Vec<u8> {
+pub fn build_receptor_types(row_ptr: &[i32], n_synapses: usize, nt_types: &[f32]) -> Vec<u8> {
     let mut receptors = vec![0u8; n_synapses.max(1)];
-    let n = if row_ptr.len() > 1 { row_ptr.len() - 1 } else { 0 };
+    let n = if row_ptr.len() > 1 {
+        row_ptr.len() - 1
+    } else {
+        0
+    };
 
     let mut syn_idx = 0usize;
     for pre in 0..n {
@@ -579,9 +663,12 @@ mod tests {
     #[test]
     fn test_decay_factors_precision() {
         let factors = DecayFactors::new(0.5); // dt=0.5ms
-        // AMPA τ=2ms: exp(-0.5/2) = exp(-0.25) ≈ 0.7788
-        assert!((factors.ampa - 0.7788).abs() < 0.001,
-            "AMPA decay: {}", factors.ampa);
+                                              // AMPA τ=2ms: exp(-0.5/2) = exp(-0.25) ≈ 0.7788
+        assert!(
+            (factors.ampa - 0.7788).abs() < 0.001,
+            "AMPA decay: {}",
+            factors.ampa
+        );
     }
 
     #[test]
@@ -604,14 +691,20 @@ mod tests {
         kin.g_gaba_a[1] = 2.0;
 
         let factors = DecayFactors::new(2.0); // dt=2ms
-        // AMPA τ=2ms: 1.0 * exp(-2/2) = 1.0 * 0.3679 = 0.3679
-        // GABA_A τ=10ms: 2.0 * exp(-2/10) = 2.0 * 0.8187 = 1.6375
+                                              // AMPA τ=2ms: 1.0 * exp(-2/2) = 1.0 * 0.3679 = 0.3679
+                                              // GABA_A τ=10ms: 2.0 * exp(-2/10) = 2.0 * 0.8187 = 1.6375
         kin.decay_all(&factors);
 
-        assert!((kin.g_ampa[0] - 0.3679).abs() < 0.001,
-            "AMPA decay: {}", kin.g_ampa[0]);
-        assert!((kin.g_gaba_a[1] - 1.6375).abs() < 0.001,
-            "GABA_A decay: {}", kin.g_gaba_a[1]);
+        assert!(
+            (kin.g_ampa[0] - 0.3679).abs() < 0.001,
+            "AMPA decay: {}",
+            kin.g_ampa[0]
+        );
+        assert!(
+            (kin.g_gaba_a[1] - 1.6375).abs() < 0.001,
+            "GABA_A decay: {}",
+            kin.g_gaba_a[1]
+        );
     }
 
     // ─── 2. Jump ──────────────────────────────────────
@@ -637,15 +730,21 @@ mod tests {
         let v = vec![-65.0, -65.0];
         let mut i_out = vec![0.0, 0.0];
 
-        kin.g_ampa[0] = 0.1;  // AMPA E_rev=0: 0.1 * (0 - (-65)) = 6.5 (depol)
+        kin.g_ampa[0] = 0.1; // AMPA E_rev=0: 0.1 * (0 - (-65)) = 6.5 (depol)
         kin.g_gaba_a[1] = 0.2; // GABA_A E_rev=-65: 0.2 * (-65 - (-65)) = 0.0 (shunt)
 
         kin.compute_currents(&v, &mut i_out);
 
-        assert!((i_out[0] - 6.5).abs() < 0.01,
-            "neuron 0 AMPA I_syn: {}", i_out[0]);
-        assert!(i_out[1].abs() < 0.01,
-            "neuron 1 GABA_A I_syn at V_rest: {} (should be 0, shunt)", i_out[1]);
+        assert!(
+            (i_out[0] - 6.5).abs() < 0.01,
+            "neuron 0 AMPA I_syn: {}",
+            i_out[0]
+        );
+        assert!(
+            i_out[1].abs() < 0.01,
+            "neuron 1 GABA_A I_syn at V_rest: {} (should be 0, shunt)",
+            i_out[1]
+        );
     }
 
     #[test]
@@ -662,8 +761,11 @@ mod tests {
         // At -65mV: B(V) ≈ 0.024, I ≈ 1.0 * 0.024 * (0 - (-65)) = 1.56 (depol)
         // At +30mV: B(V) ≈ 0.95, I ≈ 1.0 * 0.95 * (0 - 30) = -28.5 (hyperpol, driving force reversed)
         let mag_neg = i_out[1].abs(); // magnitude at depolarized V
-        assert!(mag_neg > 5.0,
-            "NMDA Mg block: at 30mV current magnitude should be large, got {}", i_out[1]);
+        assert!(
+            mag_neg > 5.0,
+            "NMDA Mg block: at 30mV current magnitude should be large, got {}",
+            i_out[1]
+        );
     }
 
     // ─── 5. PSP: single synapse produces correct current direction ──
@@ -676,8 +778,16 @@ mod tests {
         let mut i_out = vec![0.0];
         kin.g_ampa[0] = 1.0;
         kin.compute_currents(&v, &mut i_out);
-        assert!(i_out[0] > 0.0, "AMPA I_syn={} should be >0 at V=-65", i_out[0]);
-        assert!((i_out[0] - 65.0).abs() < 0.1, "AMPA I_syn={} should be ~65", i_out[0]);
+        assert!(
+            i_out[0] > 0.0,
+            "AMPA I_syn={} should be >0 at V=-65",
+            i_out[0]
+        );
+        assert!(
+            (i_out[0] - 65.0).abs() < 0.1,
+            "AMPA I_syn={} should be ~65",
+            i_out[0]
+        );
     }
 
     #[test]
@@ -688,7 +798,11 @@ mod tests {
         let mut i_out = vec![0.0];
         kin.g_ampa[0] = 1.0;
         kin.compute_currents(&v, &mut i_out);
-        assert!(i_out[0].abs() < 1e-6, "AMPA I_syn={} at V=0 should be 0", i_out[0]);
+        assert!(
+            i_out[0].abs() < 1e-6,
+            "AMPA I_syn={} at V=0 should be 0",
+            i_out[0]
+        );
     }
 
     #[test]
@@ -702,10 +816,17 @@ mod tests {
         kin.compute_currents(&v, &mut i_out);
 
         // At rest: no current
-        assert!(i_out[0].abs() < 1e-6, "GABA_A I_syn={} at V=-65 should be 0 (shunt)", i_out[0]);
+        assert!(
+            i_out[0].abs() < 1e-6,
+            "GABA_A I_syn={} at V=-65 should be 0 (shunt)",
+            i_out[0]
+        );
         // Depolarized: I = g · (-65 - (-50)) = -15 (inhibitory, outward current)
-        assert!((i_out[1] - (-15.0)).abs() < 0.1,
-            "GABA_A I_syn={} at V=-50 should be ~-15 (inhibitory)", i_out[1]);
+        assert!(
+            (i_out[1] - (-15.0)).abs() < 0.1,
+            "GABA_A I_syn={} at V=-50 should be ~-15 (inhibitory)",
+            i_out[1]
+        );
     }
 
     #[test]
@@ -716,8 +837,11 @@ mod tests {
         let mut i_out = vec![0.0];
         kin.g_gaba_b[0] = 1.0;
         kin.compute_currents(&v, &mut i_out);
-        assert!((i_out[0] - (-25.0)).abs() < 0.1,
-            "GABA_B I_syn={} at V=-65 should be ~-25 (hyperpolarizing)", i_out[0]);
+        assert!(
+            (i_out[0] - (-25.0)).abs() < 0.1,
+            "GABA_B I_syn={} at V=-65 should be ~-25 (hyperpolarizing)",
+            i_out[0]
+        );
     }
 
     #[test]
@@ -728,8 +852,11 @@ mod tests {
         let mut i_out = vec![0.0];
         kin.g_nachr[0] = 1.0;
         kin.compute_currents(&v, &mut i_out);
-        assert!((i_out[0] - 65.0).abs() < 0.1,
-            "nAChR I_syn={} at V=-65 should be ~65 (excitatory)", i_out[0]);
+        assert!(
+            (i_out[0] - 65.0).abs() < 0.1,
+            "nAChR I_syn={} at V=-65 should be ~65 (excitatory)",
+            i_out[0]
+        );
     }
 
     #[test]
@@ -743,11 +870,17 @@ mod tests {
         kin.g_glucl[1] = 1.0;
         kin.compute_currents(&v, &mut i_out);
 
-        assert!((i_out[0] - 15.0).abs() < 0.1,
-            "GluCl I_syn={} at V=-65 should be ~15 (depolarizing)", i_out[0]);
+        assert!(
+            (i_out[0] - 15.0).abs() < 0.1,
+            "GluCl I_syn={} at V=-65 should be ~15 (depolarizing)",
+            i_out[0]
+        );
         // At V=-30: I = g · (-50 - (-30)) = -20 (inhibitory at depolarized V)
-        assert!((i_out[1] - (-20.0)).abs() < 0.1,
-            "GluCl I_syn={} at V=-30 should be ~-20 (inhibitory)", i_out[1]);
+        assert!(
+            (i_out[1] - (-20.0)).abs() < 0.1,
+            "GluCl I_syn={} at V=-30 should be ~-20 (inhibitory)",
+            i_out[1]
+        );
     }
 
     #[test]
@@ -758,8 +891,11 @@ mod tests {
         let mut i_out = vec![0.0];
         kin.g_machr[0] = 1.0;
         kin.compute_currents(&v, &mut i_out);
-        assert!((i_out[0] - (-25.0)).abs() < 0.1,
-            "mAChR I_syn={} at V=-65 should be ~-25", i_out[0]);
+        assert!(
+            (i_out[0] - (-25.0)).abs() < 0.1,
+            "mAChR I_syn={} at V=-65 should be ~-25",
+            i_out[0]
+        );
     }
 
     // ─── 6. Synaptic summation ──────────────────────────
@@ -786,7 +922,7 @@ mod tests {
         // Without decay (dt=0): i2 should be 2× i1
         // After decay: i2 should be > i1 but < 2×i1
         assert!(i2 < i1 * 2.1, "I2={i2} should be < 2.1 × I1={i1}");
-        println!("Summation: I1={i1:.4}, I2={i2:.4}, ratio={:.4}", i2/i1);
+        println!("Summation: I1={i1:.4}, I2={i2:.4}, ratio={:.4}", i2 / i1);
     }
 
     #[test]
@@ -803,8 +939,11 @@ mod tests {
         // AMPA: 0.5 * (0 - (-50)) = 25
         // GABA_A: 0.3 * (-65 - (-50)) = -4.5
         // Total: 20.5
-        assert!((i_out[0] - 20.5).abs() < 0.1,
-            "AMPA+GABA_A I_syn={} should be ~20.5 at V=-50", i_out[0]);
+        assert!(
+            (i_out[0] - 20.5).abs() < 0.1,
+            "AMPA+GABA_A I_syn={} should be ~20.5 at V=-50",
+            i_out[0]
+        );
     }
 
     // ─── 7. Synaptic decay time constants ─────────────
@@ -815,26 +954,42 @@ mod tests {
         let factors = DecayFactors::new(dt);
 
         // All decay factors in (0, 1)
-        for (name, decay) in [("AMPA", factors.ampa), ("NMDA", factors.nmda),
-                              ("GABA_A", factors.gaba_a), ("GABA_B", factors.gaba_b),
-                              ("nAChR", factors.nachr), ("GluCl", factors.glucl),
-                              ("mAChR", factors.machr)] {
-            assert!(decay > 0.0 && decay < 1.0,
-                "{name} decay={decay:.6} out of (0, 1)");
+        for (name, decay) in [
+            ("AMPA", factors.ampa),
+            ("NMDA", factors.nmda),
+            ("GABA_A", factors.gaba_a),
+            ("GABA_B", factors.gaba_b),
+            ("nAChR", factors.nachr),
+            ("GluCl", factors.glucl),
+            ("mAChR", factors.machr),
+        ] {
+            assert!(
+                decay > 0.0 && decay < 1.0,
+                "{name} decay={decay:.6} out of (0, 1)"
+            );
         }
 
         // Slow receptors decay slower: NMDA > GABA_A > AMPA
-        assert!(factors.nmda > factors.gaba_a,
+        assert!(
+            factors.nmda > factors.gaba_a,
             "NMDA decay {:.6} should be > GABA_A decay {:.6} (slower)",
-            factors.nmda, factors.gaba_a);
-        assert!(factors.gaba_a > factors.ampa,
+            factors.nmda,
+            factors.gaba_a
+        );
+        assert!(
+            factors.gaba_a > factors.ampa,
             "GABA_A decay {:.6} should be > AMPA decay {:.6} (slower)",
-            factors.gaba_a, factors.ampa);
+            factors.gaba_a,
+            factors.ampa
+        );
 
         // nAChR (τ=3ms) decays faster than GluCl (τ=5ms)
-        assert!(factors.nachr < factors.glucl,
+        assert!(
+            factors.nachr < factors.glucl,
             "nAChR decay {:.6} should be < GluCl decay {:.6} (faster)",
-            factors.nachr, factors.glucl);
+            factors.nachr,
+            factors.glucl
+        );
 
         println!("Decay factors (dt={dt}ms): AMPA={:.4}, NMDA={:.4}, GABA_A={:.4}, GABA_B={:.4}, nAChR={:.4}, GluCl={:.4}, mAChR={:.4}",
             factors.ampa, factors.nmda, factors.gaba_a, factors.gaba_b,
@@ -869,7 +1024,10 @@ mod tests {
         // At 0: zero current (E_rev = V)
         assert!(b_0.abs() < 1.0, "NMDA at 0 should be ~0: {b_0}");
         // At +20: large negative current (open + negative driving force)
-        assert!(b_p20 < -5.0, "NMDA at +20 should be strongly negative: {b_p20}");
+        assert!(
+            b_p20 < -5.0,
+            "NMDA at +20 should be strongly negative: {b_p20}"
+        );
     }
 
     // ─── 9. Astrocyte modulation ────────────────────
@@ -891,11 +1049,19 @@ mod tests {
         // dt=1, tau=1000, Ca=1: A = 0*0.999 + 1*0.001 = 0.001
         // With Euler: A += 1*(-0/1000 + 1*1) = 1.0 → Actually wait, Ca_per_spike=1.0
         // A += dt * (-A/tau + pre_spikes * Ca) = 1 * (-0/1000 + 1*1) = 1.0
-        assert!(astro.a[0] > 0.0, "A should increase after spike, got {}", astro.a[0]);
+        assert!(
+            astro.a[0] > 0.0,
+            "A should increase after spike, got {}",
+            astro.a[0]
+        );
 
         // Gain should be > 1.0
         let gain = astro.compute_gain();
-        assert!(gain[0] > 1.0, "gain should be > 1.0 after spike, got {}", gain[0]);
+        assert!(
+            gain[0] > 1.0,
+            "gain should be > 1.0 after spike, got {}",
+            gain[0]
+        );
     }
 
     #[test]
@@ -910,7 +1076,11 @@ mod tests {
         }
 
         // A should be > 0 (spikes accumulated)
-        assert!(astro.a[0] > 5.0, "A should accumulate spikes: {}", astro.a[0]);
+        assert!(
+            astro.a[0] > 5.0,
+            "A should accumulate spikes: {}",
+            astro.a[0]
+        );
 
         // Without spikes, A should decay slowly
         let pre_spikes = vec![0i32; 8];
@@ -919,7 +1089,11 @@ mod tests {
         }
         // After 10ms, A should be slightly lower but not zero (slow decay)
         assert!(astro.a[0] < 10.0, "A should decay: {}", astro.a[0]);
-        assert!(astro.a[0] > 1.0, "A should still be > 0 after 10ms decay: {}", astro.a[0]);
+        assert!(
+            astro.a[0] > 1.0,
+            "A should still be > 0 after 10ms decay: {}",
+            astro.a[0]
+        );
     }
 
     #[test]
@@ -940,10 +1114,17 @@ mod tests {
 
         // Gain should modulate conductances
         let gain0 = 1.0 + astro.a[0] * astro.alpha;
-        assert!((kin.g_ampa[0] - gain0).abs() < 0.001,
-            "AMPA g[0] should be gain={gain0}, got {}", kin.g_ampa[0]);
-        assert!((kin.g_gaba_a[1] - 2.0 * gain0).abs() < 0.001,
-            "GABA_A g[1] should be 2×gain={}, got {}", 2.0 * gain0, kin.g_gaba_a[1]);
+        assert!(
+            (kin.g_ampa[0] - gain0).abs() < 0.001,
+            "AMPA g[0] should be gain={gain0}, got {}",
+            kin.g_ampa[0]
+        );
+        assert!(
+            (kin.g_gaba_a[1] - 2.0 * gain0).abs() < 0.001,
+            "GABA_A g[1] should be 2×gain={}, got {}",
+            2.0 * gain0,
+            kin.g_gaba_a[1]
+        );
     }
 
     #[test]
@@ -958,9 +1139,13 @@ mod tests {
         }
 
         let diff = (astro.a[0] - astro.a[8]).abs();
-        assert!(diff < 1e-6,
+        assert!(
+            diff < 1e-6,
             "SIMD vs scalar tail mismatch: A[0]={}, A[8]={}, diff={}",
-            astro.a[0], astro.a[8], diff);
+            astro.a[0],
+            astro.a[8],
+            diff
+        );
     }
 
     #[test]
@@ -973,7 +1158,10 @@ mod tests {
         assert!(astro.a[0] > 0.0, "A should be > 0 after spikes");
 
         astro.reset();
-        assert!(astro.a.iter().all(|&a| a == 0.0), "A should be 0 after reset");
+        assert!(
+            astro.a.iter().all(|&a| a == 0.0),
+            "A should be 0 after reset"
+        );
     }
 
     #[test]
@@ -986,10 +1174,26 @@ mod tests {
         astro.a[3] = 5.0;
 
         let gain = astro.compute_gain();
-        assert!((gain[0] - 1.0).abs() < 1e-6, "A=0 → gain=1, got {}", gain[0]);
-        assert!((gain[1] - 1.5).abs() < 1e-6, "A=1, α=0.5 → gain=1.5, got {}", gain[1]);
-        assert!((gain[2] - 2.0).abs() < 1e-6, "A=2, α=0.5 → gain=2.0, got {}", gain[2]);
-        assert!((gain[3] - 3.5).abs() < 1e-6, "A=5, α=0.5 → gain=3.5, got {}", gain[3]);
+        assert!(
+            (gain[0] - 1.0).abs() < 1e-6,
+            "A=0 → gain=1, got {}",
+            gain[0]
+        );
+        assert!(
+            (gain[1] - 1.5).abs() < 1e-6,
+            "A=1, α=0.5 → gain=1.5, got {}",
+            gain[1]
+        );
+        assert!(
+            (gain[2] - 2.0).abs() < 1e-6,
+            "A=2, α=0.5 → gain=2.0, got {}",
+            gain[2]
+        );
+        assert!(
+            (gain[3] - 3.5).abs() < 1e-6,
+            "A=5, α=0.5 → gain=3.5, got {}",
+            gain[3]
+        );
     }
 
     // ─── 10. Receptor type utilities ──────────────────

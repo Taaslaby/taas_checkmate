@@ -27,7 +27,9 @@ pub fn bsa_encode(
             spike_count += 1;
             for k in 0..k_len {
                 let idx = t + k;
-                if idx < n { reconstructed[idx] += kernel[k] * err.signum(); }
+                if idx < n {
+                    reconstructed[idx] += kernel[k] * err.signum();
+                }
             }
         } else {
             spikes_out[t] = 0;
@@ -38,15 +40,23 @@ pub fn bsa_encode(
 
 /// Hamming window kernel for BSA encoding.
 pub fn bsa_kernel_hamming(len: usize) -> Vec<f32> {
-    if len == 0 { return vec![]; }
-    if len == 1 { return vec![1.0]; } // avoid 0/0 NaN
+    if len == 0 {
+        return vec![];
+    }
+    if len == 1 {
+        return vec![1.0];
+    } // avoid 0/0 NaN
     let mut k = vec![0.0; len];
     let inv = 1.0 / (len - 1) as f32;
     for i in 0..len {
         k[i] = 0.54 - 0.46 * (2.0 * PI * i as f32 * inv).cos();
     }
     let sum: f32 = k.iter().sum();
-    if sum > 1e-10 { for kk in k.iter_mut() { *kk /= sum; } }
+    if sum > 1e-10 {
+        for kk in k.iter_mut() {
+            *kk /= sum;
+        }
+    }
     k
 }
 
@@ -61,7 +71,11 @@ pub fn phase_encode(
     threshold: f32,
     gain: f32,
 ) -> usize {
-    let n = spikes_out.len().min(phases.len()).min(cos_phases.len()).min(signal.len());
+    let n = spikes_out
+        .len()
+        .min(phases.len())
+        .min(cos_phases.len())
+        .min(signal.len());
     let mut spike_count = 0;
     for i in 0..n {
         phases[i] += signal[i] * gain;
@@ -100,7 +114,10 @@ impl TtfsEncoder {
     /// Encode values into TTFS spikes over multiple steps.
     /// Возвращает true если есть активные спайки на этом шаге.
     pub fn encode_step(&mut self, values: &[f32], spikes_out: &mut [i32]) -> bool {
-        let n = spikes_out.len().min(values.len()).min(self.fire_times.len());
+        let n = spikes_out
+            .len()
+            .min(values.len())
+            .min(self.fire_times.len());
         let mut any_spike = false;
 
         if self.current_step == 0 {
@@ -122,7 +139,9 @@ impl TtfsEncoder {
         }
 
         self.current_step += 1;
-        if self.current_step > self.max_delay { self.current_step = 0; }
+        if self.current_step > self.max_delay {
+            self.current_step = 0;
+        }
         any_spike
     }
 

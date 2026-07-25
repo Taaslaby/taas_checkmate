@@ -7,16 +7,13 @@
 
 #![allow(non_snake_case)]
 
-use taas_checkmate::rl::{ActorCriticAgent, test_mdp_episode};
+use taas_checkmate::rl::{test_mdp_episode, ActorCriticAgent};
 
 fn make_agent(n_input: usize, n_hidden: usize, n_actions: usize) -> ActorCriticAgent {
     ActorCriticAgent::new(
-        n_input,
-        n_hidden,
-        n_actions,
-        30,    // internal steps
-        1.0,   // dt (ms)
-        42,    // seed
+        n_input, n_hidden, n_actions, 30,  // internal steps
+        1.0, // dt (ms)
+        42,  // seed
     )
 }
 
@@ -26,9 +23,14 @@ fn test_agent_act_returns_action_within_bounds() {
     let state = vec![0.5, -0.3];
     let (action, value) = agent.act(&state);
 
-    assert!(action < 2, "action should be in [0, n_actions), got {action}");
-    assert!(value >= 0.0 && value <= 1.0,
-        "value should be in [0, 1], got {value}");
+    assert!(
+        action < 2,
+        "action should be in [0, n_actions), got {action}"
+    );
+    assert!(
+        value >= 0.0 && value <= 1.0,
+        "value should be in [0, 1], got {value}"
+    );
 }
 
 #[test]
@@ -76,8 +78,10 @@ fn test_agent_learn_updates_weights() {
 
     // With positive reward, td_error should be positive
     let expected_td = 1.0 + 0.9 * value - value;
-    assert!((td - expected_td).abs() < 1e-5,
-        "TD error should be {expected_td}, got {td}");
+    assert!(
+        (td - expected_td).abs() < 1e-5,
+        "TD error should be {expected_td}, got {td}"
+    );
 
     // Weights should change slightly
     // (eligibility was accumulated during act())
@@ -128,12 +132,17 @@ fn test_mdp_learning_improves_over_episodes() {
         let total = test_mdp_episode(&mut agent, 30);
         rewards.push(total);
         // Early stopping if already good
-        if ep >= 5 && rewards[ep] > rewards[ep-3] + 1.0 { break; }
+        if ep >= 5 && rewards[ep] > rewards[ep - 3] + 1.0 {
+            break;
+        }
     }
 
     // Later episodes should tend to be better (or at least not crash)
-    let last_avg = rewards[rewards.len()-3..].iter().sum::<f32>() / 3.0;
-    assert!(last_avg > -20.0, "agent should not collapse completely, last avg reward = {last_avg}");
+    let last_avg = rewards[rewards.len() - 3..].iter().sum::<f32>() / 3.0;
+    assert!(
+        last_avg > -20.0,
+        "agent should not collapse completely, last avg reward = {last_avg}"
+    );
 }
 
 /// Test that the agent can run for multiple steps without crashing.
@@ -161,7 +170,6 @@ fn test_agent_runs_multiple_steps() {
 /// Test softmax sampling produces valid probabilities.
 #[test]
 fn test_softmax_sampling() {
-    
     use taas_checkmate::ActorCriticAgent;
 
     // Just verify the sampling doesn't crash

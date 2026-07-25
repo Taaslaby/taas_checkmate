@@ -28,11 +28,9 @@
 //!   d_drive [n_steps × 3n]:    [step0: d1..d3][step1: d1..d3]...
 //!   d_grads [n_steps × 3n]:    same layout as d_drive
 
-use crate::t3::pst_linear_dim;
 use super::spike::T3SpikeTrajectory;
-use crate::cuda::{
-    DevicePtr, pst_jacobian_gpu,
-};
+use crate::cuda::{pst_jacobian_gpu, DevicePtr};
+use crate::t3::pst_linear_dim;
 
 /// Fully GPU-accelerated backward pass.
 pub fn t3spike_backward_cuda(
@@ -65,7 +63,10 @@ pub fn t3spike_backward_cuda_per_step(
     ctx.d_grad_pst.copy_from_host(grad_pst)?;
     if let Some(per_step) = per_step_grad_pst {
         ctx.ensure_per_step_grad(n_steps, pst_dim)?;
-        ctx.d_per_step_grad.as_mut().unwrap().copy_from_host(per_step)
+        ctx.d_per_step_grad
+            .as_mut()
+            .unwrap()
+            .copy_from_host(per_step)
             .map_err(|e| format!("upload per_step_grad: {e}"))?;
     }
 
@@ -112,7 +113,8 @@ pub fn t3spike_backward_cuda_per_step(
                     ctx.d_scratch.as_ptr() as *mut c_float,
                     ctx.d_v.as_ptr() as *mut c_float,
                     n as c_int,
-                ) != 0 {
+                ) != 0
+                {
                     return Err("per_step_k1_add: cuda_pst_jacobian_add failed".into());
                 }
             }
@@ -121,14 +123,14 @@ pub fn t3spike_backward_cuda_per_step(
         // Compute pointer offsets for this step
         let state_off = step * 6 * n;
         let drive_off = step * 3 * n;
-        let grad_off  = step * 3 * n;
+        let grad_off = step * 3 * n;
 
         // Use DevicePtr as raw pointer + offset for kernel
         unsafe {
             use std::ffi::c_float;
             let d_state_step = ctx.d_state.as_ptr().add(state_off) as *const c_float;
             let d_drive_step = ctx.d_drive.as_ptr().add(drive_off) as *const c_float;
-            let d_grad_step  = ctx.d_grads.as_ptr().add(grad_off) as *mut c_float;
+            let d_grad_step = ctx.d_grads.as_ptr().add(grad_off) as *mut c_float;
 
             bptt_step_gpu_raw(
                 d_state_step,
@@ -137,9 +139,15 @@ pub fn t3spike_backward_cuda_per_step(
                 ctx.d_scratch.as_ptr() as *mut c_float,
                 d_grad_step,
                 ctx.d_grad_pst.as_ptr() as *const c_float,
-                traj.w12, traj.w13, traj.w23,
-                traj.dt, traj.drive_gain, traj.alpha, traj.epsilon,
-                n, is_last,
+                traj.w12,
+                traj.w13,
+                traj.w23,
+                traj.dt,
+                traj.drive_gain,
+                traj.alpha,
+                traj.epsilon,
+                n,
+                is_last,
             )?;
         }
 
@@ -164,9 +172,15 @@ unsafe fn bptt_step_gpu_raw(
     d_scratch: *mut f32,
     d_grad_step: *mut f32,
     d_grad_pst: *const f32,
-    w12: f32, w13: f32, w23: f32,
-    dt: f32, gain: f32, alpha: f32, eps: f32,
-    n: usize, is_last_step: bool,
+    w12: f32,
+    w13: f32,
+    w23: f32,
+    dt: f32,
+    gain: f32,
+    alpha: f32,
+    eps: f32,
+    n: usize,
+    is_last_step: bool,
 ) -> Result<(), String> {
     use std::ffi::c_int;
     extern "C" {
@@ -177,12 +191,18 @@ unsafe fn bptt_step_gpu_raw(
             d_scratch: *mut f32,
             d_grad_step: *mut f32,
             d_grad_pst: *const f32,
-            w12: f32, w13: f32, w23: f32,
-            dt: f32, gain: f32, alpha: f32, eps: f32,
-            n: c_int, is_last_step: c_int,
+            w12: f32,
+            w13: f32,
+            w23: f32,
+            dt: f32,
+            gain: f32,
+            alpha: f32,
+            eps: f32,
+            n: c_int,
+            is_last_step: c_int,
         ) -> c_int;
 
-#[allow(dead_code)]
+        #[allow(dead_code)]
         fn cuda_pst_jacobian_add(
             d_state: *const f32,
             d_grad_pst: *const f32,
@@ -191,22 +211,32 @@ unsafe fn bptt_step_gpu_raw(
             n: c_int,
         ) -> c_int;
 
-#[allow(dead_code)]
-        fn cuda_vel_correction(
-            d_v: *mut f32,
-            d_vel_grad: *const f32,
-            n: c_int,
-        ) -> c_int;
+        #[allow(dead_code)]
+        fn cuda_vel_correction(d_v: *mut f32, d_vel_grad: *const f32, n: c_int) -> c_int;
     }
 
     let err = cuda_bptt_step(
-        d_state_step, d_drive_step, d_v, d_scratch,
-        d_grad_step, d_grad_pst,
-        w12, w13, w23, dt, gain, alpha, eps,
-        n as c_int, is_last_step as c_int,
+        d_state_step,
+        d_drive_step,
+        d_v,
+        d_scratch,
+        d_grad_step,
+        d_grad_pst,
+        w12,
+        w13,
+        w23,
+        dt,
+        gain,
+        alpha,
+        eps,
+        n as c_int,
+        is_last_step as c_int,
     );
-    if err == 0 { Ok(()) }
-    else { Err(format!("bptt_step_gpu error: {err}")) }
+    if err == 0 {
+        Ok(())
+    } else {
+        Err(format!("bptt_step_gpu error: {err}"))
+    }
 }
 
 /// Apply per-step velocity correction on GPU: d_v -= d_vel_grad.
@@ -221,16 +251,15 @@ unsafe fn vel_correction_gpu(
 ) -> Result<(), String> {
     use std::ffi::c_int;
     extern "C" {
-#[allow(dead_code)]
-        fn cuda_vel_correction(
-            d_v: *mut f32,
-            d_vel_grad: *const f32,
-            n: c_int,
-        ) -> c_int;
+        #[allow(dead_code)]
+        fn cuda_vel_correction(d_v: *mut f32, d_vel_grad: *const f32, n: c_int) -> c_int;
     }
     let err = cuda_vel_correction(d_v, d_vel_grad, n as c_int);
-    if err == 0 { Ok(()) }
-    else { Err(format!("vel_correction_gpu error: {err}")) }
+    if err == 0 {
+        Ok(())
+    } else {
+        Err(format!("vel_correction_gpu error: {err}"))
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -245,17 +274,17 @@ pub struct CudaBackwardContext {
     pub n_steps: usize,
 
     // K1 buffers
-    pub d_final_state: DevicePtr<f32>,  // [6n]
-    pub d_grad_pst:    DevicePtr<f32>,  // [pst_dim]
-    pub d_v:           DevicePtr<f32>,  // [6n] current v (updated in-place)
+    pub d_final_state: DevicePtr<f32>, // [6n]
+    pub d_grad_pst: DevicePtr<f32>,    // [pst_dim]
+    pub d_v: DevicePtr<f32>,           // [6n] current v (updated in-place)
 
     // Trajectory buffers (step-major)
-    pub d_state:  DevicePtr<f32>,  // [n_steps × 6n]
-    pub d_drive:  DevicePtr<f32>,  // [n_steps × 3n]
-    pub d_grads:  DevicePtr<f32>,  // [n_steps × 3n]
+    pub d_state: DevicePtr<f32>, // [n_steps × 6n]
+    pub d_drive: DevicePtr<f32>, // [n_steps × 3n]
+    pub d_grads: DevicePtr<f32>, // [n_steps × 3n]
 
     // Per-step PST gradients (optional, for SPIGRAD)
-    pub d_per_step_grad: Option<DevicePtr<f32>>,  // [n_steps × pst_dim] or None
+    pub d_per_step_grad: Option<DevicePtr<f32>>, // [n_steps × pst_dim] or None
 
     // Scratch
     pub d_scratch: DevicePtr<f32>, // [max(18, 18 × n_blocks)] for reductions
@@ -264,7 +293,7 @@ pub struct CudaBackwardContext {
 impl CudaBackwardContext {
     /// Allocate ALL persistent GPU buffers.
     pub fn new(n: usize, n_steps: usize) -> Result<Self, String> {
-    let pst_dim = pst_linear_dim(n);
+        let pst_dim = pst_linear_dim(n);
         let n_blocks = (n as u32).div_ceil(256);
         let scratch_size = (n_blocks * 18) as usize;
 
@@ -272,13 +301,13 @@ impl CudaBackwardContext {
             n,
             n_steps,
             d_final_state: DevicePtr::new(6 * n)?,
-            d_grad_pst:    DevicePtr::new(pst_dim)?,
-            d_v:           DevicePtr::new(6 * n)?,
-            d_state:       DevicePtr::new(n_steps * 6 * n)?,
-            d_drive:       DevicePtr::new(n_steps * 3 * n)?,
-            d_grads:       DevicePtr::new(n_steps * 3 * n)?,
+            d_grad_pst: DevicePtr::new(pst_dim)?,
+            d_v: DevicePtr::new(6 * n)?,
+            d_state: DevicePtr::new(n_steps * 6 * n)?,
+            d_drive: DevicePtr::new(n_steps * 3 * n)?,
+            d_grads: DevicePtr::new(n_steps * 3 * n)?,
             d_per_step_grad: None,
-            d_scratch:     DevicePtr::new(scratch_size.max(12))?,
+            d_scratch: DevicePtr::new(scratch_size.max(12))?,
         })
     }
 
@@ -307,39 +336,49 @@ impl CudaBackwardContext {
         for t in 0..ns {
             let off = t * 6 * n;
             let s_off = t * n;
-            state[off + 0*n..off + 1*n].copy_from_slice(&traj.th1_pre()[s_off..s_off + n]);
-            state[off + 1*n..off + 2*n].copy_from_slice(&traj.th2_pre()[s_off..s_off + n]);
-            state[off + 2*n..off + 3*n].copy_from_slice(&traj.th3_pre()[s_off..s_off + n]);
-            state[off + 3*n..off + 4*n].copy_from_slice(&traj.r1_pre()[s_off..s_off + n]);
-            state[off + 4*n..off + 5*n].copy_from_slice(&traj.r2_pre()[s_off..s_off + n]);
-            state[off + 5*n..off + 6*n].copy_from_slice(&traj.r3_pre()[s_off..s_off + n]);
+            state[off + 0 * n..off + 1 * n].copy_from_slice(&traj.th1_pre()[s_off..s_off + n]);
+            state[off + 1 * n..off + 2 * n].copy_from_slice(&traj.th2_pre()[s_off..s_off + n]);
+            state[off + 2 * n..off + 3 * n].copy_from_slice(&traj.th3_pre()[s_off..s_off + n]);
+            state[off + 3 * n..off + 4 * n].copy_from_slice(&traj.r1_pre()[s_off..s_off + n]);
+            state[off + 4 * n..off + 5 * n].copy_from_slice(&traj.r2_pre()[s_off..s_off + n]);
+            state[off + 5 * n..off + 6 * n].copy_from_slice(&traj.r3_pre()[s_off..s_off + n]);
         }
-        self.d_state.copy_from_host(&state).map_err(|e| format!("upload d_state: {e}"))?;
+        self.d_state
+            .copy_from_host(&state)
+            .map_err(|e| format!("upload d_state: {e}"))?;
 
         // Pack d_drive: step-major [drive1_t][drive2_t][drive3_t]
         let mut drive = vec![0.0f32; ns * 3 * n];
         for t in 0..ns {
             let off = t * 3 * n;
             let s_off = t * n;
-            drive[off + 0*n..off + 1*n].copy_from_slice(&traj.drive1()[s_off..s_off + n]);
-            drive[off + 1*n..off + 2*n].copy_from_slice(&traj.drive2()[s_off..s_off + n]);
-            drive[off + 2*n..off + 3*n].copy_from_slice(&traj.drive3()[s_off..s_off + n]);
+            drive[off + 0 * n..off + 1 * n].copy_from_slice(&traj.drive1()[s_off..s_off + n]);
+            drive[off + 1 * n..off + 2 * n].copy_from_slice(&traj.drive2()[s_off..s_off + n]);
+            drive[off + 2 * n..off + 3 * n].copy_from_slice(&traj.drive3()[s_off..s_off + n]);
         }
-        self.d_drive.copy_from_host(&drive).map_err(|e| format!("upload d_drive: {e}"))?;
+        self.d_drive
+            .copy_from_host(&drive)
+            .map_err(|e| format!("upload d_drive: {e}"))?;
         Ok(())
     }
 
     /// Pack final state (for K1) and upload.
     #[allow(clippy::identity_op, clippy::erasing_op)]
-    fn pack_and_upload_final_state(&mut self, traj: &T3SpikeTrajectory, n: usize) -> Result<(), String> {
+    fn pack_and_upload_final_state(
+        &mut self,
+        traj: &T3SpikeTrajectory,
+        n: usize,
+    ) -> Result<(), String> {
         let mut final_state = vec![0.0f32; 6 * n];
-        final_state[0*n..1*n].copy_from_slice(&traj.th1_final);
-        final_state[1*n..2*n].copy_from_slice(&traj.th2_final);
-        final_state[2*n..3*n].copy_from_slice(&traj.th3_final);
-        final_state[3*n..4*n].copy_from_slice(&traj.r1_final);
-        final_state[4*n..5*n].copy_from_slice(&traj.r2_final);
-        final_state[5*n..6*n].copy_from_slice(&traj.r3_final);
-        self.d_final_state.copy_from_host(&final_state).map_err(|e| format!("upload final_state: {e}"))?;
+        final_state[0 * n..1 * n].copy_from_slice(&traj.th1_final);
+        final_state[1 * n..2 * n].copy_from_slice(&traj.th2_final);
+        final_state[2 * n..3 * n].copy_from_slice(&traj.th3_final);
+        final_state[3 * n..4 * n].copy_from_slice(&traj.r1_final);
+        final_state[4 * n..5 * n].copy_from_slice(&traj.r2_final);
+        final_state[5 * n..6 * n].copy_from_slice(&traj.r3_final);
+        self.d_final_state
+            .copy_from_host(&final_state)
+            .map_err(|e| format!("upload final_state: {e}"))?;
         Ok(())
     }
 }
@@ -365,31 +404,31 @@ pub struct FusedForwardBwdContext {
     pub pst_dim: usize,
 
     // Input buffers
-    pub d_state:       DevicePtr<f32>,  // [6n] current state (th1,th2,th3,r1,r2,r3)
-    pub d_sincos:      DevicePtr<f32>,  // [6n] workspace
-    pub d_coupling:    DevicePtr<f32>,  // [3n] workspace
-    pub d_omega:       DevicePtr<f32>,  // [3n] natural frequencies
+    pub d_state: DevicePtr<f32>, // [6n] current state (th1,th2,th3,r1,r2,r3)
+    pub d_sincos: DevicePtr<f32>, // [6n] workspace
+    pub d_coupling: DevicePtr<f32>, // [3n] workspace
+    pub d_omega: DevicePtr<f32>, // [3n] natural frequencies
 
     // Drives (all at once)
-    pub d_all_drives:  DevicePtr<f32>,  // [n_steps × 3n]
+    pub d_all_drives: DevicePtr<f32>, // [n_steps × 3n]
 
     // Trajectory (state saved per step)
-    pub d_traj_state:  DevicePtr<f32>,  // [n_steps × 6n]
+    pub d_traj_state: DevicePtr<f32>, // [n_steps × 6n]
 
     // K1 (PST Jacobian) buffers
-    pub d_final_state: DevicePtr<f32>,  // [6n]
-    pub d_grad_pst:    DevicePtr<f32>,  // [pst_dim]
-    pub d_v:           DevicePtr<f32>,  // [6n]
-    pub d_k1_sums:     DevicePtr<f32>,  // [12]
+    pub d_final_state: DevicePtr<f32>, // [6n]
+    pub d_grad_pst: DevicePtr<f32>,    // [pst_dim]
+    pub d_v: DevicePtr<f32>,           // [6n]
+    pub d_k1_sums: DevicePtr<f32>,     // [12]
 
     // Per-step PST gradients (SPIGRAD, always allocated for simplicity)
-    pub d_per_step_grad: DevicePtr<f32>,  // [n_steps × pst_dim]
+    pub d_per_step_grad: DevicePtr<f32>, // [n_steps × pst_dim]
 
     // Output
-    pub d_grad_drives: DevicePtr<f32>,  // [n_steps × 3n]
+    pub d_grad_drives: DevicePtr<f32>, // [n_steps × 3n]
 
     // Scratch for coupling + BPTT reductions
-    pub d_scratch:     DevicePtr<f32>,  // [12 × n_blocks]
+    pub d_scratch: DevicePtr<f32>, // [12 × n_blocks]
 }
 
 impl FusedForwardBwdContext {
@@ -403,19 +442,19 @@ impl FusedForwardBwdContext {
             n,
             n_steps,
             pst_dim,
-            d_state:       DevicePtr::new(6 * n)?,
-            d_sincos:      DevicePtr::new(6 * n)?,
-            d_coupling:    DevicePtr::new(3 * n)?,
-            d_omega:       DevicePtr::new(3 * n)?,
-            d_all_drives:  DevicePtr::new(n_steps * 3 * n)?,
-            d_traj_state:  DevicePtr::new(n_steps * 6 * n)?,
+            d_state: DevicePtr::new(6 * n)?,
+            d_sincos: DevicePtr::new(6 * n)?,
+            d_coupling: DevicePtr::new(3 * n)?,
+            d_omega: DevicePtr::new(3 * n)?,
+            d_all_drives: DevicePtr::new(n_steps * 3 * n)?,
+            d_traj_state: DevicePtr::new(n_steps * 6 * n)?,
             d_final_state: DevicePtr::new(6 * n)?,
-            d_grad_pst:    DevicePtr::new(pst_dim)?,
-            d_v:           DevicePtr::new(6 * n)?,
-            d_k1_sums:     DevicePtr::new(12)?,
+            d_grad_pst: DevicePtr::new(pst_dim)?,
+            d_v: DevicePtr::new(6 * n)?,
+            d_k1_sums: DevicePtr::new(12)?,
             d_per_step_grad: DevicePtr::new(n_steps * pst_dim)?,
             d_grad_drives: DevicePtr::new(n_steps * 3 * n)?,
-            d_scratch:     DevicePtr::new(scratch_size.max(12))?,
+            d_scratch: DevicePtr::new(scratch_size.max(12))?,
         })
     }
 
@@ -437,7 +476,8 @@ impl FusedForwardBwdContext {
         if all_drives.len() != expected {
             return Err(format!(
                 "all_drives.len()={} != n_steps*3*n={}",
-                all_drives.len(), expected
+                all_drives.len(),
+                expected
             ));
         }
         self.d_all_drives.copy_from_host(all_drives)?;
@@ -450,9 +490,12 @@ impl FusedForwardBwdContext {
         if per_step.len() != expected {
             return Err(format!(
                 "per_step_grad.len()={} != n_steps*pst_dim={}",
-                per_step.len(), expected));
+                per_step.len(),
+                expected
+            ));
         }
-        self.d_per_step_grad.copy_from_host(per_step)
+        self.d_per_step_grad
+            .copy_from_host(per_step)
             .map_err(|e| format!("copy_per_step_grad_pst: {e}"))
     }
 
@@ -469,9 +512,15 @@ impl FusedForwardBwdContext {
     /// If per-step gradients were uploaded via `copy_per_step_grad_pst`, they will
     /// be used for SPIGRAD (K1' + velocity correction at each step).
     /// After this, call `download_grad_drives()` to get results.
-    pub fn run_fused(&self,
-        w12: f32, w13: f32, w23: f32,
-        dt: f32, gain: f32, alpha: f32, eps: f32,
+    pub fn run_fused(
+        &self,
+        w12: f32,
+        w13: f32,
+        w23: f32,
+        dt: f32,
+        gain: f32,
+        alpha: f32,
+        eps: f32,
     ) -> Result<(), String> {
         let d_per_step = Some(&self.d_per_step_grad);
         crate::cuda::t3_fused_forward_bptt(
@@ -488,9 +537,15 @@ impl FusedForwardBwdContext {
             &self.d_v,
             &self.d_scratch,
             &self.d_k1_sums,
-            w12, w13, w23,
-            dt, gain, alpha, eps,
-            self.n, self.n_steps,
+            w12,
+            w13,
+            w23,
+            dt,
+            gain,
+            alpha,
+            eps,
+            self.n,
+            self.n_steps,
         )
     }
 
@@ -581,11 +636,16 @@ pub fn t3spike_fused_forward_backward_cuda(
 ) -> Result<Vec<f32>, String> {
     let expected_drives = n_steps * 3 * n_osc;
     if drives.len() != expected_drives {
-        return Err(format!("drives.len()={} != n_steps*3*n={}", drives.len(), expected_drives));
+        return Err(format!(
+            "drives.len()={} != n_steps*3*n={}",
+            drives.len(),
+            expected_drives
+        ));
     }
 
     // Allocate context if needed
-    if ctx.is_none() || ctx.as_ref().unwrap().n != n_osc || ctx.as_ref().unwrap().n_steps != n_steps {
+    if ctx.is_none() || ctx.as_ref().unwrap().n != n_osc || ctx.as_ref().unwrap().n_steps != n_steps
+    {
         *ctx = Some(FusedForwardBwdContext::new(n_osc, n_steps)?);
     }
     let ctx = ctx.as_ref().unwrap();
@@ -593,9 +653,9 @@ pub fn t3spike_fused_forward_backward_cuda(
     // Pack initial state [th1,th2,th3,r1,r2,r3] all zeros
     let mut state = vec![0.0f32; 6 * n_osc];
     for i in 0..n_osc {
-        state[3 * n_osc + i] = 0.1;  // r1
-        state[4 * n_osc + i] = 0.1;  // r2
-        state[5 * n_osc + i] = 0.1;  // r3
+        state[3 * n_osc + i] = 0.1; // r1
+        state[4 * n_osc + i] = 0.1; // r2
+        state[5 * n_osc + i] = 0.1; // r3
     }
 
     // Pack omegas [omega1, omega2, omega3]
@@ -620,8 +680,13 @@ pub fn t3spike_fused_forward_backward_cuda(
     }
 
     ctx.run_fused(
-        coupling_w12, coupling_w13, coupling_w23,
-        dt, drive_gain, alpha, 0.1,
+        coupling_w12,
+        coupling_w13,
+        coupling_w23,
+        dt,
+        drive_gain,
+        alpha,
+        0.1,
     )?;
 
     ctx.download_grad_drives()
@@ -635,23 +700,28 @@ pub fn t3spike_fused_forward_backward_cuda(
 #[cfg(feature = "cuda")]
 mod tests {
     use super::*;
-    use crate::spike::{t3spike_forward, t3spike_backward};
+    use crate::spike::{t3spike_backward, t3spike_forward};
 
     /// Compare fused forward+backward (entirely on GPU) vs CPU forward + backward
     #[test]
     fn test_fused_forward_bwd_vs_cpu() {
-        if crate::cuda::get_device_count().unwrap_or(0) == 0 { return; }
+        if crate::cuda::get_device_count().unwrap_or(0) == 0 {
+            return;
+        }
         crate::cuda::set_device(0).unwrap();
 
         let n_osc = 8;
         let n_steps = 3;
         let n_total = n_steps * 3 * n_osc;
         let mut drives = vec![0.0f32; n_total];
-        for i in 0..n_total { drives[i] = ((i as f32) * 0.3).cos() * 1.5; }
+        for i in 0..n_total {
+            drives[i] = ((i as f32) * 0.3).cos() * 1.5;
+        }
 
         // CPU baseline
         let (pst, traj) = t3spike_forward(
-            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives);
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+        );
         let pst_dim = pst.len();
         let mut grad_pst = vec![0.0f32; pst_dim];
         grad_pst[0] = 1.0;
@@ -660,23 +730,26 @@ mod tests {
         // GPU fused forward+backward
         let mut ctx = None;
         let gpu_grad = t3spike_fused_forward_backward_cuda(
-            n_osc, n_steps, 0.05, 10.0, 1.0,
-            0.5, 3.0, 0.3, 0.15, 0.08,
-            &drives, &grad_pst, None, &mut ctx,
-        ).unwrap();
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives, &grad_pst, None,
+            &mut ctx,
+        )
+        .unwrap();
 
         // Second call with cached context
         let gpu_grad2 = t3spike_fused_forward_backward_cuda(
-            n_osc, n_steps, 0.05, 10.0, 1.0,
-            0.5, 3.0, 0.3, 0.15, 0.08,
-            &drives, &grad_pst, None, &mut ctx,
-        ).unwrap();
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives, &grad_pst, None,
+            &mut ctx,
+        )
+        .unwrap();
 
         let mut max_diff = 0.0f32;
         let mut worst_idx = 0;
         for i in 0..cpu_grad.len() {
             let diff = (cpu_grad[i] - gpu_grad[i]).abs();
-            if diff > max_diff { max_diff = diff; worst_idx = i; }
+            if diff > max_diff {
+                max_diff = diff;
+                worst_idx = i;
+            }
         }
 
         let mut gpu_self_max_diff = 0.0f32;
@@ -688,12 +761,21 @@ mod tests {
         let pop = (worst_idx % (3 * n_osc)) / n_osc;
         let osc = worst_idx % n_osc;
 
-        println!("\n=== Fused Forward+Bwd vs CPU (n={}, steps={}) ===", n_osc, n_steps);
-        println!("Max diff vs CPU: {:.10} at idx {} (step={}, pop={}, osc={})", max_diff, worst_idx, step, pop, osc);
+        println!(
+            "\n=== Fused Forward+Bwd vs CPU (n={}, steps={}) ===",
+            n_osc, n_steps
+        );
+        println!(
+            "Max diff vs CPU: {:.10} at idx {} (step={}, pop={}, osc={})",
+            max_diff, worst_idx, step, pop, osc
+        );
         println!("  CPU[{}] = {:.10}", worst_idx, cpu_grad[worst_idx]);
         println!("  GPU[{}] = {:.10}", worst_idx, gpu_grad[worst_idx]);
         println!("  abs diff   = {:.10}", max_diff);
-        println!("  rel diff   = {:.6}%", 100.0 * max_diff / cpu_grad[worst_idx].abs().max(1e-10));
+        println!(
+            "  rel diff   = {:.6}%",
+            100.0 * max_diff / cpu_grad[worst_idx].abs().max(1e-10)
+        );
         println!("GPU self max:    {:.10}", gpu_self_max_diff);
         println!("CPU[0..12]: {:?}", &cpu_grad[..12.min(cpu_grad.len())]);
         println!("GPU[0..12]: {:?}", &gpu_grad[..12.min(gpu_grad.len())]);
@@ -708,42 +790,68 @@ mod tests {
             println!("  Step {} max diff: {:.10}", s, s_max);
         }
 
-        assert!(gpu_self_max_diff < 1e-7, "GPU not deterministic: {:.10}", gpu_self_max_diff);
+        assert!(
+            gpu_self_max_diff < 1e-7,
+            "GPU not deterministic: {:.10}",
+            gpu_self_max_diff
+        );
         // Fused forward uses GPU kernels — slight numerical differences from CPU SIMD
         // are expected due to --use_fast_math trig. Tolerance adjusted for fused path.
-        assert!(max_diff < 5e-3, "Fused vs CPU mismatch: max_diff={:.10}", max_diff);
+        assert!(
+            max_diff < 5e-3,
+            "Fused vs CPU mismatch: max_diff={:.10}",
+            max_diff
+        );
         println!("✅ Fused forward+backward matches CPU baseline (within 0.5%)");
     }
 
     /// Debug: compare K1 (PST Jacobian) — v = J^T · grad_pst vs CPU compute_pst_jacobian_v
     #[test]
     fn test_gpu_k1_vs_cpu() {
-        if crate::cuda::get_device_count().unwrap_or(0) == 0 { return; }
+        if crate::cuda::get_device_count().unwrap_or(0) == 0 {
+            return;
+        }
         crate::cuda::set_device(0).unwrap();
 
         let n_osc = 8;
         let n_steps = 3;
         let n_drives = n_steps * 3 * n_osc;
         let mut drives = vec![0.0f32; n_drives];
-        for i in 0..n_drives { drives[i] = ((i as f32) * 0.3).cos() * 1.5; }
+        for i in 0..n_drives {
+            drives[i] = ((i as f32) * 0.3).cos() * 1.5;
+        }
 
-        let (pst, traj) = t3spike_forward(n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives);
+        let (pst, traj) = t3spike_forward(
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+        );
         let pst_dim = pst.len();
 
         // ── CPU K1: JIT Jacobian (pst_jacobian_v_jit) ──
         let mut cpu_v = crate::spike::PstGradients::new(n_osc);
         crate::spike::pst_jacobian_v_jit(
-            &traj.th1_final, &traj.r1_final,
-            &traj.th2_final, &traj.r2_final,
-            &traj.th3_final, &traj.r3_final,
-            n_osc, &pst, &mut cpu_v,
+            &traj.th1_final,
+            &traj.r1_final,
+            &traj.th2_final,
+            &traj.r2_final,
+            &traj.th3_final,
+            &traj.r3_final,
+            n_osc,
+            &pst,
+            &mut cpu_v,
         );
 
         // ── GPU K1: run pst_jacobian_gpu ──
         let mut ctx = CudaBackwardContext::new(n_osc, n_steps).unwrap();
         ctx.d_grad_pst.copy_from_host(&pst).unwrap();
         ctx.pack_and_upload_final_state(&traj, n_osc).unwrap();
-        pst_jacobian_gpu(&ctx.d_final_state, &ctx.d_grad_pst, &ctx.d_scratch, &ctx.d_v, n_osc).unwrap();
+        pst_jacobian_gpu(
+            &ctx.d_final_state,
+            &ctx.d_grad_pst,
+            &ctx.d_scratch,
+            &ctx.d_v,
+            n_osc,
+        )
+        .unwrap();
 
         let mut gpu_v = vec![0.0f32; 6 * n_osc];
         ctx.d_v.copy_to_host(&mut gpu_v).unwrap();
@@ -756,37 +864,55 @@ mod tests {
             cpu_v.v_r1.as_slice(),
             cpu_v.v_r2.as_slice(),
             cpu_v.v_r3.as_slice(),
-        ].concat();
+        ]
+        .concat();
 
         let mut k1_max_diff = 0.0f32;
         let mut k1_worst = 0;
-        for i in 0..6*n_osc {
+        for i in 0..6 * n_osc {
             let diff = (cpu_v_vec[i] - gpu_v[i]).abs();
-            if diff > k1_max_diff { k1_max_diff = diff; k1_worst = i; }
+            if diff > k1_max_diff {
+                k1_max_diff = diff;
+                k1_worst = i;
+            }
         }
         println!("K1 (PST Jacobian) vs CPU:");
-        println!("  max_diff={:.10} at idx {} (group {})", k1_max_diff, k1_worst, k1_worst / n_osc);
-        println!("  CPU v[:6]: {:?}", &cpu_v_vec[..6.min(6*n_osc)]);
-        println!("  GPU v[:6]: {:?}", &gpu_v[..6.min(6*n_osc)]);
+        println!(
+            "  max_diff={:.10} at idx {} (group {})",
+            k1_max_diff,
+            k1_worst,
+            k1_worst / n_osc
+        );
+        println!("  CPU v[:6]: {:?}", &cpu_v_vec[..6.min(6 * n_osc)]);
+        println!("  GPU v[:6]: {:?}", &gpu_v[..6.min(6 * n_osc)]);
 
-        assert!(k1_max_diff < 2e-4, "K1 mismatch: max_diff={:.10}", k1_max_diff);
+        assert!(
+            k1_max_diff < 2e-4,
+            "K1 mismatch: max_diff={:.10}",
+            k1_max_diff
+        );
         println!("✅ K1 matches");
     }
 
     /// Debug: compare 1 BPTT step (K3+K2) vs CPU
     #[test]
     fn test_gpu_bptt_one_step() {
-        if crate::cuda::get_device_count().unwrap_or(0) == 0 { return; }
+        if crate::cuda::get_device_count().unwrap_or(0) == 0 {
+            return;
+        }
         crate::cuda::set_device(0).unwrap();
 
         let n_osc = 8;
         let n_steps = 3;
         let n_drives = n_steps * 3 * n_osc;
         let mut drives = vec![0.0f32; n_drives];
-        for i in 0..n_drives { drives[i] = ((i as f32) * 0.3).cos() * 1.5; }
+        for i in 0..n_drives {
+            drives[i] = ((i as f32) * 0.3).cos() * 1.5;
+        }
 
         let (pst, traj) = t3spike_forward(
-            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives);
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+        );
 
         let pst_dim = pst.len();
         let mut grad_pst = vec![0.0f32; pst_dim];
@@ -803,12 +929,18 @@ mod tests {
         let mut worst_idx = 0;
         for i in 0..cpu_grad.len() {
             let diff = (cpu_grad[i] - gpu_grad[i]).abs();
-            if diff > max_diff { max_diff = diff; worst_idx = i; }
+            if diff > max_diff {
+                max_diff = diff;
+                worst_idx = i;
+            }
         }
 
         println!("BPTT 3 steps, n_osc=8");
         println!("  Max diff: {:.10} at index {}", max_diff, worst_idx);
-        println!("  CPU[{}] = {:.6}, GPU[{}] = {:.6}", worst_idx, cpu_grad[worst_idx], worst_idx, gpu_grad[worst_idx]);
+        println!(
+            "  CPU[{}] = {:.6}, GPU[{}] = {:.6}",
+            worst_idx, cpu_grad[worst_idx], worst_idx, gpu_grad[worst_idx]
+        );
         println!("  First 6 CPU: {:?}", &cpu_grad[..6]);
         println!("  First 6 GPU: {:?}", &gpu_grad[..6]);
 
@@ -817,7 +949,7 @@ mod tests {
         for step in 0..n_steps {
             let off = step * 3 * n;
             let mut step_max = 0.0f32;
-            for i in 0..3*n {
+            for i in 0..3 * n {
                 step_max = step_max.max((cpu_grad[off + i] - gpu_grad[off + i]).abs());
             }
             println!("  Step {} max diff: {:.10}", step, step_max);
@@ -825,26 +957,41 @@ mod tests {
 
         // Tolerance accounts for f32 precision differences between GPU (sinf/atomicAdd)
         // and CPU SIMD (f32x8.sin_cos/reduce_add). 3 steps × 8 osc = good baseline.
-        assert!(max_diff < 1e-3, "1-step BPTT mismatch: max_diff={:.10}", max_diff);
-        println!("✅ BPTT 1 step: CPU vs GPU match (max_diff={:.6e})", max_diff);
+        assert!(
+            max_diff < 1e-3,
+            "1-step BPTT mismatch: max_diff={:.10}",
+            max_diff
+        );
+        println!(
+            "✅ BPTT 1 step: CPU vs GPU match (max_diff={:.6e})",
+            max_diff
+        );
     }
 
     #[test]
     fn test_cpu_gpu_backward_cross_validation_n100() {
-        if crate::cuda::get_device_count().unwrap_or(0) == 0 { return; }
+        if crate::cuda::get_device_count().unwrap_or(0) == 0 {
+            return;
+        }
         crate::cuda::set_device(0).unwrap();
 
         let n_osc = 16;
         let n_steps = 100;
         let n_drives = n_steps * 3 * n_osc;
         let mut drives = vec![0.0f32; n_drives];
-        for i in 0..n_drives { drives[i] = ((i as f32) * 0.1).sin() * 2.0; }
+        for i in 0..n_drives {
+            drives[i] = ((i as f32) * 0.1).sin() * 2.0;
+        }
 
-        let (pst, traj) = t3spike_forward(n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives);
+        let (pst, traj) = t3spike_forward(
+            n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+        );
         let pst_dim = pst.len();
 
         let mut grad_pst = vec![0.0f32; pst_dim];
-        for i in 0..pst_dim.min(10) { grad_pst[i] = 1.0; }
+        for i in 0..pst_dim.min(10) {
+            grad_pst[i] = 1.0;
+        }
         let vel_start = 6 * n_osc;
         if vel_start + 3 * n_osc <= pst_dim {
             for i in 0..n_osc.min(4) {
@@ -879,7 +1026,10 @@ mod tests {
             gpu_self_max_diff = gpu_self_max_diff.max((gpu_grad[i] - gpu_grad2[i]).abs());
         }
 
-        println!("\n=== CPU vs GPU Backward (n={}, steps={}) ===", n_osc, n_steps);
+        println!(
+            "\n=== CPU vs GPU Backward (n={}, steps={}) ===",
+            n_osc, n_steps
+        );
         println!("Max diff:     {:.10}", max_diff);
         println!("Mean diff:    {:.10}", sum_abs_diff / cpu_grad.len() as f32);
         println!("Rel err:      {:.6e}", sum_abs_diff / (sum_abs_cpu + 1e-10));
@@ -889,7 +1039,11 @@ mod tests {
 
         // Error accumulates through BPTT chain (100 steps × multiplicative Jacobians).
         // The dominant bug (gamma/sqrt(n)) was fixed; remaining is f32 precision accumulation.
-        assert!(max_diff < 0.3, "n100 backward mismatch: max_diff={:.10}", max_diff);
+        assert!(
+            max_diff < 0.3,
+            "n100 backward mismatch: max_diff={:.10}",
+            max_diff
+        );
         assert!(gpu_self_max_diff < 1e-7, "GPU not deterministic");
         println!("✅ All match (max_diff={:.6e})", max_diff);
     }

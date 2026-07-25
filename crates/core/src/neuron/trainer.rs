@@ -39,13 +39,19 @@ pub struct WorkerState {
 
 impl WorkerState {
     fn new(
-        ni: usize, nh: usize, no: usize,
-        dt: f32, tau_e: f32,
-        weight_scale: f32, seed: u64,
+        ni: usize,
+        nh: usize,
+        no: usize,
+        dt: f32,
+        tau_e: f32,
+        weight_scale: f32,
+        seed: u64,
         worker_id: usize,
     ) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
-        let weights: Vec<f32> = (0..ni * nh).map(|_| rng.gen_range(-weight_scale..weight_scale)).collect();
+        let weights: Vec<f32> = (0..ni * nh)
+            .map(|_| rng.gen_range(-weight_scale..weight_scale))
+            .collect();
         let w_out: Vec<f32> = (0..nh * no).map(|_| rng.gen_range(-0.1..0.1)).collect();
         // Unique seed per worker for Poisson noise — ensures Hogwild! workers
         // see independent stochasticity, not identical noise patterns.
@@ -53,7 +59,8 @@ impl WorkerState {
         Self {
             eprop: EPropIzhikevichMulti::new(ni, nh, dt, tau_e),
             rng,
-            weights, w_out,
+            weights,
+            w_out,
             bias_out: vec![0.0f32; no],
             z_pre: vec![0i32; ni],
             spikes: vec![0i32; nh],
@@ -71,7 +78,11 @@ impl WorkerState {
     fn poisson_step(&mut self, dt_sec: f32) {
         for (z, &rate) in self.z_pre.iter_mut().zip(self.rates.iter()) {
             let r: f32 = self.rng.gen();
-            *z = if r < (rate * dt_sec).clamp(0.0, 1.0) { 1 } else { 0 };
+            *z = if r < (rate * dt_sec).clamp(0.0, 1.0) {
+                1
+            } else {
+                0
+            };
         }
     }
 
@@ -101,11 +112,14 @@ pub struct EPropTrainer {
     /// Fixed feedback weights [no × nh]
     pub w_fb: Vec<f32>,
 
-    pub ni: usize, pub nh: usize, pub no: usize,
+    pub ni: usize,
+    pub nh: usize,
+    pub no: usize,
     pub n_steps: usize,
     pub poisson_max_hz: f32,
     pub dt_sec: f32,
-    pub lr_in: f32, pub lr_out: f32,
+    pub lr_in: f32,
+    pub lr_out: f32,
 
     pub workers: Vec<WorkerState>,
 }
@@ -116,12 +130,19 @@ impl EPropTrainer {
     /// All workers start with **identical** weights (same seed).
     /// `num_workers` — number of parallel workers (default CPU count).
     pub fn new(
-        ni: usize, nh: usize, no: usize,
-        n_steps: usize, poisson_max_hz: f32,
-        dt: f32, tau_e: f32,
-        lr_in: f32, lr_out: f32,
-        bias: f32, weight_scale: f32,
-        seed: u64, num_workers: usize,
+        ni: usize,
+        nh: usize,
+        no: usize,
+        n_steps: usize,
+        poisson_max_hz: f32,
+        dt: f32,
+        tau_e: f32,
+        lr_in: f32,
+        lr_out: f32,
+        bias: f32,
+        weight_scale: f32,
+        seed: u64,
+        num_workers: usize,
     ) -> Self {
         let nw = num_workers.max(1);
 
@@ -141,13 +162,19 @@ impl EPropTrainer {
         };
 
         Self {
-            weights, w_out,
+            weights,
+            w_out,
             bias_hidden: vec![bias; nh],
             bias_out: vec![0.0f32; no],
             w_fb,
-            ni, nh, no, n_steps, poisson_max_hz,
+            ni,
+            nh,
+            no,
+            n_steps,
+            poisson_max_hz,
             dt_sec: dt / 1000.0,
-            lr_in, lr_out,
+            lr_in,
+            lr_out,
             workers,
         }
     }
@@ -155,56 +182,101 @@ impl EPropTrainer {
     // ─── Process one image ─────────────────────────────
 
     /// Full forward + backward on one worker's own weight copy.
-    fn train_one(worker: &mut WorkerState, image: &[f32], target: i32,
-        bias_hidden: &[f32], w_fb: &[f32],
-        _ni: usize, nh: usize, no: usize,
-        n_steps: usize, poisson_max_hz: f32, dt_sec: f32,
-        lr_in: f32, lr_out: f32,
+    fn train_one(
+        worker: &mut WorkerState,
+        image: &[f32],
+        target: i32,
+        bias_hidden: &[f32],
+        w_fb: &[f32],
+        _ni: usize,
+        nh: usize,
+        no: usize,
+        n_steps: usize,
+        poisson_max_hz: f32,
+        dt_sec: f32,
+        lr_in: f32,
+        lr_out: f32,
     ) -> (f32, u32) {
         worker.reset_image();
-        for (r, &pix) in worker.rates.iter_mut().zip(image.iter()) { *r = pix * poisson_max_hz; }
+        for (r, &pix) in worker.rates.iter_mut().zip(image.iter()) {
+            *r = pix * poisson_max_hz;
+        }
 
         for _ in 0..n_steps {
             worker.poisson_step(dt_sec);
-            let sc = worker.eprop.step(&worker.weights, &worker.z_pre, bias_hidden, &mut worker.spikes);
+            let sc = worker.eprop.step(
+                &worker.weights,
+                &worker.z_pre,
+                bias_hidden,
+                &mut worker.spikes,
+            );
             if sc > 0 {
-                for (hc, &sp) in worker.hidden_count.iter_mut().zip(worker.spikes.iter()) { *hc += sp; }
+                for (hc, &sp) in worker.hidden_count.iter_mut().zip(worker.spikes.iter()) {
+                    *hc += sp;
+                }
             }
         }
 
-        for j in 0..nh { worker.hc_f32[j] = worker.hidden_count[j] as f32; }
+        for j in 0..nh {
+            worker.hc_f32[j] = worker.hidden_count[j] as f32;
+        }
         for k in 0..no {
             let mut sum = worker.bias_out[k];
-            for j in 0..nh { sum += worker.hc_f32[j] * worker.w_out[j * no + k]; }
+            for j in 0..nh {
+                sum += worker.hc_f32[j] * worker.w_out[j * no + k];
+            }
             worker.logits[k] = sum;
         }
 
-        let max_l = worker.logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let max_l = worker
+            .logits
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut exp_sum = 0.0f32;
-        for (e, &l) in worker.exps.iter_mut().zip(worker.logits.iter()) { *e = (l - max_l).exp(); exp_sum += *e; }
+        for (e, &l) in worker.exps.iter_mut().zip(worker.logits.iter()) {
+            *e = (l - max_l).exp();
+            exp_sum += *e;
+        }
         let inv = 1.0 / (exp_sum + 1e-30);
-        for (p, &e) in worker.probs.iter_mut().zip(worker.exps.iter()) { *p = e * inv; }
+        for (p, &e) in worker.probs.iter_mut().zip(worker.exps.iter()) {
+            *p = e * inv;
+        }
 
         let loss = -(worker.probs[target as usize].max(1e-30)).ln();
-        let predicted = worker.probs.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less)).map(|(i, _)| i).unwrap_or(0);
+        let predicted = worker
+            .probs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
 
-        for k in 0..no { worker.error[k] = -worker.probs[k]; }
+        for k in 0..no {
+            worker.error[k] = -worker.probs[k];
+        }
         worker.error[target as usize] += 1.0;
 
         // BUGFIX: gradient clipping for output weights
         const GRAD_CLIP: f32 = 1.0;
         for k in 0..no {
             let ek = worker.error[k].clamp(-GRAD_CLIP, GRAD_CLIP);
-            for j in 0..nh { worker.w_out[j * no + k] += lr_out * worker.hc_f32[j] * ek; }
+            for j in 0..nh {
+                worker.w_out[j * no + k] += lr_out * worker.hc_f32[j] * ek;
+            }
             worker.bias_out[k] += lr_out * ek;
         }
 
         for j in 0..nh {
             let mut sum = 0.0f32;
-            for k in 0..no { sum += w_fb[k * nh + j] * worker.error[k]; }
+            for k in 0..no {
+                sum += w_fb[k * nh + j] * worker.error[k];
+            }
             worker.learning_signals[j] = sum;
         }
-        worker.eprop.update_weights_multi(&mut worker.weights, &worker.learning_signals, lr_in);
+        worker
+            .eprop
+            .update_weights_multi(&mut worker.weights, &worker.learning_signals, lr_in);
 
         (loss, if predicted == target as usize { 1 } else { 0 })
     }
@@ -241,32 +313,59 @@ impl EPropTrainer {
     /// Returns (avg_loss, correct_count).
     pub fn train_batch(&mut self, images: &[f32], targets: &[i32]) -> (f32, u32) {
         let n = targets.len();
-        if n == 0 { return (0.0, 0); }
+        if n == 0 {
+            return (0.0, 0);
+        }
         let nw = self.workers.len();
         let chunk_size = n.div_ceil(nw);
 
         let bias_hidden = &*self.bias_hidden;
         let w_fb = &*self.w_fb;
-        let ni = self.ni; let nh = self.nh; let no = self.no;
-        let ns = self.n_steps; let pmhz = self.poisson_max_hz; let dt = self.dt_sec;
-        let lri = self.lr_in; let lro = self.lr_out;
+        let ni = self.ni;
+        let nh = self.nh;
+        let no = self.no;
+        let ns = self.n_steps;
+        let pmhz = self.poisson_max_hz;
+        let dt = self.dt_sec;
+        let lri = self.lr_in;
+        let lro = self.lr_out;
 
-        let results: Vec<(f32, u32)> = self.workers.par_iter_mut().enumerate().map(|(wi, worker)| {
-            let start = wi * chunk_size;
-            let end = (start + chunk_size).min(n);
-            if start >= end { return (0.0, 0); }
+        let results: Vec<(f32, u32)> = self
+            .workers
+            .par_iter_mut()
+            .enumerate()
+            .map(|(wi, worker)| {
+                let start = wi * chunk_size;
+                let end = (start + chunk_size).min(n);
+                if start >= end {
+                    return (0.0, 0);
+                }
 
-            let mut loss_sum = 0.0f32;
-            let mut corr_sum = 0u32;
-            for img_idx in start..end {
-                let img = &images[img_idx * ni..(img_idx + 1) * ni];
-                let (l, c) = Self::train_one(worker, img, targets[img_idx],
-                    bias_hidden, w_fb, ni, nh, no, ns, pmhz, dt, lri, lro);
-                loss_sum += l;
-                corr_sum += c;
-            }
-            (loss_sum, corr_sum)
-        }).collect();
+                let mut loss_sum = 0.0f32;
+                let mut corr_sum = 0u32;
+                for img_idx in start..end {
+                    let img = &images[img_idx * ni..(img_idx + 1) * ni];
+                    let (l, c) = Self::train_one(
+                        worker,
+                        img,
+                        targets[img_idx],
+                        bias_hidden,
+                        w_fb,
+                        ni,
+                        nh,
+                        no,
+                        ns,
+                        pmhz,
+                        dt,
+                        lri,
+                        lro,
+                    );
+                    loss_sum += l;
+                    corr_sum += c;
+                }
+                (loss_sum, corr_sum)
+            })
+            .collect();
 
         // Serial: average diverged worker weights
         self.sync_weights();
@@ -281,17 +380,31 @@ impl EPropTrainer {
     /// Single-worker sequential training for comparison.
     pub fn train_sequential(&mut self, images: &[f32], targets: &[i32]) -> (f32, u32) {
         let n = targets.len();
-        if n == 0 { return (0.0, 0); }
+        if n == 0 {
+            return (0.0, 0);
+        }
         let worker = &mut self.workers[0];
-        let mut tl = 0.0f32; let mut tc = 0u32;
+        let mut tl = 0.0f32;
+        let mut tc = 0u32;
         for img_idx in 0..n {
             let img = &images[img_idx * self.ni..(img_idx + 1) * self.ni];
-            let (l, c) = Self::train_one(worker, img, targets[img_idx],
-                &self.bias_hidden, &self.w_fb,
-                self.ni, self.nh, self.no,
-                self.n_steps, self.poisson_max_hz, self.dt_sec,
-                self.lr_in, self.lr_out);
-            tl += l; tc += c;
+            let (l, c) = Self::train_one(
+                worker,
+                img,
+                targets[img_idx],
+                &self.bias_hidden,
+                &self.w_fb,
+                self.ni,
+                self.nh,
+                self.no,
+                self.n_steps,
+                self.poisson_max_hz,
+                self.dt_sec,
+                self.lr_in,
+                self.lr_out,
+            );
+            tl += l;
+            tc += c;
         }
         self.weights.copy_from_slice(&worker.weights);
         self.w_out.copy_from_slice(&worker.w_out);
@@ -302,24 +415,43 @@ impl EPropTrainer {
     // ─── Inference ────────────────────────────────────
 
     /// Number of parallel workers.
-    pub fn num_workers(&self) -> usize { self.workers.len() }
+    pub fn num_workers(&self) -> usize {
+        self.workers.len()
+    }
 
     pub fn predict(&mut self, image: &[f32]) -> i32 {
         let w = &mut self.workers[0];
         w.reset_image();
-        for (r, &pix) in w.rates.iter_mut().zip(image.iter()) { *r = pix * self.poisson_max_hz; }
+        for (r, &pix) in w.rates.iter_mut().zip(image.iter()) {
+            *r = pix * self.poisson_max_hz;
+        }
         for _ in 0..self.n_steps {
             w.poisson_step(self.dt_sec);
-            let sc = w.eprop.step(&w.weights, &w.z_pre, &self.bias_hidden, &mut w.spikes);
-            if sc > 0 { for (hc, &sp) in w.hidden_count.iter_mut().zip(w.spikes.iter()) { *hc += sp; } }
+            let sc = w
+                .eprop
+                .step(&w.weights, &w.z_pre, &self.bias_hidden, &mut w.spikes);
+            if sc > 0 {
+                for (hc, &sp) in w.hidden_count.iter_mut().zip(w.spikes.iter()) {
+                    *hc += sp;
+                }
+            }
         }
-        for j in 0..self.nh { w.hc_f32[j] = w.hidden_count[j] as f32; }
+        for j in 0..self.nh {
+            w.hc_f32[j] = w.hidden_count[j] as f32;
+        }
         for k in 0..self.no {
             let mut sum = w.bias_out[k];
-            for j in 0..self.nh { sum += w.hc_f32[j] * w.w_out[j * self.no + k]; }
+            for j in 0..self.nh {
+                sum += w.hc_f32[j] * w.w_out[j * self.no + k];
+            }
             w.logits[k] = sum;
         }
-        w.logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less)).map(|(i, _)| i as i32).unwrap_or(0)
+        w.logits
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less))
+            .map(|(i, _)| i as i32)
+            .unwrap_or(0)
     }
 }
 
@@ -333,7 +465,9 @@ mod tests {
 
     #[test]
     fn test_init() {
-        let t = EPropTrainer::new(100, 32, 10, 10, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.5, 42, 4);
+        let t = EPropTrainer::new(
+            100, 32, 10, 10, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.5, 42, 4,
+        );
         assert_eq!(t.workers.len(), 4);
         assert_eq!(t.bias_hidden[0], 3.0);
     }
@@ -349,11 +483,15 @@ mod tests {
 
     #[test]
     fn test_sequential_training() {
-        let mut t = EPropTrainer::new(784, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.357, 42, 2);
+        let mut t = EPropTrainer::new(
+            784, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.357, 42, 2,
+        );
         let mut imgs = vec![0.0f32; 16 * 784];
         let mut tgts = vec![0i32; 16];
         for i in 0..16 {
-            for j in 0..784 { imgs[i * 784 + j] = rand::random::<f32>() * 0.3; }
+            for j in 0..784 {
+                imgs[i * 784 + j] = rand::random::<f32>() * 0.3;
+            }
             tgts[i] = (i % 10) as i32;
         }
         let (loss, correct) = t.train_sequential(&imgs, &tgts);
@@ -363,11 +501,15 @@ mod tests {
 
     #[test]
     fn test_parallel_training() {
-        let mut t = EPropTrainer::new(784, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.357, 42, 4);
+        let mut t = EPropTrainer::new(
+            784, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.357, 42, 4,
+        );
         let mut imgs = vec![0.0f32; 32 * 784];
         let mut tgts = vec![0i32; 32];
         for i in 0..32 {
-            for j in 0..784 { imgs[i * 784 + j] = rand::random::<f32>() * 0.3; }
+            for j in 0..784 {
+                imgs[i * 784 + j] = rand::random::<f32>() * 0.3;
+            }
             tgts[i] = (i % 10) as i32;
         }
         let (loss, correct) = t.train_batch(&imgs, &tgts);
@@ -377,7 +519,9 @@ mod tests {
 
     #[test]
     fn test_empty_batch() {
-        let mut t = EPropTrainer::new(100, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.5, 42, 2);
+        let mut t = EPropTrainer::new(
+            100, 32, 10, 5, 200.0, 1.0, 30.0, 0.05, 0.02, 3.0, 0.5, 42, 2,
+        );
         let (loss, corr) = t.train_batch(&[], &[]);
         assert_eq!(loss, 0.0);
         assert_eq!(corr, 0);

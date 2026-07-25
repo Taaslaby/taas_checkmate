@@ -134,7 +134,12 @@ impl WorkingMemory {
 
     /// Recall a specific slot by index.
     pub fn recall(&self, slot: usize) -> Vec<f32> {
-        assert!(slot < self.n_slots, "slot {} out of range (n={})", slot, self.n_slots);
+        assert!(
+            slot < self.n_slots,
+            "slot {} out of range (n={})",
+            slot,
+            self.n_slots
+        );
         let off = slot * self.dim;
         self.buffer[off..off + self.dim].to_vec()
     }
@@ -146,7 +151,8 @@ impl WorkingMemory {
 
     /// Get the least-recently-used slot index.
     pub fn lru_slot(&self) -> usize {
-        self.ages.iter()
+        self.ages
+            .iter()
             .enumerate()
             .max_by_key(|(_, &age)| age)
             .map(|(i, _)| i)
@@ -197,10 +203,16 @@ impl WorkingMemory {
     }
 
     /// Get current step count.
-    pub fn step_count(&self) -> u64 { self.step }
+    pub fn step_count(&self) -> u64 {
+        self.step
+    }
 
-    pub fn n_slots(&self) -> usize { self.n_slots }
-    pub fn dim(&self) -> usize { self.dim }
+    pub fn n_slots(&self) -> usize {
+        self.n_slots
+    }
+    pub fn dim(&self) -> usize {
+        self.dim
+    }
 }
 
 #[cfg(test)]
@@ -238,7 +250,7 @@ mod tests {
         let v = vec![1.0; 4];
         wm.store(&v); // slot 0, age[0]=0, others=1
         wm.store(&v); // slot 1, age[1]=0, others age
-        // Slot 2 is oldest (never written)
+                      // Slot 2 is oldest (never written)
         assert_eq!(wm.lru_slot(), 2);
     }
 
@@ -250,7 +262,10 @@ mod tests {
         wm.store(&tiny);
         // Should not have written (norm < threshold)
         let recalled = wm.recall(0);
-        assert!(recalled.iter().all(|&x| x == 0.0), "should not store below gate threshold");
+        assert!(
+            recalled.iter().all(|&x| x == 0.0),
+            "should not store below gate threshold"
+        );
     }
 
     #[test]

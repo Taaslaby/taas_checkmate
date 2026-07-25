@@ -7,7 +7,10 @@ pub fn inspect_taas(path: &str) -> Result<String, String> {
     lines.push(format!(".taas archive: {}", path));
     lines.push(format!("   Version: {}", reader.manifest.version));
     lines.push(format!("   Created: {}", reader.manifest.created));
-    lines.push(format!("   Components: {}", reader.manifest.components.len()));
+    lines.push(format!(
+        "   Components: {}",
+        reader.manifest.components.len()
+    ));
     lines.push(String::new());
 
     for comp in &reader.manifest.components {
@@ -19,9 +22,14 @@ pub fn inspect_taas(path: &str) -> Result<String, String> {
         } else {
             format!("{} B", comp.size)
         };
-        lines.push(format!("   {:<25} {}  {:>8} {} {:?}",
-            comp.name, comp.component_type, size_str, comp.dtype, comp.shape));
-        lines.push(format!("   {:>29} offset={}  n_elems={}", "", comp.offset, n_elems));
+        lines.push(format!(
+            "   {:<25} {}  {:>8} {} {:?}",
+            comp.name, comp.component_type, size_str, comp.dtype, comp.shape
+        ));
+        lines.push(format!(
+            "   {:>29} offset={}  n_elems={}",
+            "", comp.offset, n_elems
+        ));
     }
 
     if !reader.manifest.metadata.is_empty() {

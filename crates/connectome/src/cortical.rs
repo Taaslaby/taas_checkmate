@@ -53,13 +53,25 @@ use std::collections::HashMap;
 /// Cortical layer identifier (L1–L6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum LayerId {
-    L1, L2, L3, L4, L5, L6,
+    L1,
+    L2,
+    L3,
+    L4,
+    L5,
+    L6,
 }
 
 impl LayerId {
     /// All 6 layers in ascending order.
     pub fn all() -> [LayerId; 6] {
-        [LayerId::L1, LayerId::L2, LayerId::L3, LayerId::L4, LayerId::L5, LayerId::L6]
+        [
+            LayerId::L1,
+            LayerId::L2,
+            LayerId::L3,
+            LayerId::L4,
+            LayerId::L5,
+            LayerId::L6,
+        ]
     }
 
     /// Index position 0–5.
@@ -166,14 +178,22 @@ pub struct LaminarRule {
 
 impl LaminarRule {
     pub fn new(
-        from: LayerId, to: LayerId, probability: f32,
-        w_min: f32, w_max: f32, nt_type: f32,
+        from: LayerId,
+        to: LayerId,
+        probability: f32,
+        w_min: f32,
+        w_max: f32,
+        nt_type: f32,
         proj: ProjectionType,
     ) -> Self {
         Self {
-            from_layer: from, to_layer: to,
-            probability, weight_range: (w_min, w_max), nt_type,
-            projection_type: proj, within_column: None,
+            from_layer: from,
+            to_layer: to,
+            probability,
+            weight_range: (w_min, w_max),
+            nt_type,
+            projection_type: proj,
+            within_column: None,
         }
     }
 
@@ -204,7 +224,12 @@ pub struct LayerAssignment {
 impl LayerAssignment {
     pub fn new(layer: Vec<LayerId>, column: Vec<usize>) -> Self {
         let n_neurons = layer.len().min(column.len());
-        Self { layer, column, n_neurons, n_columns: 1 }
+        Self {
+            layer,
+            column,
+            n_neurons,
+            n_columns: 1,
+        }
     }
 
     /// Get all neuron indices belonging to a specific layer and column.
@@ -254,7 +279,11 @@ impl LaminarConnectomeBuilder {
         for layer in LayerId::all() {
             map.insert(layer, n_per_layer);
         }
-        Self { n_columns, n_per_layer: map, rules: Vec::new() }
+        Self {
+            n_columns,
+            n_per_layer: map,
+            rules: Vec::new(),
+        }
     }
 
     /// Create with custom neurons per layer (some layers may have 0).
@@ -264,7 +293,11 @@ impl LaminarConnectomeBuilder {
         for layer in LayerId::all() {
             map.entry(layer).or_insert(0);
         }
-        Self { n_columns, n_per_layer: map, rules: Vec::new() }
+        Self {
+            n_columns,
+            n_per_layer: map,
+            rules: Vec::new(),
+        }
     }
 
     /// Add a laminar connection rule.
@@ -285,37 +318,149 @@ impl LaminarConnectomeBuilder {
     pub fn with_default_mammalian(self) -> Self {
         self.add_rules(&[
             // ── Within-column excitatory ──
-            LaminarRule::new(LayerId::L4,   LayerId::L4,   0.15, 0.3, 0.8,  1.0, ProjectionType::Recurrent)
-                .within_column(true),
-            LaminarRule::new(LayerId::L4,   LayerId::L2,   0.25, 0.4, 1.0,  1.0, ProjectionType::Feedforward)
-                .within_column(true),
-            LaminarRule::new(LayerId::L2,   LayerId::L2,   0.20, 0.3, 0.8,  1.0, ProjectionType::Recurrent)
-                .within_column(true),
-            LaminarRule::new(LayerId::L2,   LayerId::L5,   0.20, 0.5, 1.2,  1.0, ProjectionType::Feedforward)
-                .within_column(true),
-            LaminarRule::new(LayerId::L5,   LayerId::L5,   0.20, 0.4, 1.0,  1.0, ProjectionType::Recurrent)
-                .within_column(true),
-            LaminarRule::new(LayerId::L5,   LayerId::L6,   0.25, 0.5, 1.2,  1.0, ProjectionType::Feedforward)
-                .within_column(true),
-            LaminarRule::new(LayerId::L6,   LayerId::L4,   0.20, 0.3, 0.7,  1.0, ProjectionType::Feedback)
-                .within_column(true),
+            LaminarRule::new(
+                LayerId::L4,
+                LayerId::L4,
+                0.15,
+                0.3,
+                0.8,
+                1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L4,
+                LayerId::L2,
+                0.25,
+                0.4,
+                1.0,
+                1.0,
+                ProjectionType::Feedforward,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L2,
+                0.20,
+                0.3,
+                0.8,
+                1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L5,
+                0.20,
+                0.5,
+                1.2,
+                1.0,
+                ProjectionType::Feedforward,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L5,
+                0.20,
+                0.4,
+                1.0,
+                1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L6,
+                0.25,
+                0.5,
+                1.2,
+                1.0,
+                ProjectionType::Feedforward,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L6,
+                LayerId::L4,
+                0.20,
+                0.3,
+                0.7,
+                1.0,
+                ProjectionType::Feedback,
+            )
+            .within_column(true),
             // ── Within-column inhibitory (PV+ interneurons) ──
-            LaminarRule::new(LayerId::L4,   LayerId::L4,   0.08, 0.8, 1.5, -1.0, ProjectionType::Recurrent)
-                .within_column(true),
-            LaminarRule::new(LayerId::L2,   LayerId::L2,   0.08, 0.8, 1.5, -1.0, ProjectionType::Recurrent)
-                .within_column(true),
-            LaminarRule::new(LayerId::L5,   LayerId::L5,   0.06, 0.8, 1.5, -1.0, ProjectionType::Recurrent)
-                .within_column(true),
+            LaminarRule::new(
+                LayerId::L4,
+                LayerId::L4,
+                0.08,
+                0.8,
+                1.5,
+                -1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L2,
+                0.08,
+                0.8,
+                1.5,
+                -1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L5,
+                0.06,
+                0.8,
+                1.5,
+                -1.0,
+                ProjectionType::Recurrent,
+            )
+            .within_column(true),
             // ── Inter-columnar feedforward (lower→higher area) ──
-            LaminarRule::new(LayerId::L2,   LayerId::L4,   0.10, 0.3, 0.7,  1.0, ProjectionType::Feedforward)
-                .within_column(false),
-            LaminarRule::new(LayerId::L5,   LayerId::L4,   0.08, 0.3, 0.7,  1.0, ProjectionType::Feedforward)
-                .within_column(false),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L4,
+                0.10,
+                0.3,
+                0.7,
+                1.0,
+                ProjectionType::Feedforward,
+            )
+            .within_column(false),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L4,
+                0.08,
+                0.3,
+                0.7,
+                1.0,
+                ProjectionType::Feedforward,
+            )
+            .within_column(false),
             // ── Inter-columnar feedback (higher→lower area) ──
-            LaminarRule::new(LayerId::L5,   LayerId::L1,   0.06, 0.2, 0.5,  1.0, ProjectionType::Feedback)
-                .within_column(false),
-            LaminarRule::new(LayerId::L6,   LayerId::L1,   0.06, 0.2, 0.5,  1.0, ProjectionType::Feedback)
-                .within_column(false),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L1,
+                0.06,
+                0.2,
+                0.5,
+                1.0,
+                ProjectionType::Feedback,
+            )
+            .within_column(false),
+            LaminarRule::new(
+                LayerId::L6,
+                LayerId::L1,
+                0.06,
+                0.2,
+                0.5,
+                1.0,
+                ProjectionType::Feedback,
+            )
+            .within_column(false),
         ])
     }
 
@@ -328,16 +473,64 @@ impl LaminarConnectomeBuilder {
     pub fn with_default_insect(self) -> Self {
         self.add_rules(&[
             // PN → KC (L4 → L2/3)
-            LaminarRule::new(LayerId::L4,   LayerId::L2,   0.05, 0.3, 0.8,  1.0, ProjectionType::Feedforward),
+            LaminarRule::new(
+                LayerId::L4,
+                LayerId::L2,
+                0.05,
+                0.3,
+                0.8,
+                1.0,
+                ProjectionType::Feedforward,
+            ),
             // KC → KC recurrent (L2/3 → L2/3)
-            LaminarRule::new(LayerId::L2,   LayerId::L2,   0.10, 0.2, 0.6,  1.0, ProjectionType::Recurrent),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L2,
+                0.10,
+                0.2,
+                0.6,
+                1.0,
+                ProjectionType::Recurrent,
+            ),
             // KC → MBON (L2/3 → L5)
-            LaminarRule::new(LayerId::L2,   LayerId::L5,   0.15, 0.4, 1.0,  1.0, ProjectionType::Feedforward),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L5,
+                0.15,
+                0.4,
+                1.0,
+                1.0,
+                ProjectionType::Feedforward,
+            ),
             // MBON → MBON recurrent (L5 → L5)
-            LaminarRule::new(LayerId::L5,   LayerId::L5,   0.15, 0.3, 0.8,  1.0, ProjectionType::Recurrent),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L5,
+                0.15,
+                0.3,
+                0.8,
+                1.0,
+                ProjectionType::Recurrent,
+            ),
             // Local inhibition
-            LaminarRule::new(LayerId::L2,   LayerId::L2,   0.05, 0.5, 1.5, -1.0, ProjectionType::Recurrent),
-            LaminarRule::new(LayerId::L5,   LayerId::L5,   0.05, 0.5, 1.5, -1.0, ProjectionType::Recurrent),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L2,
+                0.05,
+                0.5,
+                1.5,
+                -1.0,
+                ProjectionType::Recurrent,
+            ),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L5,
+                0.05,
+                0.5,
+                1.5,
+                -1.0,
+                ProjectionType::Recurrent,
+            ),
         ])
     }
 
@@ -353,7 +546,9 @@ impl LaminarConnectomeBuilder {
         let per_column: usize = self.n_per_layer.values().sum();
         let mut offset = 0usize;
         for l in LayerId::all() {
-            if l == layer { break; }
+            if l == layer {
+                break;
+            }
             offset += self.n_per_layer[&l];
         }
         column * per_column + offset + local
@@ -396,21 +591,27 @@ impl LaminarConnectomeBuilder {
         for rule in &self.rules {
             let from_n = self.n_per_layer[&rule.from_layer];
             let to_n = self.n_per_layer[&rule.to_layer];
-            if from_n == 0 || to_n == 0 { continue; }
+            if from_n == 0 || to_n == 0 {
+                continue;
+            }
 
             let within_col = match rule.within_column {
-        Some(true)  => true,
-        Some(false) => false,
-        None        => { // both
+                Some(true) => true,
+                Some(false) => false,
+                None => {
+                    // both
                     for pre_col in 0..self.n_columns {
                         for post_col in 0..self.n_columns {
                             for pre_local in 0..from_n {
                                 let pre_idx = self.global_idx(pre_col, rule.from_layer, pre_local);
                                 for post_local in 0..to_n {
-                                    let post_idx = self.global_idx(post_col, rule.to_layer, post_local);
+                                    let post_idx =
+                                        self.global_idx(post_col, rule.to_layer, post_local);
                                     let rand = rng.next_f32();
                                     if rand < rule.probability {
-                                        let w = rule.weight_range.0 + rng.next_f32() * (rule.weight_range.1 - rule.weight_range.0);
+                                        let w = rule.weight_range.0
+                                            + rng.next_f32()
+                                                * (rule.weight_range.1 - rule.weight_range.0);
                                         scratch[pre_idx].push((post_idx, w));
                                     }
                                 }
@@ -437,7 +638,8 @@ impl LaminarConnectomeBuilder {
                             let post_idx = self.global_idx(post_col, rule.to_layer, post_local);
                             let rand = rng.next_f32();
                             if rand < rule.probability {
-                                let w = rule.weight_range.0 + rng.next_f32() * (rule.weight_range.1 - rule.weight_range.0);
+                                let w = rule.weight_range.0
+                                    + rng.next_f32() * (rule.weight_range.1 - rule.weight_range.0);
                                 scratch[pre_idx].push((post_idx, w));
                             }
                         }
@@ -491,17 +693,13 @@ impl LaminarConnectomeBuilder {
                 .filter(|&i| layer_assign[i] == layer)
                 .collect();
             if !indices.is_empty() {
-                groups.push(crate::data::NeuronGroup {
-                    name, indices,
-                });
+                groups.push(crate::data::NeuronGroup { name, indices });
             }
         }
 
         // Per-column groups
         for col in 0..self.n_columns {
-            let indices: Vec<usize> = (0..n_neurons)
-                .filter(|&i| col_assign[i] == col)
-                .collect();
+            let indices: Vec<usize> = (0..n_neurons).filter(|&i| col_assign[i] == col).collect();
             if !indices.is_empty() {
                 groups.push(crate::data::NeuronGroup {
                     name: format!("col_{col}"),
@@ -534,7 +732,11 @@ impl LaminarConnectomeBuilder {
     /// Compute laminar connectivity statistics.
     ///
     /// Analyzes FF/FB/LAT/REC projection counts and builds a layer×layer matrix.
-    pub fn compute_stats(&self, connectome: &ConnectomeData, assign: &LayerAssignment) -> LayerStats {
+    pub fn compute_stats(
+        &self,
+        connectome: &ConnectomeData,
+        assign: &LayerAssignment,
+    ) -> LayerStats {
         let n_neurons = connectome.n_neurons;
         let n_layers = 6;
 
@@ -550,7 +752,9 @@ impl LaminarConnectomeBuilder {
         // Projection type matrix [4×6×6]
         let mut proj_matrix = vec![0usize; 4 * n_layers * n_layers];
 
-        let proj_map: HashMap<(LayerId, LayerId), ProjectionType> = self.rules.iter()
+        let proj_map: HashMap<(LayerId, LayerId), ProjectionType> = self
+            .rules
+            .iter()
             .map(|r| ((r.from_layer, r.to_layer), r.projection_type))
             .collect();
 
@@ -558,10 +762,13 @@ impl LaminarConnectomeBuilder {
             let from_layer = assign.layer[pre];
             let from_col = assign.column[pre];
             let start = connectome.row_ptr[pre].max(0) as usize;
-            let end = (connectome.row_ptr.get(pre + 1).copied().unwrap_or(0) as usize).min(connectome.col_indices.len());
+            let end = (connectome.row_ptr.get(pre + 1).copied().unwrap_or(0) as usize)
+                .min(connectome.col_indices.len());
             for idx in start..end {
                 let post = connectome.col_indices[idx].max(0) as usize;
-                if post >= n_neurons { continue; }
+                if post >= n_neurons {
+                    continue;
+                }
                 let to_layer = assign.layer[post];
                 let to_col = assign.column[post];
 
@@ -574,7 +781,8 @@ impl LaminarConnectomeBuilder {
                         ProjectionType::Recurrent
                     } else {
                         // Within column, different layers — determine from rules
-                        proj_map.get(&(from_layer, to_layer))
+                        proj_map
+                            .get(&(from_layer, to_layer))
                             .copied()
                             .unwrap_or(ProjectionType::Lateral)
                     }
@@ -606,7 +814,10 @@ impl LaminarConnectomeBuilder {
 
         LayerStats {
             total_synapses: total,
-            ff_count, fb_count, lat_count, rec_count,
+            ff_count,
+            fb_count,
+            lat_count,
+            rec_count,
             layer_matrix,
             proj_matrix,
             n_layers,
@@ -619,11 +830,15 @@ impl LaminarConnectomeBuilder {
 // ═══════════════════════════════════════════════════════════
 
 fn find_ff_rule(rules: &[LaminarRule], from: LayerId, to: LayerId) -> bool {
-    rules.iter().any(|r| r.from_layer == from && r.to_layer == to && r.projection_type == ProjectionType::Feedforward)
+    rules.iter().any(|r| {
+        r.from_layer == from && r.to_layer == to && r.projection_type == ProjectionType::Feedforward
+    })
 }
 
 fn find_fb_rule(rules: &[LaminarRule], from: LayerId, to: LayerId) -> bool {
-    rules.iter().any(|r| r.from_layer == from && r.to_layer == to && r.projection_type == ProjectionType::Feedback)
+    rules.iter().any(|r| {
+        r.from_layer == from && r.to_layer == to && r.projection_type == ProjectionType::Feedback
+    })
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -652,25 +867,33 @@ pub struct LayerStats {
 impl LayerStats {
     /// Feedforward / Feedback ratio.
     pub fn ff_fb_ratio(&self) -> f32 {
-        if self.fb_count == 0 { return f32::INFINITY; }
+        if self.fb_count == 0 {
+            return f32::INFINITY;
+        }
         self.ff_count as f32 / self.fb_count as f32
     }
 
     /// Fraction of synapses that are recurrent (local).
     pub fn recurrent_fraction(&self) -> f32 {
-        if self.total_synapses == 0 { return 0.0; }
+        if self.total_synapses == 0 {
+            return 0.0;
+        }
         self.rec_count as f32 / self.total_synapses as f32
     }
 
     /// Fraction of synapses that are FF.
     pub fn ff_fraction(&self) -> f32 {
-        if self.total_synapses == 0 { return 0.0; }
+        if self.total_synapses == 0 {
+            return 0.0;
+        }
         self.ff_count as f32 / self.total_synapses as f32
     }
 
     /// Fraction of synapses that are FB.
     pub fn fb_fraction(&self) -> f32 {
-        if self.total_synapses == 0 { return 0.0; }
+        if self.total_synapses == 0 {
+            return 0.0;
+        }
         self.fb_count as f32 / self.total_synapses as f32
     }
 
@@ -683,7 +906,9 @@ impl LayerStats {
     pub fn format_matrix(&self) -> String {
         let labels = ["L1", "L2", "L3", "L4", "L5", "L6"];
         let mut s = String::from("Layer→Layer matrix:\n     ");
-        for lbl in &labels { s.push_str(&format!("{lbl:>6}")); }
+        for lbl in &labels {
+            s.push_str(&format!("{lbl:>6}"));
+        }
         s.push('\n');
         for (fi, &flbl) in labels.iter().enumerate() {
             s.push_str(&format!("{flbl:>4} ",));
@@ -700,11 +925,18 @@ impl LayerStats {
     pub fn format_proj_counts(&self) -> String {
         format!(
             "FF={} ({:.1}%) FB={} ({:.1}%) LAT={} ({:.1}%) REC={} ({:.1}%)",
-            self.ff_count, self.ff_fraction() * 100.0,
-            self.fb_count, self.fb_fraction() * 100.0,
+            self.ff_count,
+            self.ff_fraction() * 100.0,
+            self.fb_count,
+            self.fb_fraction() * 100.0,
             self.lat_count,
-            if self.total_synapses > 0 { self.lat_count as f32 / self.total_synapses as f32 * 100.0 } else { 0.0 },
-            self.rec_count, self.recurrent_fraction() * 100.0,
+            if self.total_synapses > 0 {
+                self.lat_count as f32 / self.total_synapses as f32 * 100.0
+            } else {
+                0.0
+            },
+            self.rec_count,
+            self.recurrent_fraction() * 100.0,
         )
     }
 }
@@ -724,7 +956,10 @@ impl Lcg32 {
     #[inline]
     fn next_u32(&mut self) -> u32 {
         // MMIX LCG by Knuth
-        self.0 = self.0.wrapping_mul(6364136223846793005u64 as u32).wrapping_add(1442695040888963407u64 as u32);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005u64 as u32)
+            .wrapping_add(1442695040888963407u64 as u32);
         self.0
     }
 
@@ -744,8 +979,7 @@ mod tests {
 
     #[test]
     fn test_basic_single_column() {
-        let builder = LaminarConnectomeBuilder::new(1, 4)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(1, 4).with_default_mammalian();
         let n = builder.total_neurons();
         assert_eq!(n, 24); // 1 col × 6 layers × 4 neurons
 
@@ -766,8 +1000,7 @@ mod tests {
 
     #[test]
     fn test_multi_column() {
-        let builder = LaminarConnectomeBuilder::new(3, 3)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(3, 3).with_default_mammalian();
         let n = builder.total_neurons();
         assert_eq!(n, 54); // 3 cols × 6 layers × 3 neurons
 
@@ -792,29 +1025,40 @@ mod tests {
 
     #[test]
     fn test_deterministic_build() {
-        let builder = LaminarConnectomeBuilder::new(2, 5)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(2, 5).with_default_mammalian();
 
         let (conn1, _) = builder.build(42);
         let (conn2, _) = builder.build(42);
         let (conn3, _) = builder.build(99); // different seed
 
         // Same seed → identical connectome
-        assert_eq!(conn1.n_synapses, conn2.n_synapses, "Same seed should produce same synapse count");
-        assert_eq!(conn1.values, conn2.values, "Same seed should produce identical weights");
+        assert_eq!(
+            conn1.n_synapses, conn2.n_synapses,
+            "Same seed should produce same synapse count"
+        );
+        assert_eq!(
+            conn1.values, conn2.values,
+            "Same seed should produce identical weights"
+        );
 
         // Different seed → different connectome (almost certainly)
         if conn1.n_synapses == conn3.n_synapses {
             // May be same by coincidence, but values should differ with high probability
-            let all_same = conn1.values.iter().zip(conn3.values.iter()).all(|(a, b)| (a - b).abs() < 1e-6);
-            assert!(!all_same, "Different seeds should produce different weights (with high probability)");
+            let all_same = conn1
+                .values
+                .iter()
+                .zip(conn3.values.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-6);
+            assert!(
+                !all_same,
+                "Different seeds should produce different weights (with high probability)"
+            );
         }
     }
 
     #[test]
     fn test_layer_stats() {
-        let builder = LaminarConnectomeBuilder::new(2, 4)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(2, 4).with_default_mammalian();
         let (conn, assign) = builder.build(42);
         let stats = builder.compute_stats(&conn, &assign);
 
@@ -826,13 +1070,16 @@ mod tests {
         assert!(stats.total_synapses > 0);
 
         // Recurrent fraction should be significant (local connections dominate)
-        assert!(stats.recurrent_fraction() > 0.25, "Recurrent fraction {:.2} should be >25%", stats.recurrent_fraction());
+        assert!(
+            stats.recurrent_fraction() > 0.25,
+            "Recurrent fraction {:.2} should be >25%",
+            stats.recurrent_fraction()
+        );
     }
 
     #[test]
     fn test_insect_default() {
-        let builder = LaminarConnectomeBuilder::new(1, 6)
-            .with_default_insect();
+        let builder = LaminarConnectomeBuilder::new(1, 6).with_default_insect();
         let n = builder.total_neurons();
         assert_eq!(n, 36); // 1 col × 6 layers × 6 neurons
 
@@ -850,14 +1097,18 @@ mod tests {
 
     #[test]
     fn test_layer_assignment_queries() {
-        let builder = LaminarConnectomeBuilder::new(2, 3)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(2, 3).with_default_mammalian();
         let (_, assign) = builder.build(7);
 
         // All 6 layers present
         for layer in LayerId::all() {
             let neurons = assign.neurons_in_layer(layer);
-            assert_eq!(neurons.len(), 6, "Layer {:?} should have 6 neurons across 2 columns", layer);
+            assert_eq!(
+                neurons.len(),
+                6,
+                "Layer {:?} should have 6 neurons across 2 columns",
+                layer
+            );
         }
 
         // Layer×Column queries
@@ -869,8 +1120,7 @@ mod tests {
 
     #[test]
     fn test_connectome_save_load_roundtrip() {
-        let builder = LaminarConnectomeBuilder::new(2, 4)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(2, 4).with_default_mammalian();
         let (conn, _) = builder.build(42);
 
         // Save
@@ -890,12 +1140,15 @@ mod tests {
 
     #[test]
     fn test_neuron_group_sizes() {
-        let builder = LaminarConnectomeBuilder::new(2, 5)
-            .with_default_mammalian();
+        let builder = LaminarConnectomeBuilder::new(2, 5).with_default_mammalian();
         let (conn, _) = builder.build(42);
 
         // Should have 6 layer groups + 2 column groups = 8 groups
-        assert!(conn.groups.len() >= 8, "Should have at least 8 groups, got {}", conn.groups.len());
+        assert!(
+            conn.groups.len() >= 8,
+            "Should have at least 8 groups, got {}",
+            conn.groups.len()
+        );
 
         // Check specific layer group
         let l4 = conn.group("layer_L4").expect("Should have layer_L4 group");
@@ -905,9 +1158,9 @@ mod tests {
     #[test]
     fn test_custom_layer_sizes() {
         let mut npl = HashMap::new();
-        npl.insert(LayerId::L2, 10);  // only L2/3 layer
-        npl.insert(LayerId::L5, 8);   // and L5
-        // Other layers default to 0
+        npl.insert(LayerId::L2, 10); // only L2/3 layer
+        npl.insert(LayerId::L5, 8); // and L5
+                                    // Other layers default to 0
 
         let builder = LaminarConnectomeBuilder::with_layer_sizes(1, npl);
         let n = builder.total_neurons();
@@ -915,12 +1168,36 @@ mod tests {
 
         // Need at least some rules that match existing layers
         let builder = builder.add_rules(&[
-            LaminarRule::new(LayerId::L2, LayerId::L2, 0.2, 0.3, 0.8, 1.0, ProjectionType::Recurrent),
-            LaminarRule::new(LayerId::L2, LayerId::L5, 0.3, 0.5, 1.0, 1.0, ProjectionType::Feedforward),
-            LaminarRule::new(LayerId::L5, LayerId::L5, 0.2, 0.4, 0.8, 1.0, ProjectionType::Recurrent),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L2,
+                0.2,
+                0.3,
+                0.8,
+                1.0,
+                ProjectionType::Recurrent,
+            ),
+            LaminarRule::new(
+                LayerId::L2,
+                LayerId::L5,
+                0.3,
+                0.5,
+                1.0,
+                1.0,
+                ProjectionType::Feedforward,
+            ),
+            LaminarRule::new(
+                LayerId::L5,
+                LayerId::L5,
+                0.2,
+                0.4,
+                0.8,
+                1.0,
+                ProjectionType::Recurrent,
+            ),
         ]);
 
-        let (conn, assign) = builder.build(1);
+        let (conn, _assign) = builder.build(1);
         assert_eq!(conn.n_neurons, 18);
         assert!(conn.n_synapses > 0);
 

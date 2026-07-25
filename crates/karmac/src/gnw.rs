@@ -45,16 +45,40 @@ impl GlobalWorkspace {
             .map(|_| rng.gen::<f32>() * 2.0 * bc_scale - bc_scale)
             .collect();
 
-        Self { gate_w, broadcast_w, n: n_neurons, ws: workspace_size, delta_buf: vec![0.0; n_neurons] }
+        Self {
+            gate_w,
+            broadcast_w,
+            n: n_neurons,
+            ws: workspace_size,
+            delta_buf: vec![0.0; n_neurons],
+        }
     }
 
     /// Create GNW with explicit weight matrices.
     /// `n` = number of neurons, `ws` = workspace size.
     /// `gate_w` must be `[ws × n]`, `broadcast_w` must be `[n × ws]`.
     pub fn from_weights(gate_w: Vec<f32>, broadcast_w: Vec<f32>, n: usize, ws: usize) -> Self {
-        assert_eq!(gate_w.len(), ws * n, "gate_w must be [ws × n] = {} × {}", ws, n);
-        assert_eq!(broadcast_w.len(), n * ws, "broadcast_w must be [n × ws] = {} × {}", n, ws);
-        Self { gate_w, broadcast_w, n, ws, delta_buf: vec![0.0; n] }
+        assert_eq!(
+            gate_w.len(),
+            ws * n,
+            "gate_w must be [ws × n] = {} × {}",
+            ws,
+            n
+        );
+        assert_eq!(
+            broadcast_w.len(),
+            n * ws,
+            "broadcast_w must be [n × ws] = {} × {}",
+            n,
+            ws
+        );
+        Self {
+            gate_w,
+            broadcast_w,
+            n,
+            ws,
+            delta_buf: vec![0.0; n],
+        }
     }
 
     /// Forward pass: `r += broadcast(softmax(gate(r)))`
@@ -98,11 +122,19 @@ impl GlobalWorkspace {
         }
     }
 
-    pub fn n_neurons(&self) -> usize { self.n }
-    pub fn workspace_size(&self) -> usize { self.ws }
+    pub fn n_neurons(&self) -> usize {
+        self.n
+    }
+    pub fn workspace_size(&self) -> usize {
+        self.ws
+    }
 
-    pub fn gate_weights(&self) -> &[f32] { &self.gate_w }
-    pub fn broadcast_weights(&self) -> &[f32] { &self.broadcast_w }
+    pub fn gate_weights(&self) -> &[f32] {
+        &self.gate_w
+    }
+    pub fn broadcast_weights(&self) -> &[f32] {
+        &self.broadcast_w
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +158,8 @@ mod tests {
         gnw.forward(&mut r);
         assert_eq!(r.len(), 4);
         // Should not NaN
-        for &v in &r { assert!(!v.is_nan()); }
+        for &v in &r {
+            assert!(!v.is_nan());
+        }
     }
 }

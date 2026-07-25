@@ -17,26 +17,45 @@
 //!
 //! + 6 отдельных Vec для final state.
 
-use crate::t3::TriOscillator;
 use crate::t3::backend::T3Backend;
+use crate::t3::TriOscillator;
 
 /// Offsets within flat Vec
 pub const OFF_TH1: usize = 0;
-pub fn off_th2(n_steps: usize, n: usize) -> usize { n_steps * n }
-pub fn off_th3(n_steps: usize, n: usize) -> usize { 2 * n_steps * n }
-pub fn off_r1(n_steps: usize, n: usize) -> usize { 3 * n_steps * n }
-pub fn off_r2(n_steps: usize, n: usize) -> usize { 4 * n_steps * n }
-pub fn off_r3(n_steps: usize, n: usize) -> usize { 5 * n_steps * n }
-pub fn off_drive1(n_steps: usize, n: usize) -> usize { 6 * n_steps * n }
-pub fn off_drive2(n_steps: usize, n: usize) -> usize { 7 * n_steps * n }
-pub fn off_drive3(n_steps: usize, n: usize) -> usize { 8 * n_steps * n }
+pub fn off_th2(n_steps: usize, n: usize) -> usize {
+    n_steps * n
+}
+pub fn off_th3(n_steps: usize, n: usize) -> usize {
+    2 * n_steps * n
+}
+pub fn off_r1(n_steps: usize, n: usize) -> usize {
+    3 * n_steps * n
+}
+pub fn off_r2(n_steps: usize, n: usize) -> usize {
+    4 * n_steps * n
+}
+pub fn off_r3(n_steps: usize, n: usize) -> usize {
+    5 * n_steps * n
+}
+pub fn off_drive1(n_steps: usize, n: usize) -> usize {
+    6 * n_steps * n
+}
+pub fn off_drive2(n_steps: usize, n: usize) -> usize {
+    7 * n_steps * n
+}
+pub fn off_drive3(n_steps: usize, n: usize) -> usize {
+    8 * n_steps * n
+}
 
 /// Pre-allocated buffer for PST matrix (avoids per-step Vec allocations).
 pub struct PstMatrixBuf {
     pub data: Vec<f32>,
-    pub sin1: Vec<f32>, pub cos1: Vec<f32>,
-    pub sin2: Vec<f32>, pub cos2: Vec<f32>,
-    pub sin3: Vec<f32>, pub cos3: Vec<f32>,
+    pub sin1: Vec<f32>,
+    pub cos1: Vec<f32>,
+    pub sin2: Vec<f32>,
+    pub cos2: Vec<f32>,
+    pub sin3: Vec<f32>,
+    pub cos3: Vec<f32>,
     pub n_steps_alloc: usize,
     pub n_alloc: usize,
 }
@@ -46,9 +65,12 @@ impl PstMatrixBuf {
         let pst_dim = crate::t3::pst_linear_dim(n);
         Self {
             data: Vec::with_capacity(max_steps * pst_dim),
-            sin1: vec![0.0; n], cos1: vec![0.0; n],
-            sin2: vec![0.0; n], cos2: vec![0.0; n],
-            sin3: vec![0.0; n], cos3: vec![0.0; n],
+            sin1: vec![0.0; n],
+            cos1: vec![0.0; n],
+            sin2: vec![0.0; n],
+            cos2: vec![0.0; n],
+            sin3: vec![0.0; n],
+            cos3: vec![0.0; n],
             n_steps_alloc: max_steps,
             n_alloc: n,
         }
@@ -57,9 +79,12 @@ impl PstMatrixBuf {
     pub fn resize(&mut self, max_steps: usize, n: usize) {
         let pst_dim = crate::t3::pst_linear_dim(n);
         if n > self.n_alloc {
-            self.sin1.resize(n, 0.0); self.cos1.resize(n, 0.0);
-            self.sin2.resize(n, 0.0); self.cos2.resize(n, 0.0);
-            self.sin3.resize(n, 0.0); self.cos3.resize(n, 0.0);
+            self.sin1.resize(n, 0.0);
+            self.cos1.resize(n, 0.0);
+            self.sin2.resize(n, 0.0);
+            self.cos2.resize(n, 0.0);
+            self.sin3.resize(n, 0.0);
+            self.cos3.resize(n, 0.0);
             self.n_alloc = n;
         }
         self.data.reserve(max_steps * pst_dim);
@@ -107,15 +132,33 @@ impl T3SpikeTrajectory {
     }
 
     /// Accessor helpers for backward pass
-    pub fn th1_pre(&self) -> &[f32] { &self.flat[OFF_TH1..off_th2(self.n_steps, self.n_osc)] }
-    pub fn th2_pre(&self) -> &[f32] { &self.flat[off_th2(self.n_steps, self.n_osc)..off_th3(self.n_steps, self.n_osc)] }
-    pub fn th3_pre(&self) -> &[f32] { &self.flat[off_th3(self.n_steps, self.n_osc)..off_r1(self.n_steps, self.n_osc)] }
-    pub fn r1_pre(&self) -> &[f32] { &self.flat[off_r1(self.n_steps, self.n_osc)..off_r2(self.n_steps, self.n_osc)] }
-    pub fn r2_pre(&self) -> &[f32] { &self.flat[off_r2(self.n_steps, self.n_osc)..off_r3(self.n_steps, self.n_osc)] }
-    pub fn r3_pre(&self) -> &[f32] { &self.flat[off_r3(self.n_steps, self.n_osc)..off_drive1(self.n_steps, self.n_osc)] }
-    pub fn drive1(&self) -> &[f32] { &self.flat[off_drive1(self.n_steps, self.n_osc)..off_drive2(self.n_steps, self.n_osc)] }
-    pub fn drive2(&self) -> &[f32] { &self.flat[off_drive2(self.n_steps, self.n_osc)..off_drive3(self.n_steps, self.n_osc)] }
-    pub fn drive3(&self) -> &[f32] { &self.flat[off_drive3(self.n_steps, self.n_osc)..] }
+    pub fn th1_pre(&self) -> &[f32] {
+        &self.flat[OFF_TH1..off_th2(self.n_steps, self.n_osc)]
+    }
+    pub fn th2_pre(&self) -> &[f32] {
+        &self.flat[off_th2(self.n_steps, self.n_osc)..off_th3(self.n_steps, self.n_osc)]
+    }
+    pub fn th3_pre(&self) -> &[f32] {
+        &self.flat[off_th3(self.n_steps, self.n_osc)..off_r1(self.n_steps, self.n_osc)]
+    }
+    pub fn r1_pre(&self) -> &[f32] {
+        &self.flat[off_r1(self.n_steps, self.n_osc)..off_r2(self.n_steps, self.n_osc)]
+    }
+    pub fn r2_pre(&self) -> &[f32] {
+        &self.flat[off_r2(self.n_steps, self.n_osc)..off_r3(self.n_steps, self.n_osc)]
+    }
+    pub fn r3_pre(&self) -> &[f32] {
+        &self.flat[off_r3(self.n_steps, self.n_osc)..off_drive1(self.n_steps, self.n_osc)]
+    }
+    pub fn drive1(&self) -> &[f32] {
+        &self.flat[off_drive1(self.n_steps, self.n_osc)..off_drive2(self.n_steps, self.n_osc)]
+    }
+    pub fn drive2(&self) -> &[f32] {
+        &self.flat[off_drive2(self.n_steps, self.n_osc)..off_drive3(self.n_steps, self.n_osc)]
+    }
+    pub fn drive3(&self) -> &[f32] {
+        &self.flat[off_drive3(self.n_steps, self.n_osc)..]
+    }
 
     /// Mutable accessors (for forward pass to fill trajectory)
     pub fn th1_pre_mut(&mut self) -> &mut [f32] {
@@ -123,31 +166,52 @@ impl T3SpikeTrajectory {
         &mut self.flat[OFF_TH1..end]
     }
     pub fn th2_pre_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_th2(self.n_steps, self.n_osc), off_th3(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_th2(self.n_steps, self.n_osc),
+            off_th3(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn th3_pre_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_th3(self.n_steps, self.n_osc), off_r1(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_th3(self.n_steps, self.n_osc),
+            off_r1(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn r1_pre_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_r1(self.n_steps, self.n_osc), off_r2(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_r1(self.n_steps, self.n_osc),
+            off_r2(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn r2_pre_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_r2(self.n_steps, self.n_osc), off_r3(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_r2(self.n_steps, self.n_osc),
+            off_r3(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn r3_pre_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_r3(self.n_steps, self.n_osc), off_drive1(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_r3(self.n_steps, self.n_osc),
+            off_drive1(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn drive1_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_drive1(self.n_steps, self.n_osc), off_drive2(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_drive1(self.n_steps, self.n_osc),
+            off_drive2(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn drive2_mut(&mut self) -> &mut [f32] {
-        let (start, end) = (off_drive2(self.n_steps, self.n_osc), off_drive3(self.n_steps, self.n_osc));
+        let (start, end) = (
+            off_drive2(self.n_steps, self.n_osc),
+            off_drive3(self.n_steps, self.n_osc),
+        );
         &mut self.flat[start..end]
     }
     pub fn drive3_mut(&mut self) -> &mut [f32] {
@@ -173,8 +237,17 @@ impl T3SpikeTrajectory {
     ) -> Self {
         let flat_len = 9 * n_steps * n_osc;
         Self {
-            n_osc, n_steps, dt, drive_gain, alpha, epsilon, freq_min, freq_max,
-            w12, w13, w23,
+            n_osc,
+            n_steps,
+            dt,
+            drive_gain,
+            alpha,
+            epsilon,
+            freq_min,
+            freq_max,
+            w12,
+            w13,
+            w23,
             flat: vec![0.0; flat_len],
             th1_final: vec![0.0; n_osc],
             th2_final: vec![0.0; n_osc],
@@ -205,16 +278,22 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
     buf.clear();
     buf.resize(n_steps, n);
 
-    let sin1 = &mut buf.sin1[..n]; let cos1 = &mut buf.cos1[..n];
-    let sin2 = &mut buf.sin2[..n]; let cos2 = &mut buf.cos2[..n];
-    let sin3 = &mut buf.sin3[..n]; let cos3 = &mut buf.cos3[..n];
+    let sin1 = &mut buf.sin1[..n];
+    let cos1 = &mut buf.cos1[..n];
+    let sin2 = &mut buf.sin2[..n];
+    let cos2 = &mut buf.cos2[..n];
+    let sin3 = &mut buf.sin3[..n];
+    let cos3 = &mut buf.cos3[..n];
 
     for step in 0..n_steps {
         let (th1, r1, th2, r2, th3, r3): (&[f32], &[f32], &[f32], &[f32], &[f32], &[f32]);
         if step == n_steps - 1 {
-            th1 = &traj.th1_final; r1 = &traj.r1_final;
-            th2 = &traj.th2_final; r2 = &traj.r2_final;
-            th3 = &traj.th3_final; r3 = &traj.r3_final;
+            th1 = &traj.th1_final;
+            r1 = &traj.r1_final;
+            th2 = &traj.th2_final;
+            r2 = &traj.r2_final;
+            th3 = &traj.th3_final;
+            r3 = &traj.r3_final;
         } else {
             let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
             th1 = s(OFF_TH1, step + 1);
@@ -226,9 +305,12 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
         }
 
         for i in 0..n {
-            sin1[i] = th1[i].sin(); cos1[i] = th1[i].cos();
-            sin2[i] = th2[i].sin(); cos2[i] = th2[i].cos();
-            sin3[i] = th3[i].sin(); cos3[i] = th3[i].cos();
+            sin1[i] = th1[i].sin();
+            cos1[i] = th1[i].cos();
+            sin2[i] = th2[i].sin();
+            cos2[i] = th2[i].cos();
+            sin3[i] = th3[i].sin();
+            cos3[i] = th3[i].cos();
         }
 
         let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
@@ -236,15 +318,27 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
         let prev_th2 = s(off_th2(n_steps, n), step);
         let prev_th3 = s(off_th3(n_steps, n), step);
 
-        for i in 0..n { buf.data.push(sin1[i]); buf.data.push(cos1[i]); }
-        for i in 0..n { buf.data.push(sin2[i]); buf.data.push(cos2[i]); }
-        for i in 0..n { buf.data.push(sin3[i]); buf.data.push(cos3[i]); }
+        for i in 0..n {
+            buf.data.push(sin1[i]);
+            buf.data.push(cos1[i]);
+        }
+        for i in 0..n {
+            buf.data.push(sin2[i]);
+            buf.data.push(cos2[i]);
+        }
+        for i in 0..n {
+            buf.data.push(sin3[i]);
+            buf.data.push(cos3[i]);
+        }
 
         for (ph, prev) in [(th1, prev_th1), (th2, prev_th2), (th3, prev_th3)] {
             for i in 0..n {
                 let mut d = ph[i] - prev[i];
-                if d > std::f32::consts::PI { d -= 2.0 * std::f32::consts::PI; }
-                else if d < -std::f32::consts::PI { d += 2.0 * std::f32::consts::PI; }
+                if d > std::f32::consts::PI {
+                    d -= 2.0 * std::f32::consts::PI;
+                } else if d < -std::f32::consts::PI {
+                    d += 2.0 * std::f32::consts::PI;
+                }
                 buf.data.push(d);
             }
         }
@@ -253,14 +347,25 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
         buf.data.extend_from_slice(r2);
         buf.data.extend_from_slice(r3);
 
-        for i in 0..n { buf.data.push(sin1[i] * sin1[i]); buf.data.push(cos1[i] * cos1[i]); }
-        for i in 0..n { buf.data.push(sin2[i] * sin2[i]); buf.data.push(cos2[i] * cos2[i]); }
-        for i in 0..n { buf.data.push(sin3[i] * sin3[i]); buf.data.push(cos3[i] * cos3[i]); }
+        for i in 0..n {
+            buf.data.push(sin1[i] * sin1[i]);
+            buf.data.push(cos1[i] * cos1[i]);
+        }
+        for i in 0..n {
+            buf.data.push(sin2[i] * sin2[i]);
+            buf.data.push(cos2[i] * cos2[i]);
+        }
+        for i in 0..n {
+            buf.data.push(sin3[i] * sin3[i]);
+            buf.data.push(cos3[i] * cos3[i]);
+        }
 
         let cross = |sa: &[f32], ca: &[f32], sb: &[f32], cb: &[f32]| -> f32 {
             let (ss, cc): (f64, f64) = (0..n).fold((0.0, 0.0), |(s, c), i| {
-                (s + (sa[i] as f64 * cb[i] as f64 - ca[i] as f64 * sb[i] as f64),
-                 c + (ca[i] as f64 * cb[i] as f64 + sa[i] as f64 * sb[i] as f64))
+                (
+                    s + (sa[i] as f64 * cb[i] as f64 - ca[i] as f64 * sb[i] as f64),
+                    c + (ca[i] as f64 * cb[i] as f64 + sa[i] as f64 * sb[i] as f64),
+                )
             });
             ((ss * ss + cc * cc).sqrt() / nf as f64) as f32
         };
@@ -269,9 +374,15 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
         buf.data.push(cross(sin1, cos1, sin3, cos3));
 
         let mu = |arr: &[f32]| arr.iter().sum::<f32>() / nf;
-        buf.data.push(mu(sin1)); buf.data.push(mu(cos1)); buf.data.push(mu(r1));
-        buf.data.push(mu(sin2)); buf.data.push(mu(cos2)); buf.data.push(mu(r2));
-        buf.data.push(mu(sin3)); buf.data.push(mu(cos3)); buf.data.push(mu(r3));
+        buf.data.push(mu(sin1));
+        buf.data.push(mu(cos1));
+        buf.data.push(mu(r1));
+        buf.data.push(mu(sin2));
+        buf.data.push(mu(cos2));
+        buf.data.push(mu(r2));
+        buf.data.push(mu(sin3));
+        buf.data.push(mu(cos3));
+        buf.data.push(mu(r3));
     }
     &buf.data
 }
@@ -287,9 +398,12 @@ pub fn t3spike_compute_pst_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
     for step in 0..n_steps {
         let (th1, r1, th2, r2, th3, r3): (&[f32], &[f32], &[f32], &[f32], &[f32], &[f32]);
         if step == n_steps - 1 {
-            th1 = &traj.th1_final; r1 = &traj.r1_final;
-            th2 = &traj.th2_final; r2 = &traj.r2_final;
-            th3 = &traj.th3_final; r3 = &traj.r3_final;
+            th1 = &traj.th1_final;
+            r1 = &traj.r1_final;
+            th2 = &traj.th2_final;
+            r2 = &traj.r2_final;
+            th3 = &traj.th3_final;
+            r3 = &traj.r3_final;
         } else {
             let _next = (step + 1) * n;
             let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
@@ -305,24 +419,42 @@ pub fn t3spike_compute_pst_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
         let prev_th2 = s(off_th2(traj.n_steps, n), step);
         let prev_th3 = s(off_th3(traj.n_steps, n), step);
 
-        let mut sin1 = Vec::with_capacity(n); let mut cos1 = Vec::with_capacity(n);
-        let mut sin2 = Vec::with_capacity(n); let mut cos2 = Vec::with_capacity(n);
-        let mut sin3 = Vec::with_capacity(n); let mut cos3 = Vec::with_capacity(n);
+        let mut sin1 = Vec::with_capacity(n);
+        let mut cos1 = Vec::with_capacity(n);
+        let mut sin2 = Vec::with_capacity(n);
+        let mut cos2 = Vec::with_capacity(n);
+        let mut sin3 = Vec::with_capacity(n);
+        let mut cos3 = Vec::with_capacity(n);
         for i in 0..n {
-            sin1.push(th1[i].sin()); cos1.push(th1[i].cos());
-            sin2.push(th2[i].sin()); cos2.push(th2[i].cos());
-            sin3.push(th3[i].sin()); cos3.push(th3[i].cos());
+            sin1.push(th1[i].sin());
+            cos1.push(th1[i].cos());
+            sin2.push(th2[i].sin());
+            cos2.push(th2[i].cos());
+            sin3.push(th3[i].sin());
+            cos3.push(th3[i].cos());
         }
 
-        for i in 0..n { out.push(sin1[i]); out.push(cos1[i]); }
-        for i in 0..n { out.push(sin2[i]); out.push(cos2[i]); }
-        for i in 0..n { out.push(sin3[i]); out.push(cos3[i]); }
+        for i in 0..n {
+            out.push(sin1[i]);
+            out.push(cos1[i]);
+        }
+        for i in 0..n {
+            out.push(sin2[i]);
+            out.push(cos2[i]);
+        }
+        for i in 0..n {
+            out.push(sin3[i]);
+            out.push(cos3[i]);
+        }
 
         for (ph, prev) in [(th1, prev_th1), (th2, prev_th2), (th3, prev_th3)] {
             for i in 0..n {
                 let mut d = ph[i] - prev[i];
-                if d > std::f32::consts::PI { d -= 2.0 * std::f32::consts::PI; }
-                else if d < -std::f32::consts::PI { d += 2.0 * std::f32::consts::PI; }
+                if d > std::f32::consts::PI {
+                    d -= 2.0 * std::f32::consts::PI;
+                } else if d < -std::f32::consts::PI {
+                    d += 2.0 * std::f32::consts::PI;
+                }
                 out.push(d);
             }
         }
@@ -331,14 +463,25 @@ pub fn t3spike_compute_pst_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
         out.extend_from_slice(r2);
         out.extend_from_slice(r3);
 
-        for i in 0..n { out.push(sin1[i] * sin1[i]); out.push(cos1[i] * cos1[i]); }
-        for i in 0..n { out.push(sin2[i] * sin2[i]); out.push(cos2[i] * cos2[i]); }
-        for i in 0..n { out.push(sin3[i] * sin3[i]); out.push(cos3[i] * cos3[i]); }
+        for i in 0..n {
+            out.push(sin1[i] * sin1[i]);
+            out.push(cos1[i] * cos1[i]);
+        }
+        for i in 0..n {
+            out.push(sin2[i] * sin2[i]);
+            out.push(cos2[i] * cos2[i]);
+        }
+        for i in 0..n {
+            out.push(sin3[i] * sin3[i]);
+            out.push(cos3[i] * cos3[i]);
+        }
 
         let cross = |sa: &[f32], ca: &[f32], sb: &[f32], cb: &[f32]| {
             let (ss, cc): (f64, f64) = (0..n).fold((0.0, 0.0), |(s, c), i| {
-                (s + (sa[i] as f64 * cb[i] as f64 - ca[i] as f64 * sb[i] as f64),
-                 c + (ca[i] as f64 * cb[i] as f64 + sa[i] as f64 * sb[i] as f64))
+                (
+                    s + (sa[i] as f64 * cb[i] as f64 - ca[i] as f64 * sb[i] as f64),
+                    c + (ca[i] as f64 * cb[i] as f64 + sa[i] as f64 * sb[i] as f64),
+                )
             });
             ((ss * ss + cc * cc).sqrt() / nf as f64) as f32
         };
@@ -347,9 +490,15 @@ pub fn t3spike_compute_pst_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
         out.push(cross(&sin1, &cos1, &sin3, &cos3));
 
         let mu = |arr: &[f32]| arr.iter().sum::<f32>() / nf;
-        out.push(mu(&sin1)); out.push(mu(&cos1)); out.push(mu(r1));
-        out.push(mu(&sin2)); out.push(mu(&cos2)); out.push(mu(r2));
-        out.push(mu(&sin3)); out.push(mu(&cos3)); out.push(mu(r3));
+        out.push(mu(&sin1));
+        out.push(mu(&cos1));
+        out.push(mu(r1));
+        out.push(mu(&sin2));
+        out.push(mu(&cos2));
+        out.push(mu(r2));
+        out.push(mu(&sin3));
+        out.push(mu(&cos3));
+        out.push(mu(r3));
     }
     out
 }
@@ -544,9 +693,12 @@ pub fn t3spike_compute_pst_fast_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
     for step in 0..n_steps {
         let (th1, r1, th2, r2, th3, r3): (&[f32], &[f32], &[f32], &[f32], &[f32], &[f32]);
         if step == n_steps - 1 {
-            th1 = &traj.th1_final; r1 = &traj.r1_final;
-            th2 = &traj.th2_final; r2 = &traj.r2_final;
-            th3 = &traj.th3_final; r3 = &traj.r3_final;
+            th1 = &traj.th1_final;
+            r1 = &traj.r1_final;
+            th2 = &traj.th2_final;
+            r2 = &traj.r2_final;
+            th3 = &traj.th3_final;
+            r3 = &traj.r3_final;
         } else {
             let _next = (step + 1) * n;
             let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
@@ -558,9 +710,15 @@ pub fn t3spike_compute_pst_fast_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
             r3 = s(off_r3(traj.n_steps, n), step + 1);
         }
 
-        for i in 0..n { out.push(th1[i].sin()); }
-        for i in 0..n { out.push(th2[i].sin()); }
-        for i in 0..n { out.push(th3[i].sin()); }
+        for i in 0..n {
+            out.push(th1[i].sin());
+        }
+        for i in 0..n {
+            out.push(th2[i].sin());
+        }
+        for i in 0..n {
+            out.push(th3[i].sin());
+        }
         out.extend_from_slice(r1);
         out.extend_from_slice(r2);
         out.extend_from_slice(r3);
@@ -588,31 +746,66 @@ mod tests {
 
         let (_, traj_avx) = crate::spike::forward::t3spike_forward_with_backend(
             Avx2Backend,
-            n, n_steps, dt, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+            n,
+            n_steps,
+            dt,
+            10.0,
+            1.0,
+            0.5,
+            3.0,
+            0.3,
+            0.15,
+            0.08,
+            &drives,
         );
         let (_, traj_scalar) = crate::spike::forward::t3spike_forward_with_backend(
             ScalarBackend,
-            n, n_steps, dt, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
+            n,
+            n_steps,
+            dt,
+            10.0,
+            1.0,
+            0.5,
+            3.0,
+            0.3,
+            0.15,
+            0.08,
+            &drives,
         );
 
         // Compare final state (should match closely)
         let max_diff = |a: &[f32], b: &[f32]| {
-            a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0f32, f32::max)
         };
         // Minimax sin/cos ~1e-4 error → tolerable for 100 steps
         let tol = 5e-3;
-        assert!(max_diff(&traj_avx.th1_final, &traj_scalar.th1_final) < tol,
-            "th1_final mismatch");
-        assert!(max_diff(&traj_avx.r1_final, &traj_scalar.r1_final) < tol,
-            "r1_final mismatch");
-        assert!(max_diff(&traj_avx.th2_final, &traj_scalar.th2_final) < tol,
-            "th2_final mismatch");
-        assert!(max_diff(&traj_avx.r2_final, &traj_scalar.r2_final) < tol,
-            "r2_final mismatch");
-        assert!(max_diff(&traj_avx.th3_final, &traj_scalar.th3_final) < tol,
-            "th3_final mismatch");
-        assert!(max_diff(&traj_avx.r3_final, &traj_scalar.r3_final) < tol,
-            "r3_final mismatch");
+        assert!(
+            max_diff(&traj_avx.th1_final, &traj_scalar.th1_final) < tol,
+            "th1_final mismatch"
+        );
+        assert!(
+            max_diff(&traj_avx.r1_final, &traj_scalar.r1_final) < tol,
+            "r1_final mismatch"
+        );
+        assert!(
+            max_diff(&traj_avx.th2_final, &traj_scalar.th2_final) < tol,
+            "th2_final mismatch"
+        );
+        assert!(
+            max_diff(&traj_avx.r2_final, &traj_scalar.r2_final) < tol,
+            "r2_final mismatch"
+        );
+        assert!(
+            max_diff(&traj_avx.th3_final, &traj_scalar.th3_final) < tol,
+            "th3_final mismatch"
+        );
+        assert!(
+            max_diff(&traj_avx.r3_final, &traj_scalar.r3_final) < tol,
+            "r3_final mismatch"
+        );
 
         // Also check PST features match
         let pst_avx = crate::t3::pst_linear_features(&{
@@ -647,8 +840,10 @@ mod tests {
             tri_scalar
         });
 
-        assert!(max_diff(&pst_avx, &pst_scalar) < 1e-2,
-            "PST features mismatch between Avx2 and Scalar backends");
+        assert!(
+            max_diff(&pst_avx, &pst_scalar) < 1e-2,
+            "PST features mismatch between Avx2 and Scalar backends"
+        );
     }
 
     #[test]
@@ -686,15 +881,30 @@ mod tests {
         // Checkpointed forward (pass freq_min/freq_max explicitly)
         let config = CheckpointConfig { stride };
         let ckpt = CheckpointedTrajectory::from_forward(
-            &mut tri, &drives, n_steps, dt, config, Some(0.5), Some(3.0),
+            &mut tri,
+            &drives,
+            n_steps,
+            dt,
+            config,
+            Some(0.5),
+            Some(3.0),
         );
 
         // Verify final state matches
         let max_diff = |a: &[f32], b: &[f32]| {
-            a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0f32, f32::max)
         };
-        assert!(max_diff(&ckpt.th1_final, &tri_ref.th1) < 1e-5, "th1_final mismatch");
-        assert!(max_diff(&ckpt.r1_final, &tri_ref.r1) < 1e-5, "r1_final mismatch");
+        assert!(
+            max_diff(&ckpt.th1_final, &tri_ref.th1) < 1e-5,
+            "th1_final mismatch"
+        );
+        assert!(
+            max_diff(&ckpt.r1_final, &tri_ref.r1) < 1e-5,
+            "r1_final mismatch"
+        );
 
         // Recompute segment and compare with reference
         let from = 30;
@@ -732,6 +942,10 @@ mod tests {
         }
 
         let buf_diff = max_diff(&flat_buf, &flat_ref);
-        assert!(buf_diff < 1e-5, "recomputed segment mismatch: {:.2e}", buf_diff);
+        assert!(
+            buf_diff < 1e-5,
+            "recomputed segment mismatch: {:.2e}",
+            buf_diff
+        );
     }
 }

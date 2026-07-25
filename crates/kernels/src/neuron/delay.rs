@@ -11,10 +11,14 @@
 /// # Safety
 /// `output[n]`, `buffer[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn delay_buffer_circular(
-    output: *mut f32, buffer: *const f32,
-    n: usize, pos: usize,
+    output: *mut f32,
+    buffer: *const f32,
+    n: usize,
+    pos: usize,
 ) {
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
     let buf = std::slice::from_raw_parts(buffer, n);
     let out = std::slice::from_raw_parts_mut(output, n);
     let len = n - pos;
@@ -27,8 +31,11 @@ pub(crate) unsafe fn delay_buffer_circular(
 /// # Safety
 /// `output[n_taps]`, `buffer[n]`, `delays[n_taps]` valid, non-overlapping.
 pub(crate) unsafe fn delay_buffer_multi_tap(
-    output: *mut f32, buffer: *const f32,
-    delays: *const i32, n: usize, n_taps: usize,
+    output: *mut f32,
+    buffer: *const f32,
+    delays: *const i32,
+    n: usize,
+    n_taps: usize,
 ) {
     let buf = std::slice::from_raw_parts(buffer, n);
     let out = std::slice::from_raw_parts_mut(output, n_taps);

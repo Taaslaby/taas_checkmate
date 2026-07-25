@@ -35,19 +35,19 @@
 
 #![allow(non_snake_case)]
 
-use numpy::{PyArray1, PyArrayMethods, IntoPyArray};
+use numpy::{IntoPyArray, PyArray1, PyArrayMethods};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyRuntimeError};
 use rand::Rng;
 use rand::SeedableRng;
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use taas_connectome::ConnectomeData;
-use taas_format::{TaasReader, load_connectome};
 use karmac::gnw::GlobalWorkspace;
-use karmac::working_memory::WorkingMemory;
 use karmac::semantic_pointer::SemanticPointer;
+use karmac::working_memory::WorkingMemory;
+use taas_connectome::ConnectomeData;
+use taas_format::{load_connectome, TaasReader};
 
 /// Python-доступная SPAUN pipeline.
 ///
@@ -104,11 +104,10 @@ impl PySpaunPipeline {
             Some(path) => {
                 let p = PathBuf::from(&path);
                 let reader = TaasReader::from_file(p.as_os_str().to_str().unwrap())
-                    .map_err(|e| PyRuntimeError::new_err(format!(
-                        "Failed to load .taas: {e}"
-                    )))?;
-                load_connectome(&reader)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse connectome: {e}")))?
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to load .taas: {e}")))?;
+                load_connectome(&reader).map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to parse connectome: {e}"))
+                })?
             }
             None => {
                 // Generate a minimal default connectome (for testing)
@@ -117,11 +116,17 @@ impl PySpaunPipeline {
                 let row_ptr: Vec<i32> = (0..=n as i32).collect();
                 let col_indices: Vec<i32> = (0..n as i32).map(|i| (i + 1) % n as i32).collect();
                 let values: Vec<f32> = (0..n).map(|_| rng.gen::<f32>() * 0.5 - 0.25).collect();
-                let nt_types: Vec<f32> = (0..n).map(|i| if i < n * 3 / 4 { 1.0 } else { -1.0 }).collect();
-                let groups = [("sensory".to_string(), (0..22.min(n)).collect::<Vec<_>>()),
-                    ("mn".to_string(), (n-5..n).collect::<Vec<_>>())];
-                let groups_refs: Vec<(&str, Vec<usize>)> = groups.iter()
-                    .map(|(n, i)| (n.as_str(), i.clone())).collect();
+                let nt_types: Vec<f32> = (0..n)
+                    .map(|i| if i < n * 3 / 4 { 1.0 } else { -1.0 })
+                    .collect();
+                let groups = [
+                    ("sensory".to_string(), (0..22.min(n)).collect::<Vec<_>>()),
+                    ("mn".to_string(), (n - 5..n).collect::<Vec<_>>()),
+                ];
+                let groups_refs: Vec<(&str, Vec<usize>)> = groups
+                    .iter()
+                    .map(|(n, i)| (n.as_str(), i.clone()))
+                    .collect();
                 ConnectomeData::new(row_ptr, col_indices, values, nt_types, groups_refs)
             }
         };
@@ -138,17 +143,20 @@ impl PySpaunPipeline {
         // Encoding: pixels → SP
         let enc_scale = (2.0 / (n_pixels + sp_dim) as f32).sqrt();
         let w_encode: Vec<f32> = (0..sp_dim * n_pixels)
-            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale)
+            .collect();
 
         // SP → cortex
         let sp2c_scale = (2.0 / (sp_dim + cortical_dim) as f32).sqrt();
         let w_sp_to_cortex: Vec<f32> = (0..cortical_dim * sp_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale)
+            .collect();
 
         // Motor readout
         let m_scale = (2.0 / (cortical_dim + n_outputs) as f32).sqrt();
         let w_motor: Vec<f32> = (0..n_outputs * cortical_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale)
+            .collect();
 
         let sensory = conn.group("sensory").unwrap_or(&[]).to_vec();
 
@@ -158,9 +166,16 @@ impl PySpaunPipeline {
             sp: SemanticPointer::new(sp_dim),
             conn,
             state: vec![0.0; n_neurons],
-            w_encode, w_sp_to_cortex, w_motor,
-            n_pixels, sp_dim, cortical_dim, n_neurons, n_outputs,
-            workspace_size: ws, wm_slots: n_wm_slots,
+            w_encode,
+            w_sp_to_cortex,
+            w_motor,
+            n_pixels,
+            sp_dim,
+            cortical_dim,
+            n_neurons,
+            n_outputs,
+            workspace_size: ws,
+            wm_slots: n_wm_slots,
             sensory_indices: sensory,
             seed,
         })
@@ -195,8 +210,10 @@ impl PySpaunPipeline {
             Some(g) => g.into_iter().collect(),
             None => vec![],
         };
-        let groups_refs: Vec<(&str, Vec<usize>)> = groups_vec.iter()
-            .map(|(n, i)| (n.as_str(), i.clone())).collect();
+        let groups_refs: Vec<(&str, Vec<usize>)> = groups_vec
+            .iter()
+            .map(|(n, i)| (n.as_str(), i.clone()))
+            .collect();
 
         let conn = ConnectomeData::new(
             rp.as_slice()?.to_vec(),
@@ -208,9 +225,7 @@ impl PySpaunPipeline {
 
         // Drop Python GIL before heavier Rust init
         drop((rp, ci, vl, nt));
-        py.allow_threads(move || {
-            Self::from_connectome_inner(conn, seed)
-        })
+        py.allow_threads(move || Self::from_connectome_inner(conn, seed))
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -223,7 +238,8 @@ impl PySpaunPipeline {
         let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
         let m_scale = (2.0 / (self.cortical_dim + n) as f32).sqrt();
         self.w_motor = (0..n * self.cortical_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale)
+            .collect();
     }
 
     /// Set pixel grid size (default 100 = 10×10).
@@ -232,7 +248,8 @@ impl PySpaunPipeline {
         let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
         let enc_scale = (2.0 / (n + self.sp_dim) as f32).sqrt();
         self.w_encode = (0..self.sp_dim * n)
-            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale)
+            .collect();
     }
 
     /// Set semantic pointer dimensionality (default 128, must be power of 2).
@@ -246,10 +263,12 @@ impl PySpaunPipeline {
         let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
         let enc_scale = (2.0 / (self.n_pixels + dim) as f32).sqrt();
         self.w_encode = (0..dim * self.n_pixels)
-            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale)
+            .collect();
         let sp2c_scale = (2.0 / (dim + self.cortical_dim) as f32).sqrt();
         self.w_sp_to_cortex = (0..self.cortical_dim * dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale)
+            .collect();
         Ok(())
     }
 
@@ -260,10 +279,12 @@ impl PySpaunPipeline {
         let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
         let sp2c_scale = (2.0 / (self.sp_dim + dim) as f32).sqrt();
         self.w_sp_to_cortex = (0..dim * self.sp_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale)
+            .collect();
         let m_scale = (2.0 / (dim + self.n_outputs) as f32).sqrt();
         self.w_motor = (0..self.n_outputs * dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale)
+            .collect();
     }
 
     /// Set GNW workspace size (default min(n_neurons/8, 64)).
@@ -284,12 +305,18 @@ impl PySpaunPipeline {
 
     /// Encode pixel vector → semantic pointer → cortex.
     /// Returns numpy array of shape (cortical_dim,).
-    pub fn encode<'py>(&self, py: Python<'py>, pixels: Bound<'_, PyArray1<f32>>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    pub fn encode<'py>(
+        &self,
+        py: Python<'py>,
+        pixels: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let ro = pixels.readonly();
         let sl = ro.as_slice()?;
         if sl.len() != self.n_pixels {
             return Err(PyValueError::new_err(format!(
-                "expected {} pixels, got {}", self.n_pixels, sl.len()
+                "expected {} pixels, got {}",
+                self.n_pixels,
+                sl.len()
             )));
         }
 
@@ -300,13 +327,19 @@ impl PySpaunPipeline {
 
     /// Full forward pass: pixels → SP → GNW → connectome → motor logits.
     /// Returns numpy array of shape (n_outputs,).
-    pub fn forward<'py>(&mut self, py: Python<'py>, pixels: Bound<'_, PyArray1<f32>>,
-        steps: usize) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    pub fn forward<'py>(
+        &mut self,
+        py: Python<'py>,
+        pixels: Bound<'_, PyArray1<f32>>,
+        steps: usize,
+    ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let ro = pixels.readonly();
         let sl = ro.as_slice()?;
         if sl.len() != self.n_pixels {
             return Err(PyValueError::new_err(format!(
-                "expected {} pixels, got {}", self.n_pixels, sl.len()
+                "expected {} pixels, got {}",
+                self.n_pixels,
+                sl.len()
             )));
         }
 
@@ -315,7 +348,9 @@ impl PySpaunPipeline {
 
         for _ in 0..steps {
             self.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
             self.connectome_step(&cortex)?;
         }
 
@@ -332,10 +367,14 @@ impl PySpaunPipeline {
     ///
     /// Returns: final average cross-entropy loss.
     #[pyo3(signature = (n_epochs=50, steps=10, lr=0.1))]
-    pub fn train(&mut self, py: Python<'_>, n_epochs: usize, steps: usize, lr: f32) -> PyResult<f32> {
-        let loss = py.allow_threads(move || {
-            self.train_inner(n_epochs, steps, lr)
-        })?;
+    pub fn train(
+        &mut self,
+        py: Python<'_>,
+        n_epochs: usize,
+        steps: usize,
+        lr: f32,
+    ) -> PyResult<f32> {
+        let loss = py.allow_threads(move || self.train_inner(n_epochs, steps, lr))?;
         Ok(loss)
     }
 
@@ -351,7 +390,9 @@ impl PySpaunPipeline {
         let mut cortex = self.sp_to_cortex(&sp);
         for _ in 0..steps {
             self.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
             self.connectome_step(&cortex)?;
         }
         let logits = self.motor_readout(&cortex);
@@ -382,7 +423,9 @@ impl PySpaunPipeline {
             let mut cortex = self.sp_to_cortex(&sp);
             for _ in 0..steps {
                 self.gnw.forward(&mut cortex);
-                for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+                for c in cortex.iter_mut() {
+                    *c = c.clamp(-5.0, 5.0);
+                }
                 self.connectome_step(&cortex)?;
             }
             let logits = self.motor_readout(&cortex);
@@ -422,7 +465,9 @@ impl PySpaunPipeline {
             }
             for _ in 0..steps {
                 self.gnw.forward(&mut cortex);
-                for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+                for c in cortex.iter_mut() {
+                    *c = c.clamp(-5.0, 5.0);
+                }
                 self.connectome_step(&cortex)?;
             }
             let logits = self.motor_readout(&cortex);
@@ -447,23 +492,35 @@ impl PySpaunPipeline {
     }
 
     /// Number of neurons in the connectome.
-    pub fn n_neurons(&self) -> usize { self.n_neurons }
+    pub fn n_neurons(&self) -> usize {
+        self.n_neurons
+    }
 
     /// Number of synapses in the connectome.
-    pub fn n_synapses(&self) -> usize { self.conn.n_synapses }
+    pub fn n_synapses(&self) -> usize {
+        self.conn.n_synapses
+    }
 
     /// Number of output classes.
-    pub fn n_outputs(&self) -> usize { self.n_outputs }
+    pub fn n_outputs(&self) -> usize {
+        self.n_outputs
+    }
 
     /// Semantic pointer dimension.
-    pub fn sp_dim(&self) -> usize { self.sp_dim }
+    pub fn sp_dim(&self) -> usize {
+        self.sp_dim
+    }
 
     /// Cortical (GNW) dimension.
-    pub fn cortical_dim(&self) -> usize { self.cortical_dim }
+    pub fn cortical_dim(&self) -> usize {
+        self.cortical_dim
+    }
 
     /// List connectome group names with their sizes.
     pub fn groups(&self) -> Vec<(String, usize)> {
-        self.conn.groups.iter()
+        self.conn
+            .groups
+            .iter()
             .map(|g| (g.name.clone(), g.indices.len()))
             .collect()
     }
@@ -511,15 +568,18 @@ impl PySpaunPipeline {
 
         let enc_scale = (2.0 / (n_pixels + sp_dim) as f32).sqrt();
         let w_encode: Vec<f32> = (0..sp_dim * n_pixels)
-            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * enc_scale - enc_scale)
+            .collect();
 
         let sp2c_scale = (2.0 / (sp_dim + cortical_dim) as f32).sqrt();
         let w_sp_to_cortex: Vec<f32> = (0..cortical_dim * sp_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * sp2c_scale - sp2c_scale)
+            .collect();
 
         let m_scale = (2.0 / (cortical_dim + n_outputs) as f32).sqrt();
         let w_motor: Vec<f32> = (0..n_outputs * cortical_dim)
-            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale).collect();
+            .map(|_| rng.gen::<f32>() * 2.0 * m_scale - m_scale)
+            .collect();
 
         let sensory = conn.group("sensory").unwrap_or(&[]).to_vec();
 
@@ -529,9 +589,16 @@ impl PySpaunPipeline {
             sp: SemanticPointer::new(sp_dim),
             conn,
             state: vec![0.0; n_neurons],
-            w_encode, w_sp_to_cortex, w_motor,
-            n_pixels, sp_dim, cortical_dim, n_neurons, n_outputs,
-            workspace_size: ws, wm_slots: n_wm_slots,
+            w_encode,
+            w_sp_to_cortex,
+            w_motor,
+            n_pixels,
+            sp_dim,
+            cortical_dim,
+            n_neurons,
+            n_outputs,
+            workspace_size: ws,
+            wm_slots: n_wm_slots,
             sensory_indices: sensory,
             seed,
         })
@@ -575,9 +642,13 @@ impl PySpaunPipeline {
             let end = self.conn.row_ptr[i + 1].max(0) as usize;
             let mut sum = 0.0f32;
             for idx in start..end {
-                if idx >= self.conn.col_indices.len() || idx >= self.conn.values.len() { break; }
+                if idx >= self.conn.col_indices.len() || idx >= self.conn.values.len() {
+                    break;
+                }
                 let j = self.conn.col_indices[idx];
-                if j < 0 || j as usize >= n { continue; }
+                if j < 0 || j as usize >= n {
+                    continue;
+                }
                 sum += self.conn.values[idx] * self.state[j as usize];
             }
             // Input injection into sensory group
@@ -590,7 +661,6 @@ impl PySpaunPipeline {
         }
         self.state.copy_from_slice(&new_state);
     }
-
 
     /// Motor readout from cortex.
     fn motor_readout(&self, cortex: &[f32]) -> Vec<f32> {
@@ -621,7 +691,9 @@ impl PySpaunPipeline {
                 let mut cortex = self.sp_to_cortex(&sp);
                 for _ in 0..steps {
                     self.gnw.forward(&mut cortex);
-                    for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+                    for c in cortex.iter_mut() {
+                        *c = c.clamp(-5.0, 5.0);
+                    }
                     self.connectome_step(&cortex)?;
                 }
 
@@ -630,7 +702,11 @@ impl PySpaunPipeline {
                 let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                 let mut exps: Vec<f32> = logits.iter().map(|&l| (l - max_l).exp()).collect();
                 let sum: f32 = exps.iter().sum();
-                if sum > 1e-10 { for e in &mut exps { *e /= sum; } }
+                if sum > 1e-10 {
+                    for e in &mut exps {
+                        *e /= sum;
+                    }
+                }
 
                 let prob = exps[digit].max(1e-10);
                 epoch_loss -= prob.ln();
@@ -641,7 +717,12 @@ impl PySpaunPipeline {
 
             final_loss = epoch_loss / 10.0;
             if (epoch + 1) % 5 == 0 || epoch == 0 || epoch == n_epochs - 1 {
-                println!("  Epoch {:3}/{}: avg CE loss = {:.4}", epoch + 1, n_epochs, final_loss);
+                println!(
+                    "  Epoch {:3}/{}: avg CE loss = {:.4}",
+                    epoch + 1,
+                    n_epochs,
+                    final_loss
+                );
             }
         }
 
@@ -663,7 +744,8 @@ impl PySpaunPipeline {
 
     /// Argmax.
     fn argmax(v: &[f32]) -> usize {
-        v.iter().enumerate()
+        v.iter()
+            .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0)

@@ -56,7 +56,11 @@ impl SpikeRecorder {
 
         let n_neurons = self.spike_counts.len();
         let batch_time_s = n_steps as f32 * dt_ms / 1000.0;
-        let rate_scale = if batch_time_s > 0.0 { 1.0 / batch_time_s } else { 0.0 };
+        let rate_scale = if batch_time_s > 0.0 {
+            1.0 / batch_time_s
+        } else {
+            0.0
+        };
 
         // Single pass: count spikes at each neuron index
         for step in 0..n_steps {
@@ -133,14 +137,17 @@ impl SpikeRecorder {
             }
         }
 
-        indices.iter().map(|&idx| {
-            let cnt = if idx < self.spike_counts.len() {
-                self.spike_counts[idx] as f32
-            } else {
-                0.0
-            };
-            (cnt * rate_norm).clamp(0.0, 1.0)
-        }).collect()
+        indices
+            .iter()
+            .map(|&idx| {
+                let cnt = if idx < self.spike_counts.len() {
+                    self.spike_counts[idx] as f32
+                } else {
+                    0.0
+                };
+                (cnt * rate_norm).clamp(0.0, 1.0)
+            })
+            .collect()
     }
 
     /// Reset internal buffers.

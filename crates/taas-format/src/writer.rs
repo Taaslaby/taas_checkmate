@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use std::io::{Write, Cursor};
-use std::path::Path;
 use crate::types::*;
+use std::collections::HashMap;
+use std::io::{Cursor, Write};
+use std::path::Path;
 
 pub struct TaasWriter {
     components: Vec<ComponentEntry>,
     tensor_data: Vec<u8>,
     metadata: HashMap<String, String>,
-    compression: Option<i32>,  // zstd compression level if Some
+    compression: Option<i32>, // zstd compression level if Some
 }
 
 /// Helper: compute CRC32 for a byte slice.
@@ -19,7 +19,12 @@ fn compute_crc32(data: &[u8]) -> u32 {
 
 impl TaasWriter {
     pub fn new() -> Self {
-        Self { components: Vec::new(), tensor_data: Vec::new(), metadata: HashMap::new(), compression: None }
+        Self {
+            components: Vec::new(),
+            tensor_data: Vec::new(),
+            metadata: HashMap::new(),
+            compression: None,
+        }
     }
 
     /// Enable zstd compression for all subsequent components.
@@ -37,7 +42,14 @@ impl TaasWriter {
         self.metadata.insert(key.to_string(), value.to_string());
     }
 
-    fn push_component(&mut self, name: &str, component_type: &str, dtype: &str, shape: Vec<usize>, data: &[u8]) {
+    fn push_component(
+        &mut self,
+        name: &str,
+        component_type: &str,
+        dtype: &str,
+        shape: Vec<usize>,
+        data: &[u8],
+    ) {
         let crc32 = Some(compute_crc32(data));
 
         // Optional zstd compression
@@ -45,7 +57,7 @@ impl TaasWriter {
             Some(level) => {
                 match zstd::bulk::compress(data, level) {
                     Ok(c) => (c, Some("zstd".to_string()), Some(data.len() as u64)),
-                    Err(_) => (data.to_vec(), None, None),  // fallback: store uncompressed
+                    Err(_) => (data.to_vec(), None, None), // fallback: store uncompressed
                 }
             }
             None => (data.to_vec(), None, None),
@@ -72,9 +84,21 @@ impl TaasWriter {
         self.push_component(name, component_type, "f32", vec![data.len()], bytes);
     }
 
-    pub fn add_f32_shape(&mut self, name: &str, component_type: &str, data: &[f32], shape: Vec<usize>) {
+    pub fn add_f32_shape(
+        &mut self,
+        name: &str,
+        component_type: &str,
+        data: &[f32],
+        shape: Vec<usize>,
+    ) {
         let total: usize = shape.iter().product();
-        assert_eq!(total, data.len(), "Shape {:?} doesn't match data len {}", shape, data.len());
+        assert_eq!(
+            total,
+            data.len(),
+            "Shape {:?} doesn't match data len {}",
+            shape,
+            data.len()
+        );
         let bytes = bytemuck::cast_slice(data);
         self.push_component(name, component_type, "f32", shape, bytes);
     }
@@ -84,9 +108,21 @@ impl TaasWriter {
         self.push_component(name, component_type, "i32", vec![data.len()], bytes);
     }
 
-    pub fn add_i32_shape(&mut self, name: &str, component_type: &str, data: &[i32], shape: Vec<usize>) {
+    pub fn add_i32_shape(
+        &mut self,
+        name: &str,
+        component_type: &str,
+        data: &[i32],
+        shape: Vec<usize>,
+    ) {
         let total: usize = shape.iter().product();
-        assert_eq!(total, data.len(), "Shape {:?} doesn't match data len {}", shape, data.len());
+        assert_eq!(
+            total,
+            data.len(),
+            "Shape {:?} doesn't match data len {}",
+            shape,
+            data.len()
+        );
         let bytes = bytemuck::cast_slice(data);
         self.push_component(name, component_type, "i32", shape, bytes);
     }
@@ -120,19 +156,29 @@ impl TaasWriter {
             components: self.components.clone(),
             metadata: self.metadata.clone(),
         };
-        let header_json = serde_json::to_string(&manifest).map_err(|e| format!("Failed to serialize manifest: {e}"))?;
+        let header_json = serde_json::to_string(&manifest)
+            .map_err(|e| format!("Failed to serialize manifest: {e}"))?;
         let header_bytes = header_json.as_bytes();
         let header_len = header_bytes.len() as u64;
 
-        writer.write_all(TAAS_MAGIC).map_err(|e| format!("Write error: {e}"))?;
-        writer.write_all(&header_len.to_le_bytes()).map_err(|e| format!("Write error: {e}"))?;
-        writer.write_all(header_bytes).map_err(|e| format!("Write error: {e}"))?;
-        writer.write_all(&self.tensor_data).map_err(|e| format!("Write error: {e}"))?;
+        writer
+            .write_all(TAAS_MAGIC)
+            .map_err(|e| format!("Write error: {e}"))?;
+        writer
+            .write_all(&header_len.to_le_bytes())
+            .map_err(|e| format!("Write error: {e}"))?;
+        writer
+            .write_all(header_bytes)
+            .map_err(|e| format!("Write error: {e}"))?;
+        writer
+            .write_all(&self.tensor_data)
+            .map_err(|e| format!("Write error: {e}"))?;
         Ok(())
     }
 
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<(), String> {
-        let mut file = std::fs::File::create(path.as_ref()).map_err(|e| format!("Cannot create file: {e}"))?;
+        let mut file =
+            std::fs::File::create(path.as_ref()).map_err(|e| format!("Cannot create file: {e}"))?;
         self.save(&mut file)
     }
 
@@ -144,5 +190,7 @@ impl TaasWriter {
 }
 
 impl Default for TaasWriter {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

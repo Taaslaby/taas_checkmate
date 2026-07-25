@@ -38,27 +38,54 @@ pub struct PyLifNeuron {
 impl PyLifNeuron {
     #[new]
     #[pyo3(signature = (n, dt=0.5, tau_m=20.0, v_rest=-65.0, v_thresh=-50.0, v_reset=-70.0, tau_theta=10.0, beta=0.1))]
-    fn new(n: usize, dt: f32, tau_m: f32, v_rest: f32, v_thresh: f32, v_reset: f32, tau_theta: f32, beta: f32) -> Self {
+    fn new(
+        n: usize,
+        dt: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_theta: f32,
+        beta: f32,
+    ) -> Self {
         let n_padded = n.div_ceil(8) * 8;
         Self {
-            v: vec![v_rest; n_padded], theta: vec![0.0; n_padded], n,
-            tau_m: vec![tau_m; n_padded], v_rest: vec![v_rest; n_padded],
-            v_thresh: vec![v_thresh; n_padded], v_reset: vec![v_reset; n_padded],
-            tau_theta: vec![tau_theta; n_padded], beta: vec![beta; n_padded], dt,
+            v: vec![v_rest; n_padded],
+            theta: vec![0.0; n_padded],
+            n,
+            tau_m: vec![tau_m; n_padded],
+            v_rest: vec![v_rest; n_padded],
+            v_thresh: vec![v_thresh; n_padded],
+            v_reset: vec![v_reset; n_padded],
+            tau_theta: vec![tau_theta; n_padded],
+            beta: vec![beta; n_padded],
+            dt,
         }
     }
 
-    fn step(&mut self, I: Bound<'_, PyArray1<f32>>, spikes: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        I: Bound<'_, PyArray1<f32>>,
+        spikes: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
         let mut I = I.readwrite();
         let mut spikes = spikes.readwrite();
         let n = self.n.div_ceil(8) * 8;
-        let mut refractory = vec![0.0f32; n];  // class-owned, will be field later
+        let mut refractory = vec![0.0f32; n]; // class-owned, will be field later
         neuron::step_lif_at(
-            &mut self.v, &mut self.theta,
-            I.as_slice_mut()?, spikes.as_slice_mut()?,
-            self.dt, &self.tau_m, &self.v_rest, &self.v_thresh,
-            &self.v_reset, &self.tau_theta, &self.beta,
-            &mut refractory, neuron::DEFAULT_TAU_REF,
+            &mut self.v,
+            &mut self.theta,
+            I.as_slice_mut()?,
+            spikes.as_slice_mut()?,
+            self.dt,
+            &self.tau_m,
+            &self.v_rest,
+            &self.v_thresh,
+            &self.v_reset,
+            &self.tau_theta,
+            &self.beta,
+            &mut refractory,
+            neuron::DEFAULT_TAU_REF,
         );
         Ok(())
     }
@@ -91,7 +118,9 @@ impl PyLifNeuron {
         Ok(())
     }
 
-    fn n_neurons(&self) -> usize { self.n }
+    fn n_neurons(&self) -> usize {
+        self.n
+    }
 
     fn __repr__(&self) -> String {
         format!("LifNeuron(n={}, dt={})", self.n, self.dt)
@@ -116,7 +145,13 @@ pub fn py_intrinsic_plasticity(
 ) -> PyResult<()> {
     let mut theta = theta.readwrite();
     let spikes = spikes.readonly();
-    neuron::intrinsic_plasticity(theta.as_slice_mut()?, spikes.as_slice()?, lr_ip, target_rate, decay);
+    neuron::intrinsic_plasticity(
+        theta.as_slice_mut()?,
+        spikes.as_slice()?,
+        lr_ip,
+        target_rate,
+        decay,
+    );
     Ok(())
 }
 
@@ -150,18 +185,31 @@ pub struct PySornNetwork {
 impl PySornNetwork {
     #[new]
     fn new(n: usize, w_init: f32, w_target_sum: f32) -> Self {
-        Self { inner: neuron::SornNetwork::new(n, w_init, w_target_sum) }
+        Self {
+            inner: neuron::SornNetwork::new(n, w_init, w_target_sum),
+        }
     }
 
-    fn step(&mut self, spikes: Bound<'_, PyArray1<i32>>, traces_pre: Bound<'_, PyArray1<f32>>, traces_post: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        spikes: Bound<'_, PyArray1<i32>>,
+        traces_pre: Bound<'_, PyArray1<f32>>,
+        traces_post: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<()> {
         let spikes = spikes.readonly();
         let traces_pre = traces_pre.readonly();
         let traces_post = traces_post.readonly();
-        self.inner.step(spikes.as_slice()?, traces_pre.as_slice()?, traces_post.as_slice()?);
+        self.inner.step(
+            spikes.as_slice()?,
+            traces_pre.as_slice()?,
+            traces_post.as_slice()?,
+        );
         Ok(())
     }
 
-    fn reset(&mut self) { self.inner.reset(); }
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
 
     /// Веса синапсов как np.ndarray.
     #[getter]
@@ -176,10 +224,15 @@ impl PySornNetwork {
     }
 
     fn __repr__(&self) -> String {
-        format!("SornNetwork(n={}, target_sum={})", self.inner.n, self.inner.w_target_sum)
+        format!(
+            "SornNetwork(n={}, target_sum={})",
+            self.inner.n, self.inner.w_target_sum
+        )
     }
 
-    fn n_neurons(&self) -> usize { self.inner.n }
+    fn n_neurons(&self) -> usize {
+        self.inner.n
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -202,7 +255,13 @@ pub fn py_bsa_encode(
     let signal = signal.readonly();
     let kernel = kernel.readonly();
     let mut reconstructed = reconstructed.readwrite();
-    Ok(neuron::bsa_encode(spikes_out.as_slice_mut()?, signal.as_slice()?, kernel.as_slice()?, reconstructed.as_slice_mut()?, threshold))
+    Ok(neuron::bsa_encode(
+        spikes_out.as_slice_mut()?,
+        signal.as_slice()?,
+        kernel.as_slice()?,
+        reconstructed.as_slice_mut()?,
+        threshold,
+    ))
 }
 
 /// Фазовое кодирование: сигнал → спайки через фазы осцилляторов.
@@ -222,7 +281,14 @@ pub fn py_phase_encode(
     let mut phases = phases.readwrite();
     let cos_phases = cos_phases.readonly();
     let signal = signal.readonly();
-    Ok(neuron::phase_encode(spikes_out.as_slice_mut()?, phases.as_slice_mut()?, cos_phases.as_slice()?, signal.as_slice()?, threshold, gain))
+    Ok(neuron::phase_encode(
+        spikes_out.as_slice_mut()?,
+        phases.as_slice_mut()?,
+        cos_phases.as_slice()?,
+        signal.as_slice()?,
+        threshold,
+        gain,
+    ))
 }
 
 /// TTFS (Time-To-First-Spike) энкодер.
@@ -236,19 +302,39 @@ pub struct PyTtfsEncoder {
 #[pymethods]
 impl PyTtfsEncoder {
     #[new]
-    fn new(n: usize, max_delay: usize) -> Self { Self { inner: neuron::TtfsEncoder::new(n, max_delay) } }
-
-    fn encode_step(&mut self, values: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<bool> {
-        let values = values.readonly();
-        let mut spikes_out = spikes_out.readwrite();
-        Ok(self.inner.encode_step(values.as_slice()?, spikes_out.as_slice_mut()?))
+    fn new(n: usize, max_delay: usize) -> Self {
+        Self {
+            inner: neuron::TtfsEncoder::new(n, max_delay),
+        }
     }
 
-    fn reset(&mut self) { self.inner.reset(); }
+    fn encode_step(
+        &mut self,
+        values: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<bool> {
+        let values = values.readonly();
+        let mut spikes_out = spikes_out.readwrite();
+        Ok(self
+            .inner
+            .encode_step(values.as_slice()?, spikes_out.as_slice_mut()?))
+    }
 
-    fn __repr__(&self) -> String { format!("TtfsEncoder(max_delay={}, n_neurons={})", self.inner.max_delay, self.inner.fire_times.len()) }
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
 
-    fn n_neurons(&self) -> usize { self.inner.fire_times.len() }
+    fn __repr__(&self) -> String {
+        format!(
+            "TtfsEncoder(max_delay={}, n_neurons={})",
+            self.inner.max_delay,
+            self.inner.fire_times.len()
+        )
+    }
+
+    fn n_neurons(&self) -> usize {
+        self.inner.fire_times.len()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -301,7 +387,9 @@ pub fn py_spike_raster_to_csv(
 /// Возвращает np.ndarray длины len.
 #[pyfunction]
 #[pyo3(name = "bsa_kernel_hamming")]
-pub fn py_bsa_kernel_hamming(len: usize) -> Vec<f32> { neuron::bsa_kernel_hamming(len) }
+pub fn py_bsa_kernel_hamming(len: usize) -> Vec<f32> {
+    neuron::bsa_kernel_hamming(len)
+}
 
 /// Декодирование population rate из буфера спайков.
 ///
@@ -316,6 +404,11 @@ pub fn py_population_rate_decode(
 ) -> PyResult<()> {
     let mut rates_out = rates_out.readwrite();
     let spike_buffer = spike_buffer.readonly();
-    neuron::population_rate_decode(rates_out.as_slice_mut()?, spike_buffer.as_slice()?, n_neurons, window);
+    neuron::population_rate_decode(
+        rates_out.as_slice_mut()?,
+        spike_buffer.as_slice()?,
+        n_neurons,
+        window,
+    );
     Ok(())
 }

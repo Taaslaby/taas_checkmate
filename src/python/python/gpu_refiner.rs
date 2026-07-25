@@ -16,15 +16,15 @@
 //! ```
 
 use numpy::{PyArray1, PyArrayMethods};
-use pyo3::prelude::*;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::prelude::*;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 use std::collections::HashMap;
 
 #[cfg(feature = "cuda")]
-use crate::cuda::{GpuContext, DevicePtr};
+use crate::cuda::{DevicePtr, GpuContext};
 
 /// Refinement history record.
 #[pyclass(name = "RefinerHistory", module = "taas_checkmate.gpu_refiner")]
@@ -140,13 +140,17 @@ impl PyGpuConnectomeRefiner {
         let vl = values.readonly();
         let nt = nt_types.readonly();
 
-        let rp_s = rp.as_slice()
+        let rp_s = rp
+            .as_slice()
             .map_err(|e| PyRuntimeError::new_err(format!("row_ptr: {e}")))?;
-        let ci_s = ci.as_slice()
+        let ci_s = ci
+            .as_slice()
             .map_err(|e| PyRuntimeError::new_err(format!("col_indices: {e}")))?;
-        let vl_s = vl.as_slice()
+        let vl_s = vl
+            .as_slice()
             .map_err(|e| PyRuntimeError::new_err(format!("values: {e}")))?;
-        let nt_s = nt.as_slice()
+        let nt_s = nt
+            .as_slice()
             .map_err(|e| PyRuntimeError::new_err(format!("nt_types: {e}")))?;
 
         let n = rp_s.len() - 1;
@@ -192,10 +196,14 @@ impl PyGpuConnectomeRefiner {
     // ═══════════════════════════════════════════════════
 
     #[getter]
-    pub fn n_neurons(&self) -> usize { self.n }
+    pub fn n_neurons(&self) -> usize {
+        self.n
+    }
 
     #[getter]
-    pub fn n_synapses(&self) -> usize { self.s }
+    pub fn n_synapses(&self) -> usize {
+        self.s
+    }
 
     #[getter]
     pub fn weights<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
@@ -203,10 +211,14 @@ impl PyGpuConnectomeRefiner {
     }
 
     #[getter]
-    pub fn last_coherence(&self) -> f32 { self.last_coherence }
+    pub fn last_coherence(&self) -> f32 {
+        self.last_coherence
+    }
 
     #[getter]
-    pub fn last_mean_w(&self) -> f32 { self.last_mean_w }
+    pub fn last_mean_w(&self) -> f32 {
+        self.last_mean_w
+    }
 
     // ═══════════════════════════════════════════════════
     //  Run refinement
@@ -257,10 +269,22 @@ impl PyGpuConnectomeRefiner {
     ) -> PyResult<HashMap<String, Vec<f64>>> {
         #[cfg(not(feature = "cuda"))]
         {
-            let _ = (n_epochs, n_steps, dt, lr, coherence_weight, sparsity_weight,
-                     temporal_weight, homeostasis_weight, target_mean_weight, weight_clamp, report_every);
+            let _ = (
+                n_epochs,
+                n_steps,
+                dt,
+                lr,
+                coherence_weight,
+                sparsity_weight,
+                temporal_weight,
+                homeostasis_weight,
+                target_mean_weight,
+                weight_clamp,
+                report_every,
+            );
             return Err(PyRuntimeError::new_err(
-                "CUDA not available — rebuild with --features cuda,python"));
+                "CUDA not available — rebuild with --features cuda,python",
+            ));
         }
 
         #[cfg(feature = "cuda")]
@@ -268,16 +292,21 @@ impl PyGpuConnectomeRefiner {
             let n = self.n;
             let s = self.s;
             let coherence_start = n_steps / 2;
-            let grad_clip_norm = 1.0_f32;  // gradient clipping threshold (0 = disable)
+            let grad_clip_norm = 1.0_f32; // gradient clipping threshold (0 = disable)
 
             // Initialize GPU context + upload connectome
             if self.ctx.is_none() {
                 let ctx = GpuContext::new(n, s)
                     .map_err(|e| PyRuntimeError::new_err(format!("GpuContext: {e}")))?;
                 let ext_I = vec![0.0f32; n];
-                ctx.upload_connectome(&self.row_ptr, &self.col_indices, &self.values,
-                                      &self.nt_types, &ext_I)
-                    .map_err(|e| PyRuntimeError::new_err(format!("upload_connectome: {e}")))?;
+                ctx.upload_connectome(
+                    &self.row_ptr,
+                    &self.col_indices,
+                    &self.values,
+                    &self.nt_types,
+                    &ext_I,
+                )
+                .map_err(|e| PyRuntimeError::new_err(format!("upload_connectome: {e}")))?;
                 self.ctx = Some(ctx);
             }
 
@@ -344,17 +373,25 @@ impl PyGpuConnectomeRefiner {
                     d_phases_traj.as_mut_ptr(),
                     d_coupling_traj.as_mut_ptr(),
                     d_dtheta_traj.as_mut_ptr(),
-                    coherence_start, coherence_weight, temporal_weight, dt, n_steps,
-                ).map_err(|e| PyRuntimeError::new_err(format!("loss_grad: {e}")))?;
+                    coherence_start,
+                    coherence_weight,
+                    temporal_weight,
+                    dt,
+                    n_steps,
+                )
+                .map_err(|e| PyRuntimeError::new_err(format!("loss_grad: {e}")))?;
 
                 // Phase 3: GPU BPTT backward
                 ctx.zero_grad_weights_async(d_grad_weights.as_mut_ptr())
                     .map_err(|e| PyRuntimeError::new_err(format!("zero_grad: {e}")))?;
 
                 for bw_step in (0..n_steps - 1).rev() {
-                    let dtheta_step = unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) } as *mut f32;
-                    let dtheta_next = unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) } as *const f32;
-                    let phases_step = unsafe { d_phases_traj.as_ptr().add(bw_step * n) } as *const f32;
+                    let dtheta_step =
+                        unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) } as *mut f32;
+                    let dtheta_next =
+                        unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) } as *const f32;
+                    let phases_step =
+                        unsafe { d_phases_traj.as_ptr().add(bw_step * n) } as *const f32;
 
                     ctx.bptt_step(
                         d_grad_weights.as_mut_ptr() as *mut f32,
@@ -362,7 +399,8 @@ impl PyGpuConnectomeRefiner {
                         dtheta_next,
                         phases_step,
                         dt,
-                    ).map_err(|e| PyRuntimeError::new_err(format!("bptt_step: {e}")))?;
+                    )
+                    .map_err(|e| PyRuntimeError::new_err(format!("bptt_step: {e}")))?;
                 }
 
                 // Phase 4: GPU Gradient Clipping
@@ -371,12 +409,14 @@ impl PyGpuConnectomeRefiner {
                         d_grad_weights.as_ptr() as *const f32,
                         d_grad_norm.as_mut_ptr(),
                         d_grad_norm_partial.as_mut_ptr(),
-                    ).map_err(|e| PyRuntimeError::new_err(format!("grad_norm: {e}")))?;
+                    )
+                    .map_err(|e| PyRuntimeError::new_err(format!("grad_norm: {e}")))?;
                     ctx.grad_clip_async(
                         d_grad_weights.as_mut_ptr() as *mut f32,
                         d_grad_norm.as_ptr() as *const f32,
                         grad_clip_norm,
-                    ).map_err(|e| PyRuntimeError::new_err(format!("grad_clip: {e}")))?;
+                    )
+                    .map_err(|e| PyRuntimeError::new_err(format!("grad_clip: {e}")))?;
                 }
 
                 // Phase 5: GPU weight update
@@ -388,31 +428,50 @@ impl PyGpuConnectomeRefiner {
                 let homeo_diff = mean_abs_w - target_mean_weight;
                 let homeostasis_scale = 2.0 * homeostasis_weight * homeo_diff / s as f32;
 
-                let sparsity_scale = if sparsity_scale.is_finite() { sparsity_scale } else { 0.0 };
-                let homeostasis_scale = if homeostasis_scale.is_finite() { homeostasis_scale } else { 0.0 };
+                let sparsity_scale = if sparsity_scale.is_finite() {
+                    sparsity_scale
+                } else {
+                    0.0
+                };
+                let homeostasis_scale = if homeostasis_scale.is_finite() {
+                    homeostasis_scale
+                } else {
+                    0.0
+                };
 
                 ctx.weight_update_async(
                     d_grad_weights.as_ptr() as *const f32,
-                    lr, sparsity_scale, homeostasis_scale, weight_clamp,
-                ).map_err(|e| PyRuntimeError::new_err(format!("weight_update: {e}")))?;
+                    lr,
+                    sparsity_scale,
+                    homeostasis_scale,
+                    weight_clamp,
+                )
+                .map_err(|e| PyRuntimeError::new_err(format!("weight_update: {e}")))?;
 
                 ctx.sync()
                     .map_err(|e| PyRuntimeError::new_err(format!("sync: {e}")))?;
 
                 // Stats
                 if report_every > 0 && (epoch % report_every == 0 || epoch == n_epochs - 1) {
-                    d_phases_traj.copy_to_host(&mut h_phases_full)
+                    d_phases_traj
+                        .copy_to_host(&mut h_phases_full)
                         .map_err(|e| PyRuntimeError::new_err(format!("dl_phases: {e}")))?;
                     let final_off = (n_steps - 1) * n;
                     let (sum_s, sum_c): (f64, f64) = h_phases_full[final_off..final_off + n]
-                        .iter().fold((0.0, 0.0), |(s, c), &th| (s + th.sin() as f64, c + th.cos() as f64));
+                        .iter()
+                        .fold((0.0, 0.0), |(s, c), &th| {
+                            (s + th.sin() as f64, c + th.cos() as f64)
+                        });
                     let coherence = ((sum_s * sum_s + sum_c * sum_c).sqrt() / n as f64) as f32;
 
                     epochs_out.push(epoch as f64);
                     coherence_out.push(coherence as f64);
                     mean_w_out.push(mean_abs_w as f64);
 
-                    let msg = format!("  epoch {:>4}/{}: R={:.4} mean|w|={:.4}", epoch, n_epochs, coherence, mean_abs_w);
+                    let msg = format!(
+                        "  epoch {:>4}/{}: R={:.4} mean|w|={:.4}",
+                        epoch, n_epochs, coherence, mean_abs_w
+                    );
                     println!("{}", msg);
                 }
             }
@@ -452,5 +511,3 @@ impl PyGpuConnectomeRefiner {
         Ok(())
     }
 }
-
-

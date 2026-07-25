@@ -30,18 +30,18 @@
 //! Usage:
 //!   cargo run --release --example spaun_pipeline -p karmac
 
-use std::path::PathBuf;
-use std::time::Instant;
 use rand::Rng;
 use rand::SeedableRng;
+use std::path::PathBuf;
+use std::time::Instant;
 
-use karmac::gnw::GlobalWorkspace;
-use karmac::working_memory::WorkingMemory;
-use karmac::semantic_pointer::SemanticPointer;
 use karmac::basal_ganglia::BasalGanglia;
+use karmac::gnw::GlobalWorkspace;
+use karmac::semantic_pointer::SemanticPointer;
+use karmac::working_memory::WorkingMemory;
 
 use taas_connectome::ConnectomeData;
-use taas_format::{TaasReader, load_connectome};
+use taas_format::{load_connectome, TaasReader};
 
 /// NLMS training wrapper: `w += lr·error·x / (‖x‖² + ε)`.
 fn nlms_train_weights(weights: &mut [f32], state: &[f32], error: f32, lr: f32, eps: f32) {
@@ -130,7 +130,9 @@ impl SpaunPipeline {
         for k in 0..3 {
             bg_weights[k * 3 + k] = 5.0; // strong self-connection
             for j in 0..3 {
-                if j != k { bg_weights[k * 3 + j] = -2.0; } // inhibit cross-talk
+                if j != k {
+                    bg_weights[k * 3 + j] = -2.0;
+                } // inhibit cross-talk
             }
         }
 
@@ -194,7 +196,9 @@ impl SpaunPipeline {
                     break;
                 }
                 let j = self.conn.col_indices[idx];
-                if j < 0 || j as usize >= n { continue; }
+                if j < 0 || j as usize >= n {
+                    continue;
+                }
                 let w = self.conn.values[idx];
                 sum += w * self.state[j as usize];
             }
@@ -235,7 +239,9 @@ impl SpaunPipeline {
         let mut cortex = self.sp_to_cortex(sp);
         for _ in 0..steps {
             self.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
             self.connectome_step(&cortex);
         }
         let logits = self.motor_readout(&cortex);
@@ -276,30 +282,32 @@ impl SpaunPipeline {
         //    cortical region. Each channel index maps to a distinct SP.
         let cue_idx = task_cue.iter().position(|&c| c > 0.5).unwrap_or(0);
         let cue_sp = self.sp.from_index(cue_idx * 50 + 10);
-        
+
         // 2. Project SP → cortex
         let mut cortex = self.sp_to_cortex(&cue_sp);
-        
+
         // 3. GNW processes the task cue through the workspace
         //    This is the SPAUN way: cortex goes through Global Workspace
         //    before reaching Basal Ganglia for action selection.
         for _ in 0..3 {
             self.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
         }
-        
+
         // 4. Downsample GNW-processed 512-dim cortex → 3-dim BG input
         //    Each BG channel averages 1/3 of the cortex dimensions.
         let third = self.cortical_dim / 3;
         let bg_input: [f32; 3] = [
             cortex[..third].iter().sum::<f32>() / third.max(1) as f32,
-            cortex[third..2*third].iter().sum::<f32>() / third.max(1) as f32,
-            cortex[2*third..].iter().sum::<f32>() / (self.cortical_dim - 2*third).max(1) as f32,
+            cortex[third..2 * third].iter().sum::<f32>() / third.max(1) as f32,
+            cortex[2 * third..].iter().sum::<f32>() / (self.cortical_dim - 2 * third).max(1) as f32,
         ];
-        
+
         // 5. BG selects action based on GNW-processed cortical activity
         let action = self.bg.step(&bg_input);
-        
+
         // Execute the chosen action
         let result = match action {
             0 => task_copy(self, task_arg, steps),
@@ -312,23 +320,30 @@ impl SpaunPipeline {
                 };
                 let out = task_serial_recall(self, &seq, steps);
                 // Return number of correct matches
-                out.iter().zip(seq.iter()).filter(|(o, s)| **o == **s).count()
-            },
+                out.iter()
+                    .zip(seq.iter())
+                    .filter(|(o, s)| **o == **s)
+                    .count()
+            }
             2 => {
                 let out = task_counting(self, task_arg + 1, steps);
                 // Return number of correct matches
                 let expected: Vec<usize> = (1..=task_arg + 1).collect();
-                out.iter().zip(expected.iter()).filter(|(o, e)| **o == **e).count()
-            },
+                out.iter()
+                    .zip(expected.iter())
+                    .filter(|(o, e)| **o == **e)
+                    .count()
+            }
             _ => unreachable!(),
         };
-        
+
         (action, result)
     }
 
     /// Argmax.
     fn argmax(v: &[f32]) -> usize {
-        v.iter().enumerate()
+        v.iter()
+            .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0)
@@ -374,7 +389,9 @@ fn task_copy(pipeline: &mut SpaunPipeline, digit: usize, steps: usize) -> usize 
 
     for _ in 0..steps {
         pipeline.gnw.forward(&mut c);
-        for cj in c.iter_mut() { *cj = cj.clamp(-5.0, 5.0); }
+        for cj in c.iter_mut() {
+            *cj = cj.clamp(-5.0, 5.0);
+        }
         pipeline.connectome_step(&c);
     }
 
@@ -386,7 +403,11 @@ fn task_copy(pipeline: &mut SpaunPipeline, digit: usize, steps: usize) -> usize 
 /// Uses the full SPAUN pipeline: recalled SP → sp_to_cortex (trained) →
 /// GNW → connectome → motor_readout. Reset connectome state before recall
 /// for consistent dynamics.
-fn task_serial_recall(pipeline: &mut SpaunPipeline, sequence: &[usize], steps_per_digit: usize) -> Vec<usize> {
+fn task_serial_recall(
+    pipeline: &mut SpaunPipeline,
+    sequence: &[usize],
+    steps_per_digit: usize,
+) -> Vec<usize> {
     let mut output = Vec::new();
 
     // Phase 1: Encode and store in working memory
@@ -440,7 +461,9 @@ fn task_counting(pipeline: &mut SpaunPipeline, n: usize, steps_per_digit: usize)
 
         for _ in 0..steps_per_digit {
             pipeline.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
             pipeline.connectome_step(&cortex);
         }
 
@@ -466,17 +489,17 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
     let n_out = pipeline.n_outputs;
     let n_cortex = pipeline.cortical_dim;
     let sp_dim = pipeline.sp_dim;
-    
+
     // Weights accumulate over epochs (no reset)
     let mut final_loss = 0.0f32;
-    
+
     // ── Phase 1: Train w_motor ──────────────────────
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
-        
+
         for digit in 0..10 {
             let pixels = digit_pixels(digit);
-            
+
             // Encode → GNW → reservoir
             let sp = pipeline.encode_pixels(&pixels);
             let mut cortex = pipeline.sp_to_cortex(&sp);
@@ -484,24 +507,30 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
             if epoch == n_epochs - 1 {
                 pipeline.store_template(digit, &sp, &cortex);
             }
-            
+
             for _ in 0..steps {
                 pipeline.gnw.forward(&mut cortex);
-                for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+                for c in cortex.iter_mut() {
+                    *c = c.clamp(-5.0, 5.0);
+                }
                 pipeline.connectome_step(&cortex);
             }
-            
+
             // Get current prediction
             let logits = pipeline.motor_readout(&cortex);
             let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let mut exps: Vec<f32> = logits.iter().map(|&l| (l - max_l).exp()).collect();
             let sum: f32 = exps.iter().sum();
-            if sum > 1e-10 { for e in &mut exps { *e /= sum; } }
-            
+            if sum > 1e-10 {
+                for e in &mut exps {
+                    *e /= sum;
+                }
+            }
+
             // Cross-entropy loss
             let prob = exps[digit].max(1e-10);
             epoch_loss -= prob.ln();
-            
+
             // NLMS update on w_motor
             for k in 0..n_out {
                 let target = if k == digit { 1.0f32 } else { 0.0f32 };
@@ -511,13 +540,18 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
                 nlms_train_weights(w_slice, &cortex, error, lr, 1e-6);
             }
         }
-        
+
         final_loss = epoch_loss / 10.0;
         if (epoch + 1) % 5 == 0 || epoch == 0 || epoch == n_epochs - 1 {
-            println!("  Epoch {:3}/{}: avg CE loss = {:.4}", epoch + 1, n_epochs, final_loss);
+            println!(
+                "  Epoch {:3}/{}: avg CE loss = {:.4}",
+                epoch + 1,
+                n_epochs,
+                final_loss
+            );
         }
     }
-    
+
     // ── Phase 2: Train w_sp_to_cortex via NLMS ─────
     // Teacher-forcing on WM-projected SPs (one at a time, clean WM per digit).
     // This ensures w_sp_to_cortex learns to handle the W_in projection distortion
@@ -532,9 +566,9 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
             let sp = pipeline.encode_pixels(&pixels);
             pipeline.wm.store(&sp);
             let projected_sp = pipeline.wm.recall(0);
-            
+
             let target = &pipeline.target_cortex[digit];
-            
+
             // Train w_sp_to_cortex on PROJECTED SP → target cortex
             for j in 0..n_cortex {
                 let mut pred = 0.0f32;
@@ -544,13 +578,16 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
                 let error = target[j] - pred;
                 nlms_train_weights(
                     &mut pipeline.w_sp_to_cortex[j * sp_dim..(j + 1) * sp_dim],
-                    &projected_sp, error, sp2c_lr, 1e-6,
+                    &projected_sp,
+                    error,
+                    sp2c_lr,
+                    1e-6,
                 );
             }
         }
     }
     pipeline.wm.clear();
-    
+
     // Verify: clean WM per digit, same as Serial Recall would use
     println!("  Verifying on clean WM-projected SPs...");
     pipeline.reset_state();
@@ -561,21 +598,28 @@ fn train_pipeline(pipeline: &mut SpaunPipeline, n_epochs: usize, steps: usize, l
         let sp = pipeline.encode_pixels(&pixels);
         pipeline.wm.store(&sp);
         let projected_sp = pipeline.wm.recall(0);
-        
+
         let mut cortex = pipeline.sp_to_cortex(&projected_sp);
         for _ in 0..steps {
             pipeline.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() { *c = c.clamp(-5.0, 5.0); }
+            for c in cortex.iter_mut() {
+                *c = c.clamp(-5.0, 5.0);
+            }
             pipeline.connectome_step(&cortex);
         }
         let logits = pipeline.motor_readout(&cortex);
         let pred = SpaunPipeline::argmax(&logits);
-        if pred == digit { sp2c_correct += 1; }
+        if pred == digit {
+            sp2c_correct += 1;
+        }
     }
     pipeline.wm.clear();
-    println!("  w_sp_to_cortex post-train accuracy (post-WM): {}/10 ({:.0}%)",
-        sp2c_correct, sp2c_correct as f64 * 10.0);
-    
+    println!(
+        "  w_sp_to_cortex post-train accuracy (post-WM): {}/10 ({:.0}%)",
+        sp2c_correct,
+        sp2c_correct as f64 * 10.0
+    );
+
     final_loss
 }
 
@@ -587,15 +631,26 @@ fn main() {
 
     // Load connectome from examples/data
     let brain_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .join("examples").join("data").join("brain.taas");
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join("data")
+        .join("brain.taas");
     println!("  Loading connectome from: {}", brain_path.display());
     let reader = TaasReader::from_file(brain_path.as_os_str().to_str().unwrap())
         .expect("Failed to load brain.taas. Generate one with --features connectome");
-    let conn = load_connectome(&reader)
-        .expect("Failed to parse connectome from .taas");
-    println!("  Connectome: {} neurons, {} synapses", conn.n_neurons, conn.n_synapses);
-    println!("  Groups: {:?}", conn.groups.iter().map(|g| (g.name.as_str(), g.indices.len())).collect::<Vec<_>>());
+    let conn = load_connectome(&reader).expect("Failed to parse connectome from .taas");
+    println!(
+        "  Connectome: {} neurons, {} synapses",
+        conn.n_neurons, conn.n_synapses
+    );
+    println!(
+        "  Groups: {:?}",
+        conn.groups
+            .iter()
+            .map(|g| (g.name.as_str(), g.indices.len()))
+            .collect::<Vec<_>>()
+    );
 
     let mut pipeline = SpaunPipeline::from_connectome(conn);
     let steps_per_digit = 10;
@@ -607,79 +662,115 @@ fn main() {
     let t_train = Instant::now();
     let final_loss = train_pipeline(&mut pipeline, 50, steps_per_digit, 0.1);
     let train_ms = t_train.elapsed().as_secs_f64() * 1000.0;
-    println!("  Training: {:.1}ms total ({:.1}ms/epoch), final loss = {:.4}",
-        train_ms, train_ms / 50.0, final_loss);
+    println!(
+        "  Training: {:.1}ms total ({:.1}ms/epoch), final loss = {:.4}",
+        train_ms,
+        train_ms / 50.0,
+        final_loss
+    );
     println!();
 
     // ── BG Action Selection Test ────────────────────────
     println!("─── Basal Ganglia Action Selection ───");
     println!("  BG: 3 cortical channels → 3 actions (Copy=0, SerialRecall=1, Count=2)");
     println!();
-    
+
     // Test Copy task via BG
     println!("  --- Cue: Copy (task_cue = [1.0, 0.0, 0.0]) ---");
     let t0 = Instant::now();
     let mut bg_copy_correct = 0usize;
     for digit in 0..10 {
         pipeline.bg.reset();
-        let (action, result) = pipeline.bg_select_and_execute(
-            &[1.0, 0.0, 0.0], digit, steps_per_digit,
-        );
+        let (action, result) =
+            pipeline.bg_select_and_execute(&[1.0, 0.0, 0.0], digit, steps_per_digit);
         let ok = result == digit;
-        if ok { bg_copy_correct += 1; }
-        if ok { total_correct += 1; }
+        if ok {
+            bg_copy_correct += 1;
+        }
+        if ok {
+            total_correct += 1;
+        }
         total_tested += 1;
-        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
-        println!("  Digit {} → BG chose {} ({}), output: {} {}",
-            digit, action, task_name, result,
-            if ok { "✓" } else { "✗" });
+        let task_name = match action {
+            0 => "Copy",
+            1 => "Recall",
+            2 => "Count",
+            _ => "?",
+        };
+        println!(
+            "  Digit {} → BG chose {} ({}), output: {} {}",
+            digit,
+            action,
+            task_name,
+            result,
+            if ok { "✓" } else { "✗" }
+        );
     }
     let bg_copy_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    println!("  BG Copy accuracy: {}/10 ({:.0}%) | {:.1}ms",
-        bg_copy_correct, bg_copy_correct as f64 * 10.0, bg_copy_ms);
+    println!(
+        "  BG Copy accuracy: {}/10 ({:.0}%) | {:.1}ms",
+        bg_copy_correct,
+        bg_copy_correct as f64 * 10.0,
+        bg_copy_ms
+    );
     println!();
-    
+
     // Test Serial Recall via BG
     println!("  --- Cue: Serial Recall (task_cue = [0.0, 1.0, 0.0]) ---");
     let t0 = Instant::now();
-    let recall_seq: [&[usize]; 4] = [
-        &[3, 7, 1],
-        &[0, 5, 9, 2],
-        &[4, 4, 4],
-        &[8, 1, 6, 3],
-    ];
+    let recall_seq: [&[usize]; 4] = [&[3, 7, 1], &[0, 5, 9, 2], &[4, 4, 4], &[8, 1, 6, 3]];
     for (seq_idx, seq) in recall_seq.iter().enumerate() {
         pipeline.bg.reset();
-        let (action, matches) = pipeline.bg_select_and_execute(
-            &[0.0, 1.0, 0.0], seq_idx, steps_per_digit,
-        );
+        let (action, matches) =
+            pipeline.bg_select_and_execute(&[0.0, 1.0, 0.0], seq_idx, steps_per_digit);
         let perfect = matches == seq.len();
         total_correct += matches;
         total_tested += seq.len();
-        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
-        println!("  Sequence {:?} → BG chose {} ({}), matches: {}/{}{}",
-            seq, action, task_name, matches, seq.len(),
-            if perfect { " ✓" } else { "" });
+        let task_name = match action {
+            0 => "Copy",
+            1 => "Recall",
+            2 => "Count",
+            _ => "?",
+        };
+        println!(
+            "  Sequence {:?} → BG chose {} ({}), matches: {}/{}{}",
+            seq,
+            action,
+            task_name,
+            matches,
+            seq.len(),
+            if perfect { " ✓" } else { "" }
+        );
     }
     let bg_recall_ms = t0.elapsed().as_secs_f64() * 1000.0;
     println!("  BG Serial Recall: {:.1}ms", bg_recall_ms);
     println!();
-    
+
     // Test Counting via BG
     println!("  --- Cue: Counting (task_cue = [0.0, 0.0, 1.0]) ---");
     let t0 = Instant::now();
     for n in 1..=5 {
         pipeline.bg.reset();
-        let (action, matches) = pipeline.bg_select_and_execute(
-            &[0.0, 0.0, 1.0], n - 1, steps_per_digit,
-        );
+        let (action, matches) =
+            pipeline.bg_select_and_execute(&[0.0, 0.0, 1.0], n - 1, steps_per_digit);
         let perfect = matches == n;
         total_correct += matches;
         total_tested += n;
-        let task_name = match action { 0 => "Copy", 1 => "Recall", 2 => "Count", _ => "?" };
-        println!("  Count to {} → BG chose {} ({}), matches: {}/{}{}",
-            n, action, task_name, matches, n,
-            if perfect { " ✓" } else { "" });
+        let task_name = match action {
+            0 => "Copy",
+            1 => "Recall",
+            2 => "Count",
+            _ => "?",
+        };
+        println!(
+            "  Count to {} → BG chose {} ({}), matches: {}/{}{}",
+            n,
+            action,
+            task_name,
+            matches,
+            n,
+            if perfect { " ✓" } else { "" }
+        );
     }
     let bg_count_ms = t0.elapsed().as_secs_f64() * 1000.0;
     println!("  BG Counting: {:.1}ms", bg_count_ms);
@@ -689,11 +780,20 @@ fn main() {
     println!("{}", "═".repeat(60));
     println!("  📊 Summary");
     println!("{}", "═".repeat(60));
-    println!("  Pipeline: GNW({}) + WM({}×{}) + SP({}) + BG(3→3) + Reservoir({})",
-        pipeline.cortical_dim, pipeline.wm.n_slots(), pipeline.sp_dim,
-        pipeline.sp_dim, pipeline.n_neurons);
-    println!("  Overall accuracy: {}/{} ({:.1}%)", total_correct, total_tested,
-        total_correct as f64 / total_tested.max(1) as f64 * 100.0);
+    println!(
+        "  Pipeline: GNW({}) + WM({}×{}) + SP({}) + BG(3→3) + Reservoir({})",
+        pipeline.cortical_dim,
+        pipeline.wm.n_slots(),
+        pipeline.sp_dim,
+        pipeline.sp_dim,
+        pipeline.n_neurons
+    );
+    println!(
+        "  Overall accuracy: {}/{} ({:.1}%)",
+        total_correct,
+        total_tested,
+        total_correct as f64 / total_tested.max(1) as f64 * 100.0
+    );
     println!();
     println!("  Basal Ganglia routes action selection: task cue → SP → GNW → BG → action.");
     println!("  BG weights are random — selection accuracy depends on cortico-striatal mapping.");

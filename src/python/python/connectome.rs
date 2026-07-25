@@ -90,8 +90,19 @@ pub fn py_bench_connectome_cpu(
         // 1. Izhikevich step (SIMD + rayon) on current I
         //    I already has external + propagated from previous step
         neuron::step_izhikevich(
-            v, u, trace, a, b, I_buf, dt, 0.99,
-            spikes, c, d, &mut refractory, neuron::DEFAULT_TAU_REF,
+            v,
+            u,
+            trace,
+            a,
+            b,
+            I_buf,
+            dt,
+            0.99,
+            spikes,
+            c,
+            d,
+            &mut refractory,
+            neuron::DEFAULT_TAU_REF,
         );
 
         // 2. Count spikes + prepare I for next step
@@ -119,15 +130,25 @@ pub fn py_bench_connectome_cpu(
                     let t1 = col_indices[j + 1] as usize;
                     let t2 = col_indices[j + 2] as usize;
                     let t3 = col_indices[j + 3] as usize;
-                    if t0 < n { I_buf[t0] += values[j] * mult; }
-                    if t1 < n { I_buf[t1] += values[j + 1] * mult; }
-                    if t2 < n { I_buf[t2] += values[j + 2] * mult; }
-                    if t3 < n { I_buf[t3] += values[j + 3] * mult; }
+                    if t0 < n {
+                        I_buf[t0] += values[j] * mult;
+                    }
+                    if t1 < n {
+                        I_buf[t1] += values[j + 1] * mult;
+                    }
+                    if t2 < n {
+                        I_buf[t2] += values[j + 2] * mult;
+                    }
+                    if t3 < n {
+                        I_buf[t3] += values[j + 3] * mult;
+                    }
                     j += 4;
                 }
                 for j in j..end {
                     let col = col_indices[j] as usize;
-                    if col < n { I_buf[col] += values[j] * mult; }
+                    if col < n {
+                        I_buf[col] += values[j] * mult;
+                    }
                 }
             }
         }
@@ -215,8 +236,19 @@ pub fn py_bench_connectome_cpu_recording(
     for step in 0..n_steps {
         // 1. Izhikevich step
         neuron::step_izhikevich(
-            v, u, trace, a, b, I_buf, dt, 0.99,
-            spikes, c, d, &mut refractory, neuron::DEFAULT_TAU_REF,
+            v,
+            u,
+            trace,
+            a,
+            b,
+            I_buf,
+            dt,
+            0.99,
+            spikes,
+            c,
+            d,
+            &mut refractory,
+            neuron::DEFAULT_TAU_REF,
         );
 
         // 2. Record to spike_buffer before reset
@@ -252,15 +284,25 @@ pub fn py_bench_connectome_cpu_recording(
                     let t1 = col_indices[j + 1] as usize;
                     let t2 = col_indices[j + 2] as usize;
                     let t3 = col_indices[j + 3] as usize;
-                    if t0 < n { I_buf[t0] += values[j] * mult; }
-                    if t1 < n { I_buf[t1] += values[j + 1] * mult; }
-                    if t2 < n { I_buf[t2] += values[j + 2] * mult; }
-                    if t3 < n { I_buf[t3] += values[j + 3] * mult; }
+                    if t0 < n {
+                        I_buf[t0] += values[j] * mult;
+                    }
+                    if t1 < n {
+                        I_buf[t1] += values[j + 1] * mult;
+                    }
+                    if t2 < n {
+                        I_buf[t2] += values[j + 2] * mult;
+                    }
+                    if t3 < n {
+                        I_buf[t3] += values[j + 3] * mult;
+                    }
                     j += 4;
                 }
                 for j in j..end {
                     let col = col_indices[j] as usize;
-                    if col < n { I_buf[col] += values[j] * mult; }
+                    if col < n {
+                        I_buf[col] += values[j] * mult;
+                    }
                 }
             }
         }
@@ -296,9 +338,24 @@ pub fn py_bench_connectome_gpu(
 ) -> PyResult<(f64, usize)> {
     #[cfg(not(feature = "cuda"))]
     {
-        let _ = (row_ptr, col_indices, values, n_steps, dt, v, u, a, b, c, d, nt_types, external_I, spikes);
+        let _ = (
+            row_ptr,
+            col_indices,
+            values,
+            n_steps,
+            dt,
+            v,
+            u,
+            a,
+            b,
+            c,
+            d,
+            nt_types,
+            external_I,
+            spikes,
+        );
         return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            "CUDA not available — rebuild with --features cuda".to_string()
+            "CUDA not available — rebuild with --features cuda".to_string(),
         ));
     }
 
@@ -341,41 +398,49 @@ pub fn py_bench_connectome_gpu(
         // Create GPU context with enough synapses
         let gpu_ctx = match GpuContext::new(n_neurons, n_synapses) {
             Ok(ctx) => ctx,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("GpuContext::new failed: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "GpuContext::new failed: {e}"
+                )))
+            }
         };
 
         // Upload neuron params to GPU
         if let Err(e) = gpu_ctx.upload_neurons(&v_host, &u_host, a_sl, b_sl, c_sl, d_sl) {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_neurons: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_neurons: {e}"
+            )));
         }
 
         // Upload CSR connectome arrays to GPU (one-time)
-        if let Err(e) = gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl,
-            nt_types_sl, external_I_sl)
-        {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_connectome: {e}")
-            ));
+        if let Err(e) = gpu_ctx.upload_connectome(
+            row_ptr_sl,
+            col_indices_sl,
+            values_sl,
+            nt_types_sl,
+            external_I_sl,
+        ) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_connectome: {e}"
+            )));
         }
 
         // Allocate device-side spike counter
         let d_spike_counter = match gpu_ctx.alloc_spike_counter() {
             Ok(ptr) => ptr,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("alloc_spike_counter: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "alloc_spike_counter: {e}"
+                )))
+            }
         };
 
         // Initialize I = external_I (needed for first step's izhikevich)
         if let Err(e) = gpu_ctx.upload_I(external_I_sl) {
             gpu_ctx.free_spike_counter(d_spike_counter);
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_I initial: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_I initial: {e}"
+            )));
         }
 
         let t0 = std::time::Instant::now();
@@ -385,16 +450,15 @@ pub fn py_bench_connectome_gpu(
             // CSR propagate + Izhikevich — all on GPU, counts spikes device-side
             if let Err(e) = gpu_ctx.connectome_step(dt, 0.99, Some(d_spike_counter)) {
                 gpu_ctx.free_spike_counter(d_spike_counter);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("connectome_step: {e}")
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "connectome_step: {e}"
+                )));
             }
         }
 
         // Sync, read spike counter, cleanup
         let _ = gpu_ctx.sync();
-        let total_spikes_i32 = gpu_ctx.read_spike_counter(d_spike_counter)
-            .unwrap_or(-1);
+        let total_spikes_i32 = gpu_ctx.read_spike_counter(d_spike_counter).unwrap_or(-1);
         gpu_ctx.free_spike_counter(d_spike_counter);
         let total_spikes = total_spikes_i32.max(0) as usize;
 
@@ -456,12 +520,32 @@ pub fn py_bench_connectome_gpu_stdp(
 ) -> PyResult<(f64, usize, f32)> {
     #[cfg(not(feature = "cuda"))]
     {
-        let _ = (row_ptr, col_indices, values, n_steps, dt,
-                 v, u, _trace, a, b, c, d, nt_types, external_I,
-                 _I_buf, _spikes, spike_buffer, weights_out,
-                 lr_ltp, lr_ltd, w_min, w_max);
+        let _ = (
+            row_ptr,
+            col_indices,
+            values,
+            n_steps,
+            dt,
+            v,
+            u,
+            _trace,
+            a,
+            b,
+            c,
+            d,
+            nt_types,
+            external_I,
+            _I_buf,
+            _spikes,
+            spike_buffer,
+            weights_out,
+            lr_ltp,
+            lr_ltd,
+            w_min,
+            w_max,
+        );
         return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            "CUDA not available — rebuild with --features cuda".to_string()
+            "CUDA not available — rebuild with --features cuda".to_string(),
         ));
     }
 
@@ -504,47 +588,55 @@ pub fn py_bench_connectome_gpu_stdp(
         // Create GPU context
         let gpu_ctx = match GpuContext::new(n_neurons, n_synapses) {
             Ok(ctx) => ctx,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("GpuContext::new failed: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "GpuContext::new failed: {e}"
+                )))
+            }
         };
 
         // Upload neuron params
         if let Err(e) = gpu_ctx.upload_neurons(&v_host, &u_host, a_sl, b_sl, c_sl, d_sl) {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_neurons: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_neurons: {e}"
+            )));
         }
 
         // Upload CSR connectome + external_I
-        if let Err(e) = gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl,
-            nt_types_sl, external_I_sl)
-        {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_connectome: {e}")
-            ));
+        if let Err(e) = gpu_ctx.upload_connectome(
+            row_ptr_sl,
+            col_indices_sl,
+            values_sl,
+            nt_types_sl,
+            external_I_sl,
+        ) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_connectome: {e}"
+            )));
         }
 
         // Initialize plastic weights from static connectome
         if let Err(e) = gpu_ctx.init_plastic_weights() {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("init_plastic_weights: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "init_plastic_weights: {e}"
+            )));
         }
 
         // Upload initial I = external_I
         if let Err(e) = gpu_ctx.upload_I(external_I_sl) {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_I: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_I: {e}"
+            )));
         }
 
         // Allocate device-side spike counter
         let d_spike_counter = match gpu_ctx.alloc_spike_counter() {
             Ok(ptr) => ptr,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("alloc_spike_counter: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "alloc_spike_counter: {e}"
+                )))
+            }
         };
 
         let mut _total_spikes: usize = 0;
@@ -554,21 +646,27 @@ pub fn py_bench_connectome_gpu_stdp(
         for step in 0..n_steps {
             // One STDP step: Izhikevich → count → CSR STDP → CSR propagate (plastic)
             // Uses connectome_stdp_step from GpuContext
-            if let Err(e) = gpu_ctx.connectome_stdp_step(dt, 0.99,
-                lr_ltp, lr_ltd, w_min, w_max, Some(d_spike_counter))
-            {
+            if let Err(e) = gpu_ctx.connectome_stdp_step(
+                dt,
+                0.99,
+                lr_ltp,
+                lr_ltd,
+                w_min,
+                w_max,
+                Some(d_spike_counter),
+            ) {
                 gpu_ctx.free_spike_counter(d_spike_counter);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("connectome_stdp_step: {e}")
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "connectome_stdp_step: {e}"
+                )));
             }
 
             // Download spikes to host (per-step D2H for recording)
             if let Err(e) = gpu_ctx.download_spikes(&mut step_spikes) {
                 gpu_ctx.free_spike_counter(d_spike_counter);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("download_spikes: {e}")
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "download_spikes: {e}"
+                )));
             }
 
             // Record to spike_buffer
@@ -603,7 +701,11 @@ pub fn py_bench_connectome_gpu_stdp(
                 sum_diff += diff;
                 count += 1;
             }
-            if count > 0 { (sum_diff / count as f64) as f32 } else { 0.0 }
+            if count > 0 {
+                (sum_diff / count as f64) as f32
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -626,8 +728,11 @@ pub fn py_bench_connectome_gpu_stdp(
 
         let v_slice = v_data.as_slice_mut()?;
         let u_slice = u_data.as_slice_mut()?;
-        let write_n = n_neurons.min(v_slice.len()).min(v_back.len())
-            .min(u_slice.len()).min(u_back.len());
+        let write_n = n_neurons
+            .min(v_slice.len())
+            .min(v_back.len())
+            .min(u_slice.len())
+            .min(u_back.len());
         for i in 0..write_n {
             v_slice[i] = v_back[i];
             u_slice[i] = u_back[i];
@@ -670,11 +775,27 @@ pub fn py_bench_connectome_gpu_recording(
 ) -> PyResult<(f64, usize)> {
     #[cfg(not(feature = "cuda"))]
     {
-        let _ = (row_ptr, col_indices, values, n_steps, dt,
-                 v, u, _trace, a, b, c, d, nt_types, external_I,
-                 _I_buf, _spikes, spike_buffer);
+        let _ = (
+            row_ptr,
+            col_indices,
+            values,
+            n_steps,
+            dt,
+            v,
+            u,
+            _trace,
+            a,
+            b,
+            c,
+            d,
+            nt_types,
+            external_I,
+            _I_buf,
+            _spikes,
+            spike_buffer,
+        );
         return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            "CUDA not available — rebuild with --features cuda".to_string()
+            "CUDA not available — rebuild with --features cuda".to_string(),
         ));
     }
 
@@ -717,40 +838,48 @@ pub fn py_bench_connectome_gpu_recording(
         // Create GPU context
         let gpu_ctx = match GpuContext::new(n_neurons, n_synapses) {
             Ok(ctx) => ctx,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("GpuContext::new failed: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "GpuContext::new failed: {e}"
+                )))
+            }
         };
 
         // Upload neuron params (v, u from previous batch's end state)
         if let Err(e) = gpu_ctx.upload_neurons(&v_host, &u_host, a_sl, b_sl, c_sl, d_sl) {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_neurons: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_neurons: {e}"
+            )));
         }
 
         // Upload CSR connectome (one-time per GpuContext lifetime)
-        if let Err(e) = gpu_ctx.upload_connectome(row_ptr_sl, col_indices_sl, values_sl,
-            nt_types_sl, external_I_sl)
-        {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_connectome: {e}")
-            ));
+        if let Err(e) = gpu_ctx.upload_connectome(
+            row_ptr_sl,
+            col_indices_sl,
+            values_sl,
+            nt_types_sl,
+            external_I_sl,
+        ) {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_connectome: {e}"
+            )));
         }
 
         // Initialize I = external_I
         if let Err(e) = gpu_ctx.upload_I(external_I_sl) {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("upload_I: {e}")
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "upload_I: {e}"
+            )));
         }
 
         // Allocate device-side spike counter
         let d_spike_counter = match gpu_ctx.alloc_spike_counter() {
             Ok(ptr) => ptr,
-            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("alloc_spike_counter: {e}")
-            )),
+            Err(e) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "alloc_spike_counter: {e}"
+                )))
+            }
         };
 
         let mut _total_spikes: usize = 0;
@@ -762,17 +891,17 @@ pub fn py_bench_connectome_gpu_recording(
             // All on-device, no H2D/D2H (except d_spike_counter increment)
             if let Err(e) = gpu_ctx.connectome_step(dt, 0.99, Some(d_spike_counter)) {
                 gpu_ctx.free_spike_counter(d_spike_counter);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("connectome_step: {e}")
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "connectome_step: {e}"
+                )));
             }
 
             // Download spikes to host (per-step D2H, needed for recording)
             if let Err(e) = gpu_ctx.download_spikes(&mut step_spikes) {
                 gpu_ctx.free_spike_counter(d_spike_counter);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("download_spikes: {e}")
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "download_spikes: {e}"
+                )));
             }
 
             // Record to spike_buffer
@@ -800,8 +929,11 @@ pub fn py_bench_connectome_gpu_recording(
         // Write v, u back to Python arrays for persistence across calls
         let v_slice = v_data.as_slice_mut()?;
         let u_slice = u_data.as_slice_mut()?;
-        let write_n = n_neurons.min(v_slice.len()).min(v_back.len())
-            .min(u_slice.len()).min(u_back.len());
+        let write_n = n_neurons
+            .min(v_slice.len())
+            .min(v_back.len())
+            .min(u_slice.len())
+            .min(u_back.len());
         for i in 0..write_n {
             v_slice[i] = v_back[i];
             u_slice[i] = u_back[i];
@@ -813,7 +945,7 @@ pub fn py_bench_connectome_gpu_recording(
     }
 }
 
-// ─── GPU: ψ-wave helpers ─────────────────────────────────
+// ─── GPU: GCO helpers ────────────────────────────────────
 
 #[cfg(feature = "cuda")]
 fn gpu_setup<'a>(
@@ -848,130 +980,163 @@ fn gpu_setup<'a>(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("GpuContext::new: {e}")))?;
 
     ctx.upload_connectome(rp_sl, ci_sl, vl_sl, &vec![1.0f32; n], &vec![0.0f32; n])
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("upload_connectome: {e}")))?;
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("upload_connectome: {e}"))
+        })?;
 
-    ctx.psi_upload(&v_host, &u_host)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("psi_upload: {e}")))?;
+    ctx.gco_upload(&v_host, &u_host)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_upload: {e}")))?;
 
     let i_ext_sl = match i_ext {
         Some(arr) => arr.readonly().as_slice()?.to_vec(),
         None => vec![0.0f32; n],
     };
-    ctx.psi_upload_drive(&i_ext_sl)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("psi_upload_drive: {e}")))?;
+    ctx.gco_upload_drive(&i_ext_sl)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_upload_drive: {e}")))?;
 
     Ok((ctx, v_host, u_host))
 }
 
-/// GPU ψ-wave на полном коннектоме.
+/// GPU GCO (Graph-Coupled Oscillator) на полном коннектоме.
 ///
-/// Загружает CSR + ψ-state на GPU, прогоняет n_steps,
+/// Загружает CSR + GCO state на GPU, прогоняет n_steps,
 /// скачивает финал. Returns: (сек, v_final, u_final).
 #[pyfunction]
-#[pyo3(name = "bench_psi_wave_gpu", signature = (row_ptr, col_indices, values, v, u, dt, hbar, n_steps, i_ext=None))]
-pub fn py_bench_psi_wave_gpu(
+#[pyo3(name = "bench_gco_gpu", signature = (row_ptr, col_indices, values, v, u, dt, tau, n_steps, i_ext=None))]
+pub fn py_bench_gco_gpu(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
     values: Bound<'_, PyArray1<f32>>,
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     dt: f32,
-    hbar: f32,
+    tau: f32,
     n_steps: usize,
     i_ext: Option<Bound<'_, PyArray1<f32>>>,
 ) -> PyResult<(f64, Vec<f32>, Vec<f32>)> {
     #[cfg(not(feature = "cuda"))]
-    { let _ = (row_ptr, col_indices, values, v, u, dt, hbar, n_steps, i_ext);
-      return Err(pyo3::exceptions::PyRuntimeError::new_err(
-          "CUDA not available — rebuild with --features cuda")); }
+    {
+        let _ = (row_ptr, col_indices, values, v, u, dt, tau, n_steps, i_ext);
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "CUDA not available — rebuild with --features cuda",
+        ));
+    }
 
     #[cfg(feature = "cuda")]
     {
-        let (ctx, mut v_host, mut u_host) = gpu_setup(
-            &row_ptr, &col_indices, &values, &v, &u, i_ext.as_ref())?;
+        let (ctx, mut v_host, mut u_host) =
+            gpu_setup(&row_ptr, &col_indices, &values, &v, &u, i_ext.as_ref())?;
 
         let t0 = std::time::Instant::now();
         for _ in 0..n_steps {
-            ctx.psi_step(dt, hbar)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                    format!("psi_step: {e}")))?;
+            ctx.gco_step(dt, tau)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_step: {e}")))?;
         }
-        ctx.psi_download(&mut v_host, &mut u_host)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("psi_download: {e}")))?;
+        ctx.gco_download(&mut v_host, &mut u_host)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_download: {e}")))?;
 
         Ok((t0.elapsed().as_secs_f64(), v_host, u_host))
     }
 }
 
-/// GPU ψ-wave + Aberton collapses на полном коннектоме.
+/// GPU GCO + Aberton collapses на полном коннектоме.
 ///
 /// Returns: (сек, v_final, u_final, collapse_count).
 #[pyfunction]
-#[pyo3(name = "bench_psi_aberton_gpu", signature = (
-    row_ptr, col_indices, values, v, u, dt, hbar, n_steps,
+#[pyo3(name = "bench_gco_aberton_gpu", signature = (
+    row_ptr, col_indices, values, v, u, dt, tau, n_steps,
     aber_gamma=0.1, aber_omega=1.0, aber_gain=1.0,
     aber_threshold=2.0, aber_collapse_scale=0.5,
     use_synaptic_field=false, i_ext=None, aber_real=None, aber_imag=None))]
-pub fn py_bench_psi_aberton_gpu(
+pub fn py_bench_gco_aberton_gpu(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
     values: Bound<'_, PyArray1<f32>>,
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
-    dt: f32, hbar: f32, n_steps: usize,
-    aber_gamma: f32, aber_omega: f32, aber_gain: f32,
-    aber_threshold: f32, aber_collapse_scale: f32,
+    dt: f32,
+    tau: f32,
+    n_steps: usize,
+    aber_gamma: f32,
+    aber_omega: f32,
+    aber_gain: f32,
+    aber_threshold: f32,
+    aber_collapse_scale: f32,
     use_synaptic_field: bool,
     i_ext: Option<Bound<'_, PyArray1<f32>>>,
     aber_real: Option<Bound<'_, PyArray1<f32>>>,
     aber_imag: Option<Bound<'_, PyArray1<f32>>>,
 ) -> PyResult<(f64, Vec<f32>, Vec<f32>, Vec<i32>)> {
     #[cfg(not(feature = "cuda"))]
-    { let _ = (row_ptr, col_indices, values, v, u, dt, hbar, n_steps,
-               aber_gamma, aber_omega, aber_gain, aber_threshold, aber_collapse_scale,
-               use_synaptic_field, i_ext, aber_real, aber_imag);
-      return Err(pyo3::exceptions::PyRuntimeError::new_err(
-          "CUDA not available — rebuild with --features cuda")); }
+    {
+        let _ = (
+            row_ptr,
+            col_indices,
+            values,
+            v,
+            u,
+            dt,
+            tau,
+            n_steps,
+            aber_gamma,
+            aber_omega,
+            aber_gain,
+            aber_threshold,
+            aber_collapse_scale,
+            use_synaptic_field,
+            i_ext,
+            aber_real,
+            aber_imag,
+        );
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "CUDA not available — rebuild with --features cuda",
+        ));
+    }
 
     #[cfg(feature = "cuda")]
     {
-        let (ctx, mut v_host, mut u_host) = gpu_setup(
-            &row_ptr, &col_indices, &values, &v, &u, i_ext.as_ref())?;
+        let (ctx, mut v_host, mut u_host) =
+            gpu_setup(&row_ptr, &col_indices, &values, &v, &u, i_ext.as_ref())?;
 
         let n = row_ptr.readonly().as_slice()?.len() - 1;
         let (aber_real_sl, aber_imag_sl) = match (&aber_real, &aber_imag) {
-            (Some(ar), Some(ai)) =>
-                (ar.readonly().as_slice()?.to_vec(),
-                 ai.readonly().as_slice()?.to_vec()),
+            (Some(ar), Some(ai)) => (
+                ar.readonly().as_slice()?.to_vec(),
+                ai.readonly().as_slice()?.to_vec(),
+            ),
             _ => (vec![0.0f32; n], vec![0.0f32; n]),
         };
         ctx.aber_upload(&aber_real_sl, &aber_imag_sl)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("aber_upload: {e}")))?;
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("aber_upload: {e}")))?;
 
         let mut collapse_counts = vec![0i32; n_steps];
         let t0 = std::time::Instant::now();
 
         for _ in 0..n_steps {
-            ctx.psi_aberton_combined_async(dt, hbar,
-                aber_gamma, aber_omega, aber_gain,
-                aber_threshold, aber_collapse_scale, use_synaptic_field)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                    format!("psi_aberton: {e}")))?;
+            ctx.gco_aberton_combined_async(
+                dt,
+                tau,
+                aber_gamma,
+                aber_omega,
+                aber_gain,
+                aber_threshold,
+                aber_collapse_scale,
+                use_synaptic_field,
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_aberton: {e}")))?;
         }
         let _ = ctx.sync();
 
-        ctx.psi_download(&mut v_host, &mut u_host)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("psi_download: {e}")))?;
+        ctx.gco_download(&mut v_host, &mut u_host)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("gco_download: {e}")))?;
 
         let mut aber_coll = vec![0i32; n];
         let mut aber_rh = vec![0.0f32; n];
         let mut aber_ih = vec![0.0f32; n];
         ctx.aber_download(&mut aber_rh, &mut aber_ih, &mut aber_coll)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("aber_download: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("aber_download: {e}"))
+            })?;
 
         collapse_counts[n_steps - 1] = aber_coll.iter().sum();
         Ok((t0.elapsed().as_secs_f64(), v_host, u_host, collapse_counts))

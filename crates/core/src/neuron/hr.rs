@@ -1,5 +1,5 @@
 //! Hindmarsh-Rose (HR) 3-variable spiking & bursting neuron model.
-//!
+//! ой ой это может вызывать у людей панические атаки
 //! Safe Rust wrapper over SIMD kernel (`kernels::hr_step`).
 //!
 //! Equations:
@@ -24,14 +24,35 @@ use rayon::prelude::*;
 ///
 /// Spike detection: x ≥ 1.0.
 pub fn step_hr(
-    x: &mut [f32], y: &mut [f32], z: &mut [f32], I: &[f32], spikes: &mut [i32],
-    dt: f32, a: &[f32], b: &[f32], c: &[f32], d: &[f32], r: &[f32], s: &[f32], xr: &[f32],
+    x: &mut [f32],
+    y: &mut [f32],
+    z: &mut [f32],
+    I: &[f32],
+    spikes: &mut [i32],
+    dt: f32,
+    a: &[f32],
+    b: &[f32],
+    c: &[f32],
+    d: &[f32],
+    r: &[f32],
+    s: &[f32],
+    xr: &[f32],
 ) {
     let n = x.len();
-    assert!(n.is_multiple_of(8)
-        && n == y.len() && n == z.len() && n == I.len() && n == spikes.len()
-        && n == a.len() && n == b.len() && n == c.len() && n == d.len()
-        && n == r.len() && n == s.len() && n == xr.len());
+    assert!(
+        n.is_multiple_of(8)
+            && n == y.len()
+            && n == z.len()
+            && n == I.len()
+            && n == spikes.len()
+            && n == a.len()
+            && n == b.len()
+            && n == c.len()
+            && n == d.len()
+            && n == r.len()
+            && n == s.len()
+            && n == xr.len()
+    );
 
     x.par_chunks_exact_mut(8)
         .zip(y.par_chunks_exact_mut(8))
@@ -54,8 +75,13 @@ pub fn step_hr(
             }
             unsafe {
                 kernels::neuron::hr::hr_step(
-                    x8.as_mut_ptr(), y8.as_mut_ptr(), z8.as_mut_ptr(),
-                    I8.as_ptr(), sp8.as_mut_ptr(), params.as_ptr(), 8,
+                    x8.as_mut_ptr(),
+                    y8.as_mut_ptr(),
+                    z8.as_mut_ptr(),
+                    I8.as_ptr(),
+                    sp8.as_mut_ptr(),
+                    params.as_ptr(),
+                    8,
                 );
             }
         });
@@ -85,7 +111,21 @@ mod tests {
 
         let mut total_spikes = 0i32;
         for _ in 0..10000 {
-            step_hr(&mut x, &mut y, &mut z, &I, &mut spikes, dt, &a, &b, &c, &d, &r, &s, &xr);
+            step_hr(
+                &mut x,
+                &mut y,
+                &mut z,
+                &I,
+                &mut spikes,
+                dt,
+                &a,
+                &b,
+                &c,
+                &d,
+                &r,
+                &s,
+                &xr,
+            );
             total_spikes += spikes.iter().sum::<i32>();
         }
         assert!(total_spikes > 0, "HR wrapper should burst/oscillate");

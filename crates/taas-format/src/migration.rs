@@ -9,10 +9,10 @@
 //! Old files are auto-migrated on read (in `TaasReader::from_bytes` / `from_file`).
 //! The migration uses the high-level reader/writer API for correctness.
 
-use crate::types::TAAS_VERSION;
+use crate::components::{load_trioscilator, save_trioscilator};
 use crate::reader::TaasReader;
+use crate::types::TAAS_VERSION;
 use crate::writer::TaasWriter;
-use crate::components::{save_trioscilator, load_trioscilator};
 
 // ─── Public API ─────────────────────────────────────────
 
@@ -137,7 +137,7 @@ fn migrate_v0_1_to_v0_2(bytes: &[u8]) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::*;
-    use taas_t3::{Avx2Backend, TriOscillator, NlmsDecoder};
+    use taas_t3::{Avx2Backend, NlmsDecoder, TriOscillator};
 
     /// Test that needs_migration correctly identifies old versions.
     #[test]
@@ -164,7 +164,7 @@ mod tests {
         let old_v = b"0.2.0";
         let new_v = b"0.1.0";
         if let Some(pos) = raw.windows(5).position(|w| w == old_v) {
-            raw[pos..pos+5].copy_from_slice(new_v);
+            raw[pos..pos + 5].copy_from_slice(new_v);
         }
 
         // Migrate
@@ -237,7 +237,7 @@ mod tests {
         let old_v = b"0.2.0";
         let new_v = b"0.1.0";
         if let Some(pos) = raw.windows(5).position(|w| w == old_v) {
-            raw[pos..pos+5].copy_from_slice(new_v);
+            raw[pos..pos + 5].copy_from_slice(new_v);
         }
 
         // Migrate
@@ -302,7 +302,7 @@ mod tests {
         let old_v = b"0.2.0";
         let new_v = b"0.1.0";
         if let Some(pos) = raw.windows(5).position(|w| w == old_v) {
-            raw[pos..pos+5].copy_from_slice(new_v);
+            raw[pos..pos + 5].copy_from_slice(new_v);
         }
 
         let migrated = migrate_bytes(&raw).unwrap();

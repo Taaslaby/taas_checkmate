@@ -16,7 +16,7 @@
 //! - `θ, r`: 1e-4 (один шаг update)
 //! - `PST features`: 1e-3 (накопление через 10 шагов)
 
-use taas_t3::{TriOscillator, Avx2Backend, ScalarBackend, T3Backend};
+use taas_t3::{Avx2Backend, ScalarBackend, T3Backend, TriOscillator};
 
 /// Максимальная разница minimax vs libm sin/cos
 const SIN_COS_TOL: f32 = 5e-5;
@@ -25,10 +25,15 @@ const STATE_TOL: f32 = 1e-4;
 /// Максимальная разница PST после 10 шагов
 const PST_TOL: f32 = 2e-3;
 
-fn test_config() -> (usize, usize) { (16, 10) }
+fn test_config() -> (usize, usize) {
+    (16, 10)
+}
 
 fn run_forward<B: taas_t3::T3Backend>(
-    backend: B, n: usize, n_steps: usize, seed: u64,
+    backend: B,
+    n: usize,
+    n_steps: usize,
+    seed: u64,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     use rand::Rng;
     use rand::SeedableRng;
@@ -50,8 +55,12 @@ fn run_forward<B: taas_t3::T3Backend>(
     tri.prepare();
 
     (
-        tri.th1.clone(), tri.th2.clone(), tri.th3.clone(),
-        tri.r1.clone(), tri.r2.clone(), tri.r3.clone(),
+        tri.th1.clone(),
+        tri.th2.clone(),
+        tri.th3.clone(),
+        tri.r1.clone(),
+        tri.r2.clone(),
+        tri.r3.clone(),
     )
 }
 
@@ -74,11 +83,29 @@ fn test_backend_prepare_consistency() {
         let d_sin = (s_avx[i] - s_scalar[i]).abs();
         let d_cos = (c_avx[i] - c_scalar[i]).abs();
         let d_ph = (p_avx[i] - p_scalar[i]).abs();
-        assert!(d_sin < SIN_COS_TOL,
-            "sin[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, s_avx[i], s_scalar[i], d_sin);
-        assert!(d_cos < SIN_COS_TOL,
-            "cos[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, c_avx[i], c_scalar[i], d_cos);
-        assert!(d_ph < 1e-6, "phase[{}] differs: avx={} scalar={}", i, p_avx[i], p_scalar[i]);
+        assert!(
+            d_sin < SIN_COS_TOL,
+            "sin[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            s_avx[i],
+            s_scalar[i],
+            d_sin
+        );
+        assert!(
+            d_cos < SIN_COS_TOL,
+            "cos[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            c_avx[i],
+            c_scalar[i],
+            d_cos
+        );
+        assert!(
+            d_ph < 1e-6,
+            "phase[{}] differs: avx={} scalar={}",
+            i,
+            p_avx[i],
+            p_scalar[i]
+        );
     }
 }
 
@@ -93,19 +120,42 @@ fn test_backend_update_consistency() {
 
     let mut p_avx = phases.clone();
     let mut a_avx = amps.clone();
-    Avx2Backend.update(&mut p_avx, &mut a_avx, &omegas, &coupling, &drives, 0.05, 1.0, 10.0);
+    Avx2Backend.update(
+        &mut p_avx, &mut a_avx, &omegas, &coupling, &drives, 0.05, 1.0, 10.0,
+    );
 
     let mut p_scalar = phases.clone();
     let mut a_scalar = amps.clone();
-    ScalarBackend.update(&mut p_scalar, &mut a_scalar, &omegas, &coupling, &drives, 0.05, 1.0, 10.0);
+    ScalarBackend.update(
+        &mut p_scalar,
+        &mut a_scalar,
+        &omegas,
+        &coupling,
+        &drives,
+        0.05,
+        1.0,
+        10.0,
+    );
 
     for i in 0..n {
         let d_ph = (p_avx[i] - p_scalar[i]).abs();
         let d_amp = (a_avx[i] - a_scalar[i]).abs();
-        assert!(d_ph < STATE_TOL,
-            "phase[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, p_avx[i], p_scalar[i], d_ph);
-        assert!(d_amp < STATE_TOL,
-            "amp[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, a_avx[i], a_scalar[i], d_amp);
+        assert!(
+            d_ph < STATE_TOL,
+            "phase[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            p_avx[i],
+            p_scalar[i],
+            d_ph
+        );
+        assert!(
+            d_amp < STATE_TOL,
+            "amp[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            a_avx[i],
+            a_scalar[i],
+            d_amp
+        );
     }
 }
 
@@ -128,9 +178,15 @@ fn test_backend_trajectory_consistency_single_step() {
     for (avx, scalar, name) in &all_pairs {
         for i in 0..n {
             let diff = (avx[i] - scalar[i]).abs();
-            assert!(diff < STATE_TOL,
+            assert!(
+                diff < STATE_TOL,
                 "{}[{}] avx={:.8} scalar={:.8} diff={:.2e}",
-                name, i, avx[i], scalar[i], diff);
+                name,
+                i,
+                avx[i],
+                scalar[i],
+                diff
+            );
         }
     }
 }
@@ -161,15 +217,24 @@ fn test_backend_trajectory_consistency_multi_step() {
                     max_diff = diff;
                     worst = (seed as usize, format!("{}[{}]", name, i));
                 }
-                assert!(diff < PST_TOL,
+                assert!(
+                    diff < PST_TOL,
                     "seed={} {}[{}] avx={:.8} scalar={:.8} diff={:.2e}",
-                    seed, name, i, avx[i], scalar[i], diff);
+                    seed,
+                    name,
+                    i,
+                    avx[i],
+                    scalar[i],
+                    diff
+                );
             }
         }
     }
 
-    println!("Backend consistency: max_diff={:.2e} at seed={} {}",
-        max_diff, worst.0, worst.1);
+    println!(
+        "Backend consistency: max_diff={:.2e} at seed={} {}",
+        max_diff, worst.0, worst.1
+    );
 }
 
 #[test]
@@ -197,10 +262,22 @@ fn test_backend_identity_with_zero_drive() {
         // With zero drive and coupling, phases drift at same freq.
         // Small difference due to sin/cos implementation in prepare()
         // (libm vs minimax) accumulates over steps.
-        assert!(d_th < 1e-3,
-            "th1[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, tri_avx.th1[i], tri_scalar.th1[i], d_th);
-        assert!(d_r < 1e-4,
-            "r1[{}] avx={:.8} scalar={:.8} diff={:.2e}", i, tri_avx.r1[i], tri_scalar.r1[i], d_r);
+        assert!(
+            d_th < 1e-3,
+            "th1[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            tri_avx.th1[i],
+            tri_scalar.th1[i],
+            d_th
+        );
+        assert!(
+            d_r < 1e-4,
+            "r1[{}] avx={:.8} scalar={:.8} diff={:.2e}",
+            i,
+            tri_avx.r1[i],
+            tri_scalar.r1[i],
+            d_r
+        );
     }
 }
 
@@ -220,7 +297,13 @@ fn test_backend_nlms_consistency() {
 
     for i in 0..n {
         let diff = (w_avx[i] - w_scalar[i]).abs();
-        assert!(diff < 1e-7, "w[{}] avx={:.10} scalar={:.10}", i, w_avx[i], w_scalar[i]);
+        assert!(
+            diff < 1e-7,
+            "w[{}] avx={:.10} scalar={:.10}",
+            i,
+            w_avx[i],
+            w_scalar[i]
+        );
     }
 }
 
@@ -240,7 +323,19 @@ fn test_backend_kalman_consistency() {
     for i in 0..n {
         let d_w = (w_avx[i] - w_scalar[i]).abs();
         let d_cov = (cov_avx[i] - cov_scalar[i]).abs();
-        assert!(d_w < 1e-7, "w[{}] avx={:.10} scalar={:.10}", i, w_avx[i], w_scalar[i]);
-        assert!(d_cov < 1e-7, "cov[{}] avx={:.10} scalar={:.10}", i, cov_avx[i], cov_scalar[i]);
+        assert!(
+            d_w < 1e-7,
+            "w[{}] avx={:.10} scalar={:.10}",
+            i,
+            w_avx[i],
+            w_scalar[i]
+        );
+        assert!(
+            d_cov < 1e-7,
+            "cov[{}] avx={:.10} scalar={:.10}",
+            i,
+            cov_avx[i],
+            cov_scalar[i]
+        );
     }
 }

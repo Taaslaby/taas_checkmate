@@ -28,7 +28,8 @@ pub fn py_xor_attention(
         keys.readonly().as_slice()?,
         values.readonly().as_slice()?,
         out.readwrite().as_slice_mut()?,
-        n_keys, n_bytes,
+        n_keys,
+        n_bytes,
     );
     Ok(())
 }
@@ -38,9 +39,7 @@ pub fn py_xor_attention(
 /// Использует инструкцию RDRAND (Intel/AMD).
 #[pyfunction]
 #[pyo3(name = "rdrand_fill")]
-pub fn py_rdrand_fill(
-    buf: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+pub fn py_rdrand_fill(buf: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
     koit::rdrand_fill(buf.readwrite().as_slice_mut()?);
     Ok(())
 }

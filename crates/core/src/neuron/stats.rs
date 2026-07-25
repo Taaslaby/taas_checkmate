@@ -14,40 +14,50 @@ pub fn population_rate_decode(
     let n_out = n_neurons.min(rates_out.len());
     let n_steps = window.min(spike_buffer.len() / n_neurons.max(1));
     let divisor = n_steps.max(1) as f32;
-    rates_out[..n_out].par_iter_mut().enumerate().for_each(|(i, rate)| {
-        let mut count = 0;
-        for t in 0..n_steps {
-            if spike_buffer[t * n_neurons + i] != 0 { count += 1; }
-        }
-        *rate = count as f32 / divisor;
-    });
+    rates_out[..n_out]
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(i, rate)| {
+            let mut count = 0;
+            for t in 0..n_steps {
+                if spike_buffer[t * n_neurons + i] != 0 {
+                    count += 1;
+                }
+            }
+            *rate = count as f32 / divisor;
+        });
 }
 
 // ─── Firing Rates ────────────────────────────────────────
 
 /// Compute firing rates for each neuron from a spike buffer.
 /// Buffer layout: `[time × neuron]` — `spike_buffer[t * n_neurons + i]`.
-pub fn firing_rates(
-    spike_buffer: &[i32],
-    n_neurons: usize,
-    n_steps: usize,
-    dt: f32,
-) -> Vec<f32> {
+pub fn firing_rates(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f32) -> Vec<f32> {
     let mut rates = vec![0.0f32; n_neurons];
     for t in 0..n_steps.min(spike_buffer.len() / n_neurons.max(1)) {
         for i in 0..n_neurons {
-            if spike_buffer[t * n_neurons + i] != 0 { rates[i] += 1.0; }
+            if spike_buffer[t * n_neurons + i] != 0 {
+                rates[i] += 1.0;
+            }
         }
     }
     let duration = (n_steps as f32) * dt;
-    if duration > 0.0 { for r in rates.iter_mut() { *r /= duration; } }
+    if duration > 0.0 {
+        for r in rates.iter_mut() {
+            *r /= duration;
+        }
+    }
     rates
 }
 
 /// Compute mean firing rate across all neurons.
 pub fn mean_firing_rate(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f32) -> f32 {
     let rates = firing_rates(spike_buffer, n_neurons, n_steps, dt);
-    if rates.is_empty() { 0.0 } else { rates.iter().sum::<f32>() / rates.len() as f32 }
+    if rates.is_empty() {
+        0.0
+    } else {
+        rates.iter().sum::<f32>() / rates.len() as f32
+    }
 }
 
 // ─── ISI ─────────────────────────────────────────────────
@@ -60,12 +70,16 @@ pub fn compute_isi(spikes: &[i32], dt: f32) -> Vec<f32> {
         if s != 0 {
             if let Some(last) = last_spike {
                 let interval = (t - last) as f32 * dt * 1000.0;
-                if interval > 0.0 { isi.push(interval); }
+                if interval > 0.0 {
+                    isi.push(interval);
+                }
             }
             last_spike = Some(t);
         }
     }
-    if isi.is_empty() { isi.push(0.0); }
+    if isi.is_empty() {
+        isi.push(0.0);
+    }
     isi
 }
 
@@ -77,7 +91,9 @@ pub fn compute_isi(spikes: &[i32], dt: f32) -> Vec<f32> {
 /// CV ≈ 1 → Poisson, CV < 1 → regular, CV > 1 → bursting
 pub fn compute_cvs(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f32) -> Vec<f32> {
     let mut cvs = vec![0.0f32; n_neurons];
-    if n_neurons == 0 || n_steps == 0 { return cvs; }
+    if n_neurons == 0 || n_steps == 0 {
+        return cvs;
+    }
 
     for i in 0..n_neurons {
         let mut isi_values = Vec::new();
@@ -86,7 +102,9 @@ pub fn compute_cvs(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f
             if spike_buffer[t * n_neurons + i] != 0 {
                 if let Some(last) = last_spike {
                     let interval = (t - last) as f32 * dt * 1000.0;
-                    if interval > 0.0 { isi_values.push(interval); }
+                    if interval > 0.0 {
+                        isi_values.push(interval);
+                    }
                 }
                 last_spike = Some(t);
             }
@@ -94,8 +112,11 @@ pub fn compute_cvs(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f
         if isi_values.len() >= 2 {
             let mean_isi: f32 = isi_values.iter().sum::<f32>() / isi_values.len() as f32;
             if mean_isi > 0.0 {
-                let variance: f32 = isi_values.iter()
-                    .map(|&x| (x - mean_isi).powi(2)).sum::<f32>() / (isi_values.len() - 1) as f32;
+                let variance: f32 = isi_values
+                    .iter()
+                    .map(|&x| (x - mean_isi).powi(2))
+                    .sum::<f32>()
+                    / (isi_values.len() - 1) as f32;
                 cvs[i] = variance.sqrt() / mean_isi;
             }
         }
@@ -127,14 +148,19 @@ pub struct SpikeRaster {
 
 impl SpikeRaster {
     pub fn new() -> Self {
-        Self { events: Vec::new(), n_steps: 0 }
+        Self {
+            events: Vec::new(),
+            n_steps: 0,
+        }
     }
 
     /// Record one step of spikes.
     pub fn record(&mut self, step: usize, spikes: &[i32], n_neurons: usize) {
         let n = spikes.len().min(n_neurons);
         for i in 0..n {
-            if spikes[i] != 0 { self.events.push((step, i)); }
+            if spikes[i] != 0 {
+                self.events.push((step, i));
+            }
         }
         self.n_steps = self.n_steps.max(step + 1);
     }
@@ -144,7 +170,9 @@ impl SpikeRaster {
         let n_steps = self.n_steps;
         let mut dense = vec![0i32; n_steps * n_neurons];
         for &(t, i) in &self.events {
-            if t < n_steps && i < n_neurons { dense[t * n_neurons + i] = 1; }
+            if t < n_steps && i < n_neurons {
+                dense[t * n_neurons + i] = 1;
+            }
         }
         (dense, n_steps)
     }
@@ -163,9 +191,15 @@ impl SpikeRaster {
         csv
     }
 
-    pub fn events(&self) -> &[(usize, usize)] { &self.events }
-    pub fn total_spikes(&self) -> usize { self.events.len() }
-    pub fn n_steps(&self) -> usize { self.n_steps }
+    pub fn events(&self) -> &[(usize, usize)] {
+        &self.events
+    }
+    pub fn total_spikes(&self) -> usize {
+        self.events.len()
+    }
+    pub fn n_steps(&self) -> usize {
+        self.n_steps
+    }
 
     pub fn reset(&mut self) {
         self.events.clear();
@@ -174,7 +208,9 @@ impl SpikeRaster {
 }
 
 impl Default for SpikeRaster {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Convenience function: create CSV from a SpikeRaster.

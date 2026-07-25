@@ -52,11 +52,19 @@ impl PyEPropTrainer {
         });
         Self {
             inner: EPropTrainer::new(
-                ni, nh, no,
-                n_steps, poisson_max_hz,
-                dt, tau_e,
-                lr_in, lr_out,
-                bias, weight_scale, seed, nw,
+                ni,
+                nh,
+                no,
+                n_steps,
+                poisson_max_hz,
+                dt,
+                tau_e,
+                lr_in,
+                lr_out,
+                bias,
+                weight_scale,
+                seed,
+                nw,
             ),
         }
     }
@@ -81,9 +89,12 @@ impl PyEPropTrainer {
         let batch_size = tgt_slice.len();
         let expected_len = batch_size * self.inner.ni;
         if img_slice.len() < expected_len {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("images len {} < batch_size {} * ni {}", img_slice.len(), batch_size, self.inner.ni)
-            ));
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "images len {} < batch_size {} * ni {}",
+                img_slice.len(),
+                batch_size,
+                self.inner.ni
+            )));
         }
 
         let (avg_loss, correct) = self.inner.train_batch(img_slice, tgt_slice);
@@ -97,7 +108,9 @@ impl PyEPropTrainer {
         self.inner.bias_hidden.fill(bias);
     }
 
-    fn bias_hidden(&self) -> f32 { self.inner.bias_hidden[0] }
+    fn bias_hidden(&self) -> f32 {
+        self.inner.bias_hidden[0]
+    }
 
     /// Predict class for a single image.
     #[pyo3(signature = (image))]
@@ -119,15 +132,25 @@ impl PyEPropTrainer {
         PyArray1::from_vec(py, self.inner.w_out.clone()).into()
     }
 
-    fn ni(&self) -> usize { self.inner.ni }
-    fn nh(&self) -> usize { self.inner.nh }
-    fn no(&self) -> usize { self.inner.no }
+    fn ni(&self) -> usize {
+        self.inner.ni
+    }
+    fn nh(&self) -> usize {
+        self.inner.nh
+    }
+    fn no(&self) -> usize {
+        self.inner.no
+    }
 
     fn __repr__(&self) -> String {
         format!(
             "EPropTrainer(ni={}, nh={}, no={}, n_steps={}, lr_in={}, lr_out={}, workers={})",
-            self.inner.ni, self.inner.nh, self.inner.no,
-            self.inner.n_steps, self.inner.lr_in, self.inner.lr_out,
+            self.inner.ni,
+            self.inner.nh,
+            self.inner.no,
+            self.inner.n_steps,
+            self.inner.lr_in,
+            self.inner.lr_out,
             self.inner.num_workers(),
         )
     }

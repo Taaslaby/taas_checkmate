@@ -5,18 +5,41 @@ pub const TAAS_VERSION: &str = "0.2.0";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TensorDtype {
-    F32, I32, I64, U64, U8,
+    F32,
+    I32,
+    I64,
+    U64,
+    U8,
 }
 
 impl TensorDtype {
     pub fn as_str(&self) -> &'static str {
-        match self { Self::F32 => "f32", Self::I32 => "i32", Self::I64 => "i64", Self::U64 => "u64", Self::U8 => "u8" }
+        match self {
+            Self::F32 => "f32",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::U64 => "u64",
+            Self::U8 => "u8",
+        }
     }
     pub fn from_str(s: &str) -> Option<Self> {
-        match s { "f32" => Some(Self::F32), "i32" => Some(Self::I32), "i64" => Some(Self::I64), "u64" => Some(Self::U64), "u8" => Some(Self::U8), _ => None }
+        match s {
+            "f32" => Some(Self::F32),
+            "i32" => Some(Self::I32),
+            "i64" => Some(Self::I64),
+            "u64" => Some(Self::U64),
+            "u8" => Some(Self::U8),
+            _ => None,
+        }
     }
     pub fn elem_size(&self) -> usize {
-        match self { Self::F32 => 4, Self::I32 => 4, Self::I64 => 8, Self::U64 => 8, Self::U8 => 1 }
+        match self {
+            Self::F32 => 4,
+            Self::I32 => 4,
+            Self::I64 => 8,
+            Self::U64 => 8,
+            Self::U8 => 1,
+        }
     }
 }
 

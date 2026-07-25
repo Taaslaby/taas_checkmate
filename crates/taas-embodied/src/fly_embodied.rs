@@ -5,8 +5,8 @@
 //! Author / Concept: Atlasov Anton (Атласов Антон)
 
 use serde::{Deserialize, Serialize};
-use taas_core::neuron::AtlasovState;
 use taas_core::neuron::delay::DelayBuffer;
+use taas_core::neuron::AtlasovState;
 
 /// Joint mapping connecting a physical DOF to an Atlasov agonist-antagonist muscle pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,8 +108,10 @@ impl FlyEmbodiedState {
             }
         }
 
-        // 2. Atlasov Neuromotor Step (SIMD & Rayon)
-        self.atlasov_state.step(&delayed_spikes, &reset_spikes, self.dt);
+        // 2. Atlasov Neuromotor Step (SIMD & Rayon) with Hill length/velocity modulation
+        // No lengths/velocities from physics engine yet — use None for isometric mode
+        self.atlasov_state
+            .step(&delayed_spikes, &reset_spikes, self.dt, None, None);
 
         // 3. Compute Generalized Joint Forces & Update Dynamics
         let mut sum_stf = 0.0f32;
@@ -133,12 +135,18 @@ impl FlyEmbodiedState {
             // Simple semi-implicit Euler step for joint simulation
             let q_acc = tau_applied; // Unit moment of inertia
             self.simulated_joint_qvel[map.dof_idx] += q_acc * self.dt;
-            self.simulated_joint_qpos[map.dof_idx] += self.simulated_joint_qvel[map.dof_idx] * self.dt;
+            self.simulated_joint_qpos[map.dof_idx] +=
+                self.simulated_joint_qvel[map.dof_idx] * self.dt;
         }
 
         self.step_count += 1;
 
-        let active_muscles = self.atlasov_state.ca.iter().filter(|&&ca| ca > 0.01).count();
+        let active_muscles = self
+            .atlasov_state
+            .ca
+            .iter()
+            .filter(|&&ca| ca > 0.01)
+            .count();
         let avg_joint_stiffness = sum_stf / self.n_joints as f32;
         let avg_joint_damping = sum_dmp / self.n_joints as f32;
 
@@ -172,8 +180,14 @@ mod tests {
         let out = fly.step(&spikes, &resets);
 
         assert!(out.t > 0.0);
-        assert!(out.avg_joint_stiffness > 1.0, "Joint stiffness should rise with calcium");
-        assert!(out.avg_joint_damping > 0.1, "Joint damping should rise with calcium to stabilize physics");
+        assert!(
+            out.avg_joint_stiffness > 1.0,
+            "Joint stiffness should rise with calcium"
+        );
+        assert!(
+            out.avg_joint_damping > 0.1,
+            "Joint damping should rise with calcium to stabilize physics"
+        );
     }
 
     #[test]
@@ -194,8 +208,14 @@ mod tests {
         let k = fly.atlasov_state.joint_stiffness[0];
         let b = fly.atlasov_state.joint_damping[0];
 
-        assert!(df.abs() < 1e-4, "Co-contraction of identical muscles produces near-zero net torque");
+        assert!(
+            df.abs() < 1e-4,
+            "Co-contraction of identical muscles produces near-zero net torque"
+        );
         assert!(k > 1.5, "Co-contraction increases joint stiffness");
-        assert!(b > 0.2, "Co-contraction increases joint damping for posture stability");
+        assert!(
+            b > 0.2,
+            "Co-contraction increases joint damping for posture stability"
+        );
     }
 }

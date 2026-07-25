@@ -13,6 +13,8 @@
 //! Reference: Wilson & Cowan (1972)
 //! "Excitatory and inhibitory interactions in localized populations
 //!  of model neurons" — Biophysical Journal
+//!
+//!  вилсон кованый ты родился слишком рано
 
 use crate::kernels;
 use rayon::prelude::*;
@@ -32,19 +34,37 @@ use rayon::prelude::*;
 /// - `w_II`: self-inhibition weight
 /// - `beta`: sigmoid steepness (default 4.0)
 pub fn step_wc(
-    e: &mut [f32], i: &mut [f32],
-    i_e: &[f32], i_i: &[f32],
-    spikes_e: &mut [f32], spikes_i: &mut [f32],
-    dt: f32, tau_E: &[f32], tau_I: &[f32],
-    w_EE: &[f32], w_EI: &[f32], w_IE: &[f32], w_II: &[f32],
+    e: &mut [f32],
+    i: &mut [f32],
+    i_e: &[f32],
+    i_i: &[f32],
+    spikes_e: &mut [f32],
+    spikes_i: &mut [f32],
+    dt: f32,
+    tau_E: &[f32],
+    tau_I: &[f32],
+    w_EE: &[f32],
+    w_EI: &[f32],
+    w_IE: &[f32],
+    w_II: &[f32],
     beta: &[f32],
 ) {
     let n = e.len();
-    assert!(n.is_multiple_of(8) && n == i.len() && n == i_e.len() && n == i_i.len()
-        && n == spikes_e.len() && n == spikes_i.len()
-        && n == tau_E.len() && n == tau_I.len()
-        && n == w_EE.len() && n == w_EI.len() && n == w_IE.len() && n == w_II.len()
-        && n == beta.len());
+    assert!(
+        n.is_multiple_of(8)
+            && n == i.len()
+            && n == i_e.len()
+            && n == i_i.len()
+            && n == spikes_e.len()
+            && n == spikes_i.len()
+            && n == tau_E.len()
+            && n == tau_I.len()
+            && n == w_EE.len()
+            && n == w_EI.len()
+            && n == w_IE.len()
+            && n == w_II.len()
+            && n == beta.len()
+    );
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     e.par_chunks_exact_mut(8)
@@ -95,8 +115,22 @@ mod tests {
         let mut spikes_i = vec![0.0f32; n];
 
         for _ in 0..500 {
-            step_wc(&mut e, &mut ii, &i_e, &i_i, &mut spikes_e, &mut spikes_i,
-                dt, &tau_E, &tau_I, &w_EE, &w_EI, &w_IE, &w_II, &beta);
+            step_wc(
+                &mut e,
+                &mut ii,
+                &i_e,
+                &i_i,
+                &mut spikes_e,
+                &mut spikes_i,
+                dt,
+                &tau_E,
+                &tau_I,
+                &w_EE,
+                &w_EI,
+                &w_IE,
+                &w_II,
+                &beta,
+            );
         }
 
         for idx in 0..n {

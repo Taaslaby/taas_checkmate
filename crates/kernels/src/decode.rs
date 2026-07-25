@@ -6,15 +6,29 @@ use wide::f32x8;
 #[inline(always)]
 unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3),
-                 *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    f32x8::from([
+        *p,
+        *p.add(1),
+        *p.add(2),
+        *p.add(3),
+        *p.add(4),
+        *p.add(5),
+        *p.add(6),
+        *p.add(7),
+    ])
 }
 #[inline(always)]
 unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     let a = v.to_array();
     let p = ptr.add(off);
-    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
-    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
+    *p = a[0];
+    *p.add(1) = a[1];
+    *p.add(2) = a[2];
+    *p.add(3) = a[3];
+    *p.add(4) = a[4];
+    *p.add(5) = a[5];
+    *p.add(6) = a[6];
+    *p.add(7) = a[7];
 }
 
 /// Complex decoder: out = W·[A·cos(θ)] + bias.
@@ -24,8 +38,13 @@ unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
 /// Pointers must be valid: `outputs[n_out]`, `amplitudes[n_in]`, `cos_buf[n_in]`,
 /// `weights[n_in·n_out]`, `biases[n_out]`.
 pub(crate) unsafe fn t3_complex_decoder(
-    outputs: *mut f32, amplitudes: *const f32, cos_buf: *const f32,
-    weights: *const f32, biases: *const f32, n_in: usize, n_out: usize,
+    outputs: *mut f32,
+    amplitudes: *const f32,
+    cos_buf: *const f32,
+    weights: *const f32,
+    biases: *const f32,
+    n_in: usize,
+    n_out: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(outputs, n_out);
     let a = std::slice::from_raw_parts(amplitudes, n_in);
@@ -45,7 +64,9 @@ pub(crate) unsafe fn t3_complex_decoder(
         }
         let arr: [f32; 8] = vdot.to_array();
         sum += arr.iter().sum::<f32>();
-        for j in i..n_in { sum += a[j] * c[j] * w[row + j]; }
+        for j in i..n_in {
+            sum += a[j] * c[j] * w[row + j];
+        }
         out[o] = sum;
     }
 }
@@ -55,8 +76,12 @@ pub(crate) unsafe fn t3_complex_decoder(
 /// # Safety
 /// `out_sin`, `out_cos` must be valid for `n1·n2` elements; `ph1[n1]`, `ph2[n2]`.
 pub(crate) unsafe fn t3_pst_features(
-    out_sin: *mut f32, out_cos: *mut f32,
-    ph1: *const f32, ph2: *const f32, n1: usize, n2: usize,
+    out_sin: *mut f32,
+    out_cos: *mut f32,
+    ph1: *const f32,
+    ph2: *const f32,
+    n1: usize,
+    n2: usize,
 ) {
     let os = std::slice::from_raw_parts_mut(out_sin, n1 * n2);
     let oc = std::slice::from_raw_parts_mut(out_cos, n1 * n2);
@@ -76,18 +101,28 @@ pub(crate) unsafe fn t3_pst_features(
 /// # Safety
 /// `weights[n]`, `states[n]` must be valid; `bias` must be non-null.
 pub(crate) unsafe fn t3_lms_train(
-    weights: *mut f32, bias: *mut f32,
-    states: *const f32, error: f32, lr: f32, n: usize,
+    weights: *mut f32,
+    bias: *mut f32,
+    states: *const f32,
+    error: f32,
+    lr: f32,
+    n: usize,
 ) {
     let lr_e = f32x8::splat(lr * error);
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
-        store8(weights, off, load8(weights, off) + lr_e * load8(states, off));
+        store8(
+            weights,
+            off,
+            load8(weights, off) + lr_e * load8(states, off),
+        );
     }
     if n8 < n {
         let w = std::slice::from_raw_parts_mut(weights, n);
         let s = std::slice::from_raw_parts(states, n);
-        for i in n8..n { w[i] += lr * error * s[i]; }
+        for i in n8..n {
+            w[i] += lr * error * s[i];
+        }
     }
     *bias += lr * error;
 }
@@ -97,25 +132,41 @@ pub(crate) unsafe fn t3_lms_train(
 /// # Safety
 /// `weights[n]`, `states[n]` must be valid; `bias` must be non-null.
 pub(crate) unsafe fn nlms_train(
-    weights: *mut f32, bias: *mut f32,
-    states: *const f32, error: f32, lr: f32, eps: f32, n: usize,
+    weights: *mut f32,
+    bias: *mut f32,
+    states: *const f32,
+    error: f32,
+    lr: f32,
+    eps: f32,
+    n: usize,
 ) {
     // Compute norm² via SIMD reduction
     let n8 = n & !7;
     let mut ns = f32x8::splat(0.0);
     let mut i = 0;
-    while i < n8 { ns += load8(states, i) * load8(states, i); i += 8; }
+    while i < n8 {
+        ns += load8(states, i) * load8(states, i);
+        i += 8;
+    }
     let arr: [f32; 8] = ns.to_array();
     let mut norm_sq: f32 = arr.iter().sum();
-    for j in i..n { let s = *states.add(j); norm_sq += s * s; }
+    for j in i..n {
+        let s = *states.add(j);
+        norm_sq += s * s;
+    }
 
     let mu = f32x8::splat(lr * error / (norm_sq + eps));
     let mut i = 0;
-    while i < n8 { store8(weights, i, load8(weights, i) + mu * load8(states, i)); i += 8; }
+    while i < n8 {
+        store8(weights, i, load8(weights, i) + mu * load8(states, i));
+        i += 8;
+    }
     if n8 < n {
         let w = std::slice::from_raw_parts_mut(weights, n);
         let s = std::slice::from_raw_parts(states, n);
-        for j in n8..n { w[j] += lr * error * s[j] / (norm_sq + eps); }
+        for j in n8..n {
+            w[j] += lr * error * s[j] / (norm_sq + eps);
+        }
     }
     *bias += lr * error / (norm_sq + eps);
 }
@@ -133,8 +184,12 @@ pub(crate) unsafe fn nlms_train(
 /// # Safety
 /// `weights[n]`, `cov[n]`, `states[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn kalman_update(
-    weights: *mut f32, cov: *mut f32,
-    states: *const f32, error: f32, s: f32, n: usize,
+    weights: *mut f32,
+    cov: *mut f32,
+    states: *const f32,
+    error: f32,
+    s: f32,
+    n: usize,
 ) {
     debug_assert!(s > 0.0, "kalman_update: s must be > 0, got {}", s);
     let s2 = f32x8::splat(s + 1e-8);
@@ -166,9 +221,18 @@ pub(crate) unsafe fn kalman_update(
 /// # Safety
 /// `weights[n]`, `m[n]`, `v[n]`, `states[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn adam_train(
-    weights: *mut f32, m: *mut f32, v: *mut f32,
-    states: *const f32, error: f32, lr: f32,
-    beta1: f32, beta2: f32, bc1: f32, _bc2: f32, eps: f32, n: usize,
+    weights: *mut f32,
+    m: *mut f32,
+    v: *mut f32,
+    states: *const f32,
+    error: f32,
+    lr: f32,
+    beta1: f32,
+    beta2: f32,
+    bc1: f32,
+    _bc2: f32,
+    eps: f32,
+    n: usize,
 ) {
     let b1 = f32x8::splat(beta1);
     let b1_c = f32x8::splat(1.0 - beta1);
@@ -183,9 +247,9 @@ pub(crate) unsafe fn adam_train(
         let mut mm = load8(m, off);
         let mut vv = load8(v, off);
         let st = load8(states, off);
-        let g = err_s * st;                     // g = error·states
-        mm = b1 * mm + b1_c * g;                // m = β₁·m + (1-β₁)·g
-        vv = b2 * vv + b2_c * g * g;            // v = β₂·v + (1-β₂)·g²
+        let g = err_s * st; // g = error·states
+        mm = b1 * mm + b1_c * g; // m = β₁·m + (1-β₁)·g
+        vv = b2 * vv + b2_c * g * g; // v = β₂·v + (1-β₂)·g²
         let mut w = load8(weights, off);
         w -= lr_s * mm / (vv.sqrt() + eps_s); // w -= lr·m̂/(√v̂ + ε)
         store8(weights, off, w);
@@ -212,8 +276,12 @@ pub(crate) unsafe fn adam_train(
 /// # Safety
 /// `output[feat_dim]`, `buffer[l·feat_dim]`, `weights[l·feat_dim]` must be valid.
 pub(crate) unsafe fn pst_decode(
-    output: *mut f32, buffer: *const f32,
-    weights: *const f32, feat_dim: usize, l: usize, pos: usize,
+    output: *mut f32,
+    buffer: *const f32,
+    weights: *const f32,
+    feat_dim: usize,
+    l: usize,
+    pos: usize,
 ) {
     let out = std::slice::from_raw_parts_mut(output, feat_dim);
     let buf = std::slice::from_raw_parts(buffer, l * feat_dim);
@@ -232,10 +300,14 @@ pub(crate) unsafe fn pst_decode(
             let bv = load8(buffer, b_off + i);
             let wv = load8(weights, w_off + i);
             let arr: [f32; 8] = (bv * wv).to_array();
-            for j in 0..8 { out[i + j] += arr[j]; }
+            for j in 0..8 {
+                out[i + j] += arr[j];
+            }
             i += 8;
         }
-        for f in i..feat_dim { out[f] += w[w_off + f] * buf[b_off + f]; }
+        for f in i..feat_dim {
+            out[f] += w[w_off + f] * buf[b_off + f];
+        }
     }
 }
 
@@ -244,18 +316,27 @@ pub(crate) unsafe fn pst_decode(
 /// # Safety
 /// `output[n]`, `amplitudes[n]`, `trig_buf[n]`, `weights[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn ring_synthesis(
-    output: *mut f32, amplitudes: *const f32,
-    trig_buf: *const f32, weights: *const f32, n: usize,
+    output: *mut f32,
+    amplitudes: *const f32,
+    trig_buf: *const f32,
+    weights: *const f32,
+    n: usize,
 ) {
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
-        store8(output, off, load8(weights, off) * load8(amplitudes, off) * load8(trig_buf, off));
+        store8(
+            output,
+            off,
+            load8(weights, off) * load8(amplitudes, off) * load8(trig_buf, off),
+        );
     }
     if n8 < n {
         let out = std::slice::from_raw_parts_mut(output, n);
         let a = std::slice::from_raw_parts(amplitudes, n);
         let t = std::slice::from_raw_parts(trig_buf, n);
         let w = std::slice::from_raw_parts(weights, n);
-        for i in n8..n { out[i] = w[i] * a[i] * t[i]; }
+        for i in n8..n {
+            out[i] = w[i] * a[i] * t[i];
+        }
     }
 }

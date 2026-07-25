@@ -10,22 +10,37 @@
 //!   Вязкий член η·∇²φ = η·(mean_neighbor_phase - φ) сглаживает фазовые разности
 //!   и подавляет хаотический шум при переключении фаз.
 
-use wide::f32x8;
 use super::wrap_phase;
 use core::f32::consts::TAU;
+use wide::f32x8;
 
 /// Helper: load f32x8 from raw pointer
 #[inline(always)]
 unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3), *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    f32x8::from([
+        *p,
+        *p.add(1),
+        *p.add(2),
+        *p.add(3),
+        *p.add(4),
+        *p.add(5),
+        *p.add(6),
+        *p.add(7),
+    ])
 }
 #[inline(always)]
 unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     let a = v.to_array();
     let p = ptr.add(off);
-    *p = a[0]; *p.add(1) = a[1]; *p.add(2) = a[2]; *p.add(3) = a[3];
-    *p.add(4) = a[4]; *p.add(5) = a[5]; *p.add(6) = a[6]; *p.add(7) = a[7];
+    *p = a[0];
+    *p.add(1) = a[1];
+    *p.add(2) = a[2];
+    *p.add(3) = a[3];
+    *p.add(4) = a[4];
+    *p.add(5) = a[5];
+    *p.add(6) = a[6];
+    *p.add(7) = a[7];
 }
 
 /// Wrap phases to [0, 2π) and compute sin/cos in one pass.
@@ -36,8 +51,10 @@ unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
 /// # Safety
 /// `phases[n]`, `cos_out[n]`, `sin_out[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn kuramoto_prepare(
-    phases: *mut f32, cos_out: *mut f32,
-    sin_out: *mut f32, n: usize,
+    phases: *mut f32,
+    cos_out: *mut f32,
+    sin_out: *mut f32,
+    n: usize,
 ) {
     let tau_s = f32x8::splat(TAU);
     let n8 = n & !7;
@@ -72,8 +89,11 @@ pub(crate) unsafe fn kuramoto_prepare(
 /// # Safety
 /// `phases[n]`, `omegas[n]`, `coupling[n]` must be valid, non-overlapping.
 pub(crate) unsafe fn kuramoto_update(
-    phases: *mut f32, omegas: *const f32,
-    coupling: *const f32, dt: f32, n: usize,
+    phases: *mut f32,
+    omegas: *const f32,
+    coupling: *const f32,
+    dt: f32,
+    n: usize,
 ) {
     let tau_s = f32x8::splat(TAU);
     let dt_s = f32x8::splat(dt);
@@ -125,8 +145,12 @@ pub(crate) unsafe fn kuramoto_update(
 /// # Safety
 /// All pointers valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn kuramoto_update_viscous(
-    phases: *mut f32, omegas: *const f32,
-    coupling: *const f32, eta: f32, dt: f32, n: usize,
+    phases: *mut f32,
+    omegas: *const f32,
+    coupling: *const f32,
+    eta: f32,
+    dt: f32,
+    n: usize,
 ) {
     let tau_s = f32x8::splat(TAU);
     let dt_s = f32x8::splat(dt);
@@ -139,7 +163,9 @@ pub(crate) unsafe fn kuramoto_update_viscous(
     let mean_phase = {
         let p = std::slice::from_raw_parts(phases, n);
         let mut sum = 0.0f32;
-        for i in 0..n { sum += p[i]; }
+        for i in 0..n {
+            sum += p[i];
+        }
         sum / n as f32
     };
 
@@ -182,10 +208,16 @@ pub(crate) unsafe fn kuramoto_update_viscous(
 /// # Safety
 /// All pointer args valid for `n` elements, non-overlapping.
 pub(crate) unsafe fn t3_update(
-    phases: *mut f32, amplitudes: *mut f32,
-    omegas: *const f32, coupling: *const f32,
-    drives: *const f32, dt: f32, decay: f32,
-    alpha: f32, gain: f32, n: usize,
+    phases: *mut f32,
+    amplitudes: *mut f32,
+    omegas: *const f32,
+    coupling: *const f32,
+    drives: *const f32,
+    dt: f32,
+    decay: f32,
+    alpha: f32,
+    gain: f32,
+    n: usize,
 ) {
     let tau_s = f32x8::splat(TAU);
     let dt_s = f32x8::splat(dt);
@@ -237,4 +269,3 @@ pub(crate) unsafe fn t3_update(
         }
     }
 }
-

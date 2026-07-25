@@ -23,17 +23,17 @@
 //! 2. **dopamine-STDP** — unsupervised contrastive plasticity
 //! 3. **T2-SPIGRAD** — exact spike-based gradients (optional)
 
-pub mod config;
 pub mod coherence;
+pub mod config;
 pub mod dopamine;
-pub mod stdp;
 pub mod hybrid;
+pub mod stdp;
 
+pub use coherence::{detect_spikes, phase_coherence, spike_entropy};
 pub use config::CpeConfig;
-pub use coherence::{phase_coherence, spike_entropy, detect_spikes};
 pub use dopamine::{dopamine_delta, dopamine_timing_gate};
-pub use stdp::{EligibilityTrace, stdp_update};
 pub use hybrid::{hybrid_update_w_in, hybrid_update_w_out};
+pub use stdp::{stdp_update, EligibilityTrace};
 
 pub use taas_kernels as kernels;
 
@@ -97,10 +97,23 @@ impl CpeEngine {
     }
 
     /// Run one Kuramoto step on a sparse connectome.
-    pub fn step(&self, phases: &mut [f32], omegas: &[f32],
-        row_ptr: &[i32], col_indices: &[i32], values: &[f32])
-    {
-        kuramoto_step(phases, omegas, row_ptr, col_indices, values, None, self.config.dt);
+    pub fn step(
+        &self,
+        phases: &mut [f32],
+        omegas: &[f32],
+        row_ptr: &[i32],
+        col_indices: &[i32],
+        values: &[f32],
+    ) {
+        kuramoto_step(
+            phases,
+            omegas,
+            row_ptr,
+            col_indices,
+            values,
+            None,
+            self.config.dt,
+        );
     }
 
     /// Compute phase coherence from current phases.
@@ -114,9 +127,14 @@ impl CpeEngine {
     }
 
     /// Compute dopamine δ.
-    pub fn delta(&self, reward: f32, pat_r: f32, pat_h_err: f32,
-        chaos_r: f32, chaos_h_err: f32) -> f32
-    {
+    pub fn delta(
+        &self,
+        reward: f32,
+        pat_r: f32,
+        pat_h_err: f32,
+        chaos_r: f32,
+        chaos_h_err: f32,
+    ) -> f32 {
         dopamine_delta(&self.config, reward, pat_r, pat_h_err, chaos_r, chaos_h_err)
     }
 
@@ -145,7 +163,15 @@ mod tests {
         let col_indices: Vec<i32> = (1..9).map(|x| x % 8).collect();
         let values = vec![1.0f32; 8];
 
-        kuramoto_step(&mut phases, &omegas, &row_ptr, &col_indices, &values, None, 0.01);
+        kuramoto_step(
+            &mut phases,
+            &omegas,
+            &row_ptr,
+            &col_indices,
+            &values,
+            None,
+            0.01,
+        );
         assert!(phases.iter().any(|&p| p > 0.0), "phases should advance");
     }
 
@@ -155,7 +181,9 @@ mod tests {
         let n = 16;
         let mut phases = vec![0.0f32; n];
         let omegas = vec![3.0f32; n];
-        let rp = vec![0i32, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32];
+        let rp = vec![
+            0i32, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32,
+        ];
         let ci: Vec<i32> = (0..32).map(|i| (i + 1) as i32 % 16).collect();
         let w = vec![1.0f32; 32];
 

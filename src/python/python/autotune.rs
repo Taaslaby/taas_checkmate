@@ -39,13 +39,25 @@ pub fn probe_eprop_fr<'py>(
     poisson_activity: f32,
     weight_scale: Option<f32>,
     seed: u64,
-) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
+) -> PyResult<(
+    Bound<'py, PyArray1<f32>>,
+    Bound<'py, PyArray1<f32>>,
+    Bound<'py, PyArray1<f32>>,
+)> {
     let biases_slice = biases.readonly();
     let biases_data = biases_slice.as_slice()?;
 
     let ws = weight_scale.unwrap_or_else(|| 10.0 / (n_pre as f32).sqrt());
 
-    let points = autotune::probe_fr(n_pre, n_post, biases_data, n_steps, poisson_activity, ws, seed);
+    let points = autotune::probe_fr(
+        n_pre,
+        n_post,
+        biases_data,
+        n_steps,
+        poisson_activity,
+        ws,
+        seed,
+    );
 
     let n = points.len();
     // PyArray1::new is unsafe in numpy 0.23
@@ -112,4 +124,3 @@ pub fn suggest_eprop_config<'py>(
     dict.set_item("snr", cfg.snr)?;
     Ok(dict)
 }
-

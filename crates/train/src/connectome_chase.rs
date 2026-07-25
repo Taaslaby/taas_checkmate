@@ -9,11 +9,11 @@
 //!
 //! Feature gate: `--features connectome` (CPU) or `--features cuda` (GPU).
 
-use crate::spike_grad::SpikeGradBridge;
 #[cfg(not(feature = "cuda"))]
 use crate::spike::t3spike_backward_per_step;
 #[cfg(not(feature = "cuda"))]
 use crate::spike::t3spike_forward;
+use crate::spike_grad::SpikeGradBridge;
 use crate::t3::pst_linear_dim;
 
 #[cfg(feature = "cuda")]
@@ -96,23 +96,35 @@ where
 
     // ── Init bridge ──
     let mut bridge = crate::spike_grad::SpikeGradBridge::new(
-        config.spike_dim, config.n_osc, config.dt,
-        config.drive_gain, config.alpha,
-        config.freq_min, config.freq_max,
-        config.coupling_w12, config.coupling_w13, config.coupling_w23,
+        config.spike_dim,
+        config.n_osc,
+        config.dt,
+        config.drive_gain,
+        config.alpha,
+        config.freq_min,
+        config.freq_max,
+        config.coupling_w12,
+        config.coupling_w13,
+        config.coupling_w23,
     );
 
     // ── Init decoder ──
     let pst_dim = config.pst_dim();
-    let mut decode_w: Vec<f32> = (0..pst_dim * 2).map(|_| (rng.gen::<f32>() - 0.5) * 0.2).collect();
+    let mut decode_w: Vec<f32> = (0..pst_dim * 2)
+        .map(|_| (rng.gen::<f32>() - 0.5) * 0.2)
+        .collect();
     let mut decode_b = vec![0.0; 2];
 
     // ── Init LIF state ──
-    let mut state = taas_connectome::sim::BrainState::new(n, taas_connectome::sim::NeuronModel::LIF);
+    let mut state =
+        taas_connectome::sim::BrainState::new(n, taas_connectome::sim::NeuronModel::LIF);
     let _lif_params = taas_connectome::sim::LifParams::new(
-        &vec![config.tau_m; n], &vec![config.v_rest; n],
-        &vec![config.v_thresh; n], &vec![config.v_reset; n],
-        config.dt_ms, 2.0,
+        &vec![config.tau_m; n],
+        &vec![config.v_rest; n],
+        &vec![config.v_thresh; n],
+        &vec![config.v_reset; n],
+        config.dt_ms,
+        2.0,
     );
 
     let mut loss_history = Vec::with_capacity(config.n_epochs);
@@ -131,12 +143,26 @@ where
             let v_rest_v = vec![config.v_rest; n];
             let v_thresh_v = vec![config.v_thresh; n];
             let v_reset_v = vec![config.v_reset; n];
-            gpu::sim_lif_gpu(conn, &mut state, config.dt_ms, &external_I,
-                             config.n_steps, &tau_m_v, &v_rest_v, &v_thresh_v, &v_reset_v)
+            gpu::sim_lif_gpu(
+                conn,
+                &mut state,
+                config.dt_ms,
+                &external_I,
+                config.n_steps,
+                &tau_m_v,
+                &v_rest_v,
+                &v_thresh_v,
+                &v_reset_v,
+            )
         };
         #[cfg(not(feature = "cuda"))]
         let spike_buf = taas_connectome::sim::sim_lif(
-            conn, &mut state, &_lif_params, &external_I, config.n_steps, 1.0
+            conn,
+            &mut state,
+            &_lif_params,
+            &external_I,
+            config.n_steps,
+            1.0,
         );
 
         // ── Extract readout spikes → bridge input ──
@@ -157,19 +183,31 @@ where
                 .expect("CudaBackend::new for connectome_chase");
             t3spike_forward_with_backend(
                 backend,
-                config.n_osc, n_steps, config.dt,
-                config.drive_gain, config.alpha,
-                config.freq_min, config.freq_max,
-                config.coupling_w12, config.coupling_w13, config.coupling_w23,
+                config.n_osc,
+                n_steps,
+                config.dt,
+                config.drive_gain,
+                config.alpha,
+                config.freq_min,
+                config.freq_max,
+                config.coupling_w12,
+                config.coupling_w13,
+                config.coupling_w23,
                 &bridge.compute_drives(&spike_in, n_steps),
             )
         };
         #[cfg(not(feature = "cuda"))]
         let (_pst_final, traj) = t3spike_forward(
-            config.n_osc, n_steps, config.dt,
-            config.drive_gain, config.alpha,
-            config.freq_min, config.freq_max,
-            config.coupling_w12, config.coupling_w13, config.coupling_w23,
+            config.n_osc,
+            n_steps,
+            config.dt,
+            config.drive_gain,
+            config.alpha,
+            config.freq_min,
+            config.freq_max,
+            config.coupling_w12,
+            config.coupling_w13,
+            config.coupling_w23,
             &bridge.compute_drives(&spike_in, n_steps),
         );
 
@@ -231,22 +269,27 @@ where
         let grad_drives = {
             let drives = bridge.compute_drives(&spike_in, n_steps);
             t3spike_fused_forward_backward_cuda(
-                config.n_osc, n_steps, config.dt,
-                config.drive_gain, config.alpha,
-                config.freq_min, config.freq_max,
-                config.coupling_w12, config.coupling_w13, config.coupling_w23,
+                config.n_osc,
+                n_steps,
+                config.dt,
+                config.drive_gain,
+                config.alpha,
+                config.freq_min,
+                config.freq_max,
+                config.coupling_w12,
+                config.coupling_w13,
+                config.coupling_w23,
                 &drives,
-                &vec![0.0f32; pd],  // final grad_pst = 0 (all loss via per_step)
+                &vec![0.0f32; pd], // final grad_pst = 0 (all loss via per_step)
                 Some(&per_step_pst),
-                &mut None,  // no context caching (re-alloc each epoch — fine for now)
-            ).expect("t3spike_fused_forward_backward_cuda")
+                &mut None, // no context caching (re-alloc each epoch — fine for now)
+            )
+            .expect("t3spike_fused_forward_backward_cuda")
         };
         #[cfg(not(feature = "cuda"))]
         let grad_drives = {
             let grad_pst_final = vec![0.0f32; pd];
-            t3spike_backward_per_step(
-                &grad_pst_final, &traj, Some(&per_step_pst),
-            )
+            t3spike_backward_per_step(&grad_pst_final, &traj, Some(&per_step_pst))
         };
 
         // ── Project grad_drives → bridge weights ──
@@ -266,8 +309,12 @@ where
 
         // ── Clip gradients ──
         let clip = config.grad_clip;
-        for w in grad_w.iter_mut() { *w = w.clamp(-clip, clip); }
-        for b in grad_b.iter_mut() { *b = b.clamp(-clip, clip); }
+        for w in grad_w.iter_mut() {
+            *w = w.clamp(-clip, clip);
+        }
+        for b in grad_b.iter_mut() {
+            *b = b.clamp(-clip, clip);
+        }
 
         // ── Update bridge ──
         bridge.update(&grad_w, &grad_b, config.lr_bridge);
@@ -287,7 +334,12 @@ where
         }
     }
 
-    ChaseResult { bridge, decoder_w: decode_w, decoder_b: decode_b, loss_history }
+    ChaseResult {
+        bridge,
+        decoder_w: decode_w,
+        decoder_b: decode_b,
+        loss_history,
+    }
 }
 
 #[cfg(test)]
@@ -295,10 +347,10 @@ where
 mod tests {
     use super::*;
 
-    /// Helper: create a tiny synthetic connectome.
+    /// Helper: create a tiny synthetic connectome (seeded for determinism).
     fn make_tiny_connectome(n: usize, avg_deg: usize) -> taas_connectome::data::ConnectomeData {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut row_ptr = vec![0i32];
         let mut col_indices = Vec::new();
         let mut values = Vec::new();
@@ -319,9 +371,7 @@ mod tests {
             row_ptr.push(col_indices.len() as i32);
         }
         let nt_types = vec![1.0f32; n];
-        taas_connectome::data::ConnectomeData::new(
-            row_ptr, col_indices, values, nt_types, vec![],
-        )
+        taas_connectome::data::ConnectomeData::new(row_ptr, col_indices, values, nt_types, vec![])
     }
 
     #[test]
@@ -353,17 +403,27 @@ mod tests {
             v_reset: -70.0,
         };
 
-        let result = train_connectome_chase(
-            &conn, &config, || vec![0.0; conn.n_neurons], 42,
-        );
+        let result = train_connectome_chase(&conn, &config, || vec![0.0; conn.n_neurons], 42);
 
         // Loss should decrease over training
         assert_eq!(result.loss_history.len(), 30);
         let first_loss = result.loss_history[0];
         let last_loss = result.loss_history[result.loss_history.len() - 1];
-        println!("connectome_chase E2E: first={:.6}, last={:.6}", first_loss, last_loss);
-        assert!(first_loss > 0.0, "first loss should be positive: {}", first_loss);
-        assert!(last_loss < first_loss * 0.99, "loss should decrease: {:.6} → {:.6}", first_loss, last_loss);
+        println!(
+            "connectome_chase E2E: first={:.6}, last={:.6}",
+            first_loss, last_loss
+        );
+        assert!(
+            first_loss > 0.0,
+            "first loss should be positive: {}",
+            first_loss
+        );
+        assert!(
+            last_loss < first_loss * 0.99,
+            "loss should decrease: {:.6} → {:.6}",
+            first_loss,
+            last_loss
+        );
     }
 
     #[test]
@@ -402,16 +462,20 @@ mod tests {
             v_reset: -70.0,
         };
 
-        let result = train_connectome_chase(
-            &conn, &config, || vec![0.0; conn.n_neurons], 42,
-        );
+        let result = train_connectome_chase(&conn, &config, || vec![0.0; conn.n_neurons], 42);
 
         assert_eq!(result.loss_history.len(), 20);
         let first_loss = result.loss_history[0];
         let last_loss = result.loss_history[result.loss_history.len() - 1];
-        println!("connectome_chase GPU E2E: first={:.6}, last={:.6}", first_loss, last_loss);
-        assert!(last_loss < first_loss * 0.99,
-            "GPU: loss should decrease: {:.6} → {:.6}", first_loss, last_loss);
+        println!(
+            "connectome_chase GPU E2E: first={:.6}, last={:.6}",
+            first_loss, last_loss
+        );
+        assert!(
+            last_loss < first_loss * 0.99,
+            "GPU: loss should decrease: {:.6} → {:.6}",
+            first_loss,
+            last_loss
+        );
     }
 }
-
