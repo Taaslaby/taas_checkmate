@@ -47,10 +47,14 @@ def run_gui_viewer():
     ]
 
     dof_indices = []
+    actuator_indices = []
     for jname in leg_joint_names:
         jid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_JOINT, jname)
+        aid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_ACTUATOR, jname)
         if jid >= 0:
             dof_indices.append(model.jnt_dofadr[jid])
+        if aid >= 0:
+            actuator_indices.append(aid)
 
     n_joints = len(dof_indices)
     n_muscles = math.ceil((n_joints * 2) / 8) * 8
@@ -151,19 +155,20 @@ def run_gui_viewer():
                     joint_stf[j] = k0[j] + beta[j] * ca_sum
                     joint_dmp[j] = b0[j] + alpha[j] * ca_sum
 
-            # 3. Apply Leg Joint Impedance Forces into MuJoCo
-            data.qfrc_applied.fill(0.0)
-            for j in range(min(n_joints, len(dof_indices))):
-                dof = dof_indices[j]
-                q = data.qpos[dof]
-                q_dot = data.qvel[dof]
+            # 3. Apply Leg Joint Impedance & Drive into MuJoCo Actuators (data.ctrl)
+            for j in range(min(n_joints, len(actuator_indices))):
+                act_idx = actuator_indices[j]
+                dof_idx = dof_indices[j]
+                q = data.qpos[dof_idx]
+                q_dot = data.qvel[dof_idx]
 
                 df = joint_df[j]
                 k_stf = joint_stf[j]
                 b_dmp = joint_dmp[j]
 
-                tau_applied = np.clip(df - k_stf * q - b_dmp * q_dot, -1.0, 1.0)
-                data.qfrc_applied[dof] = tau_applied
+                target_ctrl = np.clip(df * 0.2, -0.5, 0.5)
+                data.ctrl[act_idx] = target_ctrl
+                data.qfrc_applied[dof_idx] = -b_dmp * q_dot
 
             # 4. Step MuJoCo 3D Rigid Physics
             mu.mj_step(model, data)

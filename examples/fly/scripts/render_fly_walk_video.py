@@ -44,10 +44,14 @@ def render_walking_animation(n_frames=120, fps=30):
     ]
 
     dof_indices = []
+    actuator_indices = []
     for jname in leg_joint_names:
         jid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_JOINT, jname)
+        aid = mu.mj_name2id(model, mu.mjtObj.mjOBJ_ACTUATOR, jname)
         if jid >= 0:
             dof_indices.append(model.jnt_dofadr[jid])
+        if aid >= 0:
+            actuator_indices.append(aid)
 
     n_joints = len(dof_indices)
     n_muscles = math.ceil((n_joints * 2) / 8) * 8
@@ -125,16 +129,21 @@ def render_walking_animation(n_frames=120, fps=30):
                     joint_stf[j] = k0[j] + beta[j] * ca_sum
                     joint_dmp[j] = b0[j] + alpha[j] * ca_sum
 
-            data.qfrc_applied.fill(0.0)
-            for j in range(min(n_joints, len(dof_indices))):
-                dof = dof_indices[j]
-                q = data.qpos[dof]
-                q_dot = data.qvel[dof]
+            # 3. Apply Atlasov Muscle Impedance & Drive into MuJoCo Actuators (data.ctrl)
+            for j in range(min(n_joints, len(actuator_indices))):
+                act_idx = actuator_indices[j]
+                dof_idx = dof_indices[j]
+                q = data.qpos[dof_idx]
+                q_dot = data.qvel[dof_idx]
 
                 df = joint_df[j]
                 k_stf = joint_stf[j]
                 b_dmp = joint_dmp[j]
-                data.qfrc_applied[dof] = np.clip(df - k_stf * q - b_dmp * q_dot, -1.0, 1.0)
+
+                # Convert Atlasov Muscle Tug-of-War into smooth joint flexing control ctrl
+                target_ctrl = np.clip(df * 0.2, -0.5, 0.5)
+                data.ctrl[act_idx] = target_ctrl
+                data.qfrc_applied[dof_idx] = -b_dmp * q_dot
 
             mu.mj_step(model, data)
 
