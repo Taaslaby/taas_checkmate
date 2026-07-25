@@ -21,6 +21,7 @@
 pub mod adex; // AdEx & E-Prop AdEx
 pub mod atlasov_neuromotor;
 pub mod fhn; // FitzHugh-Nagumo
+pub mod glif; // GLIF3/4 (Generalized LIF — Allen Institute)
 pub mod hh; // LUT Hodgkin-Huxley
 pub mod hr; // Hindmarsh-Rose
 pub mod izhikevich; // Izhikevich & E-Prop Izhikevich

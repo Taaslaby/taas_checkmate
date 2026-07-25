@@ -245,6 +245,7 @@ fn surrogate_gradient(v: f32, v_thresh: f32, tau_sg: f32) -> f32 {
 // ═══════════════════════════════════════════════════════
 pub mod adex; // Adaptive Exponential (AdEx)
 pub mod fhn; // FitzHugh-Nagumo
+pub mod glif; // GLIF3/4 (Generalized LIF — Allen Institute)
 pub mod hh; // LUT Hodgkin-Huxley (NaV, KV, CaV-T)
 pub mod hr;
 pub mod izhikevich; // Izhikevich (2003)

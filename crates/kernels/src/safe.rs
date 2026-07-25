@@ -6,7 +6,7 @@
 //! are satisfied by the calling convention.
 
 use super::neuron::{
-    adex, delay, dendrite, dopamine, fhn, fused, hh, izhikevich, lif, saw, stp, wc,
+    adex, delay, dendrite, dopamine, fhn, fused, glif, hh, izhikevich, lif, saw, stp, wc,
 };
 use super::{attention, decode, measure, phase, signal};
 
@@ -1811,6 +1811,118 @@ pub fn dendrite_step(state: &mut dendrite::DendriteState, V_soma: &[f32], dt: f3
 ///   τ_I · dI/dt = -I + sigmoid(w_IE·E - w_II·I + I_I)
 ///
 /// Params layout: dt, tau_E, tau_I, w_EE, w_EI, w_IE, w_II, beta (8 × n, column-major).
+// ═══════════════════════════════════════════════════════════
+//  neuron / glif (Generalized LIF — Allen Institute)
+// ═══════════════════════════════════════════════════════════
+
+/// GLIF3 step: LIF + after-spike current (I_ahp).
+///
+/// Params layout (8 × n): [dt, g_leak, E_leak, v_thresh, v_reset, τ_ahp, Δg_ahp, E_ahp]
+/// State: v[n], g_ahp[n], refractory[n], spikes[n]
+///
+/// Equations:
+///   dv/dt = -g_leak·(v - E_leak) + I_syn + g_ahp·(v - E_ahp)
+///   dg_ahp/dt = -g_ahp / τ_ahp    (exponential Euler)
+///   On spike: v = v_reset, g_ahp += Δg_ahp
+///
+/// Allen Institute — Teeter et al. 2018, Nature Communications
+pub fn glif3_step(
+    v: &mut [f32],
+    g_ahp: &mut [f32],
+    Ii: &mut [f32],
+    spikes: &mut [i32],
+    params: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
+    I_dend: Option<&[f32]>,
+) {
+    let n = v.len();
+    assert_eq!(g_ahp.len(), n, "glif3_step: g_ahp length mismatch");
+    assert_eq!(Ii.len(), n, "glif3_step: Ii length mismatch");
+    assert_eq!(spikes.len(), n, "glif3_step: spikes length mismatch");
+    assert_eq!(
+        params.len(),
+        n * 8,
+        "glif3_step: params length mismatch (expected {}*8={})",
+        n,
+        n * 8
+    );
+    assert_eq!(
+        refractory.len(),
+        n,
+        "glif3_step: refractory length mismatch"
+    );
+    add_dendritic_current(Ii, I_dend);
+    unsafe {
+        glif::glif3_step(
+            v.as_mut_ptr(),
+            g_ahp.as_mut_ptr(),
+            Ii.as_mut_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            refractory.as_mut_ptr(),
+            tau_ref,
+            n,
+        )
+    }
+}
+
+/// GLIF4 step: GLIF3 + threshold adaptation (θ).
+///
+/// Params layout (10 × n): [dt, g_leak, E_leak, v_thresh_0, v_reset, τ_ahp, Δg_ahp, E_ahp, τ_θ, Δθ]
+/// State: v[n], theta[n], g_ahp[n], refractory[n], spikes[n]
+///
+/// Equations:
+///   Same as GLIF3 + adaptive threshold:
+///   dθ/dt = -θ / τ_θ  (exponential Euler)
+///   Effective threshold = v_thresh_0 + θ
+///   On spike: θ += Δθ
+///
+/// Allen Institute — Teeter et al. 2018, Nature Communications
+pub fn glif4_step(
+    v: &mut [f32],
+    theta: &mut [f32],
+    g_ahp: &mut [f32],
+    Ii: &mut [f32],
+    spikes: &mut [i32],
+    params: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
+    I_dend: Option<&[f32]>,
+) {
+    let n = v.len();
+    assert_eq!(theta.len(), n, "glif4_step: theta length mismatch");
+    assert_eq!(g_ahp.len(), n, "glif4_step: g_ahp length mismatch");
+    assert_eq!(Ii.len(), n, "glif4_step: Ii length mismatch");
+    assert_eq!(spikes.len(), n, "glif4_step: spikes length mismatch");
+    assert_eq!(
+        params.len(),
+        n * 10,
+        "glif4_step: params length mismatch (expected {}*10={})",
+        n,
+        n * 10
+    );
+    assert_eq!(
+        refractory.len(),
+        n,
+        "glif4_step: refractory length mismatch"
+    );
+    add_dendritic_current(Ii, I_dend);
+    unsafe {
+        glif::glif4_step(
+            v.as_mut_ptr(),
+            theta.as_mut_ptr(),
+            g_ahp.as_mut_ptr(),
+            Ii.as_mut_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            refractory.as_mut_ptr(),
+            tau_ref,
+            n,
+        )
+    }
+}
+
 pub fn wc_step(
     e: &mut [f32],
     i: &mut [f32],
