@@ -110,10 +110,12 @@ class WholeFlyEmbodiedSimulator:
 
         print(f"\n✓ Whole Fly Embodied Simulator Loaded in {time.time() - t0:.2f} seconds!")
 
-    def run_whole_fly_simulation(self, n_steps=500):
+    def run_whole_fly_simulation(self, n_steps=1000):
         print(f"\n--- Running Full Closed-Loop Simulation ({n_steps} steps, dt={self.dt*1000:.2f} ms) ---")
-        print(f"{'Step':<6} | {'Sim Time (ms)':<15} | {'Brain Activity':<18} | {'VNC Motoneurons':<18} | {'Avg Muscle Force (mN)':<25} | {'Joint K (mN/rad)':<18}")
-        print("-" * 110)
+        print(f"{'Step':<6} | {'Sim Time (ms)':<15} | {'Body Pos X,Y,Z (mm)':<28} | {'Displacement (mm)':<20} | {'Joint K (mN/rad)':<18}")
+        print("-" * 105)
+
+        start_pos = self.data.qpos[:3].copy()
 
         for step in range(n_steps):
             # 1. Brain & VNC Activity Pattern Generation
@@ -168,13 +170,14 @@ class WholeFlyEmbodiedSimulator:
             # 5. Step MuJoCo 3D Rigid Multibody Physics
             mu.mj_step(self.model, self.data)
 
-            if step % 50 == 0 or step == n_steps - 1:
-                avg_force = float(np.mean(self.tension[:self.n_muscles])) * 1e3
+            if step % 100 == 0 or step == n_steps - 1:
+                pos = self.data.qpos[:3] * 1000.0 # Convert to mm
+                disp = np.linalg.norm(self.data.qpos[:3] - start_pos) * 1000.0
                 avg_k = float(np.mean(self.joint_stf[:self.n_joints])) * 1e3
-                print(f"{step:<6} | {self.data.time * 1000.0:<15.1f} | {brain_active_pct:<17.1f}% | {vnc_active_pct:<17.1f}% | {avg_force:<25.3f} | {avg_k:<18.3f}")
+                print(f"{step:<6} | {self.data.time * 1000.0:<15.1f} | ({pos[0]:+6.2f}, {pos[1]:+6.2f}, {pos[2]:+6.2f}) | {disp:<20.3f} | {avg_k:<18.3f}")
 
-        print("=" * 110)
-        print("✓ WHOLE-FLY EMBODIED SIMULATION COMPLETED SUCCESSFULLY!")
+        print("=" * 105)
+        print(f"✓ WHOLE-FLY EMBODIED SIMULATION COMPLETED: Fly walked {disp:.3f} mm in {self.data.time*1000:.1f} ms!")
 
 if __name__ == "__main__":
     sim = WholeFlyEmbodiedSimulator()
