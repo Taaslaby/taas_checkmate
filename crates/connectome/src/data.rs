@@ -17,7 +17,7 @@ const TAAS_VERSION: u32 = 1;
 unsafe fn pod_as_bytes<T>(slice: &[T]) -> &[u8] {
     std::slice::from_raw_parts(
         slice.as_ptr() as *const u8,
-        slice.len() * std::mem::size_of::<T>(),
+        std::mem::size_of_val(slice),
     )
 }
 

@@ -64,8 +64,8 @@ pub(crate) unsafe fn wc_step(
     for off in (0..n8).step_by(8) {
         let mut ee = load8_mut(e, off);
         let mut ii = load8_mut(i, off);
-        let ie_ext = load8(i_e, off);
-        let ii_ext = load8(i_i, off);
+        let ie_ext = load8(i_e, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+        let ii_ext = load8(i_i, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
 
         // Load parameters
         let tau_E = load8(params.wrapping_add(n), off);
@@ -123,8 +123,8 @@ pub(crate) unsafe fn wc_step(
             let w_ii = p[6 * n + idx];
             let beta = p[7 * n + idx];
 
-            let input_e = w_ee * e[idx] - w_ei * i[idx] + i_e[idx];
-            let input_i = w_ie * e[idx] - w_ii * i[idx] + i_i[idx];
+            let input_e = w_ee * e[idx] - w_ei * i[idx] + i_e[idx].clamp(-100.0, 100.0);
+            let input_i = w_ie * e[idx] - w_ii * i[idx] + i_i[idx].clamp(-100.0, 100.0);
 
             let f_e = 1.0 / (1.0 + (-beta * input_e).exp());
             let f_i = 1.0 / (1.0 + (-beta * input_i).exp());

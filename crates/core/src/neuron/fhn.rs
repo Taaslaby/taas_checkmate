@@ -24,7 +24,6 @@ use rayon::prelude::*;
 /// - `b`: nullcline parameter (default 0.8)
 ///
 /// Spike detection: v ≥ threshold (default 0.5, hardcoded in kernel).
-#[allow(clippy::too_many_arguments)]
 pub fn step_fhn(
     v: &mut [f32], w: &mut [f32], I: &[f32], spikes: &mut [i32],
     dt: f32, tau_w: &[f32], a: &[f32], b: &[f32],
@@ -32,8 +31,6 @@ pub fn step_fhn(
     let n = v.len();
     assert!(n.is_multiple_of(8) && n == w.len() && n == I.len() && n == spikes.len()
         && n == tau_w.len() && n == a.len() && n == b.len());
-
-    kernels::safety_clamp(&mut v.to_vec(), -super::I_CLAMP, super::I_CLAMP);
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     v.par_chunks_exact_mut(8)

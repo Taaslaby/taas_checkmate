@@ -19,6 +19,7 @@ use std::f32::consts::TAU;
 use crate::core::neuron::hh::{HhLutConfig, step_hh_lut, build_config_from_channels};
 
 /// Full hologram pipeline: phase encoding → HH → STDP → decode.
+#[allow(dead_code)]
 #[pyclass(name = "HologramBridge", module = "taas_checkmate.hologram")]
 pub struct PyHologramBridge {
     // HH simulator

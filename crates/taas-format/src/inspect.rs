@@ -19,8 +19,8 @@ pub fn inspect_taas(path: &str) -> Result<String, String> {
         } else {
             format!("{} B", comp.size)
         };
-        lines.push(format!("   {:<25} {}  {:>8} {} {}",
-            comp.name, comp.component_type, size_str, comp.dtype, format!("{:?}", comp.shape)));
+        lines.push(format!("   {:<25} {}  {:>8} {} {:?}",
+            comp.name, comp.component_type, size_str, comp.dtype, comp.shape));
         lines.push(format!("   {:>29} offset={}  n_elems={}", "", comp.offset, n_elems));
     }
 

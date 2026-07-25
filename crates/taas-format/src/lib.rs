@@ -1,3 +1,8 @@
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::should_implement_trait)]
+
 //! # `.taas` format — универсальный снапшот для SNN моделей и осцилляторов.
 //!
 //! ## Бинарный формат
@@ -27,12 +32,14 @@ pub mod writer;
 pub mod reader;
 pub mod components;
 pub mod inspect;
+pub mod migration;
 
 pub use types::{TAAS_MAGIC, TAAS_VERSION, TensorDtype, ComponentEntry, TaasManifest};
 pub use writer::TaasWriter;
 pub use reader::TaasReader;
 pub use components::*;
 pub use inspect::inspect_taas;
+pub use migration::migrate_bytes;
 
 // ─── Fallback timestamp (without chrono dependency) ─────
 
@@ -164,9 +171,11 @@ mod tests {
         let bytes = writer.to_bytes().unwrap();
         let reader = TaasReader::from_bytes(&bytes).unwrap();
 
-        assert_eq!(reader.manifest.components.len(), 38 + 4);
+        // TriOscillator: 1 grouped tensor + 10 scalars + 1 bool = 12 components
+        // NlmsDecoder: 2 tensors + 2 scalars = 4 components
+        assert_eq!(reader.manifest.components.len(), 12 + 4);
         assert_eq!(reader.metadata().get("description").unwrap(), "Test multi-component");
-        assert!(reader.find_component("th1").is_ok());
+        assert!(reader.find_component("tri_state").is_ok());
         assert!(reader.find_component("nlms_weights").is_ok());
     }
 
@@ -242,6 +251,49 @@ mod tests {
         assert_eq!(loaded.v, state.v);
         assert_eq!(loaded.u, state.u);
         assert_eq!(loaded.n_padded, state.n_padded);
+    }
+
+    #[test]
+    fn test_zstd_compression_roundtrip() {
+        let mut writer = TaasWriter::new();
+        writer.set_compression(3);  // zstd level 3
+        writer.add_f32("data", "Test", &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        writer.add_i32("int_data", "Test", &[10, 20, 30, 40]);
+        writer.add_scalar_f32("scalar", "Test", 42.0);
+
+        let bytes = writer.to_bytes().unwrap();
+        let reader = TaasReader::from_bytes(&bytes).unwrap();
+
+        // Verify compression header fields
+        let data_entry = reader.find_component("data").unwrap();
+        assert_eq!(data_entry.compression.as_deref(), Some("zstd"));
+        let uncomp = data_entry.uncompressed_size.unwrap();
+        assert!(uncomp >= 5 * 4, "uncompressed_size={uncomp} < 20");
+        // zstd may not reduce size for tiny data (< ~100 bytes) due to framing overhead
+        // but the fields must be set correctly
+
+        // Verify data round-trip
+        assert_eq!(reader.get_f32("data").unwrap(), &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        assert_eq!(reader.get_i32("int_data").unwrap(), &[10, 20, 30, 40]);
+        assert_eq!(reader.get_scalar_f32("scalar").unwrap(), 42.0);
+        assert!(reader.validate().is_ok());
+
+        // Test mixed: compress some components, not others
+        let mut writer2 = TaasWriter::new();
+        writer2.add_f32("raw", "Test", &[1.0; 16]);  // uncompressed
+        writer2.set_compression(3);
+        writer2.add_f32("compressed", "Test", &[2.0; 16]);
+        writer2.disable_compression();
+        writer2.add_f32("raw2", "Test", &[3.0; 16]);  // uncompressed again
+
+        let bytes2 = writer2.to_bytes().unwrap();
+        let reader2 = TaasReader::from_bytes(&bytes2).unwrap();
+        assert!(reader2.find_component("raw").unwrap().compression.is_none());
+        assert_eq!(reader2.find_component("compressed").unwrap().compression.as_deref(), Some("zstd"));
+        assert!(reader2.find_component("raw2").unwrap().compression.is_none());
+        assert_eq!(reader2.get_f32("raw").unwrap(), &[1.0; 16]);
+        assert_eq!(reader2.get_f32("compressed").unwrap(), &[2.0; 16]);
+        assert_eq!(reader2.get_f32("raw2").unwrap(), &[3.0; 16]);
     }
 
     #[test]

@@ -27,7 +27,8 @@ pub(crate) unsafe fn lif_step(
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
         let mut refr = load8_mut(refractory, off);
-        let ii = load8_mut(Ii, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(2 * n), off);
         let v_th = load8(params.wrapping_add(3 * n), off);
         let v_reset = load8(params.wrapping_add(4 * n), off);
@@ -77,8 +78,9 @@ pub(crate) unsafe fn lif_step(
             let v_rest = p[2 * n + i_idx];
             let v_thresh = p[3 * n + i_idx];
             let v_reset = p[4 * n + i_idx];
+            let i_clamped = i_sl[i_idx].clamp(-100.0, 100.0);
             if tau_m > 0.0 {
-                v[i_idx] += (v_rest - v[i_idx] + i_sl[i_idx]) / tau_m * dt_val;
+                v[i_idx] += (v_rest - v[i_idx] + i_clamped) / tau_m * dt_val;
             }
             if v[i_idx] >= v_thresh {
                 spikes[i_idx] = 1;
@@ -117,7 +119,8 @@ pub(crate) unsafe fn lif_at_step(
         let mut vv = load8_mut(v, off);
         let mut th = load8_mut(theta, off);
         let mut refr = load8_mut(refractory, off);
-        let ii = load8_mut(Ii, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(2 * n), off);
         let v_th = load8(params.wrapping_add(3 * n), off);
         let v_reset = load8(params.wrapping_add(4 * n), off);
@@ -185,8 +188,9 @@ pub(crate) unsafe fn lif_at_step(
             let v_reset = p[4 * n + i_idx];
             let tau_theta = p[5 * n + i_idx];
             let beta = p[6 * n + i_idx];
+            let i_clamped = i_sl[i_idx].clamp(-100.0, 100.0);
             if tau_m > 0.0 {
-                v[i_idx] += (v_rest - v[i_idx] + i_sl[i_idx]) / tau_m * dt_val;
+                v[i_idx] += (v_rest - v[i_idx] + i_clamped) / tau_m * dt_val;
             }
             if tau_theta > 0.0 {
                 theta[i_idx] *= (-dt_val / tau_theta).exp();

@@ -33,7 +33,7 @@ extern "C" __global__ void fused_izhikevich_stdp_kernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
 
-    float vi = v[idx], ui = u[idx], Ii = I[idx];
+    float vi = v[idx], ui = u[idx], Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
 
     // ─── Refractory period: skip all dynamics (matches CPU SIMD behavior) ──
     float ref = (refractory) ? refractory[idx] : 0.0f;

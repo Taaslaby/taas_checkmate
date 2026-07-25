@@ -37,6 +37,7 @@ pub mod cpe;
 pub mod hh;
 #[cfg(feature = "cuda")]
 pub mod hh_gpu;
+pub mod iit;
 pub mod hologram;
 pub mod spaun;
 #[cfg(feature = "cuda")]
@@ -89,6 +90,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(neurons, neuron::py_step_adex);
     add_fn!(neurons, neuron::py_step_fhn);
     add_fn!(neurons, neuron::py_step_wc);
+    add_fn!(neurons, neuron::py_step_atlasov_neuromotor);
     add_fn!(neurons, neuron::py_stdp_update);
     add_fn!(neurons, neuron::py_stdp_homeostatic);
 
@@ -153,6 +155,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, t3, t3::PyKalmanDecoder);
     export_class!(m, t3, t3::PyT2SpikeGradTrajectory);
     export_class!(m, t3, t3::PyPstControl);
+    export_class!(m, t3, t3::PyAttentionCoupling);
     export_class!(m, t3, t3::PySpiker);
     export_class!(m, t3, t3::PyHologramEncoder);
     export_class!(m, t3, t3::PyNormalizedSpiker);
@@ -247,6 +250,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(format, taas_format::py_save_connectome);
     add_fn!(format, taas_format::py_load_connectome);
     add_fn!(format, taas_format::py_save_model);
+    export_class!(m, format, taas_format::PyTaasReader);
 
     // ─── cpe ────────────────────────────────────────────
     let cpe = make_sub(m.py(), m, "cpe")?;
@@ -258,6 +262,10 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(cpe, cpe::py_cpe_dopamine_timing_gate);
     add_fn!(cpe, cpe::py_cpe_eligibility_update);
     add_fn!(cpe, cpe::py_cpe_stdp_update);
+
+    // ─── iit ─────────────────────────────────────────────
+    let iit = make_sub(m.py(), m, "iit")?;
+    export_class!(m, iit, iit::PyIITConsciousness);
 
     // ─── hh ─────────────────────────────────────────────
     let hh = make_sub(m.py(), m, "hh")?;

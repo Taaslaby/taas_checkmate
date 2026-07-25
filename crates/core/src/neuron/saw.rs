@@ -13,7 +13,6 @@ use super::eprop::surrogate_gradient;
 
 // ─── SAW ─────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Step `n` SAW neurons. Parallel. n must be multiple of 8.
 pub fn step_saw(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32],
@@ -48,7 +47,6 @@ pub fn step_saw(
 
 // ─── PSI-Wave ────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Step `n` ψ-wave neurons. Parallel. n must be multiple of 8.
 pub fn step_psi_wave(
     v: &mut [f32], u: &mut [f32],

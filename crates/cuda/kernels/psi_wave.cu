@@ -85,7 +85,8 @@ extern "C" __global__ void psi_step_normalize_kernel(
 
     // Euler step
     vv += dt * h_real[i] / hbar;
-    uu += dt * (h_imag[i] + (i_ext ? i_ext[i] : 0.0f)) / hbar;
+    float i_ext_val = i_ext ? fminf(100.0f, fmaxf(-100.0f, i_ext[i])) : 0.0f;
+    uu += dt * (h_imag[i] + i_ext_val) / hbar;
 
     // Normalize — preserve |ψ_i| = 1
     float nrm = sqrtf(vv * vv + uu * uu + 1e-9f);

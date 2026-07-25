@@ -419,7 +419,7 @@ fn with_dendritic_current<'a>(
 
 /// Izhikevich neuron step: `dv/dt = 0.04v²+5v+140−u+I; du/dt = a(bv−u)`.
 ///
-/// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
+/// Ii clamp [-100, 100] встроен в SIMD kernel (fused inline load).
 ///
 /// `I_dend` — опциональный дендритный ток (той же длины, что `ii`).
 pub fn izhikevich_step(
@@ -441,7 +441,6 @@ pub fn izhikevich_step(
     assert_eq!(d.len(), n, "izhikevich_step: d length mismatch");
     assert_eq!(refractory.len(), n, "izhikevich_step: refractory length mismatch");
     add_dendritic_current(ii, I_dend);
-    safety_clamp(ii, -100.0, 100.0);
     unsafe { izhikevich::izhikevich_step(v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ii.as_ptr(), dt, trace_decay, spikes.as_mut_ptr(), c.as_ptr(), d.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -476,7 +475,7 @@ pub fn eprop_izhikevich_step(
 /// The slow state gives neurons a "memory" of recent activity, enabling
 /// bistable dynamics and context-dependent behavior (Sun et al. 2026).
 ///
-/// Clamps `ii` to [-100, 100] to prevent saturation.
+/// Ii clamp [-100, 100] встроен в SIMD kernel (fused inline load).
 pub fn izhikevich_dual_step(
     v: &mut [f32], u: &mut [f32], trace: &mut [f32],
     a: &[f32], b: &[f32], ii: &mut [f32],
@@ -500,7 +499,6 @@ pub fn izhikevich_dual_step(
     assert_eq!(refractory.len(), n, "izhikevich_dual_step: refractory length mismatch");
     assert_eq!(m.len(), n, "izhikevich_dual_step: m (slow state) length mismatch");
     add_dendritic_current(ii, I_dend);
-    safety_clamp(ii, -100.0, 100.0);
     unsafe { izhikevich::izhikevich_dual_step(
         v.as_mut_ptr(), u.as_mut_ptr(), trace.as_mut_ptr(),
         a.as_ptr(), b.as_ptr(), ii.as_ptr(),
@@ -540,7 +538,7 @@ pub fn eprop_izhikevich_step_multi(
 
 /// Leaky Integrate-and-Fire neuron step.
 ///
-/// Clamps `ii` to [-100, 100] to prevent saturation cascade from oversized weights.
+/// Ii clamp [-100, 100] встроен в SIMD kernel (fused inline load).
 pub fn lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32], refractory: &mut [f32], tau_ref: f32, I_dend: Option<&[f32]>) {
     let n = v.len();
     assert_eq!(ii.len(), n, "lif_step: Ii length mismatch");
@@ -548,7 +546,6 @@ pub fn lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32], params: &[f32
     assert_eq!(params.len(), n * 5, "lif_step: params length mismatch (expected {}*5={})", n, n * 5);
     assert_eq!(refractory.len(), n, "lif_step: refractory length mismatch");
     add_dendritic_current(ii, I_dend);
-    safety_clamp(ii, -100.0, 100.0);
     unsafe { lif::lif_step(v.as_mut_ptr(), ii.as_mut_ptr(), spikes.as_mut_ptr(), params.as_ptr(), refractory.as_mut_ptr(), tau_ref, n) }
 }
 
@@ -699,19 +696,18 @@ pub fn build_hh_channel_meta(channels: &[hh::ChannelSpec]) -> Vec<hh::ChannelMet
 
 /// Hodgkin-Huxley step using polynomial rate functions (no LUT).
 ///
-/// Использует `fast_exp_simd` для вычисления α(V)/β(V) напрямую, без
-/// предвычисленных LUT. Это устраняет SIMD gather из LUT и заменяет его
-/// цепочкой FMA — быстрее на архитектурах с медленным gather (AVX2).
-///
-/// `channel_meta` создаётся через `build_hh_channel_meta(channels)`.
+/// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+/// Size: [n_channels * n]
 pub fn hh_poly_step(
     v: &mut [f32], gates: &mut [f32], ii: &[f32],
     g_leak: &[f32], e_leak: &[f32], c_m: &[f32],
     channel_meta: &[hh::ChannelMeta],
+    g_max_per_neuron: &[f32],
     dt: f32,
     I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
+    let n_channels = channel_meta.len();
     assert_eq!(gates.len(), {
         let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
         n_gates * n
@@ -720,11 +716,45 @@ pub fn hh_poly_step(
     assert_eq!(g_leak.len(), n, "hh_poly_step: g_leak length mismatch");
     assert_eq!(e_leak.len(), n, "hh_poly_step: E_leak length mismatch");
     assert_eq!(c_m.len(), n, "hh_poly_step: C_m length mismatch");
+    assert_eq!(g_max_per_neuron.len(), n_channels * n, "hh_poly_step: g_max_per_neuron length mismatch");
     let ii = with_dendritic_current(ii, I_dend, "hh_poly_step");
     unsafe { hh::hh_poly_step(
         v.as_mut_ptr(), gates.as_mut_ptr(), ii.as_ptr(),
         g_leak.as_ptr(), e_leak.as_ptr(), c_m.as_ptr(),
-        n, channel_meta, dt,
+        n, channel_meta, g_max_per_neuron.as_ptr(), dt,
+    )}
+}
+
+/// Fused HH step: Hodgkin-Huxley dynamics + spike detection в один проход.
+///
+/// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+/// Size: [n_channels * n]
+pub fn fused_hh_poly_step(
+    v: &mut [f32], gates: &mut [f32], spikes: &mut [i32], ii: &[f32],
+    g_leak: &[f32], e_leak: &[f32], c_m: &[f32],
+    channel_meta: &[hh::ChannelMeta],
+    g_max_per_neuron: &[f32],
+    dt: f32,
+    I_dend: Option<&[f32]>,
+) {
+    let n = v.len();
+    let n_channels = channel_meta.len();
+    {
+        let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
+        assert_eq!(gates.len(), n_gates * n, "fused_hh_poly_step: gates length mismatch (expected {}*{}={})", n_gates, n, n_gates * n);
+    }
+    assert_eq!(spikes.len(), n, "fused_hh_poly_step: spikes length mismatch");
+    assert_eq!(ii.len(), n, "fused_hh_poly_step: Ii length mismatch");
+    assert_eq!(g_leak.len(), n, "fused_hh_poly_step: g_leak length mismatch");
+    assert_eq!(e_leak.len(), n, "fused_hh_poly_step: E_leak length mismatch");
+    assert_eq!(c_m.len(), n, "fused_hh_poly_step: C_m length mismatch");
+    assert_eq!(g_max_per_neuron.len(), n_channels * n, "fused_hh_poly_step: g_max_per_neuron length mismatch");
+    let ii = with_dendritic_current(ii, I_dend, "fused_hh_poly_step");
+    unsafe { hh::fused_hh_poly_step(
+        v.as_mut_ptr(), gates.as_mut_ptr(), ii.as_ptr(),
+        g_leak.as_ptr(), e_leak.as_ptr(), c_m.as_ptr(),
+        n, channel_meta, g_max_per_neuron.as_ptr(), dt,
+        spikes.as_mut_ptr(),
     )}
 }
 

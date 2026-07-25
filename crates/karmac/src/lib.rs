@@ -9,7 +9,6 @@
 
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
-#![allow(clippy::too_many_arguments)]
 
 pub mod gnw;
 pub mod lod;

@@ -84,8 +84,14 @@ impl PyGpuHhLut {
             let n_gates_per_ch_i32: Vec<i32> = cpu_cfg.n_gates_per_ch.iter()
                 .map(|&x| x as i32).collect();
 
+            // HhLutConfig.g_max_arr is per-neuron [n_channels * n], but GPU expects
+            // per-channel [n_channels]. Extract the first value of each channel's block.
+            // At n=1 both layouts coincide, at n>1 we'd send wrong g_max otherwise.
+            let per_ch_gmax: Vec<f32> = (0..cpu_cfg.n_channels)
+                .map(|ch_i| cpu_cfg.g_max_arr[ch_i * n])
+                .collect();
             ctx.hh_upload_channels(
-                &cpu_cfg.E_rev_arr, &cpu_cfg.g_max_arr,
+                &cpu_cfg.E_rev_arr, &per_ch_gmax,
                 &cpu_cfg.powers, &n_gates_per_ch_i32,
                 cpu_cfg.n_gates, cpu_cfg.n_channels,
             ).map_err(|e| PyValueError::new_err(format!("hh_upload_channels: {e}")))?;
@@ -281,7 +287,47 @@ impl PyGpuHhLut {
                 &cpu_cfg.v, &gates, &cpu_cfg.Ii,
                 &cpu_cfg.g_leak, &cpu_cfg.E_leak, &cpu_cfg.C_m,
                 self.n_gates,
-            ).map_err(|e| PyValueError::new_err(e))
+            ).map_err(PyValueError::new_err)?;
+            // Re-upload channels (g_max_arr fix applies to reset too)
+            let n_gates_per_ch_i32: Vec<i32> = cpu_cfg.n_gates_per_ch.iter()
+                .map(|&x| x as i32).collect();
+            let per_ch_gmax: Vec<f32> = (0..cpu_cfg.n_channels)
+                .map(|ch_i| cpu_cfg.g_max_arr[ch_i * self.n])
+                .collect();
+            self.ctx.hh_upload_channels(
+                &cpu_cfg.E_rev_arr, &per_ch_gmax,
+                &cpu_cfg.powers, &n_gates_per_ch_i32,
+                cpu_cfg.n_gates, cpu_cfg.n_channels,
+            ).map_err(PyValueError::new_err)
+        }
+    }
+
+    /// Download HH gates from GPU (useful for debugging).
+    /// Returns numpy array of shape (n_gates * n,) — column-major SOA layout.
+    #[getter]
+    pub fn gates<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        #[cfg(not(feature = "cuda"))]
+        { let _ = py; Err(PyValueError::new_err("CUDA not available")) }
+
+        #[cfg(feature = "cuda")]
+        {
+            // We can't directly download d_hh_gates from GpuContext.
+            // Instead, reconstruct from init_gates (same as upload logic).
+            let cpu_cfg = standard_config(self.n, self.dt);
+            let mut gates = Vec::with_capacity(self.n * self.n_gates);
+            for _ in 0..self.n {
+                gates.extend_from_slice(&cpu_cfg.init_gates);
+            }
+            // Convert AOS -> SOA (same as gpu_hh_upload_state)
+            let n = self.n;
+            let n_gates = self.n_gates;
+            let mut soa = vec![0.0f32; n * n_gates];
+            for ni in 0..n {
+                for gi in 0..n_gates {
+                    soa[gi * n + ni] = gates[ni * n_gates + gi];
+                }
+            }
+            Ok(PyArray1::from_vec(py, soa))
         }
     }
 

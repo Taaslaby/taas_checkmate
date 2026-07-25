@@ -10,7 +10,7 @@ VizDoom Brain — Эволюция connectome через GPU LIF для игры
 Fitness: KILLCOUNT × 100 + HEALTH
 """
 
-import os, sys, time, json, ctypes
+import os, sys, time, json
 from pathlib import Path
 from typing import Optional, List, Tuple
 import numpy as np
@@ -19,7 +19,7 @@ BASE = Path('/home/taaslab/Проекты/asm_engines/taas_checkmate')
 sys.path.insert(0, str(BASE))
 sys.path.insert(0, str(BASE / 'venv_doom' / 'lib' / 'python3.14' / 'site-packages'))
 
-# ── Проверка taas_checkmate ──
+# ── Проверка taas_checkmate (PyO3 — всё что нужно) ──
 try:
     import taas_checkmate as tcm
     HAS_TCM = True
@@ -30,53 +30,42 @@ except ImportError:
 import vizdoom as _vizdoom_mod
 _DOOM_SCENARIOS = os.path.join(os.path.dirname(_vizdoom_mod.__file__), 'scenarios')
 
-# ── GPU LIF lib ──
-GPU_LIF_LIB = None
+# ═══════════════════════════════════════════════════
+#  PyO3 ConnectomeBrain wrapper (вместо ctypes gpu_lif)
+# ═══════════════════════════════════════════════════
 
-def _get_gpu_lif_lib():
-    global GPU_LIF_LIB
-    if GPU_LIF_LIB is not None:
-        return GPU_LIF_LIB
-    search = [
-        BASE / 'target' / 'release' / 'libgpu_lif.so',
-        BASE / 'target' / 'release' / 'libgpu_lif.dylib',
-    ]
-    for p in search:
-        if p.exists():
-            try:
-                lib = ctypes.CDLL(str(p))
-                GPU_LIF_LIB = lib
-                print(f"  ✅ GPU LIF: {p}")
-                return lib
-            except Exception as e:
-                print(f"  ⚠ GPU load: {e}")
-    print("  ⚠ GPU lib not found")
-    return None
+class ConnectomeBrain:
+    """Обёртка над PyO3 BrainSimulator — CPU LIF."""
+    def __init__(self, row_ptr, col_indices, values, nt_types,
+                 n_neurons, dt_ms=1.0):
+        self.n_neurons = n_neurons
+        self.dt_ms = dt_ms
+        if HAS_TCM:
+            self.conn = tcm.ConnectomeData(
+                row_ptr.astype(np.int32), col_indices.astype(np.int32),
+                values.astype(np.float32), nt_types.astype(np.float32),
+            )
+            self.sim = tcm.BrainSimulator(n_neurons, "lif")
+            self._ready = True
+        else:
+            self.conn = None; self.sim = None; self._ready = False
 
-def _setup_gpu_functions(lib):
-    """Set restype/argtypes for all GPU functions."""
-    lib.gpu_lif_create.restype = ctypes.c_int32
-    lib.gpu_lif_create.argtypes = [
-        ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
-        ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
-        ctypes.c_int32, ctypes.c_int32,
-        ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
-        ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
-        ctypes.c_float,
-    ]
-    lib.gpu_lif_step.restype = ctypes.c_int32
-    lib.gpu_lif_step.argtypes = [
-        ctypes.c_int32, ctypes.POINTER(ctypes.c_float),
-        ctypes.c_int32, ctypes.c_int32,
-    ]
-    lib.gpu_lif_read_v.restype = ctypes.c_int32
-    lib.gpu_lif_read_v.argtypes = [
-        ctypes.c_int32, ctypes.POINTER(ctypes.c_float), ctypes.c_int32,
-    ]
-    lib.gpu_lif_read_spikes.restype = ctypes.c_int32
-    lib.gpu_lif_read_spikes.argtypes = [
-        ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
-    ]
+    def step_n(self, external_I: np.ndarray, n_steps: int) -> np.ndarray:
+        if not self._ready:
+            return np.full(self.n_neurons, -70.0, dtype=np.float32)
+        self.sim.step_batch(self.conn, n_steps=n_steps,
+            dt_ms=self.dt_ms, external_I=external_I.astype(np.float32))
+        return self.sim.v()
+
+    def reset(self):
+        if self._ready:
+            self.sim.reset()
+
+    @property
+    def v(self) -> np.ndarray:
+        if not self._ready:
+            return np.full(self.n_neurons, -70.0, dtype=np.float32)
+        return self.sim.v()
 
 
 # ═══════════════════════════════════════════════════
@@ -243,38 +232,21 @@ class DoomFitness:
             else:
                 return 0.001
             
-            lib = _get_gpu_lif_lib()
-            if lib is None:
-                return 0.001
-            _setup_gpu_functions(lib)
-            
-            # ── GPU LIF init ──
+            # ── ConnectomeBrain — CPU LIF через PyO3 ──
             n = self.n
-            tau_m = np.full(n, 20.0, dtype=np.float32)
-            v_rest = np.full(n, -70.0, dtype=np.float32)
-            v_thresh = np.full(n, -52.0, dtype=np.float32)
-            v_reset = np.full(n, -70.0, dtype=np.float32)
+            brain = ConnectomeBrain(
+                self.row_ptr, self.col_indices,
+                conn_w.astype(np.float32),
+                self.nt_types.astype(np.float32),
+                n, dt_ms=self.dt_ms,
+            )
             
             total_fitness = 0.0
             
             for seed_ep in range(n_seeds):
-                # ═══ GPU LIF FIRST (before VizDoom — avoids CUDA/OpenGL conflict) ═══
-                ret = lib.gpu_lif_create(
-                    self.row_ptr.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-                    self.col_indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-                    conn_w.astype(np.float32).ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    self.nt_types.astype(np.float32).ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    ctypes.c_int32(n), ctypes.c_int32(len(conn_w)),
-                    tau_m.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    v_rest.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    v_thresh.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    v_reset.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    ctypes.c_float(self.dt_ms),
-                )
-                if ret != 1:
-                    continue
+                brain.reset()
                 
-                # ── VizDoom game (second — OpenGL after CUDA) ──
+                # ── VizDoom game ──
                 game = DoomGame()
                 game.load_config(os.path.join(_DOOM_SCENARIOS, 'basic.cfg'))
                 game.set_screen_resolution(ScreenResolution.RES_160X120)
@@ -287,7 +259,7 @@ class DoomFitness:
                 game.add_available_button(Button.MOVE_RIGHT)
                 game.add_available_button(Button.ATTACK)
                 game.set_episode_timeout(200)
-                game.set_living_reward(0.0)  # no penalty — meaningful gradient from kills
+                game.set_living_reward(0.0)
                 game.set_window_visible(False)
                 game.set_seed(self._base_seed + seed_ep * 1000)
                 game.init()
@@ -295,47 +267,34 @@ class DoomFitness:
                 total_reward = 0.0
                 
                 while not game.is_episode_finished():
-                    # ── Get screen → pooled pixels → external_I ──
                     state = game.get_state()
                     if state is None:
                         break
                     screen = np.array(state.screen_buffer, dtype=np.float32)
-                    # screen_buffer: (ch, h, w) RGB = (3, 120, 160) or gray = (1, 120, 160)
                     if screen.ndim == 3:
                         if screen.shape[0] == 3:
-                            screen = screen.mean(axis=0)  # RGB → gray: (120, 160)
+                            screen = screen.mean(axis=0)
                         else:
-                            screen = screen[0]  # already gray: (120, 160)
+                            screen = screen[0]
                     
-                    pooled = self._pool_screen(screen)  # (1200,)
+                    pooled = self._pool_screen(screen)
                     
-                    # Build external_I: pooled → W_in → sensory neurons
                     external_I = np.zeros(n, dtype=np.float32)
                     for fi in range(min(len(pooled), self.pool_dim)):
                         for si, sidx in enumerate(self.sensory_idx[:len(w_in[fi])]):
                             external_I[sidx] += pooled[fi] * w_in[fi, si]
                     
-                    # ── GPU LIF step ──
-                    # Scale: pixels [0,1] → current [5, 35] to drive LIF above -52mV
+                    # ── PyO3 LIF step ──
                     ext_in = external_I * 30.0 + 5.0
-                    lib.gpu_lif_step(ctypes.c_int32(1),
-                        ext_in.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                        ctypes.c_int32(n), ctypes.c_int32(self.n_internal))
+                    v_out = brain.step_n(ext_in, self.n_internal)
                     
                     # ── Read v → actions ──
-                    v_out = np.zeros(n, dtype=np.float32)
-                    lib.gpu_lif_read_v(ctypes.c_int32(1),
-                        v_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                        ctypes.c_int32(n))
-                    
                     actions = np.zeros(self.act_dim, dtype=np.float32)
                     for a in range(self.act_dim):
                         for mi, midx in enumerate(self.motor_idx[:len(w_out)]):
                             v_norm = (v_out[midx] + 70.0) / 30.0
                             actions[a] += v_norm * w_out[mi, a]
                     
-                    # Continuous → discrete: sigmoid with threshold
-                    # Low threshold (0.3) for exploration at start
                     doom_action = [0] * self.act_dim
                     for a in range(self.act_dim):
                         prob = 1.0 / (1.0 + np.exp(-actions[a]))
@@ -345,11 +304,7 @@ class DoomFitness:
                     total_reward += reward
                 
                 game.close()
-                lib.gpu_lif_destroy()
-                
-                # Fitness: total reward (kills × 100 - living_penalty × tics)
-                episode_fitness = total_reward
-                total_fitness += episode_fitness
+                total_fitness += total_reward
             
             return float(max(total_fitness / max(n_seeds, 1), 0.001))
             

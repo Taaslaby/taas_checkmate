@@ -79,7 +79,7 @@ pub fn t3spike_backward_cuda_per_step(
         n,
     )?;
 
-    let _n_blocks = (n as u32 + 255) / 256;
+    let _n_blocks = (n as u32).div_ceil(256);
 
     // ── 4. BPTT loop: step from N-1 to 0 ──
     for step in (0..n_steps).rev() {
@@ -265,7 +265,7 @@ impl CudaBackwardContext {
     /// Allocate ALL persistent GPU buffers.
     pub fn new(n: usize, n_steps: usize) -> Result<Self, String> {
     let pst_dim = pst_linear_dim(n);
-        let n_blocks = (n as u32 + 255) / 256;
+        let n_blocks = (n as u32).div_ceil(256);
         let scratch_size = (n_blocks * 18) as usize;
 
         Ok(Self {
@@ -396,7 +396,7 @@ impl FusedForwardBwdContext {
     /// Allocate ALL persistent GPU buffers.
     pub fn new(n: usize, n_steps: usize) -> Result<Self, String> {
         let pst_dim = pst_linear_dim(n);
-        let n_blocks = (n as u32 + 255) / 256;
+        let n_blocks = (n as u32).div_ceil(256);
         let scratch_size = (n_blocks * 12) as usize;
 
         Ok(Self {
@@ -603,7 +603,7 @@ pub fn t3spike_fused_forward_backward_cuda(
     let mut omega = vec![0.0f32; 3 * n_osc];
     for i in 0..n_osc {
         omega[i] = freq_min + freq_spread * (i as f32 / n_osc as f32);
-        omega[1 * n_osc + i] = freq_min + freq_spread * ((i + n_osc / 3) as f32 / n_osc as f32);
+        omega[n_osc + i] = freq_min + freq_spread * ((i + n_osc / 3) as f32 / n_osc as f32);
         omega[2 * n_osc + i] = freq_min + freq_spread * ((i + 2 * n_osc / 3) as f32 / n_osc as f32);
     }
 

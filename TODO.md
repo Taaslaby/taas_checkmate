@@ -65,13 +65,6 @@
 
 - [ ] **Добить ~400 clippy warnings** по всему workspace
   - `cargo clippy --all-features 2>&1 | grep 'warning:' | wc -l`
-  - Основные крейты: `core`, `t3`, `train`, `connectome`, `connectome-gpt`
-- [ ] **Аудит connectome-gpt** (9.2K LOC)
-  - Самый большой крейт в workspace
-  - Что делает: Graph VAE + decoder для connectome
-  - Нужно решить: оставить, вынести, удалить?
-  - LOC по файлам:
-
 ### 🟡 Priority 2 — Архитектура
 
 - [ ] **Cross-crate интеграционные тесты**
@@ -82,7 +75,6 @@
   - Column-major params → named structs где возможно
 - [ ] **Аудит зависимостей**
   - `cargo tree -e features` — проверить дублирование и лишние фичи
-  - Особенно: `connectome-gpt` (куча ML зависимостей)
 
 ### 🟠 Priority 2.5 — Новые нейробиологические фичи
 
@@ -235,8 +227,7 @@ taas_checkmate/
 │   ├── train/        ← RL + BPTT + SPIGRAD
 │   ├── connectome/   ← FlyWire connectome simulator
 │   ├── karmac/       ← Cognitive architecture (GNW, BasalGanglia, LOD)
-│   ├── connectome-gpt/ ← Graph VAE + decoder (9.2K LOC — ❓)
-│   ├── cpe/          ← Coherence, Dopamine, STDP, Hybrid
+│   │   ├── cpe/          ← Coherence, Dopamine, STDP, Hybrid
 │   ├── taas-format/  ← Binary .taas snapshot format
 │   ├── cuda-kernels/ ← CUDA backend
 │   ├── unity/        ← C ABI for Unity

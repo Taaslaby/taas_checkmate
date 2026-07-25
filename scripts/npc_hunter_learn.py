@@ -30,12 +30,12 @@ np.random.seed(42)
 class DopamineSTDP:
     """
     Аналог Rust taas_core::neuron::DopamineSTDP.
-    
+
     Каждый синапс имеет свои:
       - trace_pre — пресинаптический след (растёт при pre-spike)
       - trace_post — постсинаптический след (растёт при post-spike)
       - eligibility — e[t] = e[t-1]·decay_e + LTP - LTD
-    
+
     Step: обновить traces + eligibility для ВСЕХ синапсов сразу.
     apply: Δw = η · D · e для ВСЕХ синапсов сразу.
     """
@@ -49,39 +49,39 @@ class DopamineSTDP:
         self.a_ltd = 0.12
         self.w_min = 0.0
         self.w_max = 3.0
-        
+
         self.trace_pre = np.zeros(n_synapses, dtype=np.float32)
         self.trace_post = np.zeros(n_synapses, dtype=np.float32)
         self.eligibility = np.zeros(n_synapses, dtype=np.float32)
-    
+
     def step(self, pre_spikes: np.ndarray, post_spikes: np.ndarray):
         """
         Один шаг STDP для ВСЕХ синапсов.
-        
+
         pre_spikes[i]  = 1 если пресинаптический нейрон i заспайкал
         post_spikes[i] = 1 если постсинаптический нейрон i заспайкал
-        
+
         Для cortico-striatal:
           pre  = cortex_state (32 нейрона, tiled до 192)
           post = action (6 нейронов, repeated до 192)
         """
         assert len(pre_spikes) == self.n
         assert len(post_spikes) == self.n
-        
+
         # Decay
         self.trace_pre *= 1.0 - self.dt / self.tau_pre
         self.trace_post *= 1.0 - self.dt / self.tau_post
         self.eligibility *= 1.0 - self.dt / self.tau_e
-        
+
         # Spike events
         self.trace_pre[pre_spikes > 0] += 1.0
         self.trace_post[post_spikes > 0] += 1.0
-        
+
         # Eligibility: LTP (post fires) + LTD (pre fires)
         ltp = np.where(post_spikes > 0, self.a_ltp * self.trace_pre, 0.0)
         ltd = np.where(pre_spikes > 0, self.a_ltd * self.trace_post, 0.0)
         self.eligibility += ltp - ltd
-    
+
     def apply_dopamine(self, weights: np.ndarray, dopamine: float, lr: float = 0.01):
         """
         Δw = η · D · e  для ВСЕХ синапсов сразу.
@@ -89,7 +89,7 @@ class DopamineSTDP:
         """
         delta = lr * dopamine * self.eligibility
         np.clip(weights + delta, self.w_min, self.w_max, out=weights)
-    
+
     def reset(self):
         self.trace_pre.fill(0.0)
         self.trace_post.fill(0.0)
@@ -159,56 +159,56 @@ class PlasticBasalGanglia:
     Каждый экземпляр имеет СВОЙ DopamineSTDP.
     Веса flatten → один STDP step на все синапсы.
     """
-    
+
     def __init__(self, n_cortical: int, n_actions: int):
         self.n_cortical = n_cortical
         self.n_actions = n_actions
-        
+
         # Каждому BG — свой STDP!
         self.stdp = DopamineSTDP(n_synapses=n_cortical * n_actions, dt=1.0)
-        
+
         scale = np.sqrt(2.0 / (n_cortical + n_actions))
         self.weights = np.random.randn(n_actions, n_cortical).astype(np.float32) * scale
-        
+
         self.state = np.zeros(n_cortical, dtype=np.float32)
         self.prev_action: Optional[int] = None
-        
+
         self.d1_gain = 2.0; self.d2_gain = 1.5
         self.stn_excitation = 0.5; self.thalamus_gain = 1.0
         self.decay = 0.95
-        
+
         self.last_cortex = np.zeros(n_cortical, dtype=np.float32)
-    
+
     def step(self, cortex_input: np.ndarray) -> int:
         assert len(cortex_input) == self.n_cortical
         self.last_cortex = cortex_input.copy()
-        
+
         self.state = self.decay * self.state + cortex_input
         drive = self.weights @ self.state
-        
+
         drive[drive > 0] *= self.d1_gain
         drive[drive < 0] *= self.d2_gain
         drive += self.stn_excitation * np.mean(drive)
-        
+
         mx = np.max(drive)
         exps = np.exp((drive - mx) * 2.0)
         probs = exps / (np.sum(exps) + 1e-10)
-        
+
         if np.random.random() < 0.03:
             action = np.random.randint(self.n_actions)
         else:
             action = int(np.argmax(probs))
-        
+
         self.prev_action = action
         return action
-    
+
     def apply_stdp(self, dopamine: float, lr: float = 0.01):
         """
         Применить STDP к ВСЕМ весам сразу (один проход).
-        
+
         pre_spikes:  cortex → tiled до n_cortical * n_actions
         post_spikes: action → repeated до n_cortical * n_actions
-        
+
         synapse (a, c) = weights[a, c] — связь cortex[c] → action[a]
         trace_pre[a*n_c + c]  растёт когда cortex[c] спайкает
         trace_post[a*n_c + c] растёт когда action[A] спайкает (для всех C!)
@@ -216,24 +216,24 @@ class PlasticBasalGanglia:
         """
         corteX = np.abs(self.last_cortex)
         pre_spikes = (corteX > 0.05).astype(np.int32)
-        
+
         # Post-spike: только выбранное действие
         post = np.zeros(self.n_actions, dtype=np.int32)
         if self.prev_action is not None:
             post[self.prev_action] = 1
-        
+
         # tile/repeat до длины n_cortical * n_actions
         pre = np.tile(pre_spikes, self.n_actions)    # [A × C] — порядок: A0(C0-C31), A1(C0-C31), ...
         post_repeated = np.repeat(post, self.n_cortical)  # [A × C] — action A: все C получают post
-        
+
         weights_flat = self.weights.ravel()
-        
+
         # ОДИН STDP step — все синапсы сразу
         self.stdp.step(pre, post_repeated)
         self.stdp.apply_dopamine(weights_flat, dopamine, lr)
-        
+
         self.weights[:] = weights_flat.reshape(self.n_actions, self.n_cortical)
-    
+
     def reset(self):
         self.state.fill(0.0)
         self.prev_action = None
@@ -273,9 +273,9 @@ H, W = WORLD.shape
 
 class NpcBrain:
     ACTIONS = ["CHASE", "FLANK", "SEARCH", "PATROL", "AMBUSH", "CUTOFF"]
-    
+
     def __init__(self, npc_id: int, start_pos: np.ndarray,
-                 shared_wm: SharedWorkingMemory, 
+                 shared_wm: SharedWorkingMemory,
                  sp: SemanticPointer, gnw: GlobalWorkspace,
                  bg: PlasticBasalGanglia, role: str = "hunter"):
         self.id = npc_id
@@ -283,7 +283,7 @@ class NpcBrain:
         self.vel = np.zeros(2)
         self.role = role
         self.sp = sp; self.wm = shared_wm; self.gnw = gnw; self.bg = bg
-        
+
         self.last_known = None
         self.search_target = None
         self.steps_since_seen = 0
@@ -291,7 +291,7 @@ class NpcBrain:
         self.cortex = np.zeros(gnw.n, dtype=np.float32)
         self.dopamine_history: List[float] = []
         self.dist_history: List[float] = []
-        
+
         if self.id == 1:
             self.patrol_pts = [np.array([5.,15.]), np.array([10.,12.]),
                                np.array([5.,8.]), np.array([3.,5.])]
@@ -450,7 +450,7 @@ print("\n  Фаза 1: Исследование (без обучения) — 10
 print("  Фаза 2: STDP обучение — 900 шагов")
 print()
 
-for step in range(1000):
+for step in range(99000):
     # Player move
     target = np.array(player_path[path_idx], dtype=np.float32)
     d = target - player_pos; dist = np.linalg.norm(d)
@@ -458,29 +458,29 @@ for step in range(1000):
         path_idx = (path_idx + 1) % len(player_path)
     else:
         player_pos += (d / (dist + 0.1)) * 0.6
-    
+
     # Sense
     v1 = npc1.sense(player_pos)
     v2 = npc2.sense(player_pos)
-    
+
     # Act
     a1, an1 = npc1.act(player_pos, v1, npc2.pos, npc2.last_known)
     a2, an2 = npc2.act(player_pos, v2, npc1.pos, npc1.last_known)
-    
+
     # Dopamine + STDP (начиная со 100 шага)
     if step >= 100:
         d1 = npc1.compute_dopamine(player_pos, v1)
         d2 = npc2.compute_dopamine(player_pos, v2)
         npc1.dopamine_history.append(d1)
         npc2.dopamine_history.append(d2)
-        
+
         dopamine = (d1 + d2) * 0.5  # средний dopamine
         lr = 0.02 * max(0.1, 1.0 - step / 1500)
-        
+
         # Каждый NPC применяет СВОЙ STDP
         npc1.bg.apply_stdp(dopamine, lr)
         npc2.bg.apply_stdp(dopamine, lr)
-    
+
     # Log
     if step % 100 == 99 or step == 0:
         d1 = np.linalg.norm(npc1.pos - player_pos)

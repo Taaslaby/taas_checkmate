@@ -1,4 +1,11 @@
 #![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::module_inception)]
+#![allow(clippy::manual_memcpy)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::misnamed_getters)]
 
 //! # taas-checkmate
 //!
@@ -27,6 +34,7 @@
 pub use taas_kernels as kernels;
 pub use taas_core as core;
 pub use taas_train as train;    pub use taas_format;
+pub use taas_iit as iit;
 
 #[cfg(feature = "t3")]
 pub use taas_t3 as t3;
@@ -43,6 +51,9 @@ pub mod io;
 #[cfg(feature = "python")]
 pub mod python;
 
+#[cfg(feature = "unity")]
+pub mod unity;
+
 // ─── Backward compatibility re-exports ──────────────────
 pub use core::{neuron, kuramoto};
 pub use core::{sparse, koit};
@@ -58,7 +69,7 @@ pub use core::kuramoto::{
 pub use taas_kernels::spike_entropy;
 pub use core::neuron::{
     step_izhikevich, step_saw, step_psi_wave, step_lif, step_lif_at,
-    step_adex, step_fhn, step_wc,
+    step_adex, step_fhn, step_hr, step_atlasov_neuromotor, AtlasovState, step_wc,
     stdp_update, stdp_homeostatic, DelayBuffer,
     intrinsic_plasticity, synaptic_normalization, SornNetwork,
     bsa_encode, bsa_kernel_hamming, phase_encode,

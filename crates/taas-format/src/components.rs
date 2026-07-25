@@ -172,33 +172,31 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
 pub fn save_trioscilator(tri: &taas_t3::TriOscillator, writer: &mut TaasWriter) {
     writer.add_metadata("type", "TriOscillator");
     writer.add_metadata("n", &tri.n.to_string());
-    writer.add_f32("th1", "TriOscillator", &tri.th1);
-    writer.add_f32("th2", "TriOscillator", &tri.th2);
-    writer.add_f32("th3", "TriOscillator", &tri.th3);
-    writer.add_f32("prev_th1", "TriOscillator", &tri.prev_th1);
-    writer.add_f32("prev_th2", "TriOscillator", &tri.prev_th2);
-    writer.add_f32("prev_th3", "TriOscillator", &tri.prev_th3);
-    writer.add_f32("r1", "TriOscillator", &tri.r1);
-    writer.add_f32("r2", "TriOscillator", &tri.r2);
-    writer.add_f32("r3", "TriOscillator", &tri.r3);
-    writer.add_f32("prev_r1", "TriOscillator", &tri.prev_r1);
-    writer.add_f32("prev_r2", "TriOscillator", &tri.prev_r2);
-    writer.add_f32("prev_r3", "TriOscillator", &tri.prev_r3);
-    writer.add_f32("omega1", "TriOscillator", &tri.omega1);
-    writer.add_f32("omega2", "TriOscillator", &tri.omega2);
-    writer.add_f32("omega3", "TriOscillator", &tri.omega3);
-    writer.add_f32("drive1", "TriOscillator", &tri.drive1);
-    writer.add_f32("drive2", "TriOscillator", &tri.drive2);
-    writer.add_f32("drive3", "TriOscillator", &tri.drive3);
-    writer.add_f32("sin1", "TriOscillator", &tri.sin1);
-    writer.add_f32("cos1", "TriOscillator", &tri.cos1);
-    writer.add_f32("sin2", "TriOscillator", &tri.sin2);
-    writer.add_f32("cos2", "TriOscillator", &tri.cos2);
-    writer.add_f32("sin3", "TriOscillator", &tri.sin3);
-    writer.add_f32("cos3", "TriOscillator", &tri.cos3);
-    writer.add_f32("coupling1", "TriOscillator", &tri.coupling1);
-    writer.add_f32("coupling2", "TriOscillator", &tri.coupling2);
-    writer.add_f32("coupling3", "TriOscillator", &tri.coupling3);
+    writer.add_metadata("format", "v2_grouped");
+
+    // Group all 27 Vec<f32> fields into one tensor [27, n]:
+    // [th1..th3, prev_th1..prev_th3, r1..r3, prev_r1..prev_r3,
+    //  omega1..omega3, drive1..drive3, sin1..cos3, coupling1..coupling3]
+    let n = tri.n;
+    let mut buf = Vec::with_capacity(27 * n);
+    macro_rules! push_all {
+        ($($field:ident),*) => {
+            $(buf.extend_from_slice(&tri.$field[..n]);)*
+        };
+    }
+    push_all!(
+        th1, th2, th3,
+        prev_th1, prev_th2, prev_th3,
+        r1, r2, r3,
+        prev_r1, prev_r2, prev_r3,
+        omega1, omega2, omega3,
+        drive1, drive2, drive3,
+        sin1, cos1, sin2, cos2, sin3, cos3,
+        coupling1, coupling2, coupling3
+    );
+    writer.add_f32_shape("tri_state", "TriOscillator", &buf, vec![27, n]);
+
+    // Scalars stay as individual components
     writer.add_scalar_f32("w12", "TriOscillator", tri.w12);
     writer.add_scalar_f32("w13", "TriOscillator", tri.w13);
     writer.add_scalar_f32("w23", "TriOscillator", tri.w23);
@@ -212,27 +210,72 @@ pub fn save_trioscilator(tri: &taas_t3::TriOscillator, writer: &mut TaasWriter) 
     writer.add_scalar_bool("initialised", "TriOscillator", tri.initialised);
 }
 
+/// Restore a TriOscillator field from the grouped tensor.
+/// `buf` is flat [27 × n], each chunk has `n` elements.
+macro_rules! restore_tri_field {
+    ($tri:expr, $buf:expr, $n:expr, $idx:expr, $field:ident) => {
+        let start = $idx * $n;
+        $tri.$field[..$n].copy_from_slice(&$buf[start..start + $n]);
+    };
+}
+
 pub fn load_trioscilator(reader: &TaasReader, n: usize) -> Result<taas_t3::TriOscillator<taas_t3::Avx2Backend>, String> {
     use taas_t3::{TriOscillator, Avx2Backend};
     let mut tri = TriOscillator::new(n, 0.5, 1.5, Avx2Backend);
-    macro_rules! restore {
-        ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) {
-                let n = v.len().min(tri.$field.len());
-                tri.$field[..n].copy_from_slice(&v[..n]);
-            }
-        };
+
+    // Try new grouped format first (v2_grouped)
+    if let Ok(grouped) = reader.get_f32("tri_state") {
+        if grouped.len() >= 27 * n {
+            restore_tri_field!(tri, grouped, n, 0, th1);
+            restore_tri_field!(tri, grouped, n, 1, th2);
+            restore_tri_field!(tri, grouped, n, 2, th3);
+            restore_tri_field!(tri, grouped, n, 3, prev_th1);
+            restore_tri_field!(tri, grouped, n, 4, prev_th2);
+            restore_tri_field!(tri, grouped, n, 5, prev_th3);
+            restore_tri_field!(tri, grouped, n, 6, r1);
+            restore_tri_field!(tri, grouped, n, 7, r2);
+            restore_tri_field!(tri, grouped, n, 8, r3);
+            restore_tri_field!(tri, grouped, n, 9, prev_r1);
+            restore_tri_field!(tri, grouped, n, 10, prev_r2);
+            restore_tri_field!(tri, grouped, n, 11, prev_r3);
+            restore_tri_field!(tri, grouped, n, 12, omega1);
+            restore_tri_field!(tri, grouped, n, 13, omega2);
+            restore_tri_field!(tri, grouped, n, 14, omega3);
+            restore_tri_field!(tri, grouped, n, 15, drive1);
+            restore_tri_field!(tri, grouped, n, 16, drive2);
+            restore_tri_field!(tri, grouped, n, 17, drive3);
+            restore_tri_field!(tri, grouped, n, 18, sin1);
+            restore_tri_field!(tri, grouped, n, 19, cos1);
+            restore_tri_field!(tri, grouped, n, 20, sin2);
+            restore_tri_field!(tri, grouped, n, 21, cos2);
+            restore_tri_field!(tri, grouped, n, 22, sin3);
+            restore_tri_field!(tri, grouped, n, 23, cos3);
+            restore_tri_field!(tri, grouped, n, 24, coupling1);
+            restore_tri_field!(tri, grouped, n, 25, coupling2);
+            restore_tri_field!(tri, grouped, n, 26, coupling3);
+        }
+    } else {
+        // Fallback: load old per-field format
+        macro_rules! restore {
+            ($field:ident, $name:expr) => {
+                if let Ok(v) = reader.get_f32($name) {
+                    let n = v.len().min(tri.$field.len());
+                    tri.$field[..n].copy_from_slice(&v[..n]);
+                }
+            };
+        }
+        restore!(th1, "th1"); restore!(th2, "th2"); restore!(th3, "th3");
+        restore!(prev_th1, "prev_th1"); restore!(prev_th2, "prev_th2"); restore!(prev_th3, "prev_th3");
+        restore!(r1, "r1"); restore!(r2, "r2"); restore!(r3, "r3");
+        restore!(prev_r1, "prev_r1"); restore!(prev_r2, "prev_r2"); restore!(prev_r3, "prev_r3");
+        restore!(omega1, "omega1"); restore!(omega2, "omega2"); restore!(omega3, "omega3");
+        restore!(drive1, "drive1"); restore!(drive2, "drive2"); restore!(drive3, "drive3");
+        restore!(sin1, "sin1"); restore!(cos1, "cos1");
+        restore!(sin2, "sin2"); restore!(cos2, "cos2");
+        restore!(sin3, "sin3"); restore!(cos3, "cos3");
+        restore!(coupling1, "coupling1"); restore!(coupling2, "coupling2"); restore!(coupling3, "coupling3");
     }
-    restore!(th1, "th1"); restore!(th2, "th2"); restore!(th3, "th3");
-    restore!(prev_th1, "prev_th1"); restore!(prev_th2, "prev_th2"); restore!(prev_th3, "prev_th3");
-    restore!(r1, "r1"); restore!(r2, "r2"); restore!(r3, "r3");
-    restore!(prev_r1, "prev_r1"); restore!(prev_r2, "prev_r2"); restore!(prev_r3, "prev_r3");
-    restore!(omega1, "omega1"); restore!(omega2, "omega2"); restore!(omega3, "omega3");
-    restore!(drive1, "drive1"); restore!(drive2, "drive2"); restore!(drive3, "drive3");
-    restore!(sin1, "sin1"); restore!(cos1, "cos1");
-    restore!(sin2, "sin2"); restore!(cos2, "cos2");
-    restore!(sin3, "sin3"); restore!(cos3, "cos3");
-    restore!(coupling1, "coupling1"); restore!(coupling2, "coupling2"); restore!(coupling3, "coupling3");
+
     tri.w12 = reader.get_scalar_f32("w12").unwrap_or(0.0);
     tri.w13 = reader.get_scalar_f32("w13").unwrap_or(0.0);
     tri.w23 = reader.get_scalar_f32("w23").unwrap_or(0.0);

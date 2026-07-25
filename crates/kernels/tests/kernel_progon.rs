@@ -614,7 +614,8 @@ fn test_hh_poly_step_basic() {
         }
     }
 
-    hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01, None);
+    let g_max_per_neuron = vec![1.0; meta.len() * n];
+    hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, &g_max_per_neuron, 0.01, None);
     assert_no_nan(&v, "hh_poly v");
     assert_no_nan(&gates, "hh_poly gates");
 }
@@ -632,6 +633,7 @@ fn test_hh_poly_step_no_spike_small_current() {
     let g_leak = vec![0.3; n];
     let e_leak = vec![-54.0; n];
     let c_m = vec![1.0; n];
+    let g_max_per_neuron = vec![1.0; meta.len() * n];
 
     let ss = steady_state_gates(-65.0, &channels);
     for gi in 0..n_gates {
@@ -639,7 +641,7 @@ fn test_hh_poly_step_no_spike_small_current() {
     }
 
     for _ in 0..100 {
-        hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, 0.01, None);
+        hh_poly_step(&mut v, &mut gates, &ii, &g_leak, &e_leak, &c_m, &meta, &g_max_per_neuron, 0.01, None);
     }
     for &vv in &v {
         assert!(vv < -40.0, "HH without input spiked: {vv}");

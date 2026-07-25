@@ -18,7 +18,7 @@ extern "C" __global__ void izhikevich_step_kernel(
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
-    float vi = v[idx], ui = u[idx], Ii = I[idx];
+    float vi = v[idx], ui = u[idx], Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
 
     // Refractory period: skip all dynamics but clear I to prevent accumulation
     float ref = (refractory) ? refractory[idx] : 0.0f;
@@ -63,8 +63,9 @@ extern "C" __global__ void lif_step_kernel(
     // Exponential Euler: v = v_rest + (v - v_rest)*exp(-dt/tau) + I*(1 - exp(-dt/tau))
     // Matches CPU SIMD kernel (lif_step). Exact for constant I, no truncation error.
     float vi = v[idx];
+    float Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
     float decay = __expf(-dt / fmaxf(tau_m, 1e-6f));
-    vi = v_rest + (vi - v_rest) * decay + I[idx] * (1.0f - decay);
+    vi = v_rest + (vi - v_rest) * decay + Ii * (1.0f - decay);
     int spiked = (vi >= v_thresh) ? 1 : 0;
     if (spiked) {
         v[idx] = v_reset;
@@ -99,12 +100,13 @@ extern "C" __global__ void adex_step_kernel(
     float v_reset = params[1+4*n+idx], delta_t = params[1+5*n+idx];
     float ada_a = params[1+6*n+idx], ada_b = params[1+7*n+idx];
     float vi = v[idx], ui = u[idx];
+    float Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
 
     // Exp overflow guard: clamp arg to prevent Inf
     float arg = fminf((vi - v_thresh) / fmaxf(delta_t, 1e-6f), 20.0f);
     float e = __expf(arg);  // BUGFIX: use fast __expf, no double delta_t multiply
 
-    vi += dt / tau_m * (-(vi - v_rest) + delta_t * e - ui + I[idx]);
+    vi += dt / tau_m * (-(vi - v_rest) + delta_t * e - ui + Ii);
     ui += dt / tau_w * (ada_a * (vi - v_rest) - ui);
     int spiked = (vi >= v_thresh) ? 1 : 0;
     if (spiked) { vi = v_reset; ui += ada_b; }
@@ -178,7 +180,7 @@ extern "C" __global__ void saw_step_kernel(
     unsigned int ns = noise_state[idx];
     if (ns == 0) ns = (unsigned int)(idx * 7919 + 104729);
 
-    float vi = v[idx], ui = u[idx], Ii = I[idx];
+    float vi = v[idx], ui = u[idx], Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
 
     // Refractory period: drain I to prevent accumulation
     float ref = (refractory) ? refractory[idx] : 0.0f;

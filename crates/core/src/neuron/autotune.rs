@@ -265,7 +265,7 @@ pub fn suggest_config(
         sig / bias.max(1.0)
     };
 
-    let needs_adjustment = snr_at_base < 1.5 || snr_at_base > 8.0;
+    let needs_adjustment = !(1.5..=8.0).contains(&snr_at_base);
     let adjusted_weight_scale = if needs_adjustment {
         target_weight_scale_for_snr(n_pre, poisson_activity, bias, target_snr)
     } else {
@@ -296,7 +296,7 @@ pub fn suggest_config(
                 .iter()
                 .filter(|p| {
                     let snr = estimate_signal_std(n_pre, poisson_activity, base_weight_scale) / p.bias.max(1.0);
-                    snr >= 1.5 && snr <= 8.0
+                    (1.5..=8.0).contains(&snr)
                 })
                 .min_by(|a, b| {
                     (a.avg_fr - target_fr)

@@ -434,7 +434,7 @@ impl PstControl {
         use rand::Rng;
         let target = self.target_pst(target_class);
         let mut best_drive = 0.0;
-        let mut best_loss = std::f32::MAX;
+        let mut best_loss = f32::MAX;
         let mut rng = rand::thread_rng();
 
         let range = self.config.drive_max - self.config.drive_min;

@@ -4,7 +4,8 @@
 
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::manual_clamp)]
 
 pub mod attention;
 pub mod decode;

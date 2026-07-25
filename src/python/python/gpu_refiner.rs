@@ -294,7 +294,7 @@ impl PyGpuConnectomeRefiner {
                 .map_err(|e| PyRuntimeError::new_err(format!("alloc grad_weights: {e}")))?;
 
             // Gradient norm buffers (fully on GPU — no D2H)
-            let n_partial_blocks = (s + 255) / 256;
+            let n_partial_blocks = s.div_ceil(256);
             let mut d_grad_norm = DevicePtr::<f32>::new(1)
                 .map_err(|e| PyRuntimeError::new_err(format!("alloc grad_norm: {e}")))?;
             let mut d_grad_norm_partial = DevicePtr::<f32>::new(n_partial_blocks)

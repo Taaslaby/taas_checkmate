@@ -14,18 +14,17 @@ import os, sys, time, json
 from pathlib import Path
 from typing import Optional, List, Tuple
 import numpy as np
-import ctypes
 
 BASE = Path('/home/taaslab/Проекты/asm_engines/taas_checkmate')
 COOKIE_DIR = Path('/home/taaslab/Проекты/asm_engines/MEIIgpt/experiments/sardana_2')
 
-# ── Проверка taas_checkmate (только для save/load connectome) ──
+# ── Проверка taas_checkmate (PyO3 — всё что нужно) ──
 try:
     import taas_checkmate as tcm
     HAS_TCM = True
-    print("  ✅ taas_checkmate: ConnectomeData, save_connectome OK")
+    print("  ✅ taas_checkmate: ConnectomeData, BrainSimulator, save_connectome OK")
 except ImportError:
-    print("  ⚠ taas_checkmate не загружен.")
+    print("  ⚠ taas_checkmate не загружен. Собери: cd target/release && pip install -e .")
     HAS_TCM = False
 
 np.random.seed(42)
@@ -250,153 +249,75 @@ ANT_XML = '''<?xml version="1.0" encoding="utf-8"?>
 
 
 # ═══════════════════════════════════════════════════
-#  3a. GPU LIF EVALUATOR (ctypes)
+#  3a. CONNECTOME BRAIN EVALUATOR (PyO3)
 # ═══════════════════════════════════════════════════
+#
+# Использует taas_checkmate.BrainSimulator вместо старого ctypes gpu_lif.
+# Работает на CPU (всегда доступно). Для GPU используйте
+# tcm.BrainSimulator(..., model="lif").step_batch_gpu() с флагом --features cuda.
 
-GPU_LIF_LIB = None  # lazy load
-
-def _get_gpu_lif_lib():
-    """Загрузить libgpu_lif.so (cdylib) через ctypes."""
-    global GPU_LIF_LIB
-    if GPU_LIF_LIB is not None:
-        return GPU_LIF_LIB
+class ConnectomeBrain:
+    """Обёртка над PyO3 BrainSimulator для эволюции.
     
-    import glob as glob_mod
+    Создаётся один раз и переиспользуется на все эпизоды.
+    """
     
-    # Ищем .so файл в target/release
-    search_paths = [
-        BASE / 'target' / 'release' / 'libgpu_lif.so',
-        BASE / 'target' / 'release' / 'libgpu_lif.dylib',
-    ]
+    def __init__(
+        self,
+        row_ptr, col_indices, values, nt_types,
+        n_neurons: int,
+        dt_ms: float = 1.0,
+        tau_m_val: float = 20.0,
+        v_rest_val: float = -70.0,
+        v_thresh_val: float = -52.0,
+        v_reset_val: float = -70.0,
+    ):
+        self.n_neurons = n_neurons
+        self.dt_ms = dt_ms
+        self.tau_m_val = tau_m_val
+        self.v_rest_val = v_rest_val
+        self.v_thresh_val = v_thresh_val
+        self.v_reset_val = v_reset_val
+        
+        if HAS_TCM:
+            # ConnectomeData — один раз
+            self.conn = tcm.ConnectomeData(
+                row_ptr.astype(np.int32),
+                col_indices.astype(np.int32),
+                values.astype(np.float32),
+                nt_types.astype(np.float32),
+            )
+            # BrainSimulator — один раз, переиспользуется через reset()
+            self.sim = tcm.BrainSimulator(n_neurons, "lif")
+            self._ready = True
+        else:
+            self.conn = None
+            self.sim = None
+            self._ready = False
     
-    for p in search_paths:
-        if p.exists():
-            try:
-                lib = ctypes.CDLL(str(p))
-                GPU_LIF_LIB = lib
-                print(f"  ✅ GPU LIF lib loaded: {p}")
-                return lib
-            except Exception as e:
-                print(f"  ⚠ GPU lib load failed: {e}")
-                continue
+    def step_n(self, external_I: np.ndarray, n_steps: int) -> np.ndarray:
+        """Прогнать n_steps с external_I и вернуть мембранные потенциалы."""
+        if not self._ready:
+            return np.full(self.n_neurons, -70.0, dtype=np.float32)
+        
+        self.sim.step_batch(
+            self.conn, n_steps=n_steps,
+            dt_ms=self.dt_ms,
+            external_I=external_I.astype(np.float32),
+        )
+        return self.sim.v()
     
-    print("  ⚠ GPU LIF lib not found. Evolution requires GPU!")
-    print("  Build: cd target/release && cargo build --release -p gpu-eval")
-    return None
-
-
-def gpu_lif_create(row_ptr, col_indices, values, nt_types,
-                   tau_m, v_rest, v_thresh, v_reset, dt_ms):
-    """Инициализировать GPU контекст для LIF симуляции."""
-    lib = _get_gpu_lif_lib()
-    if lib is None:
-        return -1
+    def reset(self):
+        """Сбросить состояние симуляции."""
+        if self._ready:
+            self.sim.reset()
     
-    n = len(nt_types)
-    s = len(values)
-    
-    lib.gpu_lif_create.restype = ctypes.c_int32
-    lib.gpu_lif_create.argtypes = [
-        ctypes.POINTER(ctypes.c_int32),  # row_ptr
-        ctypes.POINTER(ctypes.c_int32),  # col_indices
-        ctypes.POINTER(ctypes.c_float),  # values
-        ctypes.POINTER(ctypes.c_float),  # nt_types
-        ctypes.c_int32,                  # n_neurons
-        ctypes.c_int32,                  # n_synapses
-        ctypes.POINTER(ctypes.c_float),  # tau_m
-        ctypes.POINTER(ctypes.c_float),  # v_rest
-        ctypes.POINTER(ctypes.c_float),  # v_thresh
-        ctypes.POINTER(ctypes.c_float),  # v_reset
-        ctypes.c_float,                  # dt_ms
-    ]
-    result = lib.gpu_lif_create(
-        row_ptr.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-        col_indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-        values.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        nt_types.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_int32(n), ctypes.c_int32(s),
-        tau_m.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        v_rest.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        v_thresh.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        v_reset.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_float(dt_ms),
-    )
-    return result
-
-
-def gpu_lif_step(external_I, n_steps: int):
-    """Загрузить external_I и прогнать n_steps LIF на GPU."""
-    lib = _get_gpu_lif_lib()
-    if lib is None:
-        return -1
-    
-    lib.gpu_lif_step.restype = ctypes.c_int32
-    lib.gpu_lif_step.argtypes = [
-        ctypes.c_int32,                  # handle (unused)
-        ctypes.POINTER(ctypes.c_float),  # external_I
-        ctypes.c_int32,                  # n_neurons
-        ctypes.c_int32,                  # n_steps
-    ]
-    return lib.gpu_lif_step(
-        ctypes.c_int32(1),  # handle (unused)
-        external_I.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_int32(len(external_I)),
-        ctypes.c_int32(n_steps),
-    )
-
-
-def gpu_lif_read_v(n_neurons: int) -> np.ndarray:
-    """Скачать мембранные потенциалы с GPU."""
-    lib = _get_gpu_lif_lib()
-    if lib is None:
-        return None
-    
-    v_out = np.zeros(n_neurons, dtype=np.float32)
-    lib.gpu_lif_read_v.restype = ctypes.c_int32
-    lib.gpu_lif_read_v.argtypes = [
-        ctypes.c_int32,                  # handle (unused)
-        ctypes.POINTER(ctypes.c_float),  # v_out
-        ctypes.c_int32,                  # n_neurons
-    ]
-    result = lib.gpu_lif_read_v(
-        ctypes.c_int32(1),
-        v_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        ctypes.c_int32(n_neurons),
-    )
-    if result != 0:
-        return None
-    return v_out
-
-
-def gpu_lif_read_spikes(n_neurons: int) -> np.ndarray:
-    """Скачать спайки с GPU."""
-    lib = _get_gpu_lif_lib()
-    if lib is None:
-        return None
-    
-    spike_out = np.zeros(n_neurons, dtype=np.int32)
-    lib.gpu_lif_read_spikes.restype = ctypes.c_int32
-    lib.gpu_lif_read_spikes.argtypes = [
-        ctypes.c_int32,                  # handle (unused)
-        ctypes.POINTER(ctypes.c_int32),  # spike_out
-        ctypes.c_int32,                  # n_neurons
-    ]
-    result = lib.gpu_lif_read_spikes(
-        ctypes.c_int32(1),
-        spike_out.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-        ctypes.c_int32(n_neurons),
-    )
-    if result != 0:
-        return None
-    return spike_out
-
-
-def gpu_lif_destroy():
-    """Уничтожить GPU контекст."""
-    lib = _get_gpu_lif_lib()
-    if lib is None:
-        return
-    lib.gpu_lif_destroy()
+    @property
+    def v(self) -> np.ndarray:
+        """Текущие мембранные потенциалы."""
+        if not self._ready:
+            return np.full(self.n_neurons, -70.0, dtype=np.float32)
+        return self.sim.v()
 
 
 class AntChaseFitness:
@@ -447,6 +368,9 @@ class AntChaseFitness:
         # Remember sensory/motor indices
         self.sensory_idx = self._select_neurons(n_sensory, low_in=True)
         self.motor_idx = self._select_neurons(n_motor, low_out=True)
+        
+        # Brain simulator (создаётся при первом evaluate, когда известны веса)
+        self._brain = None
         
         print(f"  AntChase: obs={obs_dim}→sens={len(self.sensory_idx)}, "
               f"mot={len(self.motor_idx)}→act={act_dim}")
@@ -557,7 +481,7 @@ class AntChaseFitness:
         return obs[:self.obs_dim]
     
     def _evaluate_ant(self, params: np.ndarray, rng: np.random.Generator = None) -> float:
-        """Запустить MuJoCo эпизод и измерить chase performance (GPU-only)."""
+        """Запустить MuJoCo эпизод и измерить chase performance (PyO3 BrainSimulator)."""
         import mujoco
         
         if rng is None:
@@ -565,27 +489,21 @@ class AntChaseFitness:
         
         conn_w, w_in, w_out = self._deconstruct_params(params)
         
+        # ── Создаём ConnectomeBrain с новыми весами (не кэшируем — веса меняются!) ──
+        n = self.n_neurons
+        brain = ConnectomeBrain(
+            self.row_ptr, self.col_indices,
+            conn_w.astype(np.float32),
+            self.nt_types.astype(np.float32),
+            n, dt_ms=self.dt_ms,
+        )
+        
         # ── MuJoCo модель ──
         model = mujoco.MjModel.from_xml_string(ANT_XML)
         data = mujoco.MjData(model)
         mujoco.mj_resetData(model, data)
         
-        # ── Инициализация GPU LIF ──
-        n = self.n_neurons
-        tau_m = np.full(n, 20.0, dtype=np.float32)
-        v_rest = np.full(n, -70.0, dtype=np.float32)
-        v_thresh = np.full(n, -52.0, dtype=np.float32)
-        v_reset = np.full(n, -70.0, dtype=np.float32)
-        
-        # GPU LIF инициализация (обязательна — без GPU не запускаемся)
-        ret = gpu_lif_create(
-            self.row_ptr, self.col_indices,
-            conn_w.astype(np.float32),
-            self.nt_types.astype(np.float32),
-            tau_m, v_rest, v_thresh, v_reset, self.dt_ms,
-        )
-        if ret != 1:
-            return 0.001
+        brain.reset()
         
         total_dist = 0.0
         n_contacts = 0
@@ -612,15 +530,11 @@ class AntChaseFitness:
                 for si, sidx in enumerate(self.sensory_idx[:len(w_in[oi])]):
                     external_I[sidx] += obs[oi] * w_in[oi, si]
             
-            # ── Internal dynamics via GPU LIF ──
+            # ── Internal dynamics via PyO3 BrainSimulator ──
             ext_in = external_I * 0.5 + 0.1
-            gpu_lif_step(ext_in, self.n_internal)
+            v_all = brain.step_n(ext_in, self.n_internal)
             
             # ── Read motor neurons → actions ──
-            v_all = gpu_lif_read_v(n)
-            if v_all is None:
-                v_all = np.zeros(n, dtype=np.float32)
-            
             actions = np.zeros(self.act_dim, dtype=np.float32)
             for a in range(self.act_dim):
                 for mi, midx in enumerate(self.motor_idx[:len(w_out)]):
@@ -631,7 +545,6 @@ class AntChaseFitness:
             # ── Apply actions and step physics ──
             for a in range(min(self.act_dim, model.nu)):
                 data.ctrl[a] = actions[a]
-            # MuJoCo 3.x: mj_step takes (model, data), frame_skip via loop
             for _ in range(5):
                 mujoco.mj_step(model, data)
             
@@ -644,7 +557,6 @@ class AntChaseFitness:
                 n_contacts = step + 1
                 break
             n_contacts = step + 1
-        gpu_lif_destroy()
         
         mean_dist = total_dist / max(n_contacts, 1)
         fitness = 1.0 / (1.0 + mean_dist)

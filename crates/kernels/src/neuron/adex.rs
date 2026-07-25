@@ -32,7 +32,8 @@ pub(crate) unsafe fn adex_step(
         let mut vv = load8_mut(v, off);
         let mut uu = load8_mut(u, off);
         let mut refr = load8_mut(refractory, off);
-        let ii = load8_mut(Ii, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8_mut(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let v_rest = load8(params.wrapping_add(3 * n), off);
         let v_th = load8(params.wrapping_add(4 * n), off);
         let v_reset = load8(params.wrapping_add(5 * n), off);
@@ -119,8 +120,9 @@ pub(crate) unsafe fn adex_step(
             let exp_term = if v[i] > v_thresh - 20.0 {
                 delta_t * ((v[i] - v_thresh) / delta_t.max(1.0)).exp()
             } else { 0.0 };
+            let i_clamped = ii[i].clamp(-100.0, 100.0);
             if tau_m > 0.0 {
-                v[i] += (v_rest - v[i] + exp_term - u_sl[i] + ii[i]) / tau_m * dt_val;
+                v[i] += (v_rest - v[i] + exp_term - u_sl[i] + i_clamped) / tau_m * dt_val;
             }
             if tau_w > 0.0 {
                 u_sl[i] += (aa * (v[i] - v_rest) - u_sl[i]) / tau_w * dt_val;
@@ -196,7 +198,8 @@ pub(crate) unsafe fn eprop_adex_step_multi(
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
         let mut ww = load8_mut(w, off);
-        let ii = load8(I_ext, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8(I_ext, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
 
         // Compute I_total = I_ext + Σ_i weights[i·n + j] · z_pre[i]
         let mut I_s = ii;
@@ -277,7 +280,7 @@ pub(crate) unsafe fn eprop_adex_step_multi(
             let mut ww = w_sl[j];
 
             // Compute I_total
-            let mut I_total = i_sl[j];
+            let mut I_total = i_sl[j].clamp(-100.0, 100.0);
             for i in 0..n_pre {
                 let z = *z_pre.add(i) as f32;
                 if z != 0.0 {

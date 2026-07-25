@@ -31,6 +31,9 @@ fn main() {
         "stdp_dopamine.cu",
         "t3_fused_forward_bptt.cu",
         "bptt.cu",
+        "edge_predictor.cu",
+        "gmm_sampler.cu",
+        "topk_select.cu",
     ];
     let mut obj_files = Vec::new();
     let nvcc = which_nvcc();

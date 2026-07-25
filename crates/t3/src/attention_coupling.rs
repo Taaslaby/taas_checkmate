@@ -54,6 +54,7 @@
 ///
 /// Initialized as identity (Q=K=state), so the initial attention is based on
 /// state similarity. Training updates these weights to learn task-specific coupling.
+#[derive(Clone)]
 pub struct AttentionCoupling {
     pub n: usize,
     pub state_dim: usize,
@@ -245,6 +246,7 @@ impl AttentionCouplingConfig {
 /// Δθ_Ai = γ · Σ_j attention_ij · r_Bj · sin(θ_Bj - θ_Ai)
 /// ```
 /// Where attention is computed from the states of pop A (Q) and pop B (K).
+#[derive(Clone)]
 pub struct CrossAttentionCoupling {
     pub n: usize,
     pub state_dim: usize,

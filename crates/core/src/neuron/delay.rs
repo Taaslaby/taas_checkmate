@@ -3,6 +3,7 @@
 use crate::kernels;
 
 /// Circular delay buffer with SIMD read.
+#[derive(Debug, Clone)]
 pub struct DelayBuffer {
     buf: Vec<f32>,
     n: usize,

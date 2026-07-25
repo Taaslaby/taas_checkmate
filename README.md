@@ -46,7 +46,6 @@ taas_checkmate/
 │   │
 │   ├── karmac/             ← Cognitive architecture (GNW, BasalGanglia, LOD)  6 files
 │   │
-│   ├── connectome-gpt/     ← Graph VAE + decoder for connectome    7 files
 │   │
 │   ├── cpe/                ← Coherence, Dopamine, STDP, Hybrid     6 files
 │   │

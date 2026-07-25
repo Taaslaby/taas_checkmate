@@ -69,7 +69,7 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
     dt: f32,
 ) {
     let dt_n = dt / n as f32;
-    let nf = n as f32;
+    let _nf = n as f32;
 
     // Offsets per population for sin/cos and r
     let off_th_source = match POP_SOURCE { 1 => OFF_TH1, 2 => off_th2(n_steps, n), 3 => off_th3(n_steps, n), _ => unreachable!() };
@@ -122,7 +122,7 @@ fn accumulate_pair<const POP_TARGET: usize, const POP_SOURCE: usize>(
 /// Использует CSR итерацию: только ненулевые entries, без материализации плотной матрицы.
 /// sin/cos вычисляются per-step из траектории (не из BpttWorkspace — он держит только last step).
 pub fn compute_sparse_coupling_gradients(
-    v_th1: &[f32], v_th2: &[f32], v_th3: &[f32],
+    v_th1: &[f32], v_th2: &[f32], _v_th3: &[f32],
     traj: &T3SpikeTrajectory,
     n_steps: usize,
     csr_12: &SparseCouplingCsr,

@@ -31,7 +31,6 @@ use rayon::prelude::*;
 /// - `w_IE`: excitation-to-inhibition weight
 /// - `w_II`: self-inhibition weight
 /// - `beta`: sigmoid steepness (default 4.0)
-#[allow(clippy::too_many_arguments)]
 pub fn step_wc(
     e: &mut [f32], i: &mut [f32],
     i_e: &[f32], i_i: &[f32],

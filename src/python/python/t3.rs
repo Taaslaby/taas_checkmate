@@ -19,6 +19,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use crate::t3::Decoder;
+use crate::t3::attention_coupling::AttentionCoupling;
 
 // ═══════════════════════════════════════════════════════════
 //  T3 TriOscillator
@@ -186,8 +187,52 @@ impl PyTriOscillator {
     }
 
     fn __repr__(&self) -> String {
-        format!("TriOscillator(n={}, pst_dim={})", self.inner.n, crate::t3::pst_linear_dim(self.inner.n))
+        let has_attn = self.inner.attn_coupling1.is_some()
+            || self.inner.attn_coupling2.is_some()
+            || self.inner.attn_coupling3.is_some();
+        format!("TriOscillator(n={}, pst_dim={}, attention={})",
+            self.inner.n, crate::t3::pst_linear_dim(self.inner.n), has_attn)
     }
+
+    // ── set_attention_coupling ──
+
+    /// Set attention-based coupling for individual populations.
+    ///
+    /// Pass `None` (or omit) to use uniform coupling for that population.
+    /// Each config is an `AttentionCoupling` instance.
+    #[pyo3(signature = (pop1=None, pop2=None, pop3=None))]
+    fn set_attention_coupling(
+        &mut self,
+        pop1: Option<Bound<'_, PyAttentionCoupling>>,
+        pop2: Option<Bound<'_, PyAttentionCoupling>>,
+        pop3: Option<Bound<'_, PyAttentionCoupling>>,
+    ) {
+        fn to_attn(py_ref: &Bound<'_, PyAttentionCoupling>) -> AttentionCoupling {
+            let inner = py_ref.borrow();
+            let mut ac = AttentionCoupling::new(inner.inner.n, inner.inner.gamma);
+            ac.q_weight.copy_from_slice(&inner.inner.q_weight);
+            ac.k_weight.copy_from_slice(&inner.inner.k_weight);
+            ac
+        }
+        self.inner.attn_coupling1 = pop1.as_ref().map(to_attn);
+        self.inner.attn_coupling2 = pop2.as_ref().map(to_attn);
+        self.inner.attn_coupling3 = pop3.as_ref().map(to_attn);
+    }
+
+    // ── getters for raw state (for T1→T2 bridge) ──
+
+    fn get_phases1(&self) -> Vec<f32> { self.inner.th1.clone() }
+    fn get_phases2(&self) -> Vec<f32> { self.inner.th2.clone() }
+    fn get_phases3(&self) -> Vec<f32> { self.inner.th3.clone() }
+    fn get_sin1(&self) -> Vec<f32> { self.inner.sin1.clone() }
+    fn get_sin2(&self) -> Vec<f32> { self.inner.sin2.clone() }
+    fn get_sin3(&self) -> Vec<f32> { self.inner.sin3.clone() }
+    fn get_cos1(&self) -> Vec<f32> { self.inner.cos1.clone() }
+    fn get_cos2(&self) -> Vec<f32> { self.inner.cos2.clone() }
+    fn get_cos3(&self) -> Vec<f32> { self.inner.cos3.clone() }
+    fn get_amplitudes1(&self) -> Vec<f32> { self.inner.r1.clone() }
+    fn get_amplitudes2(&self) -> Vec<f32> { self.inner.r2.clone() }
+    fn get_amplitudes3(&self) -> Vec<f32> { self.inner.r3.clone() }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1133,5 +1178,68 @@ pub fn py_train_connectome_chase(
     Ok((py_bridge, result.decoder_w, result.decoder_b, result.loss_history))
 }
 
+// ═══════════════════════════════════════════════════════════
+//  PyAttentionCoupling — Python bindings
+// ═══════════════════════════════════════════════════════════
 
+/// Attention-based Kuramoto coupling for one oscillator population.
+///
+/// Replaces uniform coupling with attention-weighted coupling:
+///   Δθ_i = γ · Σ_j A_ij · r_j · sin(θ_j − θ_i)
+///   where A_ij = softmax_j(Q_i · K_j / √state_dim)
+///   Q_i = W_Q · [sin(θ_i), cos(θ_i), r_i]
+///   K_j = W_K · [sin(θ_j), cos(θ_j), r_j]
+///
+/// State dimension is fixed at 3: [sin(θ), cos(θ), r].
+/// Q/K weights are initialized as identity (attention = state cosine similarity).
+#[pyclass(name = "AttentionCoupling", module = "taas_checkmate.t3")]
+pub struct PyAttentionCoupling {
+    pub inner: AttentionCoupling,
+}
+
+#[pymethods]
+impl PyAttentionCoupling {
+    /// Create attention coupling for `n` oscillators with coupling strength `gamma`.
+    #[new]
+    fn new(n: usize, gamma: f32) -> Self {
+        Self { inner: AttentionCoupling::new(n, gamma) }
+    }
+
+    /// Create attention coupling with custom Q/K weights.
+    ///
+    /// Args:
+    ///     n: number of oscillators
+    ///     gamma: coupling strength
+    ///     q_weight: flattened (state_dim × state_dim) Q projection matrix
+    ///     k_weight: flattened (state_dim × state_dim) K projection matrix
+    #[staticmethod]
+    fn from_weights(n: usize, gamma: f32, q_weight: Vec<f32>, k_weight: Vec<f32>) -> PyResult<Self> {
+        let expected = 3 * 3; // state_dim = 3
+        if q_weight.len() != expected || k_weight.len() != expected {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Q/K weights must be [{expected}] (3×3), got Q={} K={}",
+                    q_weight.len(), k_weight.len())
+            ));
+        }
+        let mut ac = AttentionCoupling::new(n, gamma);
+        ac.q_weight.copy_from_slice(&q_weight);
+        ac.k_weight.copy_from_slice(&k_weight);
+        Ok(Self { inner: ac })
+    }
+
+    /// Number of oscillators.
+    fn n(&self) -> usize { self.inner.n }
+    /// Coupling strength γ.
+    fn gamma(&self) -> f32 { self.inner.gamma }
+    /// State dimension (always 3).
+    fn state_dim(&self) -> usize { self.inner.state_dim }
+    /// Q projection weights as flat list (state_dim × state_dim).
+    fn q_weight(&self) -> Vec<f32> { self.inner.q_weight.clone() }
+    /// K projection weights as flat list (state_dim × state_dim).
+    fn k_weight(&self) -> Vec<f32> { self.inner.k_weight.clone() }
+
+    fn __repr__(&self) -> String {
+        format!("AttentionCoupling(n={}, gamma={})", self.inner.n, self.inner.gamma)
+    }
+}
 

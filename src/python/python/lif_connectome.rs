@@ -65,7 +65,7 @@ static GPU_CTX: Mutex<Option<CachedCtx>> = Mutex::new(None);
 /// Returns: (wall_time_sec, total_spikes)
 #[pyfunction]
 #[pyo3(name = "lif_sim_cpu_recording")]
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn py_lif_sim_cpu_recording(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -318,7 +318,7 @@ pub fn py_lif_sim_cpu_recording(
 /// Returns: (wall_time_sec, total_spikes).
 #[pyfunction]
 #[pyo3(name = "lif_sim_gpu_recording")]
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn py_lif_sim_gpu_recording(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -436,7 +436,7 @@ pub fn py_lif_sim_gpu_recording(
 
         for step in 0..n_steps {
             gpu_ctx.connectome_lif_step(Some(d_spike_counter))
-                .map_err(|e| { gpu_ctx.free_spike_counter(d_spike_counter); e })
+                .inspect_err(|_e| { gpu_ctx.free_spike_counter(d_spike_counter); })
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                     format!("connectome_lif_step: {e}")
                 ))?;

@@ -35,7 +35,7 @@ pub(crate) unsafe fn saw_step(
         let mut refr = load8_mut(refractory, off);
         let aa = load8(a, off);
         let bb = load8(b, off);
-        let ii = load8(Ii, off);
+        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
 
         // Refractory mask: refr > 0 → skip dynamics
         let refr_mask = refr.cmp_gt(zero);
@@ -98,7 +98,7 @@ pub(crate) unsafe fn saw_step(
                 continue;
             }
             let vv = v[i];
-            let dv = 0.04 * vv * vv + 5.0 * vv + 140.0 - u[i] + ii[i];
+            let dv = 0.04 * vv * vv + 5.0 * vv + 140.0 - u[i] + ii[i].clamp(-100.0, 100.0);
             let du = a[i] * (b[i] * vv - u[i]);
             v[i] += dt * dv;
             u[i] += dt * du;
@@ -164,13 +164,13 @@ pub(crate) unsafe fn eprop_saw_step(
         let mut vv = load8_mut(v, off);
         let mut uu = load8_mut(u, off);
         let mut ee = load8_mut(eligibility, off);
-        let ii = load8(Ii, off);
+        let ii_clamped = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let pre = load8_i32(pre_spikes, off);
 
         // SAW dynamics (same as Izhikevich)
         // Euler: v += dt * dv
         let v5 = vv.mul_add(c04, c5);
-        let dv = v5.mul_add(vv, c140) - uu + ii;
+        let dv = v5.mul_add(vv, c140) - uu + ii_clamped;
         let du = a_s * (b_s * vv - uu);
         vv += dt_s * dv;
         uu += dt_s * du;
@@ -219,7 +219,7 @@ pub(crate) unsafe fn eprop_saw_step(
         let pre_sl = std::slice::from_raw_parts(pre_spikes, n);
         for i in n8..n {
             let vv = v_sl[i];
-            let dv = (0.04 * vv + 5.0) * vv + 140.0 - u_sl[i] + i_sl[i];
+            let dv = (0.04 * vv + 5.0) * vv + 140.0 - u_sl[i] + i_sl[i].clamp(-100.0, 100.0);
             let du = a * (b * vv - u_sl[i]);
             v_sl[i] += dt * dv;
             u_sl[i] += dt * du;
@@ -264,7 +264,7 @@ pub(crate) unsafe fn psi_wave_step(
         let mut uu = load8_mut(u, off);
         let hr = load8_mut(h_real, off);
         let hi = load8_mut(h_imag, off);
-        let ie = load8_mut(i_ext, off);
+        let ie = load8_mut(i_ext, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let sp = load8_mut(speed, off);
 
         let dv = hr - hi * sp + ie;
@@ -290,7 +290,7 @@ pub(crate) unsafe fn psi_wave_step(
         let i_ext = std::slice::from_raw_parts_mut(i_ext, n);
         let speed = std::slice::from_raw_parts_mut(speed, n);
         for i in n8..n {
-            let dv = h_real[i] - h_imag[i] * speed[i] + i_ext[i];
+            let dv = h_real[i] - h_imag[i] * speed[i] + i_ext[i].clamp(-100.0, 100.0);
             let du = h_imag[i] + h_real[i] * speed[i];
             v[i] += dt * dv / hbar;
             u[i] += dt * du / hbar;

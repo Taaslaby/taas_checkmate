@@ -23,7 +23,6 @@ use crate::core::neuron;
 /// Returns: (wall_time_sec, total_spikes).
 #[pyfunction]
 #[pyo3(name = "bench_connectome_cpu")]
-#[allow(clippy::too_many_arguments)]
 pub fn py_bench_connectome_cpu(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -146,7 +145,7 @@ pub fn py_bench_connectome_cpu(
 /// Возвращает (wall_time_sec, total_spikes).
 #[pyfunction]
 #[pyo3(name = "bench_connectome_cpu_recording")]
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn py_bench_connectome_cpu_recording(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -279,7 +278,6 @@ pub fn py_bench_connectome_cpu_recording(
 /// Returns: (wall_time_sec, total_spikes).
 #[pyfunction]
 #[pyo3(name = "bench_connectome_gpu")]
-#[allow(clippy::too_many_arguments)]
 pub fn py_bench_connectome_gpu(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -431,7 +429,7 @@ pub fn py_bench_connectome_gpu(
     _I_buf, _spikes, spike_buffer,
     lr_ltp, lr_ltd, w_min, w_max,
     weights_out=None))]
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn py_bench_connectome_gpu_stdp(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,
@@ -650,7 +648,7 @@ pub fn py_bench_connectome_gpu_stdp(
 /// Returns: (wall_time_sec, total_spikes).
 #[pyfunction]
 #[pyo3(name = "bench_connectome_gpu_recording")]
-#[allow(clippy::too_many_arguments, clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn py_bench_connectome_gpu_recording(
     row_ptr: Bound<'_, PyArray1<i32>>,
     col_indices: Bound<'_, PyArray1<i32>>,

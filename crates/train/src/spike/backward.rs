@@ -49,7 +49,7 @@ fn phase_gate_from_sincos(sin: &[f32], cos: &[f32], n: usize, gamma: f32) -> f32
 fn r_clamp_effect(r: f32, drive: f32, dt: f32, gain: f32, alpha: f32) -> f32 {
     let rp = r as f64 + (dt as f64) * ((alpha as f64 - r as f64 * r as f64) * r as f64
                                         + drive as f64 * gain as f64);
-    if rp < 0.001 || rp > 10.0 { 0.0 } else { 1.0 }
+    if !(0.001..=10.0).contains(&rp) { 0.0 } else { 1.0 }
 }
 
 #[inline]
@@ -160,9 +160,9 @@ fn simd_pass1_pop(
         st(sin, i, s); st(cos, i, c);
         let r = ld(pre_r, i);
         let v = ld(v_th, i);
-        r_ss_v = r_ss_v + r * s; r_cc_v = r_cc_v + r * c;
-        s_acc_v = s_acc_v + s; c_acc_v = c_acc_v + c;
-        v_ss_v = v_ss_v + v * s; v_cc_v = v_cc_v + v * c;
+        r_ss_v += r * s; r_cc_v += r * c;
+        s_acc_v += s; c_acc_v += c;
+        v_ss_v += v * s; v_cc_v += v * c;
     }
 
     let mut r_ss_s = 0.0; let mut r_cc_s = 0.0;
@@ -188,6 +188,7 @@ fn simd_pass1_pop(
 }
 
 /// Pass 2: SIMD BPTT arithmetic — update v_th/v_r + write grad_drives.
+#[allow(clippy::too_many_arguments)]
 fn simd_pass2(
     n: usize, dt: f32, gain: f32, alpha: f32,
     pre_r1: &[f32], d1: &[f32],
@@ -209,13 +210,13 @@ fn simd_pass2(
     step: usize, n_steps: usize, grad_pst: &[f32],
 ) {
     let s_dt = f32x8::splat(dt);
-    let s_gain = f32x8::splat(gain);
+    let _s_gain = f32x8::splat(gain);
     let s_alpha = f32x8::splat(alpha);
     let s_w12g2 = f32x8::splat(w12 * g2);
     let s_w13g3 = f32x8::splat(w13 * g3);
     let s_w12g1 = f32x8::splat(w12 * g1);
     let s_w13g1 = f32x8::splat(w13 * g1);
-    let s_w23g2 = f32x8::splat(w23 * g2);
+    let _s_w23g2 = f32x8::splat(w23 * g2);
     let s_w12_2 = f32x8::splat(w12 * g2);
     let s_w23_2 = f32x8::splat(w23 * g3);
     let s_w13_3 = f32x8::splat(w13 * g3);
@@ -510,7 +511,7 @@ pub fn bptt_loop_into(
                      &traj.th2_final[..], &traj.r2_final[..],
                      &traj.th3_final[..], &traj.r3_final[..])
                 } else {
-                    let nxt = (step + 1);
+                    let nxt = step + 1;
                     (step_slice(&traj.flat, OFF_TH1, n, nxt),
                      step_slice(&traj.flat, off_r1(n_steps, n), n, nxt),
                      step_slice(&traj.flat, off_th2(n_steps, n), n, nxt),
@@ -620,8 +621,7 @@ impl TruncatedBptt {
     /// Create new TruncatedBptt with window_size шагов.
     ///
     /// Память: O(window_size · n) для trajectory + O(n) для workspace.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+        pub fn new(
         n: usize,
         window_size: usize,
         dt: f32,
@@ -815,7 +815,7 @@ pub fn t3spike_backward_per_step_with_ws(
     ws: &mut BpttWorkspace,
 ) {
     let n = traj.n_osc;
-    let pst_dim = pst_linear_dim(n);
+    let _pst_dim = pst_linear_dim(n);
 
     // K1: v = J^T · grad_pst — JIT, без матрицы
     pst_jacobian_v_jit(

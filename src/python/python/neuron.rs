@@ -271,7 +271,6 @@ pub fn py_step_lif(
 ///     b: сила адаптации [n]
 #[pyfunction]
 #[pyo3(name = "step_adex")]
-#[allow(clippy::too_many_arguments)]
 pub fn py_step_adex(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
@@ -528,5 +527,71 @@ pub fn py_step_wc(
         w_II.as_slice()?,
         beta.as_slice()?,
     );
+    Ok(())
+}
+
+/// Atlasov Neuromotor Engine — один шаг симуляции мышц и суставов.
+///
+/// Modifies ca, tension, joint_delta_f, joint_stiffness, joint_damping in-place.
+#[pyfunction]
+#[pyo3(name = "step_atlasov_neuromotor")]
+pub fn py_step_atlasov_neuromotor(
+    ca: Bound<'_, PyArray1<f32>>,
+    tension: Bound<'_, PyArray1<f32>>,
+    spikes: Bound<'_, PyArray1<i32>>,
+    resets: Bound<'_, PyArray1<i32>>,
+    dt: f32,
+    d_ca: Bound<'_, PyArray1<f32>>,
+    tau_pump: Bound<'_, PyArray1<f32>>,
+    eta_reset: Bound<'_, PyArray1<f32>>,
+    t_max: Bound<'_, PyArray1<f32>>,
+    kd: Bound<'_, PyArray1<f32>>,
+    joint_delta_f: Option<Bound<'_, PyArray1<f32>>>,
+    joint_stiffness: Option<Bound<'_, PyArray1<f32>>>,
+    joint_damping: Option<Bound<'_, PyArray1<f32>>>,
+    k0: Option<Bound<'_, PyArray1<f32>>>,
+    beta: Option<Bound<'_, PyArray1<f32>>>,
+    b0: Option<Bound<'_, PyArray1<f32>>>,
+    alpha: Option<Bound<'_, PyArray1<f32>>>,
+) -> PyResult<()> {
+    let mut ca_rw = ca.readwrite();
+    let mut tension_rw = tension.readwrite();
+    let spikes_ro = spikes.readonly();
+    let resets_ro = resets.readonly();
+    let d_ca_ro = d_ca.readonly();
+    let tau_pump_ro = tau_pump.readonly();
+    let eta_reset_ro = eta_reset.readonly();
+    let t_max_ro = t_max.readonly();
+    let kd_ro = kd.readonly();
+
+    let mut j_df_storage = joint_delta_f.as_ref().map(|a| a.readwrite());
+    let mut j_stf_storage = joint_stiffness.as_ref().map(|a| a.readwrite());
+    let mut j_dmp_storage = joint_damping.as_ref().map(|a| a.readwrite());
+
+    let k0_ro = k0.as_ref().map(|a| a.readonly());
+    let beta_ro = beta.as_ref().map(|a| a.readonly());
+    let b0_ro = b0.as_ref().map(|a| a.readonly());
+    let alpha_ro = alpha.as_ref().map(|a| a.readonly());
+
+    neuron::step_atlasov_neuromotor(
+        ca_rw.as_slice_mut()?,
+        tension_rw.as_slice_mut()?,
+        spikes_ro.as_slice()?,
+        resets_ro.as_slice()?,
+        dt,
+        d_ca_ro.as_slice()?,
+        tau_pump_ro.as_slice()?,
+        eta_reset_ro.as_slice()?,
+        t_max_ro.as_slice()?,
+        kd_ro.as_slice()?,
+        j_df_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
+        j_stf_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
+        j_dmp_storage.as_mut().and_then(|a| a.as_slice_mut().ok()),
+        k0_ro.as_ref().and_then(|a| a.as_slice().ok()),
+        beta_ro.as_ref().and_then(|a| a.as_slice().ok()),
+        b0_ro.as_ref().and_then(|a| a.as_slice().ok()),
+        alpha_ro.as_ref().and_then(|a| a.as_slice().ok()),
+    );
+
     Ok(())
 }

@@ -19,6 +19,7 @@
 
 #![allow(non_snake_case)]
 use wide::f32x8;
+use wide::i32x8;
 
 const RNG_SCALE_16: f32 = 1.0 / 65536.0;
 /// 24-bit scale: for Poisson spike generation (fused kernel uses state>>8)
@@ -102,14 +103,14 @@ fn rand_f32() -> f32 {
 
 /// Fast `exp(x)` approximation for a single `f32`.
 ///
-/// Uses the same 4th-order minimax polynomial as `fast_exp_simd`:
+/// Uses a 6th-order Taylor-series polynomial for 2^f on [0, 1):
 ///   1. t = x · log2(e) — range reduction
 ///   2. n = floor(t), f = t − n — split integer/fractional
-///   3. 2^f ≈ P(f) — 4th-order polynomial on [0, 1)
+///   3. 2^f ≈ P(f) — 6th-order polynomial on [0, 1)
 ///   4. 2^n = reinterpret((n + 127) << 23) — IEEE 754 bit trick
 ///   5. e^x = 2^n · 2^f
 ///
-/// Accuracy: ~1e-4 rel. error on [-10, 10].
+/// Accuracy: ~1.7e-5 rel. error on [-10, 10] (6× better than previous 4th-order).
 /// Speed: ~2–3× faster than `f32::exp()`.
 #[inline(always)]
 pub fn fast_exp(x: f32) -> f32 {
@@ -118,13 +119,19 @@ pub fn fast_exp(x: f32) -> f32 {
     let n = t.floor() as i32;
     let f = t - n as f32;
 
-    // 2^f: 4th-order minimax polynomial on [0, 1)
-    let c1 = 0.693_032_15;
-    let c2 = 0.241_379_77;
-    let c3 = 0.052_097_276;
-    let c4 = 0.009_355_339;
-    let poly = ((c4 * f + c3) * f + c2) * f + c1;
-    let exp2f = poly * f + 1.0;
+    // 2^f: 6th-order Taylor-series polynomial on [0, 1)
+    // Coefficients = (ln 2)^k / k! for k=1..6
+    // c1 = ln(2) = std::f32::consts::LN_2
+    let c1 = std::f32::consts::LN_2;
+    let c2 = 0.240_226_5_f32;
+    let c3 = 0.055_504_11_f32;
+    let c4 = 0.009_618_129_f32;
+    let c5 = 0.001_333_356_f32;
+    let c6 = 0.000_154_035_3_f32;
+    // Horner: (((((c6·f + c5)·f + c4)·f + c3)·f + c2)·f + c1)·f + 1
+    let poly = (((c6 * f + c5) * f + c4) * f + c3) * f + c2;
+    let poly = (poly * f + c1) * f + 1.0;
+    let exp2f = poly;
 
     // 2^n via IEEE 754 bit trick
     // Guard against n < -126 (wrapping would produce huge positive value)
@@ -142,25 +149,25 @@ pub fn fast_exp(x: f32) -> f32 {
 
 /// Fast `exp(x)` approximation using `f32x8` SIMD.
 ///
-/// Fully SIMD implementation — no scalar fallback.
-/// Uses `f32x8::floor()` for SIMD range reduction, then a unified
-/// polynomial for exp(x) on the clamped range [-10, 10] that avoids
-/// the IEEE-754 bit trick entirely.
+/// **Fully SIMD** — zero scalar loops or lane extraction.
+/// Uses `i32x8` integer arithmetic for the IEEE-754 2^n bit trick,
+/// eliminating the previous scalar-loop bottleneck that stalled the
+/// SIMD pipeline on every call.
 ///
 /// Algorithm:
-/// 1. Clamp x to [-10, 10] to prevent overflow
+/// 1. Clamp x to [-87, 87] (full f32 exp range without overflow/underflow)
 /// 2. Range reduction: t = x · log2(e)
 /// 3. n = floor(t), f = t - n (SIMD via f32x8::floor)
-/// 4. 2^f via 4th-order polynomial on [0, 1) (SIMD)
-/// 5. 2^n via `f32x8::from()` conversion of exponent bits
+/// 4. 2^f via 6th-order Taylor polynomial on [0, 1) (FMA chain)
+/// 5. 2^n via SIMD integer arithmetic: i32x8 `(n + 127) << 23` → f32x8 reinterpret
 ///
-/// Accuracy: ~1e-4 relative error on [-10, 10].
+/// Accuracy: ~1.7e-5 relative error on [-87, 87].
 /// Speed: ~8× faster than 8 separate `f32::exp()` calls.
 #[inline(always)]
 pub fn fast_exp_simd(x: f32x8) -> f32x8 {
-    // Clamp to prevent overflow
-    let x = x.max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
-    
+    // Clamp to full f32 exp range (exp(-87) ≈ 1.6e-38, exp(87) ≈ 6.1e37)
+    let x = x.max(f32x8::splat(-87.0)).min(f32x8::splat(87.0));
+
     // t = x * log2(e)  (SIMD)
     let log2e = f32x8::splat(std::f32::consts::LOG2_E);
     let t = x * log2e;
@@ -169,37 +176,32 @@ pub fn fast_exp_simd(x: f32x8) -> f32x8 {
     let n = t.floor();                       // SIMD floor
     let ff = t - n;                          // SIMD fractional  [0, 1)
 
-    // 4th-order minimax polynomial for 2^f on [0, 1):
-    let c1 = f32x8::splat(0.693_032_15);
-    let c2 = f32x8::splat(0.241_379_77);
-    let c3 = f32x8::splat(0.052_097_276);
-    let c4 = f32x8::splat(0.009_355_339);
+    // 6th-order Taylor-series polynomial for 2^f on [0, 1):
+    // Coefficients = (ln 2)^k / k! for k=1..6
+    let c1 = f32x8::splat(std::f32::consts::LN_2);
+    let c2 = f32x8::splat(0.240_226_5_f32);
+    let c3 = f32x8::splat(0.055_504_11_f32);
+    let c4 = f32x8::splat(0.009_618_129_f32);
+    let c5 = f32x8::splat(0.001_333_356_f32);
+    let c6 = f32x8::splat(0.000_154_035_3_f32);
 
-    // Horner: P(f) = (((c4·f + c3)·f + c2)·f + c1)·f + 1
-    let poly = ff.mul_add(c4, c3);
+    // Horner: P(f) = (((((c6·f + c5)·f + c4)·f + c3)·f + c2)·f + c1)·f + 1
+    let poly = ff.mul_add(c6, c5);
+    let poly = ff.mul_add(poly, c4);
+    let poly = ff.mul_add(poly, c3);
     let poly = ff.mul_add(poly, c2);
     let poly = ff.mul_add(poly, c1);
     let poly = ff.mul_add(poly, f32x8::splat(1.0));
 
-    // 2^n: reconstruct via integer exponent → float
-    // n_i32 = n.to_array() → scalar loop for IEEE-754 bit trick
-    let n_arr: [f32; 8] = n.to_array();
-    let mut exp2_arr = [0.0f32; 8];
-    for j in 0..8 {
-        let n_int = n_arr[j] as i32;
-        let biased = n_int.wrapping_add(127);
-        exp2_arr[j] = if biased <= 0 {
-            0.0
-        } else if biased >= 255 {
-            f32::INFINITY
-        } else {
-            f32::from_bits((biased as u32) << 23)
-        };
-    }
-    let exp2 = f32x8::from(exp2_arr);
+    // 2^n: fully SIMD IEEE-754 bit trick via i32x8
+    // Convert n (float) → i32, add bias 127, shift left 23 → reinterpret as f32
+    // Input is clamped to [-87, 87], so n ∈ [-126, 125] — biased ∈ [1, 252], always valid.
+    let n_i32: i32x8 = n.fast_round_int();   // floor already integer-valued → round is exact
+    let biased = n_i32 + i32x8::splat(127);
+    let exp2n: f32x8 = bytemuck::cast(biased << 23_u32);
 
     // e^x = 2^n · 2^f
-    exp2 * poly
+    exp2n * poly
 }
 
 /// Fast sin/cos approximation using `f32x8` SIMD.
@@ -279,6 +281,8 @@ pub mod lif;
 pub mod adex;
 pub mod hh;
 pub mod fhn;
+pub mod hr;
+pub mod atlasov_neuromotor;
 pub mod wc;
 pub mod stp;
 pub mod synapse;

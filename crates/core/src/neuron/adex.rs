@@ -10,7 +10,6 @@ use rayon::prelude::*;
 
 // ─── AdEx ────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Step `n` AdEx neurons. Parallel. n must be multiple of 8.
 ///
 /// Adaptive Exponential (AdEx) model dynamics:
@@ -28,8 +27,6 @@ pub fn step_adex(
     assert!(n.is_multiple_of(8) && n == u.len() && n == I.len() && n == spikes.len() && n == tau_m.len()
         && n == tau_w.len() && n == v_rest.len() && n == v_thresh.len()
         && n == v_reset.len() && n == delta_t.len() && n == a.len() && n == b.len() && n == refractory.len());
-
-    kernels::safety_clamp(I, -super::I_CLAMP, super::I_CLAMP);
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     // Each chunk builds [72]f32: [dt×8, tau_m×8, tau_w×8, v_rest×8, v_thresh×8,
@@ -86,8 +83,7 @@ pub struct EPropAdExMulti {
 }
 
 impl EPropAdExMulti {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+        pub fn new(
         n_pre: usize, n_post: usize, dt: f32,
         tau_m: f32, tau_w: f32, tau_e: f32,
         v_rest: f32, v_thresh: f32, v_reset: f32, delta_t: f32,

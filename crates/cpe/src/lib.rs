@@ -1,3 +1,6 @@
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+
 //! # ChaosPatternEngine (CPE)
 //!
 //! Contrastive dopamine-STDP + T2-SPIGRAD learning on Kuramoto connectomes.

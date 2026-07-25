@@ -2,7 +2,6 @@
 
 | Файл | Описание |
 |:-----|:---------|
-| `bench_dual_vs_standard.py` | Dual Memory vs Standard Izhikevich comparison |
 | `viz_real.py` | Real-time visualization |
 | `viz_t3hh.py` | T3 + HH visualization |
 | `psi/` | PSI resonance: coherence, flywire, VNC, eigenanalysis |

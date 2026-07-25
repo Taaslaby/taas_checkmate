@@ -35,13 +35,17 @@
 
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::len_without_is_empty)]
+#![allow(clippy::manual_memcpy)]
 
+pub mod cortical;
 pub mod data;
 pub mod rcm;
 pub mod record;
 pub mod sim;
 
+pub use cortical::{LayerId, LayerAssignment, LaminarRule, ProjectionType,
+    LaminarConnectomeBuilder, LayerStats};
 pub use data::{
     ConnectomeData, NeuronGroup,
     BrainIO, InputChannel, InputEncoding, OutputChannel, OutputReadout,
@@ -51,9 +55,9 @@ pub use rcm::{reverse_cuthill_mckee, build_adjacency, bandwidth, mean_bandwidth,
     apply_permutation_to_csr, apply_permutation_to_state, apply_permutation_to_groups,
     spectral_ordering, fiedler_vector};
 pub use sim::{
-    BrainState, NeuronModel, LifParams, IzhikevichParams, RateParams, PsiParams,
+    BrainState, NeuronModel, LifParams, IzhikevichParams, IzhikevichDualParams, RateParams, PsiParams,
     sim_lif, sim_lif_synaptic, sim_hh, sim_hh_synaptic,
-    sim_izhikevich, sim_izhikevich_synaptic, sim_rate, sim_psi, sim_psi_record,
+    sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic, sim_rate, sim_psi, sim_psi_record,
     csr_propagate, csr_propagate_from_queue, csr_propagate_conductance_from_queue,
     push_spikes_to_queue, SpikeQueue,
 };

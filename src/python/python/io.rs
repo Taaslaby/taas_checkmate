@@ -257,6 +257,6 @@ pub fn py_t3_tact_generator_cuda(
         ph2.readonly().as_slice()?,
         ph3.readonly().as_slice()?,
         threshold,
-    ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }

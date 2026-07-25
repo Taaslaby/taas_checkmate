@@ -1,3 +1,8 @@
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::type_complexity)]
+#![allow(deprecated)]
+
 //! Spiking RL, T3-SPIKE GRAD BPTT, optimizers.
 
 pub mod rl;

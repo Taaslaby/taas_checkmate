@@ -53,7 +53,6 @@ pub fn py_kuramoto_step_sparse(
 /// Фазовая динамика + амплитудная динамика на разреженной матрице.
 #[pyfunction]
 #[pyo3(name = "t3_step_sparse")]
-#[allow(clippy::too_many_arguments)]
 pub fn py_t3_step_sparse(
     phases: Bound<'_, PyArray1<f32>>,
     amplitudes: Bound<'_, PyArray1<f32>>,
@@ -137,7 +136,7 @@ pub fn py_interference_matrix_cuda(
         output.as_slice_mut()?,
         phases_a.as_slice()?,
         phases_b.as_slice()?,
-    ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 
@@ -249,7 +248,7 @@ pub fn py_band_energy_cuda(
         amplitudes.as_slice()?,
         omegas.as_slice()?,
         band_edges.as_slice()?,
-    ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+    ).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 
@@ -401,7 +400,7 @@ pub fn py_ring_synthesis_cuda(
     let trig_buf = trig_buf.readonly();
     let weights = weights.readonly();
     crate::cuda::ring_synthesis(output.as_slice_mut()?, amplitudes.as_slice()?, trig_buf.as_slice()?, weights.as_slice()?)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+        .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(())
 }
 

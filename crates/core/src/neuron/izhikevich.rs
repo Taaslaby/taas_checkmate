@@ -9,11 +9,9 @@ use crate::kernels;
 use rayon::prelude::*;
 
 use super::eprop::surrogate_gradient;
-use super::I_CLAMP;
 
 // ─── step_izhikevich ──────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Step `n` Izhikevich neurons by `dt`. Parallel. n must be multiple of 8.
 ///
 /// Supports refractory period via `refractory` buffer (0 = not refractory).
@@ -27,8 +25,6 @@ pub fn step_izhikevich(
     let n = v.len();
     assert!(n.is_multiple_of(8) && n == u.len() && n == trace.len() && n == a.len() && n == b.len()
         && n == I.len() && n == spikes.len() && n == c.len() && n == d.len() && n == refractory.len());
-
-    kernels::safety_clamp(I, -I_CLAMP, I_CLAMP);
 
     v.par_chunks_exact_mut(8)
         .zip(u.par_chunks_exact_mut(8))

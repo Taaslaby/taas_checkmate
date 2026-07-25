@@ -277,7 +277,7 @@ pub fn py_spike_raster_to_csv(
 ) -> PyResult<String> {
     let spike_buffer = spike_buffer.readonly();
     let buf = spike_buffer.as_slice()?;
-    let n_steps = if n_neurons > 0 { buf.len() / n_neurons } else { 0 };
+    let n_steps = buf.len().checked_div(n_neurons).unwrap_or(0);
 
     // Build raster from dense buffer, then export
     let mut raster = neuron::SpikeRaster::new();

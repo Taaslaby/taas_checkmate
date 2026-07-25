@@ -10,7 +10,6 @@ use super::eprop::surrogate_gradient;
 
 // ─── LIF-AT ──────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Step `n` LIF-AT (LIF with Adaptive Threshold) neurons. Parallel, n must be multiple of 8.
 ///
 /// LIF-AT добавляет adaptive threshold offset θ:
@@ -62,8 +61,6 @@ pub fn step_lif(
     let n = v.len();
     assert!(n.is_multiple_of(8) && n == I.len() && n == spikes.len() && n == tau_m.len()
         && n == v_rest.len() && n == v_thresh.len() && n == v_reset.len() && n == refractory.len());
-
-    kernels::safety_clamp(I, -super::I_CLAMP, super::I_CLAMP);
 
     // Build params on stack per chunk — avoids heap allocation on every step.
     v.par_chunks_exact_mut(8)

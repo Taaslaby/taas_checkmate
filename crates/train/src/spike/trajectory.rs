@@ -22,7 +22,7 @@ use crate::t3::backend::T3Backend;
 
 /// Offsets within flat Vec
 pub const OFF_TH1: usize = 0;
-pub fn off_th2(n_steps: usize, n: usize) -> usize { 1 * n_steps * n }
+pub fn off_th2(n_steps: usize, n: usize) -> usize { n_steps * n }
 pub fn off_th3(n_steps: usize, n: usize) -> usize { 2 * n_steps * n }
 pub fn off_r1(n_steps: usize, n: usize) -> usize { 3 * n_steps * n }
 pub fn off_r2(n_steps: usize, n: usize) -> usize { 4 * n_steps * n }
@@ -101,6 +101,7 @@ pub struct T3SpikeTrajectory {
 }
 
 impl T3SpikeTrajectory {
+    #[allow(dead_code)]
     fn flat_offset(&self, base: usize, step: usize) -> usize {
         base + step * self.n_osc
     }
@@ -198,7 +199,7 @@ pub fn t3spike_compute_pst_matrix_into<'a>(
 ) -> &'a [f32] {
     let n = traj.n_osc;
     let n_steps = traj.n_steps;
-    let pst_dim = crate::t3::pst_linear_dim(n);
+    let _pst_dim = crate::t3::pst_linear_dim(n);
     let nf = n as f32;
 
     buf.clear();
@@ -290,7 +291,7 @@ pub fn t3spike_compute_pst_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
             th2 = &traj.th2_final; r2 = &traj.r2_final;
             th3 = &traj.th3_final; r3 = &traj.r3_final;
         } else {
-            let next = (step + 1) * n;
+            let _next = (step + 1) * n;
             let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
             th1 = s(OFF_TH1, step + 1);
             r1 = s(off_r1(traj.n_steps, n), step + 1);
@@ -547,7 +548,7 @@ pub fn t3spike_compute_pst_fast_matrix(traj: &T3SpikeTrajectory) -> Vec<f32> {
             th2 = &traj.th2_final; r2 = &traj.r2_final;
             th3 = &traj.th3_final; r3 = &traj.r3_final;
         } else {
-            let next = (step + 1) * n;
+            let _next = (step + 1) * n;
             let s = |off: usize, step: usize| &traj.flat[off + step * n..off + (step + 1) * n];
             th1 = s(OFF_TH1, step + 1);
             r1 = s(off_r1(traj.n_steps, n), step + 1);

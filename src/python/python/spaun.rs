@@ -105,7 +105,7 @@ impl PySpaunPipeline {
                 let p = PathBuf::from(&path);
                 let reader = TaasReader::from_file(p.as_os_str().to_str().unwrap())
                     .map_err(|e| PyRuntimeError::new_err(format!(
-                        "Failed to load .taas: {e}. Generate with: cargo run --release --example bake_brain -p connectome-gpt"
+                        "Failed to load .taas: {e}"
                     )))?;
                 load_connectome(&reader)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse connectome: {e}")))?
@@ -118,10 +118,8 @@ impl PySpaunPipeline {
                 let col_indices: Vec<i32> = (0..n as i32).map(|i| (i + 1) % n as i32).collect();
                 let values: Vec<f32> = (0..n).map(|_| rng.gen::<f32>() * 0.5 - 0.25).collect();
                 let nt_types: Vec<f32> = (0..n).map(|i| if i < n * 3 / 4 { 1.0 } else { -1.0 }).collect();
-                let groups = vec![
-                    ("sensory".to_string(), (0..22.min(n)).collect::<Vec<_>>()),
-                    ("mn".to_string(), (n-5..n).collect::<Vec<_>>()),
-                ];
+                let groups = [("sensory".to_string(), (0..22.min(n)).collect::<Vec<_>>()),
+                    ("mn".to_string(), (n-5..n).collect::<Vec<_>>())];
                 let groups_refs: Vec<(&str, Vec<usize>)> = groups.iter()
                     .map(|(n, i)| (n.as_str(), i.clone())).collect();
                 ConnectomeData::new(row_ptr, col_indices, values, nt_types, groups_refs)

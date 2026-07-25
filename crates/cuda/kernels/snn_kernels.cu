@@ -47,7 +47,7 @@ extern "C" __global__ void lif_at_step_kernel(
 
     float vi = v[idx];
     float th = theta[idx];
-    float Ii = I[idx];
+    float Ii = fminf(100.0f, fmaxf(-100.0f, I[idx]));
 
     // Exponential Euler for membrane: v = v_rest + (v - v_rest) * exp(-dt/τ) + I * (1 - exp(-dt/τ))
     float decay = __expf(-dt / fmaxf(tau_m, 1e-6f));

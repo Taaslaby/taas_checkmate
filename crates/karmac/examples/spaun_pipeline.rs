@@ -585,13 +585,13 @@ fn main() {
     println!("{}", "═".repeat(60));
     println!();
 
-    // Load real connectome from ConnectomeGPT-generated brain
+    // Load connectome from examples/data
     let brain_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent().unwrap()
-        .join("connectome-gpt").join("models").join("brain.taas");
+        .join("examples").join("data").join("brain.taas");
     println!("  Loading connectome from: {}", brain_path.display());
     let reader = TaasReader::from_file(brain_path.as_os_str().to_str().unwrap())
-        .expect("Failed to load brain.taas. Run: cd crates/connectome-gpt && cargo run --release --example bake_brain");
+        .expect("Failed to load brain.taas. Generate one with --features connectome");
     let conn = load_connectome(&reader)
         .expect("Failed to parse connectome from .taas");
     println!("  Connectome: {} neurons, {} synapses", conn.n_neurons, conn.n_synapses);

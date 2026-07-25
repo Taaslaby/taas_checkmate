@@ -115,18 +115,17 @@ extern "C" __global__ void hh_step_kernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
 
-    // ─── Refractory: skip all dynamics ─────────────────
+    // ─── Refractory Timer Update (Do NOT skip ODE dynamics) ─
     float ref = refractory[idx];
     if (ref > 0.0f) {
         refractory[idx] = fmaxf(0.0f, ref - dt);
-        spikes[idx] = 0;
-        return;
     }
 
     float vi = v[idx];
 
     int gi = 0;  // global gate index
-    float I_ion = 0.0f;
+    float I_ion_sum = 0.0f; // Sum of g_k * E_k
+    float g_ion_sum = 0.0f; // Sum of g_k
 
     for (int ch = 0; ch < n_channels; ch++) {
         int ng = n_gates_per_ch[ch];
@@ -154,7 +153,7 @@ extern "C" __global__ void hh_step_kernel(
             // SOA gate access: gates[gate_idx * n + neuron_idx]
             float* g_ptr = &gates[gi * n];
 
-            // Gate update: g(t+dt) = m_inf + (g(t) - m_inf) * exp(-dt/tau)
+            // Rush-Larsen gate update: g(t+dt) = m_inf + (g(t) - m_inf) * exp(-dt/tau)
             float g_val = m_inf + (g_ptr[idx] - m_inf) * decay;
             g_ptr[idx] = g_val;
 
@@ -168,26 +167,30 @@ extern "C" __global__ void hh_step_kernel(
             gi++;
         }
 
-        I_ion += g_ch * (vi - e_rev);
+        g_ion_sum += g_ch;
+        I_ion_sum += g_ch * e_rev;
     }
 
-    // Leak current
-    float I_leak = g_leak[idx] * (vi - E_leak[idx]);
-    float dV = (Ii[idx] - I_ion - I_leak) / C_m[idx];
-    vi += dV * dt;
-    vi = fminf(50.0f, fmaxf(-100.0f, vi));
+    // ─── Exponential Euler Membrane Voltage Integration (Unconditionally Stable) ─
+    float g_l = g_leak[idx];
+    float e_l = E_leak[idx];
+    float cm = C_m[idx];
+    float Ii_val = Ii[idx];
 
-    // ─── Spike detection (backward zero-crossing) ───
-    // Match CPU HHLUT: detect when v crosses 0 mV going DOWN.
-    // This captures the spike after its peak, allowing the natural
-    // AHP to develop (v falls to ~-75 mV, KV deactivation takes ~15ms).
-    // NO artificial v reset — let HH dynamics play out.
+    float g_tot = g_ion_sum + g_l + 1e-12f;
+    float v_inf = (Ii_val + I_ion_sum + g_l * e_l) / g_tot;
+    float tau_v = cm / g_tot;
+    float decay_v = __expf(-dt / tau_v);
+
+    float v_prev = vi;
+    vi = v_inf + (v_prev - v_inf) * decay_v;
+
+    // ─── Standard Rising-Edge Spike Threshold Detection ───
     int spiked = 0;
-    float v_prev = v[idx];  // v from previous step (before update)
-    if (v_prev >= 0.0f && vi < 0.0f) {
+    const float V_THRESH = 0.0f; // 0 mV threshold
+
+    if (ref <= 0.0f && v_prev < V_THRESH && vi >= V_THRESH) {
         spiked = 1;
-    }
-    if (spiked) {
         refractory[idx] = tau_ref;
     }
 
@@ -228,7 +231,11 @@ extern "C" int cuda_hh_step(
 extern "C" int gpu_hh_step_async(void* vctx, float dt, float tau_ref) {
     GpuCtx* ctx = (GpuCtx*)vctx;
     ENSURE_ALLOC(d_spikes, ctx->n_neurons*sizeof(int));
-    ENSURE_ALLOC(d_refractory, ctx->n_neurons*sizeof(float));
+    if (!ctx->d_refractory) {
+        cudaError_t _e = cudaMalloc(&ctx->d_refractory, ctx->n_neurons*sizeof(float));
+        if (_e) return (int)_e;
+        cudaMemset(ctx->d_refractory, 0, ctx->n_neurons*sizeof(float));
+    }
     int bs = 256;
     int n = ctx->n_neurons;
     int n_gates = ctx->n_hh_gates;

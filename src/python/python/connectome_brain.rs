@@ -31,7 +31,8 @@ use crate::connectome::{
     LifParams, IzhikevichParams, RateParams, PsiParams,
     SynapticKinetics,
 };
-use crate::core::neuron::hh::{HhLutConfig, standard_config};
+use crate::core::neuron::hh::{HhLutConfig, standard_config, build_config_from_channels};
+use crate::kernels::neuron::hh::pacemaking_channels;
 
 // ─── ConnectomeData ──────────────────────────────────
 
@@ -174,6 +175,7 @@ pub struct PyBrainSimulator {
     n_neurons: usize,
     kinetics: Option<SynapticKinetics>,
     hh_config: Option<(f32, HhLutConfig)>,  // (dt, config) — lazily created for "hh" model
+    hh_use_pacemaking: bool,                 // if true, use 3-channel HH (NaV+KV+CaT)
 }
 
 impl PyBrainSimulator {
@@ -182,7 +184,13 @@ impl PyBrainSimulator {
         match &mut self.hh_config {
             Some((stored_dt, _)) if *stored_dt == dt => {}
             _ => {
-                self.hh_config = Some((dt, standard_config(self.n_neurons, dt)));
+                let cfg = if self.hh_use_pacemaking {
+                    let channels = pacemaking_channels();
+                    build_config_from_channels(&channels, self.n_neurons, dt, -100.0, 60.0, 1024)
+                } else {
+                    standard_config(self.n_neurons, dt)
+                };
+                self.hh_config = Some((dt, cfg));
             }
         }
         &mut self.hh_config.as_mut().unwrap().1
@@ -192,20 +200,28 @@ impl PyBrainSimulator {
 #[pymethods]
 impl PyBrainSimulator {
     #[new]
-    #[pyo3(signature = (n_neurons, model="lif".to_string()))]
-    pub fn new(n_neurons: usize, model: String) -> PyResult<Self> {
-        let (nm, hh_config) = match model.as_str() {
-            "lif" => (NeuronModel::LIF, None),
-            "izhikevich" => (NeuronModel::Izhikevich, None),
-            "rate" => (NeuronModel::Rate, None),
-            "psi" => (NeuronModel::Psi, None),
-            "hh" => (NeuronModel::LIF, Some((0.0, standard_config(n_neurons, 0.5)))),
+    #[pyo3(signature = (n_neurons, model="lif".to_string(), pacemaking=false))]
+    pub fn new(n_neurons: usize, model: String, pacemaking: bool) -> PyResult<Self> {
+        let (nm, hh_use_pacemaking, hh_config) = match model.as_str() {
+            "lif" => (NeuronModel::LIF, false, None),
+            "izhikevich" => (NeuronModel::Izhikevich, false, None),
+            "rate" => (NeuronModel::Rate, false, None),
+            "psi" => (NeuronModel::Psi, false, None),
+            "hh" => {
+                if pacemaking {
+                    let channels = pacemaking_channels();
+                    let cfg = build_config_from_channels(&channels, n_neurons, 0.5, -100.0, 60.0, 1024);
+                    (NeuronModel::LIF, true, Some((0.0, cfg)))
+                } else {
+                    (NeuronModel::LIF, false, Some((0.0, standard_config(n_neurons, 0.5))))
+                }
+            }
             other => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                 format!("Unknown model '{other}'. Use: lif, izhikevich, rate, psi, hh")
             )),
         };
         let state = conn::BrainState::new(n_neurons, nm);
-        Ok(Self { state, model: nm, n_neurons, kinetics: None, hh_config })
+        Ok(Self { state, model: nm, n_neurons, kinetics: None, hh_config, hh_use_pacemaking })
     }
 
     /// Getter for n_neurons.
@@ -344,7 +360,13 @@ impl PyBrainSimulator {
                 None => true,
             };
             if recreate {
-                self.hh_config = Some((dt_ms, standard_config(self.n_neurons, dt_ms)));
+                let cfg = if self.hh_use_pacemaking {
+                    let channels = pacemaking_channels();
+                    build_config_from_channels(&channels, self.n_neurons, dt_ms, -100.0, 60.0, 1024)
+                } else {
+                    standard_config(self.n_neurons, dt_ms)
+                };
+                self.hh_config = Some((dt_ms, cfg));
             }
             let cfg = &mut self.hh_config.as_mut().unwrap().1;
             let kinetics = self.kinetics.as_mut().unwrap();
@@ -380,6 +402,75 @@ impl PyBrainSimulator {
         Ok(spike_buf.into_pyarray(py))
     }
 
+    /// Run Izhikevich Dual Memory simulation with slow state pathway.
+    ///
+    /// The slow state accumulates recent spiking activity per neuron:
+    /// ```text
+    /// m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t-1]
+    /// I += w_m · m[t-1]
+    /// ```
+    ///
+    /// Also applies Hebbian plasticity on CSR weights (in-place):
+    /// ``dW = η · m_pre · m_post − α · W · dt``
+    ///
+    /// Args:
+    ///     connectome: ``ConnectomeData`` — CSR graph (weights are modified by Hebbian plasticity).
+    ///     n_steps: number of simulation steps.
+    ///     dt_ms: timestep in milliseconds (default 0.5).
+    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
+    ///     tau_m: slow memory time constant (0..1, higher = slower decay, default 0.999).
+    ///     w_m: memory-to-current weight (how much slow state modulates I, default 5.0).
+    ///     hebb_lr: Hebbian learning rate (default 0.001).
+    ///     hebb_decay: Hebbian weight decay (default 0.0001).
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, tau_m=0.999, w_m=5.0, hebb_lr=0.001, hebb_decay=0.0001))]
+    pub fn step_batch_dual<'py>(
+        &mut self,
+        py: Python<'py>,
+        connectome: &mut PyConnectomeData,
+        n_steps: usize,
+        dt_ms: f32,
+        external_I: Option<Bound<'_, PyArray1<f32>>>,
+        tau_m: f32,
+        w_m: f32,
+        hebb_lr: f32,
+        hebb_decay: f32,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let conn_data = &mut connectome.inner;
+        let n = self.n_neurons;
+
+        let ext_I: Vec<f32> = match external_I {
+            Some(arr) => {
+                let ro = arr.readonly();
+                let sl = ro.as_slice()?;
+                let mut v = vec![0.0f32; n];
+                let copy_n = sl.len().min(n);
+                v[..copy_n].copy_from_slice(&sl[..copy_n]);
+                v
+            }
+            None => vec![0.0f32; n],
+        };
+
+        let params = conn::IzhikevichDualParams {
+            a: vec![0.02f32; n],
+            b: vec![0.2f32; n],
+            c: vec![-65.0f32; n],
+            d: vec![8.0f32; n],
+            dt_ms,
+            tau_ref: 2.0,
+            tau_m,
+            w_m,
+        };
+
+        let spike_buf = conn::sim_izhikevich_dual(
+            conn_data, &mut self.state, &params, &ext_I, n_steps, hebb_lr, hebb_decay,
+        );
+
+        Ok(spike_buf.into_pyarray(py))
+    }
+
     /// Reset synaptic conductances to zero (keeps membrane potentials intact).
     pub fn reset_kinetics(&mut self) {
         if let Some(k) = &mut self.kinetics {
@@ -390,7 +481,13 @@ impl PyBrainSimulator {
     /// Reset brain state with small noise. Also resets synaptic conductances.
     pub fn reset(&mut self) {
         if let Some((dt, _)) = &self.hh_config {
-            self.hh_config = Some((*dt, standard_config(self.n_neurons, *dt)));
+            let cfg = if self.hh_use_pacemaking {
+                let channels = pacemaking_channels();
+                build_config_from_channels(&channels, self.n_neurons, *dt, -100.0, 60.0, 1024)
+            } else {
+                standard_config(self.n_neurons, *dt)
+            };
+            self.hh_config = Some((*dt, cfg));
         }
         self.state = conn::BrainState::new(self.n_neurons, self.model);
         self.state.reset_with_noise(self.n_neurons);
@@ -436,6 +533,123 @@ impl PyBrainSimulator {
     /// Current recovery variables (u) — read-only snapshot.
     pub fn u<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         self.state.u[..self.n_neurons].to_vec().into_pyarray(py)
+    }
+
+    /// Set HH ion channel parameters (for "hh" model only).
+    ///
+    /// Args:
+    ///     g_max_arr: per-channel max conductances ``[n_channels]`` e.g. [120.0, 36.0] for NaV, KV.
+    ///     E_rev_arr: per-channel reversal potentials ``[n_channels]`` e.g. [50.0, -77.0] for Na, K.
+    ///     g_leak: per-neuron leak conductance ``[n_neurons]`` (scalar accepted, broadcast).
+    ///     E_leak: per-neuron leak reversal ``[n_neurons]`` (scalar accepted, broadcast).
+    ///
+    /// Must be called after constructing BrainSimulator(model="hh").
+    /// Takes effect on the next ``step_batch()`` call.
+    /// Pass ``dt_ms=`` to lock the HH timestep — prevents ``ensure_hh_config``
+    /// from recreating the config with default parameters.
+    #[pyo3(signature = (g_max_arr, E_rev_arr, g_leak, E_leak, dt_ms=None))]
+    pub fn set_hh_params(
+        &mut self,
+        g_max_arr: Bound<'_, PyArray1<f32>>,
+        E_rev_arr: Bound<'_, PyArray1<f32>>,
+        g_leak: Bound<'_, PyArray1<f32>>,
+        E_leak: Bound<'_, PyArray1<f32>>,
+        dt_ms: Option<f32>,
+    ) -> PyResult<()> {
+        let hh_cfg = match &mut self.hh_config {
+            Some((dt, cfg)) => {
+                // Lock the dt if provided — prevents ensure_hh_config from recreating
+                if let Some(dt_val) = dt_ms {
+                    *dt = dt_val;
+                }
+                cfg
+            }
+            None => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "BrainSimulator not in HH mode — construct with model='hh'".to_string()
+            )),
+        };
+
+        // g_max_arr: [n_channels] (broadcast) or [n_channels * n_neurons] (per-neuron)
+        {
+            let ro = g_max_arr.readonly();
+            let sl = ro.as_slice()?;
+            if sl.len() == hh_cfg.n_channels {
+                // Broadcast scalar per-channel g_max to all neurons
+                let n = self.n_neurons;
+                for (ch_i, &val) in sl.iter().enumerate() {
+                    for ni in 0..n {
+                        hh_cfg.g_max_arr[ch_i * n + ni] = val;
+                    }
+                }
+            } else if sl.len() == hh_cfg.n_channels * self.n_neurons {
+                // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
+                hh_cfg.g_max_arr.copy_from_slice(sl);
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
+                        sl.len(), hh_cfg.n_channels, hh_cfg.n_channels * self.n_neurons)
+                ));
+            }
+        }
+
+        // E_rev_arr: must match n_channels
+        {
+            let ro = E_rev_arr.readonly();
+            let sl = ro.as_slice()?;
+            if sl.len() != hh_cfg.n_channels {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("E_rev_arr length {} != n_channels {}", sl.len(), hh_cfg.n_channels)
+                ));
+            }
+            hh_cfg.E_rev_arr.copy_from_slice(sl);
+        }
+
+        // g_leak: per-neuron, length must match n_neurons
+        {
+            let ro = g_leak.readonly();
+            let sl = ro.as_slice()?;
+            let n = sl.len().min(self.n_neurons);
+            hh_cfg.g_leak[..n].copy_from_slice(&sl[..n]);
+        }
+
+        // E_leak: per-neuron, length must match n_neurons
+        {
+            let ro = E_leak.readonly();
+            let sl = ro.as_slice()?;
+            let n = sl.len().min(self.n_neurons);
+            hh_cfg.E_leak[..n].copy_from_slice(&sl[..n]);
+        }
+
+        // Also update v_prev to avoid spike detection glitch after param change
+        hh_cfg.v_prev.copy_from_slice(&hh_cfg.v);
+
+        Ok(())
+    }
+
+    /// Get membrane capacitances — read-only snapshot.
+    /// For HH: returns cfg.C_m (per-neuron).
+    /// For LIF/Izhikevich: returns state's internal C_m (default 1.0).
+    pub fn C_m<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        if let Some((_, cfg)) = &self.hh_config {
+            cfg.C_m[..self.n_neurons].to_vec().into_pyarray(py)
+        } else {
+            // Non-HH: C_m is not stored per-neuron, return defaults
+            vec![1.0; self.n_neurons].into_pyarray(py)
+        }
+    }
+
+    /// Set membrane capacitances (per-neuron).
+    /// For HH: sets cfg.C_m per-neuron. Affects dv/dt = (I - I_ion) / C_m.
+    /// For non-HH: no effect (LIF/Izhikevich use params, not per-neuron C_m).
+    pub fn set_C_m(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = values.readonly();
+        let sl = ro.as_slice()?;
+        if let Some((_, cfg)) = &mut self.hh_config {
+            let n = sl.len().min(self.n_neurons);
+            cfg.C_m[..n].copy_from_slice(&sl[..n]);
+        }
+        // Non-HH: silently ignored (LIF/Izhikevich have fixed params, not per-neuron C_m)
+        Ok(())
     }
 
     /// Current input currents (Ii) — read-only snapshot.

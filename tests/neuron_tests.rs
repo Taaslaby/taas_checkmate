@@ -1998,12 +1998,13 @@ fn test_hh_high_current_stability() {
     let g_leak = vec![0.3f32; n];
     let E_leak = vec![-65.0f32; n];
     let C_m = vec![1.0f32; n];
+    let g_max_per_neuron: Vec<f32> = channels.iter().map(|ch| ch.g_max).collect();
 
     unsafe {
         taas_checkmate::kernels::neuron::hh::hh_poly_step(
             v.as_mut_ptr(), gates.as_mut_ptr(), Ii.as_ptr(),
             g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
-            n, &meta, 0.01,
+            n, &meta, g_max_per_neuron.as_ptr(), 0.01,
         );
     }
 

@@ -128,7 +128,7 @@ pub struct BrainState {
 impl BrainState {
     /// Create a new brain state for `n_neurons` neurons.
     pub fn new(n_neurons: usize, model: NeuronModel) -> Self {
-        let n_padded = (n_neurons + 7) / 8 * 8;
+        let n_padded = n_neurons.div_ceil(8) * 8;
         let (v_init, u_init) = match model {
             NeuronModel::LIF => (-58.0, 0.0),
             NeuronModel::Izhikevich => (-65.0, -13.0),
@@ -212,7 +212,7 @@ impl LifParams {
     /// Note: params[1..n) are UNUSED padding (gap after dt before first column).
     pub fn new(tau_m: &[f32], v_rest: &[f32], v_thresh: &[f32], v_reset: &[f32], dt_ms: f32, tau_ref: f32) -> Self {
         let n = tau_m.len();
-        let n_padded = (n + 7) / 8 * 8;
+        let n_padded = n.div_ceil(8) * 8;
         // Allocate 5 * n_padded elements (stride = n_padded for each column)
         let mut packed = vec![0.0f32; n_padded * 5];
         // Column 0: dt at index 0 (rest of indices 1..n_padded are unused padding)
@@ -1797,10 +1797,7 @@ pub fn sim_hh(
             cfg.Ii[i] += external_I[i];
         }
 
-        // 2. Clamp Ii (prevents saturation)
-        safe::safety_clamp(&mut cfg.Ii[..n], -100.0, 100.0);
-
-        // 3. HH step — produces spikes, updates cfg.v
+        // 2. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
         taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes);
 
         // 4. Push spikes to queue
@@ -1862,10 +1859,7 @@ pub fn sim_hh_synaptic(
         // 3. Compute I_syn from conductances and add to Ii
         kinetics.compute_currents(&cfg.v, &mut cfg.Ii);
 
-        // 4. Clamp Ii (prevents saturation from oversized CSR propagation)
-        safe::safety_clamp(&mut cfg.Ii[..n], -100.0, 100.0);
-
-        // 5. HH step — produces spikes, updates cfg.v
+        // 4. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
         taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes);
 
         // 5. Push spikes to queue

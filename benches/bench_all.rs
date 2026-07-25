@@ -375,13 +375,13 @@ fn bench_fhn_step(c: &mut Criterion) {
     let (mut v1, mut w1, i1, mut sp1, p1) = (vec![-65.0f32], vec![0.0f32], vec![10.0f32], vec![0i32], pack_fhn(&[0.5, 10.0, 0.7, 0.8]));
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| b.iter(|| {
-        kernels::fhn_step(&mut v1, &mut w1, &i1, &mut sp1, &p1);
+        kernels::fhn_step(&mut v1, &mut w1, &i1, &mut sp1, &p1, None);
         black_box(());
     }));
     let (mut v8, mut w8, i8, mut sp8, p8) = (vec![-65.0f32; 8], vec![0.0f32; 8], vec![10.0f32; 8], vec![0i32; 8], pack_fhn_n(&[0.5, 10.0, 0.7, 0.8], 8));
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| b.iter(|| {
-        kernels::fhn_step(&mut v8, &mut w8, &i8, &mut sp8, &p8);
+        kernels::fhn_step(&mut v8, &mut w8, &i8, &mut sp8, &p8, None);
         black_box(());
     }));
     g.finish();
@@ -424,6 +424,87 @@ fn bench_delay_buffer(c: &mut Criterion) {
         black_box(());
     }));
     g.finish();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HH (Hodgkin-Huxley) — fused vs original benchmark
+// ═══════════════════════════════════════════════════════════
+
+fn bench_hh_fused_vs_original(c: &mut Criterion) {
+    use taas_kernels::neuron::hh;
+
+    let channels = hh::standard_channels();
+    let channel_meta = hh::build_channel_meta(&channels);
+    let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
+
+    let n = 1024;
+    let dt = 0.01;
+
+    let v = vec![-65.0f32; n];
+    let mut gates = vec![0.0f32; n * n_gates];
+    let init_gates = hh::steady_state_gates(-65.0, &channels);
+    for gi in 0..n_gates {
+        for ni in 0..n {
+            gates[gi * n + ni] = init_gates[gi];
+        }
+    }
+    let Ii = vec![15.0f32; n];
+    let g_leak = vec![0.3f32; n];
+    let E_leak = vec![-65.0f32; n];
+    let C_m = vec![1.0f32; n];
+    let n_channels = channel_meta.len();
+    // Per-neuron g_max: column-major [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+    let mut g_max_per_neuron = vec![0.0; n_channels * n];
+    for (ch_i, ch) in channels.iter().enumerate() {
+        for ni in 0..n {
+            g_max_per_neuron[ch_i * n + ni] = ch.g_max;
+        }
+    }
+
+    let mut group = c.benchmark_group("hh_poly_vs_fused");
+    group.throughput(Throughput::Elements(n as u64));
+
+    // Old: hh_poly_step + manual spike detection (v_prev copy + loop)
+    group.bench_function("original_old_way", |b| {
+        let mut v_copy = v.clone();
+        let mut gates_copy = gates.clone();
+        let mut v_prev = vec![0.0f32; n];
+        let mut spikes = vec![0i32; n];
+        b.iter(|| {
+            v_prev.copy_from_slice(&v_copy);
+            unsafe {
+                hh::hh_poly_step(
+                    v_copy.as_mut_ptr(), gates_copy.as_mut_ptr(), Ii.as_ptr(),
+                    g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
+                    n, &channel_meta, g_max_per_neuron.as_ptr(), dt,
+                );
+            }
+            for i in 0..n {
+                spikes[i] = if v_prev[i] >= 0.0 && v_copy[i] < 0.0 { 1 } else { 0 };
+            }
+            black_box(&spikes);
+        });
+    });
+
+    // New: fused_hh_poly_step (one SIMD pass, no copy, common subexpression)
+    group.bench_function("fused_new_way", |b| {
+        let mut v_copy = v.clone();
+        let mut gates_copy = gates.clone();
+        let mut spikes = vec![0i32; n];
+        b.iter(|| {
+            unsafe {
+                hh::fused_hh_poly_step(
+                    v_copy.as_mut_ptr(), gates_copy.as_mut_ptr(), Ii.as_ptr(),
+                    g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
+                    n, &channel_meta, g_max_per_neuron.as_ptr(), dt,
+                    spikes.as_mut_ptr(),
+                );
+            }
+            black_box(&spikes);
+        });
+    });
+
+    group.finish();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -477,5 +558,7 @@ criterion_group!(benches_all,
     bench_fhn_step,
     bench_wc_step,
     bench_delay_buffer,
+    // hh
+    bench_hh_fused_vs_original,
 );
 criterion_main!(benches_all);

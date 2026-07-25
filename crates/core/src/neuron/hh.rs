@@ -27,6 +27,7 @@ pub struct HhState {
 }
 
 /// Compiled LUT configuration for simulation.
+/// Compiled LUT configuration for simulation.
 pub struct HhLutConfig {
     pub n: usize,
     pub n_gates: usize,
@@ -44,6 +45,10 @@ pub struct HhLutConfig {
     pub E_leak: Vec<f32>,
     pub C_m: Vec<f32>,
 
+    /// Per-neuron g_max: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+    /// Size: [n_channels * n]
+    pub g_max_arr: Vec<f32>,
+
     // LUT data (per gate, length n_gates)
     pub m_inf_luts: Vec<Vec<f32>>,  // [n_gates][n_bins+1]
     pub decay_luts: Vec<Vec<f32>>,  // [n_gates][n_bins+1]
@@ -51,7 +56,6 @@ pub struct HhLutConfig {
 
     // Channel params (per channel, length n_channels)
     pub E_rev_arr: Vec<f32>,   // [n_channels]
-    pub g_max_arr: Vec<f32>,   // [n_channels]
     pub n_gates_per_ch: Vec<usize>,
 
     /// Which gate index is the leak (or !0 for explicit leak).
@@ -63,7 +67,7 @@ pub struct HhLutConfig {
     /// Number of LUT bins (actual array length = n_bins + 1 for linear interpolation).
     pub n_bins_usize: usize,
 
-    /// Previous voltage for spike detection (reverse zero-crossing).
+    /// Previous voltage — больше не обновляется `step_hh_lut`.
     pub v_prev: Vec<f32>,
 
     /// Cached ChannelMeta for polynomial HH (avoids rebuild per step).
@@ -83,12 +87,10 @@ pub fn standard_config(n: usize, dt: f32) -> HhLutConfig {
     let mut powers = Vec::with_capacity(n_gates);
     // Per-channel arrays
     let mut E_rev_arr = Vec::with_capacity(n_channels);
-    let mut g_max_arr = Vec::with_capacity(n_channels);
     let mut n_gates_per_ch = Vec::with_capacity(n_channels);
 
     for (ch_i, ch) in channels.iter().enumerate() {
         E_rev_arr.push(ch.E_rev);
-        g_max_arr.push(ch.g_max);
         n_gates_per_ch.push(ch.gates.len());
         for (g_i, gate) in ch.gates.iter().enumerate() {
             m_inf_luts.push(luts[ch_i][g_i].m_inf.clone());
@@ -110,6 +112,15 @@ pub fn standard_config(n: usize, dt: f32) -> HhLutConfig {
     let channels_sp = kernels::neuron::hh::standard_channels();
     let channel_meta = kernels::neuron::hh::build_channel_meta(&channels_sp);
 
+    // Per-neuron g_max: column-major [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+    // Size: [n_channels * n], each channel stride = n
+    let mut g_max_arr = vec![0.0; n_channels * n];
+    for (ch_i, ch) in channels.iter().enumerate() {
+        for ni in 0..n {
+            g_max_arr[ch_i * n + ni] = ch.g_max;
+        }
+    }
+
     HhLutConfig {
         n,
         n_gates,
@@ -125,10 +136,10 @@ pub fn standard_config(n: usize, dt: f32) -> HhLutConfig {
         g_leak: vec![0.3; n],
         E_leak: vec![-65.0; n],
         C_m: vec![1.0; n],
+        g_max_arr,
         m_inf_luts,
         decay_luts,
         E_rev_arr,
-        g_max_arr,
         powers,
         n_gates_per_ch,
         g_leak_idx: !0,
@@ -153,17 +164,24 @@ pub fn build_config_from_channels(
     let mut decay_luts = Vec::with_capacity(n_gates);
     let mut powers = Vec::with_capacity(n_gates);
     let mut E_rev_arr = Vec::with_capacity(n_channels);
-    let mut g_max_arr = Vec::with_capacity(n_channels);
     let mut n_gates_per_ch = Vec::with_capacity(n_channels);
 
     for (ch_i, ch) in channels.iter().enumerate() {
         E_rev_arr.push(ch.E_rev);
-        g_max_arr.push(ch.g_max);
         n_gates_per_ch.push(ch.gates.len());
         for (g_i, gate) in ch.gates.iter().enumerate() {
             m_inf_luts.push(luts[ch_i][g_i].m_inf.clone());
             decay_luts.push(luts[ch_i][g_i].decay.clone());
             powers.push(gate.power);
+        }
+    }
+
+    // Per-neuron g_max: column-major [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+    // Size: [n_channels * n], each channel stride = n
+    let mut g_max_arr = vec![0.0; n_channels * n];
+    for (ch_i, ch) in channels.iter().enumerate() {
+        for ni in 0..n {
+            g_max_arr[ch_i * n + ni] = ch.g_max;
         }
     }
 
@@ -194,10 +212,10 @@ pub fn build_config_from_channels(
         g_leak: vec![0.3; n],
         E_leak: vec![-65.0; n],
         C_m: vec![1.0; n],
+        g_max_arr,
         m_inf_luts,
         decay_luts,
         E_rev_arr,
-        g_max_arr,
         powers,
         n_gates_per_ch,
         g_leak_idx: !0,
@@ -527,13 +545,22 @@ mod tests {
         let g_leak = vec![0.3; n];
         let E_leak = vec![-65.0; n];
         let C_m = vec![1.0; n];
+        let n_channels = meta.len();
+        // Per-neuron g_max: column-major [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+        let mut g_max_arr = vec![0.0; n_channels * n];
+        let channels = standard_channels();
+        for (ch_i, ch) in channels.iter().enumerate() {
+            for ni in 0..n {
+                g_max_arr[ch_i * n + ni] = ch.g_max;
+            }
+        }
 
         for _ in 0..200 {
             unsafe {
                 hh_poly_step(
                     v.as_mut_ptr(), gates.as_mut_ptr(), Ii.as_ptr(),
                     g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
-                    n, &meta, 0.01,
+                    n, &meta, g_max_arr.as_ptr(), 0.01,
                 );
             }
         }
@@ -571,13 +598,22 @@ mod tests {
         let g_leak = vec![0.3; n];
         let E_leak = vec![-65.0; n];
         let C_m = vec![1.0; n];
+        let n_channels = meta.len();
+        // Per-neuron g_max: column-major [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+        let mut g_max_arr = vec![0.0; n_channels * n];
+        let channels = standard_channels();
+        for (ch_i, ch) in channels.iter().enumerate() {
+            for ni in 0..n {
+                g_max_arr[ch_i * n + ni] = ch.g_max;
+            }
+        }
 
         for _ in 0..200 {
             unsafe {
                 hh_poly_step(
                     v.as_mut_ptr(), gates.as_mut_ptr(), Ii.as_ptr(),
                     g_leak.as_ptr(), E_leak.as_ptr(), C_m.as_ptr(),
-                    n, &meta, 0.01,
+                    n, &meta, g_max_arr.as_ptr(), 0.01,
                 );
             }
         }
@@ -769,8 +805,11 @@ mod tests {
     #[test]
     fn test_hh_input_resistance() {
         // Input resistance R_in = ΔV / ΔI при subthreshold I
-        // Для gL=0.3, Cm=1: R_in_theoretical = 1/gL = 3.33 mV/µA·cm²
-        // (в единицах мембраны: ΔV = I/gL для постоянного тока)
+        // Для пассивной мембраны: R_in = 1/gL = 3.33 mV/µA·cm².
+        // НО: HH имеет voltage-gated K+ каналы (n⁴). При V=-65 mV
+        // n≈0.32, n⁴≈0.01, G_K ≈ 36*0.01 = 0.36 mS/cm².
+        // Общая проводимость G_total = gL + G_K ≈ 0.3 + 0.36 = 0.66
+        // → R_in ≈ 1.5 mV/µA·cm². Это expected HH behaviour, не баг.
         let mut cfg = standard_config(1, 0.01);
         let n_steps = 5_000;
 
@@ -787,11 +826,11 @@ mod tests {
 
         let dV = v_depol - v_rest;
         let r_in = dV / 1.0; // mV per µA/cm²
-        let r_expected = 1.0 / 0.3; // 1/gL
 
-        assert!(r_in > 1.0 && r_in < 6.0,
-            "Input resistance {r_in:.2} mV/µA·cm² out of [1.0, 6.0] (expected ~{r_expected:.1})");
-        println!("V_rest={v_rest:.1} mV, V(I=1)={v_depol:.1} mV, R_in={r_in:.2} mV/µA·cm² (expected ~{r_expected:.1})");
+        // Для HH: R_in ≈ 1/(gL + G_K(V_rest)) ≈ 1-2 mV/µA·cm²
+        assert!(r_in > 0.8 && r_in < 3.0,
+            "Input resistance {r_in:.2} mV/µA·cm² out of [0.8, 3.0] (HH with active KV channels)");
+        println!("V_rest={v_rest:.1} mV, V(I=1)={v_depol:.1} mV, R_in={r_in:.2} mV/µA·cm² (HH: K+ channels reduce R below 1/gL)");
     }
 
     #[test]
@@ -862,37 +901,31 @@ mod tests {
     }
 }
 
-/// Step all neurons by dt using polynomial HH dynamics (no LUT).
+/// Step all neurons by dt using fused polynomial HH dynamics + spike detection.
 ///
-/// Uses `hh_poly_step` (polynomial HH) as the default engine — no LUT gather,
-/// pure FMA arithmetic via `fast_exp_simd`. ~8× faster than LUT on AVX2.
+/// Uses `fused_hh_poly_step` — combines HH computation with spike detection
+/// in a single SIMD pass. Eliminates the O(n) v_prev copy and O(n) separate
+/// spike detection loop that `step_hh_lut` previously required.
 ///
-/// Also provides spike detection: writes 1 to `spikes[i]` when voltage
-/// crosses 0 mV from above (reverse zero-crossing), 0 otherwise.
-/// Matches CUDA HH spike detection convention.
+/// Spikes: writes 1 to `spikes[i]` on reverse zero-crossing (v ≥ 0 → v < 0).
+/// Step all neurons by dt using fused polynomial HH dynamics + spike detection.
+///
+/// Uses per-neuron g_max_arr from cfg.
 pub fn step_hh_lut(cfg: &mut HhLutConfig, spikes: &mut [i32]) {
     let n = cfg.n.min(spikes.len());
-    let dt = cfg.dt;
 
-    // Save previous voltage for spike detection
-    cfg.v_prev.copy_from_slice(&cfg.v);
-
-    // Use cached ChannelMeta (built once at config time)
     unsafe {
-        kernels::neuron::hh::hh_poly_step(
+        kernels::neuron::hh::fused_hh_poly_step(
             cfg.v.as_mut_ptr(),
             cfg.gates.as_mut_ptr(),
             cfg.Ii.as_ptr(),
             cfg.g_leak.as_ptr(),
             cfg.E_leak.as_ptr(),
             cfg.C_m.as_ptr(),
-            n, &cfg.channel_meta, dt,
+            n, &cfg.channel_meta,
+            cfg.g_max_arr.as_ptr(),
+            cfg.dt,
+            spikes.as_mut_ptr(),
         );
-    }
-
-    // Spike detection: reverse zero-crossing (v_prev ≥ 0 && v < 0)
-    // CUDA HH matches this convention: spike on falling edge through 0.
-    for i in 0..n {
-        spikes[i] = if cfg.v_prev[i] >= 0.0 && cfg.v[i] < 0.0 { 1 } else { 0 };
     }
 }

@@ -40,7 +40,6 @@ fn safe_col(col_indices: &[i32], idx: usize, n: usize) -> usize {
 
 // ─── Kuramoto (standard) ─────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Full sparse Kuramoto step with rayon parallelization.
 ///
 /// Computes coupling via CSR sparse matrix: `coupling[i] = Σⱼ w[i,j]·sin(θⱼ−θᵢ)`,
@@ -126,7 +125,6 @@ pub fn kuramoto_step_dense(
 
 // ─── T3 (Temporal Triplet) ───────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Full sparse T3 (Temporal Triplet) step with rayon parallelization.
 ///
 /// Combines Kuramoto phase dynamics with Stuart-Landau amplitude evolution:
@@ -257,7 +255,6 @@ pub fn kalman_update(weights: &mut [f32], cov: &mut [f32], states: &[f32], error
     kernels::kalman_update(weights, cov, states, error, s);
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Adam optimizer update: `m = β₁·m + (1−β₁)·g; v = β₂·v + (1−β₂)·g²; w -= lr·m̂/(√v̂ + ε)`.
 pub fn adam_train(
     weights: &mut [f32],

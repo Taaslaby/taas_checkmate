@@ -16,7 +16,7 @@ fn bench_izhikevich(c: &mut Criterion) {
             &mut v1, &mut u1, &mut tr1,
             &a1, &b1, &mut I1,
             0.5, 0.01, &mut sp1, &c1, &d1,
-            &mut refr1, 3.0,
+            &mut refr1, 3.0, None,
         );
         black_box(());
     }));
@@ -31,7 +31,7 @@ fn bench_izhikevich(c: &mut Criterion) {
             &mut v8, &mut u8, &mut tr8,
             &a8, &b8, &mut I8,
             0.5, 0.01, &mut sp8, &c8, &d8,
-            &mut refr8, 3.0,
+            &mut refr8, 3.0, None,
         );
         black_box(());
     }));
@@ -44,14 +44,14 @@ fn bench_lif(c: &mut Criterion) {
     let (mut v1, mut I1, mut sp1, p1) = (vec![-65.0f32], vec![15.0f32], vec![0i32], pack1(&[0.5, 10.0, -65.0, -50.0, -70.0]));
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| b.iter(|| {
-        kernels::lif_step(&mut v1, &mut I1, &mut sp1, &p1, &mut refr1_l, 3.0);
+        kernels::lif_step(&mut v1, &mut I1, &mut sp1, &p1, &mut refr1_l, 3.0, None);
         black_box(());
     }));
     let mut refr8_l = vec![0.0f32; 8];
     let (mut v8, mut I8, mut sp8, p8) = (vec![-65.0f32; 8], vec![15.0f32; 8], vec![0i32; 8], pack8(&[0.5, 10.0, -65.0, -50.0, -70.0]));
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| b.iter(|| {
-        kernels::lif_step(&mut v8, &mut I8, &mut sp8, &p8, &mut refr8_l, 3.0);
+        kernels::lif_step(&mut v8, &mut I8, &mut sp8, &p8, &mut refr8_l, 3.0, None);
         black_box(());
     }));
     g.finish();
@@ -63,14 +63,14 @@ fn bench_lif_at(c: &mut Criterion) {
     let (mut v1, mut th1, mut I1, mut sp1, p1) = (vec![-65.0f32], vec![0.0f32], vec![15.0f32], vec![0i32], pack1(&[0.5, 10.0, -65.0, -50.0, -70.0, 20.0, 0.1]));
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| b.iter(|| {
-        kernels::lif_at_step(&mut v1, &mut th1, &mut I1, &mut sp1, &p1, &mut refr1_la, 3.0);
+        kernels::lif_at_step(&mut v1, &mut th1, &mut I1, &mut sp1, &p1, &mut refr1_la, 3.0, None);
         black_box(());
     }));
     let mut refr8_la = vec![0.0f32; 8];
     let (mut v8, mut th8, mut I8, mut sp8, p8) = (vec![-65.0f32; 8], vec![0.0f32; 8], vec![15.0f32; 8], vec![0i32; 8], pack8(&[0.5, 10.0, -65.0, -50.0, -70.0, 20.0, 0.1]));
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| b.iter(|| {
-        kernels::lif_at_step(&mut v8, &mut th8, &mut I8, &mut sp8, &p8, &mut refr8_la, 3.0);
+        kernels::lif_at_step(&mut v8, &mut th8, &mut I8, &mut sp8, &p8, &mut refr8_la, 3.0, None);
         black_box(());
     }));
     g.finish();
@@ -82,14 +82,14 @@ fn bench_adex(c: &mut Criterion) {
     let (mut v1, mut u1, mut I1, mut sp1, p1) = (vec![-65.0f32], vec![0.0f32], vec![15.0f32], vec![0i32], pack1(&[0.5, 10.0, 30.0, -65.0, -50.0, -70.0, 2.0, 0.03, 0.2]));
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| b.iter(|| {
-        kernels::adex_step(&mut v1, &mut u1, &mut I1, &mut sp1, &p1, &mut refr1_a, 3.0);
+        kernels::adex_step(&mut v1, &mut u1, &mut I1, &mut sp1, &p1, &mut refr1_a, 3.0, None);
         black_box(());
     }));
     let mut refr8_a = vec![0.0f32; 8];
     let (mut v8, mut u8, mut I8, mut sp8, p8) = (vec![-65.0f32; 8], vec![0.0f32; 8], vec![15.0f32; 8], vec![0i32; 8], pack8(&[0.5, 10.0, 30.0, -65.0, -50.0, -70.0, 2.0, 0.03, 0.2]));
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| b.iter(|| {
-        kernels::adex_step(&mut v8, &mut u8, &mut I8, &mut sp8, &p8, &mut refr8_a, 3.0);
+        kernels::adex_step(&mut v8, &mut u8, &mut I8, &mut sp8, &p8, &mut refr8_a, 3.0, None);
         black_box(());
     }));
     g.finish();
@@ -102,7 +102,7 @@ fn bench_saw(c: &mut Criterion) {
         (vec![-65.0f32], vec![-13.0f32], vec![0.0f32], vec![0.02f32], vec![0.2f32], vec![10.0f32], vec![0i32]);
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| b.iter(|| {
-        kernels::saw_step(&mut v1, &mut u1, &mut tr1, &a1, &b1, &I1, 0.5, 0.01, 0.1, &mut sp1, &mut refr1_s, 3.0);
+        kernels::saw_step(&mut v1, &mut u1, &mut tr1, &a1, &b1, &I1, 0.5, 0.01, 0.1, &mut sp1, &mut refr1_s, 3.0, None);
         black_box(());
     }));
     let mut refr8_s = vec![0.0f32; 8];
@@ -110,7 +110,7 @@ fn bench_saw(c: &mut Criterion) {
         (vec![-65.0f32; 8], vec![-13.0f32; 8], vec![0.0f32; 8], vec![0.02f32; 8], vec![0.2f32; 8], vec![10.0f32; 8], vec![0i32; 8]);
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| b.iter(|| {
-        kernels::saw_step(&mut v8, &mut u8, &mut tr8, &a8, &b8, &I8, 0.5, 0.01, 0.1, &mut sp8, &mut refr8_s, 3.0);
+        kernels::saw_step(&mut v8, &mut u8, &mut tr8, &a8, &b8, &I8, 0.5, 0.01, 0.1, &mut sp8, &mut refr8_s, 3.0, None);
         black_box(());
     }));
     g.finish();
@@ -249,30 +249,33 @@ fn bench_kalman(c: &mut Criterion) {
 }
 
 fn bench_hh_poly(c: &mut Criterion) {
-    use taas_checkmate::kernels::neuron::hh::{build_channel_meta, ChannelMeta, standard_channels};
+    use taas_checkmate::kernels::neuron::hh::{build_channel_meta, standard_channels};
     let channels = standard_channels();
     let meta = build_channel_meta(&channels);
-    // Single neuron
     let n_gates: usize = meta.iter().map(|ch| ch.n_gates).sum();
+    // Single neuron
     let (mut v1, mut g1, I1, gl1, El1, cm1) = (vec![-65.0f32], vec![0.5f32; n_gates], vec![10.0f32], vec![0.3f32], vec![-65.0f32], vec![1.0f32]);
+    let gmax1 = vec![120.0f32, 36.0];  // per-channel g_max for 1 neuron
     c.benchmark_group("hh_poly").throughput(Throughput::Elements(1))
     .bench_function("scalar_n1", |b| b.iter(|| {
-        unsafe { taas_checkmate::kernels::neuron::hh::hh_poly_step(
-            v1.as_mut_ptr(), g1.as_mut_ptr(), I1.as_ptr(), gl1.as_ptr(), El1.as_ptr(), cm1.as_ptr(), 1, &meta, 0.01); }
+        taas_checkmate::kernels::hh_poly_step(
+            &mut v1, &mut g1, &I1, &gl1, &El1, &cm1, &meta, &gmax1, 0.01, None);
         black_box(());
     }));
     let (mut v8, mut g8, I8, gl8, El8, cm8) = (vec![-65.0f32; 8], vec![0.5f32; 8 * n_gates], vec![10.0f32; 8], vec![0.3f32; 8], vec![-65.0f32; 8], vec![1.0f32; 8]);
+    let gmax8 = vec![120.0f32; 16];  // 2 channels × 8 neurons
     c.benchmark_group("hh_poly").throughput(Throughput::Elements(8))
     .bench_function("simd_n8", |b| b.iter(|| {
-        unsafe { taas_checkmate::kernels::neuron::hh::hh_poly_step(
-            v8.as_mut_ptr(), g8.as_mut_ptr(), I8.as_ptr(), gl8.as_ptr(), El8.as_ptr(), cm8.as_ptr(), 8, &meta, 0.01); }
+        taas_checkmate::kernels::hh_poly_step(
+            &mut v8, &mut g8, &I8, &gl8, &El8, &cm8, &meta, &gmax8, 0.01, None);
         black_box(());
     }));
     let (mut v1024, mut g1024, I1024, gl1024, El1024, cm1024) = (vec![-65.0f32; 1024], vec![0.5f32; 1024 * n_gates], vec![10.0f32; 1024], vec![0.3f32; 1024], vec![-65.0f32; 1024], vec![1.0f32; 1024]);
+    let gmax1024 = vec![120.0f32; 2048];  // 2 channels × 1024 neurons
     c.benchmark_group("hh_poly").throughput(Throughput::Elements(1024))
     .bench_function("simd_n1024", |b| b.iter(|| {
-        unsafe { taas_checkmate::kernels::neuron::hh::hh_poly_step(
-            v1024.as_mut_ptr(), g1024.as_mut_ptr(), I1024.as_ptr(), gl1024.as_ptr(), El1024.as_ptr(), cm1024.as_ptr(), 1024, &meta, 0.01); }
+        taas_checkmate::kernels::hh_poly_step(
+            &mut v1024, &mut g1024, &I1024, &gl1024, &El1024, &cm1024, &meta, &gmax1024, 0.01, None);
         black_box(());
     }));
 }

@@ -51,7 +51,7 @@ pub fn t3spike_forward_with_backend<B: T3Backend>(
     );
 
     for step in 0..n_steps {
-        let off = step * n_osc;
+        let _off = step * n_osc;
         let d_off = step * step_size;
 
         // Write pre-state into flat trajectory

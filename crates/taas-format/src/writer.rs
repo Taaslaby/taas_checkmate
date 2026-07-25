@@ -7,89 +7,102 @@ pub struct TaasWriter {
     components: Vec<ComponentEntry>,
     tensor_data: Vec<u8>,
     metadata: HashMap<String, String>,
+    compression: Option<i32>,  // zstd compression level if Some
+}
+
+/// Helper: compute CRC32 for a byte slice.
+fn compute_crc32(data: &[u8]) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(data);
+    hasher.finalize()
 }
 
 impl TaasWriter {
     pub fn new() -> Self {
-        Self { components: Vec::new(), tensor_data: Vec::new(), metadata: HashMap::new() }
+        Self { components: Vec::new(), tensor_data: Vec::new(), metadata: HashMap::new(), compression: None }
+    }
+
+    /// Enable zstd compression for all subsequent components.
+    /// `level`: 1 (fast) to 22 (max), default 3.
+    pub fn set_compression(&mut self, level: i32) {
+        self.compression = Some(level.clamp(1, 22));
+    }
+
+    /// Disable compression for subsequent components.
+    pub fn disable_compression(&mut self) {
+        self.compression = None;
     }
 
     pub fn add_metadata(&mut self, key: &str, value: &str) {
         self.metadata.insert(key.to_string(), value.to_string());
     }
 
-    pub fn add_f32(&mut self, name: &str, component_type: &str, data: &[f32]) {
+    fn push_component(&mut self, name: &str, component_type: &str, dtype: &str, shape: Vec<usize>, data: &[u8]) {
+        let crc32 = Some(compute_crc32(data));
+
+        // Optional zstd compression
+        let (stored, compression, uncompressed_size) = match self.compression {
+            Some(level) => {
+                match zstd::bulk::compress(data, level) {
+                    Ok(c) => (c, Some("zstd".to_string()), Some(data.len() as u64)),
+                    Err(_) => (data.to_vec(), None, None),  // fallback: store uncompressed
+                }
+            }
+            None => (data.to_vec(), None, None),
+        };
+
         let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 4) as u64;
+        let size = stored.len() as u64;
         self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "f32".to_string(), shape: vec![data.len()], offset, size,
+            name: name.to_string(),
+            component_type: component_type.to_string(),
+            dtype: dtype.to_string(),
+            shape,
+            offset,
+            size,
+            crc32,
+            compression,
+            uncompressed_size,
         });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        self.tensor_data.extend_from_slice(&stored);
+    }
+
+    pub fn add_f32(&mut self, name: &str, component_type: &str, data: &[f32]) {
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "f32", vec![data.len()], bytes);
     }
 
     pub fn add_f32_shape(&mut self, name: &str, component_type: &str, data: &[f32], shape: Vec<usize>) {
-        let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 4) as u64;
         let total: usize = shape.iter().product();
         assert_eq!(total, data.len(), "Shape {:?} doesn't match data len {}", shape, data.len());
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "f32".to_string(), shape, offset, size,
-        });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "f32", shape, bytes);
     }
 
     pub fn add_i32(&mut self, name: &str, component_type: &str, data: &[i32]) {
-        let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 4) as u64;
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "i32".to_string(), shape: vec![data.len()], offset, size,
-        });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "i32", vec![data.len()], bytes);
     }
 
     pub fn add_i32_shape(&mut self, name: &str, component_type: &str, data: &[i32], shape: Vec<usize>) {
-        let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 4) as u64;
         let total: usize = shape.iter().product();
         assert_eq!(total, data.len(), "Shape {:?} doesn't match data len {}", shape, data.len());
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "i32".to_string(), shape, offset, size,
-        });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "i32", shape, bytes);
     }
 
     pub fn add_i64(&mut self, name: &str, component_type: &str, data: &[i64]) {
-        let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 8) as u64;
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "i64".to_string(), shape: vec![data.len()], offset, size,
-        });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "i64", vec![data.len()], bytes);
     }
 
     pub fn add_u64(&mut self, name: &str, component_type: &str, data: &[u64]) {
-        let offset = self.tensor_data.len() as u64;
-        let size = (data.len() * 8) as u64;
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "u64".to_string(), shape: vec![data.len()], offset, size,
-        });
-        self.tensor_data.extend_from_slice(bytemuck::cast_slice(data));
+        let bytes = bytemuck::cast_slice(data);
+        self.push_component(name, component_type, "u64", vec![data.len()], bytes);
     }
 
     pub fn add_u8(&mut self, name: &str, component_type: &str, data: &[u8]) {
-        let offset = self.tensor_data.len() as u64;
-        let size = data.len() as u64;
-        self.components.push(ComponentEntry {
-            name: name.to_string(), component_type: component_type.to_string(),
-            dtype: "u8".to_string(), shape: vec![data.len()], offset, size,
-        });
-        self.tensor_data.extend_from_slice(data);
+        self.push_component(name, component_type, "u8", vec![data.len()], data);
     }
 
     pub fn add_scalar_f32(&mut self, name: &str, component_type: &str, value: f32) {

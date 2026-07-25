@@ -4,7 +4,7 @@
 # are intentional design choices for performance and clarity.
 
 # SIMD kernels and GPU wrappers routinely take 10-20 params (raw ptrs, params, etc.)
-too-many-arguments-threshold = 20
+too-many-arguments-threshold = 24
 
 # `vv = vv + SIMD_op(...)` is more readable than `vv += SIMD_op(...)`
 # in SIMD context where the operation is visually distinct

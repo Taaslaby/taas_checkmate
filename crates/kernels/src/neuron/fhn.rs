@@ -46,7 +46,8 @@ pub(crate) unsafe fn fhn_step(
     for off in (0..n8).step_by(8) {
         let mut vv = load8_mut(v, off);
         let mut ww = load8_mut(w, off);
-        let ii = load8(Ii, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let tau_w = load8(params.wrapping_add(n), off);
         let aa = load8(params.wrapping_add(2 * n), off);
         let bb = load8(params.wrapping_add(3 * n), off);
@@ -88,8 +89,9 @@ pub(crate) unsafe fn fhn_step(
             let tau_w = p[n + i];
             let a = p[2 * n + i];
             let b = p[3 * n + i];
+            let i_clamped = ii[i].clamp(-100.0, 100.0);
             let v3 = v[i] * v[i] * v[i];
-            let dv = v[i] - v3 / 3.0 - w[i] + ii[i];
+            let dv = v[i] - v3 / 3.0 - w[i] + i_clamped;
             let dw = if tau_w > 0.0 { (v[i] + a - b * w[i]) / tau_w } else { 0.0 };
             v[i] += dt_val * dv;
             w[i] += dt_val * dw;

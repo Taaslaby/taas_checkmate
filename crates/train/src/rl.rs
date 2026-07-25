@@ -101,8 +101,7 @@ pub struct ActorCriticAgent {
 }
 
 impl ActorCriticAgent {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+        pub fn new(
         n_input: usize,
         n_hidden: usize,
         n_actions: usize,
@@ -426,7 +425,7 @@ fn sample_from_softmax(probs: &[f32]) -> usize {
         cum += p;
         if r < cum { return i; }
     }
-    (probs.len() - 1).max(0)
+    probs.len() - 1
 }
 
 /// Run a single MDP episode for testing. Returns total reward.

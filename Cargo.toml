@@ -4,11 +4,9 @@ members = [
     "crates/kernels", "crates/t3", "crates/cuda", "crates/connectome",
     "crates/core",     "crates/train",
     "crates/taas-format",
-    "crates/connectome-gpt",
     "crates/cpe",
     "crates/karmac",
-    "crates/unity",
-    "crates/gpu-eval",
+    "crates/iit", "crates/taas-embodied",
 ]
 
 [workspace.package]
@@ -46,13 +44,13 @@ taas-core = { path = "crates/core" }
 taas-train = { path = "crates/train" }
 taas-format = { path = "crates/taas-format", features = ["train"] }
 taas-cpe = { path = "crates/cpe" }
+taas-iit = { path = "crates/iit" }
 
 # Internal crates (optional, behind features)
 taas-t3 = { path = "crates/t3", optional = true }
 cuda-kernels = { path = "crates/cuda", optional = true }
 taas-connectome = { path = "crates/connectome", optional = true }
 karmac = { path = "crates/karmac", optional = true }
-taas-unity = { path = "crates/unity", optional = true }
 
 # External dependencies
 rayon = "1"
@@ -81,44 +79,22 @@ harness = false
 
 # ── Core engine (no special features needed) ──
 [[example]]
-name = "bench_lif"
-path = "examples/core/bench_lif.rs"
-
-[[example]]
-name = "bench_connectome"
-path = "examples/core/bench_connectome.rs"
-
-[[example]]
-name = "learning_bench"
-path = "examples/core/learning_bench.rs"
-
-[[example]]
 name = "hologram_bridge"
 path = "examples/core/hologram_bridge.rs"
 
 # ── Core engine (requires CUDA) ──
-[[example]]
-name = "bench_cuda_lif"
-path = "examples/core/bench_cuda_lif.rs"
-required-features = ["cuda"]
-
-[[example]]
-name = "gpu_kuramoto_bench"
-path = "examples/core/gpu_kuramoto_bench.rs"
-required-features = ["cuda"]
-
 [[example]]
 name = "gpu_bptt_refine"
 path = "examples/core/gpu_bptt_refine.rs"
 required-features = ["cuda"]
 
 # ── Connectome utilities (requires connectome) ──
-[[example]]
-name = "rcm_vs_spectral"
-path = "examples/core/rcm_vs_spectral.rs"
-required-features = ["connectome"]
-
 # ── Hodgkin-Huxley (requires CUDA) ──
+[[example]]
+name = "hh_n_repro"
+path = "examples/hh/hh_n_repro.rs"
+required-features = ["cuda"]
+
 [[example]]
 name = "hh_real"
 path = "examples/hh/hh_real.rs"
@@ -167,26 +143,6 @@ path = "examples/connectome/biology_check.rs"
 required-features = ["connectome"]
 
 # ── Connectome brain simulator (requires CUDA) ──
-[[example]]
-name = "bench_fly_brain"
-path = "examples/connectome/bench_fly_brain.rs"
-required-features = ["cuda"]
-
-[[example]]
-name = "bench_fly_hh"
-path = "examples/connectome/bench_fly_hh.rs"
-required-features = ["cuda"]
-
-[[example]]
-name = "bench_mouse_brain"
-path = "examples/connectome/bench_mouse_brain.rs"
-required-features = ["cuda"]
-
-[[example]]
-name = "bench_princeton_connectome"
-path = "examples/connectome/bench_princeton_connectome.rs"
-required-features = ["cuda"]
-
 [[example]]
 name = "viz_fly_brain"
 path = "examples/connectome/viz_fly_brain.rs"
@@ -243,8 +199,8 @@ cuda = ["t3", "connectome",
 # Python bindings
 python = ["dep:pyo3", "dep:numpy", "connectome", "t3", "taas-train/connectome", "karmac"]
 
-# Unity C ABI
-unity = ["dep:taas-unity", "connectome"]
+# Unity C ABI (inlined in main crate, like python)
+unity = ["connectome"]
 
 # Everything
 all = ["t3", "train", "connectome", "karmac", "cuda", "python", "unity"]

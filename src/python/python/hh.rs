@@ -5,6 +5,7 @@
 //! Access `.v`, `.Ii`, `.gates` as numpy arrays.
 
 #![allow(non_snake_case)]
+#![allow(deprecated)]
 
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
@@ -88,16 +89,92 @@ impl PyHhLut {
         PyArray1::from_vec(py, self.cfg.g_leak.clone())
     }
 
+    /// Set leak conductances.
+    pub fn set_g_leak(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = values.readonly();
+        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("g_leak: {e}")))?;
+        if slice.len() != self.cfg.n {
+            return Err(PyValueError::new_err(format!("expected {} values, got {}", self.cfg.n, slice.len())));
+        }
+        self.cfg.g_leak.copy_from_slice(slice);
+        Ok(())
+    }
+
     /// Leak reversal potentials.
     #[getter]
     pub fn E_leak<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         PyArray1::from_vec(py, self.cfg.E_leak.clone())
     }
 
+    /// Set leak reversal potentials.
+    pub fn set_E_leak(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = values.readonly();
+        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("E_leak: {e}")))?;
+        if slice.len() != self.cfg.n {
+            return Err(PyValueError::new_err(format!("expected {} values, got {}", self.cfg.n, slice.len())));
+        }
+        self.cfg.E_leak.copy_from_slice(slice);
+        Ok(())
+    }
+
     /// Membrane capacitances.
     #[getter]
     pub fn C_m<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         PyArray1::from_vec(py, self.cfg.C_m.clone())
+    }
+
+    /// Maximum conductances per channel per neuron [n_channels * n].
+    /// Column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
+    /// Standard: [0..n]=NaV (120 mS/cm²), [n..2n]=KV (36 mS/cm²).
+    #[getter]
+    pub fn g_max_arr<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        PyArray1::from_vec(py, self.cfg.g_max_arr.clone())
+    }
+
+    /// Set maximum conductances per channel per neuron.
+    ///
+    /// Args:
+    ///     values: [n_channels] (broadcast to all neurons) or [n_channels * n] (per-neuron).
+    pub fn set_g_max_arr(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = values.readonly();
+        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("g_max_arr: {e}")))?;
+        let n = self.cfg.n;
+        if slice.len() == self.cfg.n_channels {
+            // Broadcast per-channel to all neurons
+            for (ch_i, &val) in slice.iter().enumerate() {
+                for ni in 0..n {
+                    self.cfg.g_max_arr[ch_i * n + ni] = val;
+                }
+            }
+        } else if slice.len() == self.cfg.n_channels * n {
+            self.cfg.g_max_arr.copy_from_slice(slice);
+        } else {
+            return Err(PyValueError::new_err(format!(
+                "g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
+                slice.len(), self.cfg.n_channels, self.cfg.n_channels * n
+            )));
+        }
+        Ok(())
+    }
+
+    /// Reversal potentials for each ion channel type [n_channels] (mV).
+    /// Standard: [0]=NaV (+50 mV), [1]=KV (-77 mV).
+    #[getter]
+    pub fn E_rev_arr<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        PyArray1::from_vec(py, self.cfg.E_rev_arr.clone())
+    }
+
+    /// Set reversal potentials for each ion channel type.
+    pub fn set_E_rev_arr(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = values.readonly();
+        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("E_rev_arr: {e}")))?;
+        if slice.len() != self.cfg.n_channels {
+            return Err(PyValueError::new_err(format!(
+                "expected {} values, got {}", self.cfg.n_channels, slice.len()
+            )));
+        }
+        self.cfg.E_rev_arr.copy_from_slice(slice);
+        Ok(())
     }
 
     /// Number of neurons.

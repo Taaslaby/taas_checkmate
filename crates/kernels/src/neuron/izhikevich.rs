@@ -43,7 +43,8 @@ pub(crate) unsafe fn izhikevich_step(
         let mut refr = load8_mut(refractory, off);
         let aa = load8(a, off);
         let bb = load8(b, off);
-        let ii = load8(Ii, off);
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let cc = load8(c, off);
         let dd = load8(d, off);
 
@@ -105,7 +106,8 @@ pub(crate) unsafe fn izhikevich_step(
                 continue;
             }
             let orig_v = v[i];
-            let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[i] + ii[i];
+            let i_clamped = ii[i].clamp(-100.0, 100.0);
+            let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[i] + i_clamped;
             let du = a_sl[i] * (b_sl[i] * orig_v - u[i]);
             v[i] += dt * dv;
             u[i] += dt * du;
@@ -192,7 +194,8 @@ pub(crate) unsafe fn izhikevich_dual_step(
         let mut mm = load8_mut(m, off);  // ← slow state loaded
         let aa = load8(a, off);
         let bb = load8(b, off);
-        let mut ii = load8(Ii, off);     // ← Ii is mutable now (we'll add w_m * m)
+        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
+        let mut ii = load8(Ii, off).max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
         let cc = load8(c, off);
         let dd = load8(d, off);
 
@@ -271,7 +274,7 @@ pub(crate) unsafe fn izhikevich_dual_step(
             }
             let orig_v = v[i];
             // Slow pathway: modulate current
-            let I_total = ii[i] + w_m * m[i];
+            let I_total = ii[i].clamp(-100.0, 100.0) + w_m * m[i];
             let dv = (0.04 * orig_v + 5.0) * orig_v + 140.0 - u[i] + I_total;
             let du = a_sl[i] * (b_sl[i] * orig_v - u[i]);
             v[i] += dt * dv;

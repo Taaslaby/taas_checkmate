@@ -1,6 +1,7 @@
-#![allow(unused_doc_comments, dead_code, improper_ctypes, non_snake_case, clippy::not_unsafe_ptr_arg_deref)]
-
 //! CUDA kernels for neuron-engine — максималочка GPU.
+
+#![allow(unused_doc_comments, dead_code, improper_ctypes, non_snake_case,
+    clippy::not_unsafe_ptr_arg_deref, clippy::len_without_is_empty)]
 //!
 //! ## Optimizations applied
 //!
@@ -404,7 +405,7 @@ impl GpuContext {
         ok_or(unsafe { gpu_t3_stuart_landau_async(self.ctx, dt, alpha, gain) }, "t3_stuart_landau")
     }
 
-    /// Safety clamp membrane potentials (async).
+    // Safety clamp membrane potentials (async).
     // ═══════════════════════════════════════════════════════
     //  GPU trajectory + weight optimizer for Kuramoto BPTT
     // ═══════════════════════════════════════════════════════
@@ -1210,6 +1211,33 @@ extern "C" {
     fn cuda_stdp_update(weights: *mut c_float, traces_pre: *const c_float,
         traces_post: *const c_float, lr_ltd: c_float, lr_ltp: c_float,
         w_min: c_float, w_max: c_float, n: c_int) -> c_int;
+    fn cuda_edge_predictor(
+        d_states: *const c_float,
+        d_output: *mut c_float,
+        d_w1: *const c_float, d_b1: *const c_float,
+        d_w2: *const c_float, d_b2: *const c_float,
+        d_w3: *const c_float, d_b3: *const c_float,
+        N: c_int, state_dim: c_int, hidden_dim: c_int) -> c_int;
+    fn cuda_gmm_sample(
+        d_weights: *const c_float,
+        d_means: *const c_float,
+        d_covars: *const c_float,
+        d_cum_weights: *const c_float,
+        d_states: *mut c_float,
+        N: c_int, dim: c_int, n_components: c_int, seed: u32) -> c_int;
+    fn cuda_topk_select(
+        d_logits: *const c_float,
+        d_target_degs: *const c_int,
+        d_edge_counts: *mut c_int,
+        d_scratch: *mut c_int,
+        N: c_int, threshold: c_float, topk_mult: c_int, max_k: c_int) -> c_int;
+    fn cuda_csr_build(
+        d_edge_counts: *const c_int,
+        d_row_ptr: *const c_int,
+        d_scratch_indices: *const c_int,
+        d_col_indices: *mut c_int,
+        d_values: *mut c_float,
+        max_k: c_int, N: c_int) -> c_int;
     fn cuda_hebbian_update(weights: *mut c_float, cos_diff: *const c_float,
         lr: c_float, decay: c_float, dt: c_float, n: c_int) -> c_int;
     fn cuda_kuramoto_prepare(phases: *const c_float, cos_out: *mut c_float,
@@ -1715,6 +1743,81 @@ pub fn t3_update(phases: &mut [f32], amplitudes: &mut [f32],
 pub fn t3_prepare(phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [f32]) -> Result<(), String> {
     let n = phases.len() as c_int;
     ok_or(unsafe { cuda_t3_prepare(phases.as_mut_ptr(), cos_out.as_mut_ptr(), sin_out.as_mut_ptr(), n) }, "t3_prepare")
+}
+
+pub fn edge_predictor(
+    d_states: &DevicePtr<f32>,
+    d_output: &DevicePtr<f32>,
+    d_w1: &DevicePtr<f32>, d_b1: &DevicePtr<f32>,
+    d_w2: &DevicePtr<f32>, d_b2: &DevicePtr<f32>,
+    d_w3: &DevicePtr<f32>, d_b3: &DevicePtr<f32>,
+    N: usize, state_dim: usize, hidden_dim: usize) -> Result<(), String>
+{
+    let err = unsafe {
+        cuda_edge_predictor(
+            d_states.as_ptr(), d_output.as_ptr() as *mut c_float,
+            d_w1.as_ptr(), d_b1.as_ptr(),
+            d_w2.as_ptr(), d_b2.as_ptr(),
+            d_w3.as_ptr(), d_b3.as_ptr(),
+            N as c_int, state_dim as c_int, hidden_dim as c_int)
+    };
+    ok_or(err, "edge_predictor")
+}
+
+/// Sample N states from GMM on GPU.
+pub fn gmm_sample(
+    d_weights: &DevicePtr<f32>,
+    d_means: &DevicePtr<f32>,
+    d_covars: &DevicePtr<f32>,
+    d_cum_weights: &DevicePtr<f32>,
+    d_states: &DevicePtr<f32>,
+    N: usize, dim: usize, n_components: usize, seed: u32) -> Result<(), String>
+{
+    let err = unsafe {
+        cuda_gmm_sample(
+            d_weights.as_ptr(), d_means.as_ptr(), d_covars.as_ptr(),
+            d_cum_weights.as_ptr(), d_states.as_ptr() as *mut c_float,
+            N as c_int, dim as c_int, n_components as c_int, seed)
+    };
+    ok_or(err, "gmm_sample")
+}
+
+/// Top-k selection per row from NxN logits on GPU (pass 1).
+pub fn topk_select(
+    d_logits: &DevicePtr<f32>,
+    d_target_degs: &DevicePtr<i32>,
+    d_edge_counts: &DevicePtr<i32>,
+    d_scratch: &DevicePtr<i32>,
+    N: usize, threshold: f32, topk_mult: usize, max_k: usize) -> Result<(), String>
+{
+    let err = unsafe {
+        cuda_topk_select(
+            d_logits.as_ptr(), d_target_degs.as_ptr(),
+            d_edge_counts.as_ptr() as *mut c_int,
+            d_scratch.as_ptr() as *mut c_int,
+            N as c_int, threshold, topk_mult as c_int, max_k as c_int)
+    };
+    ok_or(err, "topk_select")
+}
+
+/// Build CSR from scratch buffer on GPU (pass 2).
+pub fn csr_build(
+    d_edge_counts: &DevicePtr<i32>,
+    d_row_ptr: &DevicePtr<i32>,
+    d_scratch: &DevicePtr<i32>,
+    d_col_indices: &DevicePtr<i32>,
+    d_values: &DevicePtr<f32>,
+    max_k: usize, N: usize) -> Result<(), String>
+{
+    let err = unsafe {
+        cuda_csr_build(
+            d_edge_counts.as_ptr(), d_row_ptr.as_ptr(),
+            d_scratch.as_ptr(),
+            d_col_indices.as_ptr() as *mut c_int,
+            d_values.as_ptr() as *mut c_float,
+            max_k as c_int, N as c_int)
+    };
+    ok_or(err, "csr_build")
 }
 
 pub fn saw_step(v: &mut [f32], u: &mut [f32], trace: &mut [f32],

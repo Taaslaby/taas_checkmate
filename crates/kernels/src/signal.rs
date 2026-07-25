@@ -25,12 +25,11 @@ unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
 
 // Sigmoid via fast_exp_simd from neuron module (~3× faster than scalar f32::exp).
 // f32x8 doesn't have exp() — use the crate's SIMD polynomial approximation.
+// fast_exp_simd уже клипсует внутри к [-10, 10], redundant clamp убран.
 #[inline(always)]
 fn simd_sigmoid(x: f32x8) -> f32x8 {
     let one = f32x8::splat(1.0);
-    // Clamp x to [-10, 10] for fast_exp_simd range (overflow protection)
-    let x_clamped = x.max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
-    one / (one + super::fast_exp_simd(-x_clamped))
+    one / (one + super::fast_exp_simd(-x))
 }
 
 /// Safety-clamp values in [min, max]. Uses f32x8 SIMD.
@@ -135,7 +134,7 @@ pub(crate) unsafe fn thalamic_gate(
         let s = std::slice::from_raw_parts(source_v, n);
         let g = std::slice::from_raw_parts(gate_v, n);
         for i in n8..n {
-            let sig = 1.0 / (1.0 + (-gain * (g[i] - threshold)).exp());
+            let sig = 1.0 / (1.0 + super::fast_exp(-gain * (g[i] - threshold)));
             t[i] = s[i] * sig;
         }
     }
@@ -160,7 +159,7 @@ pub(crate) unsafe fn sigmoid_gate(
         let out = std::slice::from_raw_parts_mut(output, n);
         let inp = std::slice::from_raw_parts(input, n);
         for i in n8..n {
-            out[i] = 1.0 / (1.0 + (-gain * (inp[i] - threshold)).exp());
+            out[i] = 1.0 / (1.0 + super::fast_exp(-gain * (inp[i] - threshold)));
         }
     }
 }
@@ -186,7 +185,7 @@ pub(crate) unsafe fn phase_gate_apply(
         let inp = std::slice::from_raw_parts(input, n);
         let rr = std::slice::from_raw_parts(r, n);
         for i in n8..n {
-            let gate = 1.0 / (1.0 + (-gain * (rr[i] - threshold)).exp());
+            let gate = 1.0 / (1.0 + super::fast_exp(-gain * (rr[i] - threshold)));
             out[i] = inp[i] * gate;
         }
     }

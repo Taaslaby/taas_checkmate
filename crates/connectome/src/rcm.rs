@@ -457,7 +457,7 @@ pub fn bandwidth(row_ptr: &[i32], col_indices: &[i32]) -> usize {
         for j in start..end {
             let post = col_indices[j].max(0) as usize;
             if post < n {
-                let diff = if i > post { i - post } else { post - i };
+                let diff = i.abs_diff(post);
                 if diff > bw {
                     bw = diff;
                 }
@@ -484,7 +484,7 @@ pub fn mean_bandwidth(row_ptr: &[i32], col_indices: &[i32]) -> f64 {
         for j in start..end {
             let post = col_indices[j].max(0) as usize;
             if post < n {
-                let diff = if i > post { i - post } else { post - i };
+                let diff = i.abs_diff(post);
                 total += diff as u64;
                 count += 1;
             }

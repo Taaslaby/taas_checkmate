@@ -16,9 +16,6 @@ examples/
 ## Быстрый старт
 
 ```bash
-# Core examples (no special features)
-cargo run --example bench_lif --release
-
 # Connectome (requires connectome feature)
 cargo run --features connectome --example bake_fafb --release
 
