@@ -1,0 +1,20 @@
+[package]
+name = "pillars"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pillars — reusable SIMD bio primitives for neural computation"
+
+[dependencies]
+wide = "0.7"
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }
+pillars-macros = { path = "../pillars-macros", optional = true }
+
+[features]
+default = []
+checker = ["pillars-macros"]
+
+[dev-dependencies]
+pillars-macros = { path = "../pillars-macros" }
+rand = "0.8"

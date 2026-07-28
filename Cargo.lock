@@ -516,6 +516,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pillars"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "pillars-macros",
+ "rand",
+ "wide",
+]
+
+[[package]]
+name = "pillars-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

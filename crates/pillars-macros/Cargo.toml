@@ -1,0 +1,15 @@
+[package]
+name = "pillars-macros"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pillars Checker — compile-time biological invariant checks, like borrow checker for neurobiology"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
