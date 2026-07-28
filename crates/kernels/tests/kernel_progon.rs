@@ -485,27 +485,6 @@ fn test_spike_entropy_sparse() {
 // ═══════════════════════════════════════════════════════
 
 #[test]
-fn test_xor_attention_identical() {
-    let query = vec![0u8; 8];
-    let keys = vec![0u8; 8 * 4];
-    let values = vec![1.0, 0.0, 0.0, 0.0];
-    let mut out = 0.0;
-    xor_attention(&query, &keys, &values, &mut out);
-    // All 4 keys are identical to query (sim=1.0), so output = average of values
-    // values = [1.0, 0.0, 0.0, 0.0] → avg = 0.25
-    assert!((out - 0.25).abs() < 0.01, "identical keys attention: {out}");
-}
-
-#[test]
-fn test_rdrand_fill_range() {
-    let mut buf = vec![0.0; 1024];
-    rdrand_fill(&mut buf);
-    for &v in &buf {
-        assert!(v >= 0.0 && v < 1.0, "rdrand: {v} out of [0,1)");
-    }
-    assert!(buf.iter().any(|&v| v > 0.01), "rdrand: all zeros");
-}
-
 // ═══════════════════════════════════════════════════════
 //  6. IZHKEVICH REFRACTORY
 // ═══════════════════════════════════════════════════════
@@ -983,7 +962,6 @@ fn test_gco_step_basic() {
     let mut speed = vec![0.1; n];
 
     for _ in 0..100 {
-        unsafe {
             gco_step(
                 &mut v,
                 &mut u,
@@ -992,8 +970,7 @@ fn test_gco_step_basic() {
                 &mut i_ext,
                 &mut speed,
                 0.5,
-            )
-        };
+            );
     }
     assert_no_nan(&h_real, "gco real");
     assert_no_nan(&h_imag, "gco imag");
@@ -1158,5 +1135,144 @@ fn test_lif_long_run_stability() {
     assert_no_nan(&v, "lif long-run v");
     for &vv in &v {
         assert!(vv > -200.0 && vv < 100.0, "lif long-run v={vv}");
+    }
+}
+
+#[test]
+fn test_morris_lecar_simd_step() {
+    let mut v = vec![-60.0; 8];
+    let mut w = vec![0.0; 8];
+    let mut i_in = vec![50.0; 8];
+    let mut spikes = vec![0; 8];
+    let mut params = vec![0.0; 8 * 16];
+    for c in 0..8 {
+        params[c * 16 + 0] = 20.0;  // C
+        params[c * 16 + 1] = 2.0;   // g_L
+        params[c * 16 + 2] = -60.0; // E_L
+        params[c * 16 + 3] = 4.0;   // g_Ca
+        params[c * 16 + 4] = 120.0; // E_Ca
+        params[c * 16 + 5] = 8.0;   // g_K
+        params[c * 16 + 6] = -84.0; // E_K
+        params[c * 16 + 7] = -1.2;  // V1
+        params[c * 16 + 8] = 18.0;  // V2
+        params[c * 16 + 9] = 12.0;  // V3
+        params[c * 16 + 10] = 17.4; // V4
+        params[c * 16 + 11] = 0.066;// phi
+        params[c * 16 + 12] = 20.0; // v_thresh
+    }
+
+    for _ in 0..100 {
+        taas_kernels::safe::morris_lecar_step(&mut v, &mut w, &mut i_in, &mut spikes, &params, 0.1);
+    }
+    assert_no_nan(&v, "morris_lecar v");
+    assert_no_nan(&w, "morris_lecar w");
+}
+
+#[test]
+fn test_nmda_mg_block_simd_step() {
+    let v = vec![-70.0, -40.0, 0.0, 20.0, -70.0, -40.0, 0.0, 20.0];
+    let g_act = vec![1.0; 8];
+    let mut i_out = vec![0.0; 8];
+    let mut params = vec![0.0; 8 * 4];
+    for c in 0..8 {
+        params[c * 4 + 0] = 1.0;  // g_nmda
+        params[c * 4 + 1] = 0.0;  // E_syn
+        params[c * 4 + 2] = 1.0;  // mg_conc 1mM
+    }
+
+    taas_kernels::safe::nmda_mg_block_step(&v, &g_act, &mut i_out, &params);
+    assert_no_nan(&i_out, "nmda i_out");
+    // At -70mV (index 0), Mg2+ block is strong (current is small). At +20mV (index 3), Mg2+ unblocks (current is large).
+    assert!(i_out[0].abs() < i_out[3].abs());
+}
+
+#[test]
+fn test_tsodyks_markram_stp_simd_step() {
+    let mut x = vec![1.0; 8];
+    let mut u = vec![0.1; 8];
+    let spikes = vec![1, 0, 0, 0, 1, 0, 0, 0];
+    let mut w_eff = vec![0.0; 8];
+    let mut params = vec![0.0; 8 * 4];
+    for c in 0..8 {
+        params[c * 4 + 0] = 0.2;   // U
+        params[c * 4 + 1] = 200.0; // tau_d
+        params[c * 4 + 2] = 50.0;  // tau_f
+        params[c * 4 + 3] = 1.0;   // W_base
+    }
+
+    taas_kernels::safe::tsodyks_markram_step(&mut x, &mut u, &spikes, &mut w_eff, &params, 0.1);
+    assert_no_nan(&x, "tsodyks_markram x");
+    assert_no_nan(&u, "tsodyks_markram u");
+    assert_no_nan(&w_eff, "tsodyks_markram w_eff");
+}
+
+#[test]
+fn test_analytical_accuracy_nmda_mg_block() {
+    let v_vals = vec![-100.0, -70.0, -50.0, -20.0, 0.0, 20.0, 40.0, 60.0];
+    let g_act = vec![1.0; 8];
+    let mut i_simd = vec![0.0; 8];
+    let mut params = vec![0.0; 8 * 4];
+    for c in 0..8 {
+        params[c * 4 + 0] = 1.0;  // g_nmda
+        params[c * 4 + 1] = 0.0;  // E_syn
+        params[c * 4 + 2] = 1.0;  // mg_conc 1mM
+    }
+
+    taas_kernels::safe::nmda_mg_block_step(&v_vals, &g_act, &mut i_simd, &params);
+
+    for i in 0..8 {
+        let v64 = v_vals[i] as f64;
+        let block_exact = 1.0 / (1.0 + (1.0 / 3.57) * (-0.062 * v64).exp());
+        let i_exact = 1.0 * block_exact * (v64 - 0.0);
+        let diff = (i_simd[i] as f64 - i_exact).abs();
+        assert!(
+            diff < 1e-2,
+            "NMDA precision error at V={}: SIMD={}, exact={}, diff={}",
+            v_vals[i], i_simd[i], i_exact, diff
+        );
+    }
+}
+
+#[test]
+fn test_analytical_accuracy_tsodyks_markram_stp() {
+    let mut x_simd = vec![1.0; 8];
+    let mut u_simd = vec![0.1; 8];
+    let spikes = vec![1, 0, 1, 0, 0, 1, 0, 0];
+    let mut w_simd = vec![0.0; 8];
+    let mut params = vec![0.0; 8 * 4];
+    let U = 0.2f64;
+    let tau_d = 200.0f64;
+    let tau_f = 50.0f64;
+    let W_base = 1.5f64;
+    let dt = 0.5f32;
+
+    for c in 0..8 {
+        params[c * 4 + 0] = U as f32;
+        params[c * 4 + 1] = tau_d as f32;
+        params[c * 4 + 2] = tau_f as f32;
+        params[c * 4 + 3] = W_base as f32;
+    }
+
+    let mut x64 = vec![1.0f64; 8];
+    let mut u64 = vec![0.1f64; 8];
+
+    for step in 0..20 {
+        taas_kernels::safe::tsodyks_markram_step(&mut x_simd, &mut u_simd, &spikes, &mut w_simd, &params, dt);
+
+        for i in 0..8 {
+            x64[i] += ((1.0 - x64[i]) / tau_d) * dt as f64;
+            u64[i] += ((U - u64[i]) / tau_f) * dt as f64;
+            if spikes[i] != 0 {
+                u64[i] += U * (1.0 - u64[i]);
+                x64[i] -= u64[i] * x64[i];
+            }
+            let w_exact = W_base * u64[i] * x64[i];
+            let diff_w = (w_simd[i] as f64 - w_exact).abs();
+            assert!(
+                diff_w < 1e-4,
+                "STP precision error at step {step}, synapse {i}: SIMD={}, exact={}, diff={}",
+                w_simd[i], w_exact, diff_w
+            );
+        }
     }
 }

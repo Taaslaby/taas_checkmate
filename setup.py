@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Setup script for taas CLI tools.
+"""Setup script for taas CLI tools and interactive TUI setup wizard."""
 
-This installs the `taas` command-line toolkit alongside the Rust module.
+import sys
 
-Usage:
-    pip install -e .              # editable install
-    taas --help                    # use the CLI
-"""
+# If setup.py is invoked directly without commands (python setup.py) or with setup/tui command, launch TUI wizard!
+if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] in ["setup", "tui"]):
+    from taas.setup_tui import run_tui
+    try:
+        run_tui()
+    except KeyboardInterrupt:
+        print("\n\n[!] Setup cancelled by user.")
+    sys.exit(0)
 
 from setuptools import setup, find_packages
 

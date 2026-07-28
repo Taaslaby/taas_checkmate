@@ -21,6 +21,46 @@ use wide::CmpGe;
 use wide::CmpLt;
 
 // ═══════════════════════════════════════════════════════
+//  NEURON-совместимый vtrap — Taylor при малых |x/y|
+// ═══════════════════════════════════════════════════════
+
+/// SIMD vtrap: `x / (exp(x/y) - 1)` с Taylor `y - x/2` при |x/y| < 1e-6.
+/// В точности как NEURON hh.mod `FUNCTION vtrap`.
+/// Предотвращает 0/0 при x → 0.
+#[inline(always)]
+fn vtrap_simd(x: f32x8, y: f32) -> f32x8 {
+    let y_v = f32x8::splat(y);
+    let ratio = x / y_v;
+    let small_mask = ratio.abs().cmp_lt(f32x8::splat(1e-6));
+    // Taylor: y - x/2 (matches NEURON: y*(1 - x/y/2))
+    let taylor = y_v - x * f32x8::splat(0.5);
+    let exact = x / (fast_exp_simd(ratio) - f32x8::splat(1.0));
+    small_mask.blend(taylor, exact)
+}
+
+/// Scalar vtrap: `x / (exp(x/y) - 1)` с Taylor при малых |x/y|.
+#[inline(always)]
+fn vtrap_scalar(x: f32, y: f32) -> f32 {
+    let ratio = x / y;
+    if ratio.abs() < 1e-6 {
+        y - x * 0.5 // Taylor
+    } else {
+        x / (fast_exp(ratio) - 1.0)
+    }
+}
+
+/// Вычислить Q10 = 3^((celsius - 6.3) / 10) для температурной коррекции HH.
+/// При 6.3°C (squid axon) Q10 = 1.0. При 37°C Q10 ≈ 29×.
+#[inline]
+pub fn q10_from_celsius(celsius: f32) -> f32 {
+    if (celsius - 6.3).abs() > 0.1 {
+        3.0f32.powf((celsius - 6.3) / 10.0)
+    } else {
+        1.0
+    }
+}
+
+// ═══════════════════════════════════════════════════════
 //  LUT Generation (call at init, offline)
 // ═══════════════════════════════════════════════════════
 
@@ -99,13 +139,9 @@ pub fn v_to_idx(v: f32, v_min: f32, inv_dv: f32, n_bins: usize) -> usize {
 // ═══════════════════════════════════════════════════════
 
 /// Na activation (m-gate) — Hodgkin & Huxley 1952, squid axon @ 6.3°C
+/// Использует vtrap для численной стабильности при V → -40 mV.
 pub fn na_m_alpha(v: f32) -> f32 {
-    let v_ = v + 40.0;
-    if v_.abs() < 1e-6 {
-        1.0
-    } else {
-        0.1 * v_ / (1.0 - (-v_ / 10.0).exp())
-    }
+    0.1 * vtrap_scalar(-(v + 40.0), 10.0)
 }
 pub fn na_m_beta(v: f32) -> f32 {
     4.0 * (-(v + 65.0) / 18.0).exp()
@@ -120,13 +156,9 @@ pub fn na_h_beta(v: f32) -> f32 {
 }
 
 /// K activation (n-gate)
+/// Использует vtrap для численной стабильности при V → -55 mV.
 pub fn k_n_alpha(v: f32) -> f32 {
-    let v_ = v + 55.0;
-    if v_.abs() < 1e-6 {
-        0.1
-    } else {
-        0.01 * v_ / (1.0 - (-v_ / 10.0).exp())
-    }
+    0.01 * vtrap_scalar(-(v + 55.0), 10.0)
 }
 pub fn k_n_beta(v: f32) -> f32 {
     0.125 * (-(v + 65.0) / 80.0).exp()
@@ -207,18 +239,13 @@ pub fn steady_state_gates(v: f32, channels: &[ChannelSpec]) -> Vec<f32> {
 
 /// SIMD α/β computation helpers (inlined)
 ///
-/// Compute NaV m-gate α(V) and β(V) using fast_exp_simd.
-/// α = 0.1·(v+40) / (1 − exp(−(v+40)/10)), β = 4.0·exp(−(v+65)/18)
+/// Compute NaV m-gate α(V) and β(V) using fast_exp_simd + vtrap.
+/// α = 0.1·vtrap(−(v+40), 10), β = 4.0·exp(−(v+65)/18)
 #[inline(always)]
 unsafe fn na_m_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
     let vp40 = v + f32x8::splat(40.0);
-    let one = f32x8::splat(1.0);
-    // α: handle vp40 ≈ 0 via blend (avoid 0/0)
-    let exp_val = fast_exp_simd(-vp40 / f32x8::splat(10.0));
-    let denom = one - exp_val;
-    let alpha_num = f32x8::splat(0.1) * vp40;
-    let small_mask = vp40.abs().cmp_lt(f32x8::splat(1e-6));
-    let alpha = small_mask.blend(f32x8::splat(1.0), alpha_num / denom);
+    // α: 0.1·vtrap(−(v+40), 10) — Taylor при |vp40/10| < 1e-6
+    let alpha = f32x8::splat(0.1) * vtrap_simd(-vp40, 10.0);
     let beta = f32x8::splat(4.0) * fast_exp_simd(-(v + f32x8::splat(65.0)) / f32x8::splat(18.0));
     (alpha, beta)
 }
@@ -234,17 +261,13 @@ unsafe fn na_h_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
     (alpha, beta)
 }
 
-/// Compute KV n-gate α(V) and β(V) using fast_exp_simd.
-/// α = 0.01·(v+55) / (1 − exp(−(v+55)/10)), β = 0.125·exp(−(v+65)/80)
+/// Compute KV n-gate α(V) and β(V) using fast_exp_simd + vtrap.
+/// α = 0.01·vtrap(−(v+55), 10), β = 0.125·exp(−(v+65)/80)
 #[inline(always)]
 unsafe fn k_n_alpha_beta_simd(v: f32x8) -> (f32x8, f32x8) {
     let vp55 = v + f32x8::splat(55.0);
-    let one = f32x8::splat(1.0);
-    let exp_val = fast_exp_simd(-vp55 / f32x8::splat(10.0));
-    let denom = one - exp_val;
-    let alpha_num = f32x8::splat(0.01) * vp55;
-    let small_mask = vp55.abs().cmp_lt(f32x8::splat(1e-6));
-    let alpha = small_mask.blend(f32x8::splat(0.1), alpha_num / denom);
+    // α: 0.01·vtrap(−(v+55), 10) — Taylor при |vp55/10| < 1e-6
+    let alpha = f32x8::splat(0.01) * vtrap_simd(-vp55, 10.0);
     let beta = f32x8::splat(0.125) * fast_exp_simd(-(v + f32x8::splat(65.0)) / f32x8::splat(80.0));
     (alpha, beta)
 }
@@ -307,6 +330,7 @@ pub fn build_channel_meta(channels: &[ChannelSpec]) -> Vec<ChannelMeta> {
 
 /// SIMD polynomial HH step — direct rate computation (no LUT).
 ///
+/// `celsius`: температура в °C для Q10 коррекции (6.3 = squid axon, 24 = Drosophila).
 /// `g_max_per_neuron`: per-neuron, per-channel g_max values.
 ///   Layout: [ch0_n0, ch0_n1, ..., ch1_n0, ch1_n1, ...] (column-major, stride=n)
 ///   Size: [n_channels * n]
@@ -314,8 +338,9 @@ pub fn build_channel_meta(channels: &[ChannelSpec]) -> Vec<ChannelMeta> {
 /// For each 8-neuron SIMD block:
 ///   1. Load V, g_max for each channel
 ///   2. For each channel: compute m_inf(V), τ(V) via fast_exp_simd → gate update
-///   3. I_ion += g_ch · (V − E_rev)
-///   4. V += (I_ext − I_ion − I_leak) / C_m · dt
+///   3. Apply Q10: tau_q10 = tau / Q10 (faster kinetics at higher temperature)
+///   4. I_ion += g_ch · (V − E_rev)
+///   5. V += (I_ext − I_ion − I_leak) / C_m · dt
 ///
 /// # Safety
 /// All pointers valid for n elements, non-overlapping.
@@ -330,10 +355,12 @@ pub(crate) unsafe fn hh_poly_step_simd(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
 ) {
     let zero = f32x8::splat(0.0);
     let eps = f32x8::splat(1e-12);
     let dt_v = f32x8::splat(dt);
+    let q10 = f32x8::splat(q10_from_celsius(celsius));
 
     for i in (0..n).step_by(8) {
         if i + 8 > n {
@@ -360,8 +387,9 @@ pub(crate) unsafe fn hh_poly_step_simd(
 
                 let sum = (alpha + beta).max(eps);
                 let m_inf = alpha / sum;
-                // decay = exp(-dt/tau) = exp(-dt * sum) — skip division by tau
-                let decay = fast_exp_simd(-dt_v * sum);
+                // Q10: tau_q10 = tau / Q10 → sum_q10 = sum * Q10
+                let sum_q10 = sum * q10;
+                let decay = fast_exp_simd(-dt_v * sum_q10);
 
                 let gi_ptr = gates.add(gi * n + i);
                 let gv = unsafe { load8(gi_ptr, 0) };
@@ -409,12 +437,7 @@ pub(crate) unsafe fn hh_poly_step_simd(
 fn rate_fn(v: f32, gate_type: GateType) -> (f32, f32) {
     match gate_type {
         GateType::NaM => {
-            let vp40 = v + 40.0;
-            let a = if vp40.abs() < 1e-6 {
-                1.0
-            } else {
-                0.1 * vp40 / (1.0 - fast_exp(-vp40 / 10.0))
-            };
+            let a = 0.1 * vtrap_scalar(-(v + 40.0), 10.0);
             let b = 4.0 * fast_exp(-(v + 65.0) / 18.0);
             (a, b)
         }
@@ -424,12 +447,7 @@ fn rate_fn(v: f32, gate_type: GateType) -> (f32, f32) {
             (a, b)
         }
         GateType::Kn => {
-            let vp55 = v + 55.0;
-            let a = if vp55.abs() < 1e-6 {
-                0.1
-            } else {
-                0.01 * vp55 / (1.0 - fast_exp(-vp55 / 10.0))
-            };
+            let a = 0.01 * vtrap_scalar(-(v + 55.0), 10.0);
             let b = 0.125 * fast_exp(-(v + 65.0) / 80.0);
             (a, b)
         }
@@ -452,7 +470,10 @@ pub(crate) unsafe fn hh_poly_step_scalar(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
 ) {
+    let q10 = q10_from_celsius(celsius);
+
     for i in 0..n {
         let vi = *v.add(i);
         let mut sum_g = 0.0f32;
@@ -467,7 +488,8 @@ pub(crate) unsafe fn hh_poly_step_scalar(
                 let (alpha, beta) = rate_fn(vi, ch.gate_type[gate_idx]);
                 let sum = alpha + beta;
                 let m_inf = if sum > 1e-12 { alpha / sum } else { 0.5 };
-                let decay = fast_exp(-dt * sum.max(1e-12));
+                // Q10: sum_q10 = sum * Q10 (faster kinetics at higher temperature)
+                let decay = fast_exp(-dt * sum.max(1e-12) * q10);
 
                 let p = gates.add(gi * total_n + i);
                 *p = m_inf + (*p - m_inf) * decay;
@@ -493,6 +515,7 @@ pub(crate) unsafe fn hh_poly_step_scalar(
 
 /// Public polynomial HH step — auto-selects SIMD or scalar.
 ///
+/// `celsius`: температура в °C (6.3 = squid axon @ H&H 1952, 24 = Drosophila).
 /// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
 /// Size: [n_channels * n]
 pub unsafe fn hh_poly_step(
@@ -506,6 +529,7 @@ pub unsafe fn hh_poly_step(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
 ) {
     if n >= 8 {
         hh_poly_step_simd(
@@ -519,6 +543,7 @@ pub unsafe fn hh_poly_step(
             channel_meta,
             g_max_per_neuron,
             dt,
+            celsius,
         );
     }
     let remainder = n % 8;
@@ -536,53 +561,77 @@ pub unsafe fn hh_poly_step(
             channel_meta,
             g_max_per_neuron,
             dt,
+            celsius,
         );
     }
 }
 
 // ═══════════════════════════════════════════════════════
-//  Fused HH + spike detection — один SIMD-проход
+//  Fused HH + spike detection — single SIMD pass
 // ═══════════════════════════════════════════════════════
 //
-// Объединяет hh_poly_step с детекцией спайков (reverse zero-crossing)
-// в один SIMD-проход. Устраняет:
-//   1. v_prev.copy_from_slice(&cfg.v) — O(n) копию
-//   2. Отдельный цикл spike detection — ещё O(n)
+// Merges hh_poly_step with spike detection (reverse zero-crossing)
+// into one SIMD pass. Eliminates:
+//   1. v_prev.copy_from_slice(&cfg.v) — O(n) copy eliminated
+//   2. Separate spike detection loop — another O(n) gone
 //
-// Дополнительно: common subexpression для exp(−v/10).
-// В стандартном HH этот exp используется 3 раза:
+// Additionally: common subexpression for exp(−v/10).
+// In standard HH this exp is used 3×:
 //   - Na-m α: exp(−(v+40)/10) = exp(−v/10) · exp(−4)
-//   - Na-h β: 1/(1 + exp(−(v+35)/10)) где exp_term = exp(−v/10) · exp(−3.5)
+//   - Na-h β: 1/(1 + exp(−(v+35)/10)) where exp_term = exp(−v/10) · exp(−3.5)
 //   - K-n α:  exp(−(v+55)/10) = exp(−v/10) · exp(−5.5)
-// → 2 вызова fast_exp_simd меньше на нейрон.
+// → 2 fewer fast_exp_simd calls per neuron.
+//
+// один SIMD-проход: объединяет hh_poly_step с детекцией спайков,
+// устраняя O(n) копию v_prev и отдельный цикл spike detection.
+// exp(−v/10) вычисляется 1 раз и переиспользуется 3× — минус 2 exp/нейрон.
 
-/// Константы для common subexpression: exp_const = exp(−shift/10)
-/// Значения вычислены через (-4.0f32).exp() и т.д. (не const-стабильно в Rust)
-const EXP_V10_NA_M_ALPHA: f32 = 0.018_315_64_f32; // exp(−40/10) = exp(−4)
-const EXP_V10_NA_H_BETA: f32 = 0.030197383_f32; // exp(−35/10) = exp(−3.5)
-const EXP_V10_KN_ALPHA: f32 = 0.0040867714_f32; // exp(−55/10) = exp(−5.5)
-
-/// Fused SIMD α/β: вычисляет exp(−v/10) один раз и переиспользует.
+/// Precomputed constants for common subexpression: exp_const = exp(−shift/10)
 ///
-/// Возвращает те же (alpha, beta), что `na_m_alpha_beta_simd`,
-/// но с одним вызовом fast_exp_simd вместо двух.
+/// Rust can't compute these as const f32 via `.exp()`, so they're hardcoded.
+///   exp(−40/10) = exp(−4) = 0.01831564   — Na-m α
+///   exp(−35/10) = exp(−3.5) = 0.03019738  — Na-h β
+///   exp(−55/10) = exp(−5.5) = 0.00408677  — K-n α
+const EXP_V10_NA_M_ALPHA: f32 = 0.018_315_64_f32;
+const EXP_V10_NA_H_BETA: f32 = 0.030197383_f32;
+const EXP_V10_KN_ALPHA: f32 = 0.0040867714_f32;
+
+/// Fused SIMD α/β: compute exp(−v/10) once and reuse across all 3 gates.
+///
+/// Same (alpha, beta) as `na_m_alpha_beta_simd` but with 1 fast_exp_simd call
+/// instead of 2. The exp(−v/10) term is shared across Na-m α, Na-h β, K-n α.
+///
+/// вычисляет exp(−v/10) один раз и переиспользует для Na-m, Na-h, K-n — на 2 вызова fast_exp_simd меньше на нейрон.
+/// Использует vtrap для численной стабильности при V → -40 mV.
 #[inline(always)]
 unsafe fn na_m_alpha_beta_simd_fused(v: f32x8, exp_v10: f32x8) -> (f32x8, f32x8) {
     let one = f32x8::splat(1.0);
-    // α: 0.1·(v+40) / (1 − exp(−(v+40)/10))
+    // α: 0.1·vtrap(−(v+40), 10)
+    // vtrap(x, y) = x/(exp(x/y)-1); vtrap(-vp40, 10) = -(v+40)/(exp(-(v+40)/10)-1)
     // exp(−(v+40)/10) = exp(−v/10) · exp(−4)
     let vp40 = v + f32x8::splat(40.0);
     let exp_nm_alpha = exp_v10 * f32x8::splat(EXP_V10_NA_M_ALPHA);
-    let denom = one - exp_nm_alpha;
-    let alpha_num = f32x8::splat(0.1) * vp40;
-    let small_mask = vp40.abs().cmp_lt(f32x8::splat(1e-6));
-    let alpha = small_mask.blend(f32x8::splat(1.0), alpha_num / denom);
+    // vtrap: x/(exp(x/y)-1) with Taylor for small |x/y|
+    // x = -vp40, y = 10, exp(x/y) = exp_nm_alpha
+    let ten = f32x8::splat(10.0);
+    let ratio = -vp40 / ten;
+    let small_mask = ratio.abs().cmp_lt(f32x8::splat(1e-6));
+    let vtrap_val = small_mask.blend(
+        ten - (-vp40) * f32x8::splat(0.5), // Taylor: 10 - (-vp40)/2
+        (-vp40) / (exp_nm_alpha - one),    // Exact
+    );
+    let alpha = f32x8::splat(0.1) * vtrap_val;
     // β: 4.0·exp(−(v+65)/18) — no reuse opportunity, separate exp
     let beta = f32x8::splat(4.0) * fast_exp_simd(-(v + f32x8::splat(65.0)) / f32x8::splat(18.0));
     (alpha, beta)
 }
 
-/// Fused Na-h α/β: использует exp(−v/10) для β.
+/// Fused Na-h α/β: reuses exp(−v/10) for β computation.
+///
+/// α uses a separate exp (different divisor ÷20).
+/// β = 1/(1 + exp(−v/10)·exp(−3.5)) — reuses exp_v10.
+///
+/// использует exp(−v/10) для β; α через отдельный exp (другой делитель ÷20).
 #[inline(always)]
 unsafe fn na_h_alpha_beta_simd_fused(v: f32x8, exp_v10: f32x8) -> (f32x8, f32x8) {
     let one = f32x8::splat(1.0);
@@ -595,31 +644,45 @@ unsafe fn na_h_alpha_beta_simd_fused(v: f32x8, exp_v10: f32x8) -> (f32x8, f32x8)
     (alpha, beta)
 }
 
-/// Fused K-n α/β: использует exp(−v/10) для α.
+/// Fused K-n α/β: reuses exp(−v/10) for α computation.
+///
+/// α = 0.01·vtrap(−(v+55), 10) — reuses exp_v10 для exp(−(v+55)/10).
+/// β uses a separate exp (different divisor ÷80).
+///
+/// использует exp(−v/10) для α; β через отдельный exp (другой делитель ÷80).
 #[inline(always)]
 unsafe fn k_n_alpha_beta_simd_fused(v: f32x8, exp_v10: f32x8) -> (f32x8, f32x8) {
     let one = f32x8::splat(1.0);
-    // α: 0.01·(v+55) / (1 − exp(−(v+55)/10))
-    // exp(−(v+55)/10) = exp(−v/10) · exp(−5.5)
+    // α: 0.01·vtrap(−(v+55), 10)
     let vp55 = v + f32x8::splat(55.0);
     let exp_kn_alpha = exp_v10 * f32x8::splat(EXP_V10_KN_ALPHA);
-    let denom = one - exp_kn_alpha;
-    let alpha_num = f32x8::splat(0.01) * vp55;
-    let small_mask = vp55.abs().cmp_lt(f32x8::splat(1e-6));
-    let alpha = small_mask.blend(f32x8::splat(0.1), alpha_num / denom);
+    let ten = f32x8::splat(10.0);
+    let ratio = -vp55 / ten;
+    let small_mask = ratio.abs().cmp_lt(f32x8::splat(1e-6));
+    let vtrap_val = small_mask.blend(
+        ten - (-vp55) * f32x8::splat(0.5), // Taylor: 10 - (-vp55)/2
+        (-vp55) / (exp_kn_alpha - one),    // Exact
+    );
+    let alpha = f32x8::splat(0.01) * vtrap_val;
     // β: 0.125·exp(−(v+65)/80) — separate exp
     let beta = f32x8::splat(0.125) * fast_exp_simd(-(v + f32x8::splat(65.0)) / f32x8::splat(80.0));
     (alpha, beta)
 }
 
-/// SIMD polynomial HH step с fused spike detection + common subexpression.
+/// SIMD polynomial HH step with fused spike detection + common subexpression + Q10.
+///
+/// `celsius`: температура в °C для Q10 коррекции HH kinetics.
+///
+/// For each 8-neuron SIMD block:
+///   1. Save V_old (for reverse zero-crossing spike detection)
+///   2. Compute exp(−v/10) once → reused for Na-m α, Na-h β, K-n α
+///   3. Compute HH dynamics (α/β, gates, I_ion, dV) с Q10 коррекцией
+///   4. Store V_new with clamp to [-100, 50] mV
+///   5. Spike detection: V_old ≥ 0 && V_new < 0 → 1, else 0
 ///
 /// Для каждого блока из 8 нейронов:
-///   1. Save V_old (для spike detection)
-///   2. Compute exp(−v/10) один раз → reused для Na-m α, Na-h β, K-n α
-///   3. Compute HH dynamics (α/β, gates, I_ion, dV)
-///   4. Store V_new
-///   5. Spike detection: V_old ≥ 0 && V_new < 0 → 1, иначе 0
+///   exp(−v/10) вычисляется 1× → переиспользуется 3×
+///   детекция спайков встроена (reverse zero-crossing)
 ///
 /// # Safety
 /// All pointer args valid for n elements, non-overlapping.
@@ -634,12 +697,14 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
     spikes: *mut i32,
 ) {
     let zero = f32x8::splat(0.0);
     let eps = f32x8::splat(1e-12);
     let dt_v = f32x8::splat(dt);
     let v10_inv = f32x8::splat(1.0 / 10.0);
+    let q10 = f32x8::splat(q10_from_celsius(celsius));
 
     for i in (0..n).step_by(8) {
         if i + 8 > n {
@@ -649,7 +714,7 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
         let vi = v_old;
 
         // Common subexpression: exp(−v/10) — reused 3×
-        // fast_exp_simd уже клипсует внутри к [-87, 87]
+        // fast_exp_simd already clamps internally to [-87, 87]
         let exp_v10 = fast_exp_simd((-vi) * v10_inv);
 
         let mut I_ion = zero;
@@ -671,8 +736,9 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
 
                 let sum = (alpha + beta).max(eps);
                 let m_inf = alpha / sum;
-                // decay = exp(-dt/tau) = exp(-dt * sum) — skip division by tau
-                let decay = fast_exp_simd(-dt_v * sum);
+                // Q10: tau_q10 = tau / Q10 → sum_q10 = sum * Q10
+                let sum_q10 = sum * q10;
+                let decay = fast_exp_simd(-dt_v * sum_q10);
 
                 let gi_ptr = gates.add(gi * n + i);
                 let gv = unsafe { load8(gi_ptr, 0) };
@@ -699,7 +765,6 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
 
         let I_leak = unsafe { load8(g_leak, i) } * (vi - unsafe { load8(E_leak, i) });
         let cm = unsafe { load8(C_m, i) };
-        // Fused Ii clamp — предотвращает saturation cascade от oversized weights
         let ii_clamped = unsafe { load8(Ii, i) }
             .max(f32x8::splat(-100.0))
             .min(f32x8::splat(100.0));
@@ -710,7 +775,6 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
         }
 
         // Fused spike detection: reverse zero-crossing (v_old ≥ 0 && v_new < 0)
-        // f32x8 comparison returns all-1s for true, all-0s for false → bitwise AND
         let spike_mask = v_old.cmp_ge(zero) & v_new.cmp_lt(zero);
         let spike_arr = super::spike_mask_to_i32(spike_mask);
         let p = spikes.add(i);
@@ -725,7 +789,11 @@ pub(crate) unsafe fn fused_hh_poly_step_simd(
     }
 }
 
-/// Scalar polynomial HH step с fused spike detection (для remainder).
+/// Scalar polynomial HH step with fused spike detection + Q10 (for remainder n%8).
+///
+/// Same as fused_hh_poly_step_simd but scalar — for the tail elements.
+///
+/// скалярный вариант для остатка n%8 с Q10 и vtrap.
 ///
 /// # Safety
 /// All pointer args valid for n elements.
@@ -741,8 +809,11 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
     spikes: *mut i32,
 ) {
+    let q10 = q10_from_celsius(celsius);
+
     for i in 0..n {
         let v_old = *v.add(i);
         let vi = v_old;
@@ -756,12 +827,7 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
                 let power = ch.powers[gate_idx];
                 let (alpha, beta) = match ch.gate_type[gate_idx] {
                     GateType::NaM => {
-                        let vp40 = vi + 40.0;
-                        let a = if vp40.abs() < 1e-6 {
-                            1.0
-                        } else {
-                            0.1 * vp40 / (1.0 - fast_exp(-vp40 / 10.0))
-                        };
+                        let a = 0.1 * vtrap_scalar(-(vi + 40.0), 10.0);
                         let b = 4.0 * super::fast_exp(-(vi + 65.0) / 18.0);
                         (a, b)
                     }
@@ -771,12 +837,7 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
                         (a, b)
                     }
                     GateType::Kn => {
-                        let vp55 = vi + 55.0;
-                        let a = if vp55.abs() < 1e-6 {
-                            0.1
-                        } else {
-                            0.01 * vp55 / (1.0 - fast_exp(-vp55 / 10.0))
-                        };
+                        let a = 0.01 * vtrap_scalar(-(vi + 55.0), 10.0);
                         let b = 0.125 * super::fast_exp(-(vi + 65.0) / 80.0);
                         (a, b)
                     }
@@ -787,8 +848,8 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
                 };
                 let sum = alpha + beta;
                 let m_inf = if sum > 1e-12 { alpha / sum } else { 0.5 };
-                // decay = exp(-dt/tau) = exp(-dt * sum) — skip division
-                let decay = fast_exp(-dt * sum.max(1e-12));
+                // Q10: sum_q10 = sum * Q10
+                let decay = fast_exp(-dt * sum.max(1e-12) * q10);
 
                 let p = gates.add(gi * total_n + i);
                 *p = m_inf + (*p - m_inf) * decay;
@@ -798,7 +859,6 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
             I_ion += g_ch * (vi - ch.e_rev);
         }
         let I_leak = *g_leak.add(i) * (vi - *E_leak.add(i));
-        // Fused Ii clamp
         let ii_clamped = (*Ii.add(i)).clamp(-100.0, 100.0);
         let dV = (ii_clamped - I_ion - I_leak) / *C_m.add(i);
         let v_new = (vi + dV * dt).clamp(-100.0, 50.0);
@@ -811,6 +871,7 @@ pub(crate) unsafe fn fused_hh_poly_step_scalar(
 
 /// Public fused HH step — auto-selects SIMD or scalar.
 ///
+/// `celsius`: температура в °C (6.3 = squid axon @ H&H 1952, 24 = Drosophila).
 /// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
 /// Size: [n_channels * n]
 ///
@@ -826,6 +887,7 @@ pub unsafe fn fused_hh_poly_step(
     channel_meta: &[ChannelMeta],
     g_max_per_neuron: *const f32,
     dt: f32,
+    celsius: f32,
     spikes: *mut i32,
 ) {
     if n >= 8 {
@@ -840,6 +902,7 @@ pub unsafe fn fused_hh_poly_step(
             channel_meta,
             g_max_per_neuron,
             dt,
+            celsius,
             spikes,
         );
     }
@@ -858,6 +921,7 @@ pub unsafe fn fused_hh_poly_step(
             channel_meta,
             g_max_per_neuron,
             dt,
+            celsius,
             spikes.add(simd_end),
         );
     }

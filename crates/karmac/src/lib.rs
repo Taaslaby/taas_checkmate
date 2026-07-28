@@ -13,6 +13,7 @@
 pub mod basal_ganglia;
 pub mod gnw;
 pub mod lod;
+pub mod min_brain;
 pub mod semantic_pointer;
 pub mod working_memory;
 

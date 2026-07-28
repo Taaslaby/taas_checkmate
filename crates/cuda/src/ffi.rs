@@ -25,6 +25,32 @@ extern "C" {
     pub(crate) fn gpu_context_destroy(ctx: *mut GpuCtx);
     pub(crate) fn gpu_context_sync(ctx: *mut GpuCtx) -> c_int;
 
+    pub(crate) fn cuda_morris_lecar_step(
+        v: *mut c_float,
+        w: *mut c_float,
+        I_in: *mut c_float,
+        spikes: *mut c_int,
+        params: *const c_float,
+        dt: c_float,
+        n: c_int,
+    ) -> c_int;
+    pub(crate) fn cuda_nmda_mg_block_step(
+        v: *const c_float,
+        g_act: *const c_float,
+        i_out: *mut c_float,
+        params: *const c_float,
+        n: c_int,
+    ) -> c_int;
+    pub(crate) fn cuda_tsodyks_markram_step(
+        x: *mut c_float,
+        u: *mut c_float,
+        spikes: *const c_int,
+        w_eff: *mut c_float,
+        params: *const c_float,
+        dt: c_float,
+        n: c_int,
+    ) -> c_int;
+
     pub(crate) fn gpu_context_upload_neurons(
         ctx: *mut GpuCtx,
         v: *const c_float,

@@ -21,8 +21,8 @@ extern "C" void gpu_context_destroy(void* vctx);
 
 // ─── ψ-wave async wrappers (defined in psi_wave.cu) ──────
 
-extern "C" int gpu_psi_hamiltonian_async(void* vctx);
-extern "C" int gpu_psi_step_async(void* vctx, float dt, float hbar);
+extern "C" int gpu_gco_hamiltonian_async(void* vctx);
+extern "C" int gpu_gco_step_async(void* vctx, float dt, float hbar);
 
 // ─── LIF + CSR + Izhikevich + HH async wrappers ──
 
@@ -706,8 +706,8 @@ extern "C" int gpu_psi_graph_replay(void* vctx, float dt, float hbar) {
         if (e) return (int)e;
 
         // Use existing async wrappers — kernel launches are captured on stream
-        gpu_psi_hamiltonian_async(vctx);
-        gpu_psi_step_async(vctx, dt, hbar);
+        gpu_gco_hamiltonian_async(vctx);
+        gpu_gco_step_async(vctx, dt, hbar);
 
         e = cudaStreamEndCapture(ctx->stream, &ctx->psi_graph);
         if (e) return (int)e;

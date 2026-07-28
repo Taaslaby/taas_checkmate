@@ -7,7 +7,6 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::manual_clamp)]
 
-pub mod attention;
 pub mod decode;
 pub mod io;
 pub mod measure;
@@ -16,10 +15,10 @@ pub mod phase;
 pub mod safe;
 pub mod signal;
 pub mod vnc;
+pub mod ion;
 
 // Re-export safe wrappers as the primary public API
 pub use safe::*;
-// Re-export safe utility functions from neuron module
 pub use neuron::{fast_exp, fast_exp_simd, fast_sincos_simd};
 
 /// Wrap phase to [-π, π)
@@ -334,35 +333,7 @@ mod tests {
         }
     }
 
-    // ── attention tests ──
 
-    #[test]
-    fn xor_attention_identical_keys() {
-        let n_bytes = 8;
-        let n_keys = 4;
-        let query = vec![0u8; n_bytes];
-        let mut keys = vec![0xFFu8; n_keys * n_bytes];
-        // First key identical to query
-        for i in 0..n_bytes {
-            keys[i] = 0x00;
-        }
-        let values = vec![1.0f32, 0.0, 0.0, 0.0];
-        let mut out = 0.0f32;
-        xor_attention(&query, &keys, &values, &mut out);
-        assert!(
-            (out - 1.0).abs() < 0.01,
-            "identical key should give value 1.0, got {out}"
-        );
-    }
-
-    #[test]
-    fn rdrand_fill_range() {
-        let mut buf = vec![0.0f32; 1024];
-        rdrand_fill(&mut buf);
-        for &v in &buf {
-            assert!(v >= 0.0 && v < 1.0, "rdrand_fill: {v} out of [0,1)");
-        }
-    }
 
     // ── neuron tests ──
 

@@ -2434,7 +2434,7 @@ fn test_hh_spike_detection_reverse_crossing() {
 
     for _ in 0..20_000 {
         // 200 ms at dt=0.01
-        neuron::step_hh_lut(&mut cfg, &mut spikes);
+        neuron::step_hh_lut(&mut cfg, &mut spikes, 6.3);
         total_spikes += spikes[0];
     }
 

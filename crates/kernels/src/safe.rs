@@ -6,9 +6,9 @@
 //! are satisfied by the calling convention.
 
 use super::neuron::{
-    adex, delay, dendrite, dopamine, fhn, fused, glif, hh, izhikevich, lif, saw, stp, wc,
+    adex, bcm, delay, dendrite, dopamine, fhn, fused, glif, haap, hh, izhikevich, lif, morris_lecar, nmda, saw, stp, tsodyks_markram, wc,
 };
-use super::{attention, decode, measure, phase, signal};
+use super::{decode, measure, phase, signal};
 
 // ═══════════════════════════════════════════════════════════
 //  signal
@@ -876,40 +876,6 @@ pub fn t3_update(
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  attention
-// ═══════════════════════════════════════════════════════════
-
-/// XOR attention with popcnt similarity: weighted average of values by XOR distance.
-pub fn xor_attention(query: &[u8], keys: &[u8], values: &[f32], out: &mut f32) {
-    let n_bytes = query.len();
-    let n_keys = values.len();
-    assert_eq!(
-        keys.len(),
-        n_keys * n_bytes,
-        "xor_attention: keys length mismatch"
-    );
-    unsafe {
-        attention::xor_attention(
-            query.as_ptr(),
-            keys.as_ptr(),
-            values.as_ptr(),
-            out as *mut f32,
-            n_keys,
-            n_bytes,
-        )
-    }
-}
-
-/// Fill buffer with pseudo-random floats in [0, 1) using xorshift32.
-pub fn rdrand_fill(buf: &mut [f32]) {
-    let n = buf.len();
-    unsafe { attention::rdrand_fill(buf.as_mut_ptr(), n) }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  neuron / izhikevich
-// ═══════════════════════════════════════════════════════════
 
 /// Add dendritic current `I_dend` to input current `Ii` in-place.
 /// No-op if `I_dend` is `None`.
@@ -1621,6 +1587,7 @@ pub fn build_hh_channel_meta(channels: &[hh::ChannelSpec]) -> Vec<hh::ChannelMet
 
 /// Hodgkin-Huxley step using polynomial rate functions (no LUT).
 ///
+/// `celsius`: температура в °C (6.3 = squid axon @ H&H 1952, 24 = Drosophila).
 /// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
 /// Size: [n_channels * n]
 pub fn hh_poly_step(
@@ -1633,6 +1600,7 @@ pub fn hh_poly_step(
     channel_meta: &[hh::ChannelMeta],
     g_max_per_neuron: &[f32],
     dt: f32,
+    celsius: f32,
     I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
@@ -1667,12 +1635,14 @@ pub fn hh_poly_step(
             channel_meta,
             g_max_per_neuron.as_ptr(),
             dt,
+            celsius,
         )
     }
 }
 
-/// Fused HH step: Hodgkin-Huxley dynamics + spike detection в один проход.
+/// Fused HH step: Hodgkin-Huxley dynamics + spike detection + Q10 в один проход.
 ///
+/// `celsius`: температура в °C (6.3 = squid axon @ H&H 1952, 24 = Drosophila).
 /// `g_max_per_neuron`: per-neuron g_max, layout [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...]
 /// Size: [n_channels * n]
 pub fn fused_hh_poly_step(
@@ -1686,6 +1656,7 @@ pub fn fused_hh_poly_step(
     channel_meta: &[hh::ChannelMeta],
     g_max_per_neuron: &[f32],
     dt: f32,
+    celsius: f32,
     I_dend: Option<&[f32]>,
 ) {
     let n = v.len();
@@ -1736,7 +1707,54 @@ pub fn fused_hh_poly_step(
             channel_meta,
             g_max_per_neuron.as_ptr(),
             dt,
+            celsius,
             spikes.as_mut_ptr(),
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  neuron / haap (Hyperpolarization-Activated Adaptive Pulse-Bursting)
+// ═══════════════════════════════════════════════════════════
+
+/// HAAP neuron step: VNC model with M-current adaptation + HCN h-current.
+///
+/// Equations:
+///   C_m·dV/dt = -g_L(V-E_L) - g_M·u·(V-E_K) - g_h·h·(V-E_h) + I_syn
+///   τ_u·du/dt = (u_∞(V) - u)
+///   τ_h·dh/dt = (h_∞(V) - h)
+///
+/// Params layout: dt, C_m, g_L, E_L, g_M, E_K, g_h, E_h, tau_u, tau_h,
+///                V_half_u, k_u, V_half_h, k_h, V_thresh, V_reset, delta_u (17 × n)
+pub fn haap_step(
+    v: &mut [f32],
+    u_state: &mut [f32],
+    h_state: &mut [f32],
+    ii: &[f32],
+    spikes: &mut [i32],
+    params: &[f32],
+) {
+    let n = v.len();
+    assert_eq!(u_state.len(), n, "haap_step: u_state length mismatch");
+    assert_eq!(h_state.len(), n, "haap_step: h_state length mismatch");
+    assert_eq!(ii.len(), n, "haap_step: Ii length mismatch");
+    assert_eq!(spikes.len(), n, "haap_step: spikes length mismatch");
+    assert_eq!(
+        params.len(),
+        n * 17,
+        "haap_step: params length mismatch (expected {}*17={})",
+        n,
+        n * 17
+    );
+    unsafe {
+        haap::haap_step(
+            v.as_mut_ptr(),
+            u_state.as_mut_ptr(),
+            h_state.as_mut_ptr(),
+            ii.as_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            n,
         )
     }
 }
@@ -1804,13 +1822,7 @@ pub fn dendrite_step(state: &mut dendrite::DendriteState, V_soma: &[f32], dt: f3
     state.step(V_soma, dt);
 }
 
-/// Wilson-Cowan population model step: excitatory-inhibitory rate dynamics.
-///
-/// Equations:
-///   τ_E · dE/dt = -E + sigmoid(w_EE·E - w_EI·I + I_E)
-///   τ_I · dI/dt = -I + sigmoid(w_IE·E - w_II·I + I_I)
-///
-/// Params layout: dt, tau_E, tau_I, w_EE, w_EI, w_IE, w_II, beta (8 × n, column-major).
+
 // ═══════════════════════════════════════════════════════════
 //  neuron / glif (Generalized LIF — Allen Institute)
 // ═══════════════════════════════════════════════════════════
@@ -1919,6 +1931,67 @@ pub fn glif4_step(
             refractory.as_mut_ptr(),
             tau_ref,
             n,
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  neuron / bcm — Bienenstock-Cooper-Munro Plasticity
+// ═══════════════════════════════════════════════════════════
+
+/// BCM plasticity step: rate-based Hebbian learning with sliding threshold.
+///
+/// Updates pre/post traces, sliding threshold θ_M, and synaptic weights.
+/// LTP when y > θ_M, LTD when y < θ_M.
+pub fn bcm_step(
+    x: &mut [f32],
+    y: &mut [f32],
+    theta_m: &mut [f32],
+    weights: &mut [f32],
+    pre_rates: &[f32],
+    post_rates: &[f32],
+    dt: f32,
+    tau_x: f32,
+    tau_y: f32,
+    tau_theta: f32,
+    eta: f32,
+    decay: f32,
+    w_min: f32,
+    w_max: f32,
+) {
+    let n = x.len();
+    assert_eq!(y.len(), n, "bcm_step: y length mismatch");
+    assert_eq!(theta_m.len(), n, "bcm_step: theta_m length mismatch");
+    assert_eq!(weights.len(), n, "bcm_step: weights length mismatch");
+    assert_eq!(pre_rates.len(), n, "bcm_step: pre_rates length mismatch");
+    assert_eq!(post_rates.len(), n, "bcm_step: post_rates length mismatch");
+    unsafe {
+        bcm::bcm_step(
+            x.as_mut_ptr(), y.as_mut_ptr(), theta_m.as_mut_ptr(),
+            weights.as_mut_ptr(), pre_rates.as_ptr(), post_rates.as_ptr(),
+            dt, tau_x, tau_y, tau_theta, eta, decay, w_min, w_max, n,
+        );
+    }
+}
+
+/// Homeostatic synaptic scaling: Δw = η · (r_target − r_mean) · w · dt
+pub fn homeostatic_scale(
+    weights: &mut [f32],
+    post_rates: &[f32],
+    dt: f32,
+    eta_h: f32,
+    target_rate: f32,
+) {
+    let n = weights.len();
+    assert_eq!(post_rates.len(), n, "homeostatic_scale: post_rates length mismatch");
+    unsafe {
+        bcm::homeostatic_scale(
+            weights.as_mut_ptr(),
+            post_rates.as_ptr(),
+            n,
+            dt,
+            eta_h,
+            target_rate,
         )
     }
 }
@@ -2469,6 +2542,82 @@ pub fn poisson_fused_hidden_step(
             ni,
             nh,
             active_buf,
+        )
+    }
+}
+
+/// Morris-Lecar SIMD step for n neurons.
+pub fn morris_lecar_step(
+    v: &mut [f32],
+    w: &mut [f32],
+    i_in: &mut [f32],
+    spikes: &mut [i32],
+    params: &[f32],
+    dt: f32,
+) {
+    let n = v.len();
+    assert_eq!(w.len(), n, "morris_lecar_step: w length mismatch");
+    assert_eq!(i_in.len(), n, "morris_lecar_step: i_in length mismatch");
+    assert_eq!(spikes.len(), n, "morris_lecar_step: spikes length mismatch");
+    assert_eq!(params.len(), n * 16, "morris_lecar_step: params length mismatch");
+    unsafe {
+        morris_lecar::morris_lecar_step(
+            v.as_mut_ptr(),
+            w.as_mut_ptr(),
+            i_in.as_mut_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+            dt,
+        )
+    }
+}
+
+/// NMDA Synaptic Channel with Mg²⁺ block.
+pub fn nmda_mg_block_step(
+    v: &[f32],
+    g_act: &[f32],
+    i_out: &mut [f32],
+    params: &[f32],
+) {
+    let n = v.len();
+    assert_eq!(g_act.len(), n, "nmda_mg_block_step: g_act length mismatch");
+    assert_eq!(i_out.len(), n, "nmda_mg_block_step: i_out length mismatch");
+    assert_eq!(params.len(), n * 4, "nmda_mg_block_step: params length mismatch");
+    unsafe {
+        nmda::nmda_mg_block_step(
+            v.as_ptr(),
+            g_act.as_ptr(),
+            i_out.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+        )
+    }
+}
+
+/// Tsodyks-Markram Short-Term Plasticity (STP).
+pub fn tsodyks_markram_step(
+    x: &mut [f32],
+    u: &mut [f32],
+    spikes: &[i32],
+    w_eff: &mut [f32],
+    params: &[f32],
+    dt: f32,
+) {
+    let n = x.len();
+    assert_eq!(u.len(), n, "tsodyks_markram_step: u length mismatch");
+    assert_eq!(spikes.len(), n, "tsodyks_markram_step: spikes length mismatch");
+    assert_eq!(w_eff.len(), n, "tsodyks_markram_step: w_eff length mismatch");
+    assert_eq!(params.len(), n * 4, "tsodyks_markram_step: params length mismatch");
+    unsafe {
+        tsodyks_markram::tsodyks_markram_step(
+            x.as_mut_ptr(),
+            u.as_mut_ptr(),
+            spikes.as_ptr(),
+            w_eff.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+            dt,
         )
     }
 }

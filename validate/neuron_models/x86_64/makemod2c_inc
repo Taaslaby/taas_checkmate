@@ -1,0 +1,48 @@
+adex_taas.cpp: ../adex_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "adex_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./adex_taas.o: adex_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+
+fhn_taas.cpp: ../fhn_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "fhn_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./fhn_taas.o: fhn_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+
+hh_taas.cpp: ../hh_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "hh_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./hh_taas.o: hh_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+
+izh_taas.cpp: ../izh_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "izh_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./izh_taas.o: izh_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+
+lif_taas.cpp: ../lif_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "lif_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./lif_taas.o: lif_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+
+ml_taas.cpp: ../ml_taas.mod $(NOCMODL)
+	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "ml_taas.mod"  -o "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64" )
+
+./ml_taas.o: ml_taas.cpp
+	@printf " -> $(C_GREEN)Compiling$(C_RESET) /home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<\\n"
+	$(CXXCOMPILE) -I".." $(INCLUDES) -fPIC -c "/home/taaslab/Проекты/asm_engines/taas_checkmate/validate/neuron_models/x86_64/$<" -o $@
+

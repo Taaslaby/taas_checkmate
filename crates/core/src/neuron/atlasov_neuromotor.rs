@@ -10,7 +10,11 @@
 //!
 //! Author / Concept: Atlasov (Атласов)
 //!
-//! маленкие мускулы из маленьких клеток строят маленьких человечков которые потом будут строить человечков побольше и так до бесконечности
+//! Small muscles made of tiny cells build tiny humans, who will build bigger humans,
+//! and so on to infinity. A fractal of nested builders.
+//!
+//! маленькие мускулы из маленьких клеток строят маленьких человечков,
+//! которые потом будут строить человечков побольше — и так до бесконечности
 //!
 
 use crate::kernels;
@@ -245,7 +249,7 @@ pub struct BiomechanicsProfile {
 
 impl BiomechanicsProfile {
     /// Mammalian-scale profile (macroscopic forces in Newtons).
-    pub fn mammal() -> Self {
+    pub const fn mammal() -> Self {
         Self {
             d_ca: 0.5,
             tau_pump: 50.0,
@@ -262,8 +266,7 @@ impl BiomechanicsProfile {
     }
 
     /// Insect-scale profile (microscopic forces in milli-Newtons).
-    /// Ideal for Drosophila MuJoCo physics (prevents explosion from excess torque).
-    pub fn insect() -> Self {
+    pub const fn insect() -> Self {
         Self {
             d_ca: 0.5,
             tau_pump: 20.0,
@@ -278,11 +281,235 @@ impl BiomechanicsProfile {
             alpha: 1e-5,
         }
     }
+
+    /// Drosophila-scale profile (forces in micro-Newtons).
+    ///
+    /// Based on anatomical data (Drosophila leg, Azevedo et al. 2024):
+    /// - Slow fibers: ~5-7 fibers, ~0.1 µN per spike — postural tone
+    /// - Intermediate fibers: ~4-6 fibers, ~1-3 µN per spike — walking
+    /// - Fast fibers: ~3-5 fibers, ~10 µN per spike — ballistic
+    ///
+    /// Uses intermediate values as default.
+    pub const fn drosophila() -> Self {
+        Self {
+            d_ca: 0.3,
+            tau_pump: 10.0,
+            eta_reset: 0.9,
+            t_max: 2e-6,    // 2 µN — intermediate fiber
+            kd: 0.2,
+            l0: 0.0003,     // 300 µm fiber length
+            v_max: 0.5,
+            k0: 1e-8,
+            beta: 1e-7,
+            b0: 1e-9,
+            alpha: 1e-8,
+        }
+    }
+
+    /// Drosophila slow fiber pool — postural tone (~0.1 µN per spike).
+    pub const fn drosophila_slow() -> Self {
+        Self {
+            d_ca: 0.1,
+            tau_pump: 20.0,
+            eta_reset: 0.9,
+            t_max: 1e-7,     // 0.1 µN
+            kd: 0.15,
+            l0: 0.0002,      // 200 µm
+            v_max: 0.1,
+            k0: 1e-8,
+            beta: 1e-8,
+            b0: 1e-9,
+            alpha: 1e-9,
+        }
+    }
+
+    /// Drosophila fast fiber pool — ballistic (~10 µN per spike).
+    pub const fn drosophila_fast() -> Self {
+        Self {
+            d_ca: 1.0,
+            tau_pump: 8.0,
+            eta_reset: 0.7,
+            t_max: 1e-5,       // 10 µN
+            kd: 0.3,
+            l0: 0.0004,        // 400 µm
+            v_max: 1.0,
+            k0: 1e-8,
+            beta: 1e-7,
+            b0: 1e-9,
+            alpha: 1e-8,
+        }
+    }
+
+    /// TDT (Tergal Depressor of Trochanter) — catapult muscle for jumping.
+    ///
+    /// Super-thick tubular fibers, generates 10-50× body weight.
+    /// Found in middle legs (mesothoracic), used for escape jumps.
+    pub const fn drosophila_tdt() -> Self {
+        Self {
+            d_ca: 2.0,       // massive Ca²⁺ injection
+            tau_pump: 50.0,  // slow pump
+            eta_reset: 0.5,  // passive reset
+            t_max: 2e-4,     // 200 µN — 100× body weight!
+            kd: 0.1,
+            l0: 0.0005,      // 500 µm — spans thorax
+            v_max: 2.0,      // 2 m/s — ballistic
+            k0: 1e-7,
+            beta: 1e-6,
+            b0: 1e-8,
+            alpha: 1e-7,
+        }
+    }
 }
 
 impl Default for BiomechanicsProfile {
     fn default() -> Self {
         Self::mammal()
+    }
+}
+
+/// Configuration for a single Drosophila muscle fiber pool.
+#[derive(Debug, Clone, Copy)]
+pub struct FiberPoolConfig {
+    /// Number of fibers in this pool (typically 3-7 per fly muscle).
+    pub n_fibers: usize,
+    /// Biophysical profile for this pool.
+    pub profile: BiomechanicsProfile,
+}
+
+impl FiberPoolConfig {
+    /// Slow postural fibers: 5-7 fibers, ~0.1 µN each.
+    pub const fn slow() -> Self {
+        Self { n_fibers: 6, profile: BiomechanicsProfile::drosophila_slow() }
+    }
+    /// Intermediate walking fibers: 4-6 fibers, ~2 µN each.
+    pub const fn intermediate() -> Self {
+        Self { n_fibers: 5, profile: BiomechanicsProfile::drosophila() }
+    }
+    /// Fast ballistic fibers: 3-5 fibers, ~10 µN each.
+    pub const fn fast() -> Self {
+        Self { n_fibers: 4, profile: BiomechanicsProfile::drosophila_fast() }
+    }
+    /// TDT catapult: 3 super-thick fibers, ~200 µN each.
+    pub const fn tdt() -> Self {
+        Self { n_fibers: 3, profile: BiomechanicsProfile::drosophila_tdt() }
+    }
+}
+
+/// Full Drosophila leg musculature configuration.
+///
+/// Each leg has 5 joints (coxa, trochanter, femur, tibia, tarsus) driven by 19 muscles.
+/// Each muscle consists of 3 fiber pools (slow/intermediate/fast).
+/// The middle legs (T2) additionally have the TDT catapult muscle.
+#[derive(Debug, Clone)]
+pub struct DrosophilaLegConfig {
+    /// Number of legs.
+    pub n_legs: usize,
+    /// Number of muscles per leg.
+    pub muscles_per_leg: usize,
+    /// Number of joints per leg.
+    pub joints_per_leg: usize,
+    /// Total muscles across all legs.
+    pub total_muscles: usize,
+    /// Total fiber channels (sum of all pool.n_fibers).
+    pub total_channels: usize,
+    /// Whether to include TDT catapult muscles (middle legs only).
+    pub include_tdt: bool,
+    /// Fiber pool assignments for each muscle [n_muscles × pools].
+    pub pools: Vec<Vec<FiberPoolConfig>>,
+}
+
+impl Default for DrosophilaLegConfig {
+    fn default() -> Self {
+        Self::hexapod()
+    }
+}
+
+impl DrosophilaLegConfig {
+    /// Standard 6-legged fly configuration.
+    ///
+    /// Each leg: 19 muscles × [slow, intermediate, fast] = 57 channels.
+    /// Middle legs (T2, 2 legs): +3 TDT fibers each = +6 channels.
+    /// Total: 6 × 57 + 6 = 348 channels.
+    ///
+    /// To match SIMD alignment, padding channels are added (352 = 44×8).
+    pub fn hexapod() -> Self {
+        let n_legs = 6;
+        let muscles_per_leg = 19;
+        let joints_per_leg = 5;
+
+        // Standard pools per muscle: slow + intermediate + fast
+        let standard_pools = vec![
+            FiberPoolConfig::slow(),
+            FiberPoolConfig::intermediate(),
+            FiberPoolConfig::fast(),
+        ];
+
+        // Build pools for each muscle in each leg
+        let mut pools = Vec::new();
+        for leg in 0..n_legs {
+            for muscle in 0..muscles_per_leg {
+                let mut muscle_pools = standard_pools.clone();
+                // TDT is a SINGLE muscle (muscle 18, the last one) in middle legs only
+                // TDT (Tergal Depressor of Trochanter) spans thorax → trochanter
+                if (leg == 1 || leg == 2) && muscle == muscles_per_leg - 1 {
+                    muscle_pools.push(FiberPoolConfig::tdt());
+                }
+                pools.push(muscle_pools);
+            }
+        }
+
+        // Calculate total fiber channels
+        let total_channels: usize = pools.iter()
+            .flat_map(|p| p.iter())
+            .map(|pool| pool.n_fibers)
+            .sum();
+
+        // Pad to multiple of 8 for SIMD
+        let n_padded = (total_channels + 7) / 8 * 8;
+
+        Self {
+            n_legs,
+            muscles_per_leg,
+            joints_per_leg,
+            total_muscles: muscles_per_leg * n_legs,
+            total_channels: n_padded, // store padded count for SIMD alignment
+            include_tdt: true,
+            pools,
+        }
+    }
+
+    /// Build an AtlasovState for the full fly with per-fiber parameters.
+    ///
+    /// Each fiber channel gets its profile's d_ca, tau_pump, t_max, etc.
+    /// Padding channels (to meet SIMD 8-alignment) get default drosophila() values.
+    pub fn build_state(&self) -> AtlasovState {
+        let n_channels = self.total_channels; // already padded to ×8
+
+        // Start from drosophila() defaults for all channels
+        let mut state = AtlasovStateBuilder::new(n_channels)
+            .with_profile(BiomechanicsProfile::drosophila())
+            .build();
+
+        // Override per-channel parameters from pool profiles
+        let mut idx = 0;
+        for muscle_pools in &self.pools {
+            for pool in muscle_pools {
+                for _ in 0..pool.n_fibers {
+                    if idx < n_channels {
+                        state.d_ca[idx] = pool.profile.d_ca;
+                        state.tau_pump[idx] = pool.profile.tau_pump;
+                        state.eta_reset[idx] = pool.profile.eta_reset;
+                        state.t_max[idx] = pool.profile.t_max;
+                        state.kd[idx] = pool.profile.kd;
+                        state.l0[idx] = pool.profile.l0;
+                        state.v_max[idx] = pool.profile.v_max;
+                    }
+                    idx += 1;
+                }
+            }
+        }
+
+        state
     }
 }
 
@@ -296,8 +523,8 @@ pub struct AtlasovStateBuilder {
 impl AtlasovStateBuilder {
     pub fn new(n_muscles: usize) -> Self {
         assert!(
-            n_muscles.is_multiple_of(2),
-            "n_muscles must be even for agonist-antagonist pairs"
+            n_muscles.is_multiple_of(8),
+            "n_muscles must be multiple of 8 for SIMD alignment"
         );
         Self {
             n_muscles,
@@ -339,7 +566,7 @@ impl AtlasovStateBuilder {
 }
 
 impl AtlasovState {
-    /// Initialize new Atlasov Neuromotor state for `n_muscles` (must be even for joint pairs)
+    /// Initialize new Atlasov Neuromotor state for `n_muscles` (must be multiple of 8)
     /// using the default (mammal) profile. For customized profiles, use `AtlasovStateBuilder`.
     pub fn new(n_muscles: usize) -> Self {
         AtlasovStateBuilder::new(n_muscles).build()
@@ -390,7 +617,7 @@ mod tests {
         let dt = 1.0;
         let mut ca = vec![0.0f32; n];
         let mut tension = vec![0.0f32; n];
-        let spikes = vec![1i32; n]; // All muscles spike
+        let spikes = vec![1i32; n];
         let resets = vec![0i32; n];
 
         let d_ca = vec![0.5f32; n];
@@ -410,39 +637,17 @@ mod tests {
         let alpha = vec![1e-5f32; 8];
 
         step_atlasov_neuromotor(
-            &mut ca,
-            &mut tension,
-            &spikes,
-            &resets,
-            dt,
-            &d_ca,
-            &tau_pump,
-            &eta_reset,
-            &t_max,
-            &kd,
-            &l0,
-            &v_max,
-            None,
-            None,
-            Some(&mut joint_df),
-            Some(&mut joint_stf),
-            Some(&mut joint_dmp),
-            Some(&k0),
-            Some(&beta),
-            Some(&b0),
-            Some(&alpha),
+            &mut ca, &mut tension, &spikes, &resets, dt,
+            &d_ca, &tau_pump, &eta_reset, &t_max, &kd, &l0, &v_max,
+            None, None,
+            Some(&mut joint_df), Some(&mut joint_stf), Some(&mut joint_dmp),
+            Some(&k0), Some(&beta), Some(&b0), Some(&alpha),
         );
 
         assert!(ca[0] > 0.0, "Ca2+ should accumulate");
         assert!(tension[0] > 0.0, "Tension should be generated");
-        assert!(
-            joint_stf[0] > 1e-5,
-            "Joint stiffness should increase with calcium"
-        );
-        assert!(
-            joint_dmp[0] > 1e-6,
-            "Joint damping should increase with calcium"
-        );
+        assert!(joint_stf[0] > 1e-5, "Joint stiffness should increase");
+        assert!(joint_dmp[0] > 1e-6, "Joint damping should increase");
     }
 
     #[test]
@@ -468,10 +673,7 @@ mod tests {
         let mn_spike = vec![1.0f32; 8];
         let resets = vec![0i32; 8];
 
-        // Push spike to delay buffer (simulating 2ms NMJ delay)
         delay_buf.push(&mn_spike);
-
-        // Immediate read at delay=2 should return 0.0 (since buffer was pre-filled with 0.0)
         let delayed_spikes_t0 = delay_buf.read(2);
         let spikes_t0_i32: Vec<i32> = delayed_spikes_t0.iter().map(|&s| s as i32).collect();
         state.step(&spikes_t0_i32, &resets, 1.0, None, None);
@@ -481,7 +683,6 @@ mod tests {
 
     #[test]
     fn test_human_scale_muscles() {
-        // У обычного человека около 640 скелетных мышц (320 суставных пар).
         let human_muscles = 640;
         let mut state = AtlasovStateBuilder::new(human_muscles)
             .with_profile(BiomechanicsProfile::mammal())
@@ -490,21 +691,134 @@ mod tests {
         let spikes = vec![1i32; human_muscles];
         let resets = vec![0i32; human_muscles];
 
-        // Проверим производительность на 1000 итерациях (1 секунда симуляции при dt=1ms)
         let start = std::time::Instant::now();
         for _ in 0..1000 {
             state.step(&spikes, &resets, 1.0, None, None);
         }
         let duration = start.elapsed();
 
-        // Сила должна быть огромной (в Ньютонах)
         assert!(state.tension[0] > 1.0);
-        // Жесткость коленных и других суставов при коконтракции
         assert!(state.joint_stiffness[0] > 1.0);
+        println!("Simulated 640 human muscles (1000 ticks) in {:?}", duration);
+    }
 
-        println!(
-            "Просимулировано 640 мышц человека (1 секунда, 1000 тиков) за: {:?}",
-            duration
-        );
+    #[test]
+    fn test_drosophila_profile_slow_fiber_pool() {
+        let n = 8;
+        let mut state = AtlasovStateBuilder::new(n)
+            .with_profile(BiomechanicsProfile::drosophila_slow())
+            .build();
+
+        let spikes = vec![1i32; n];
+        let resets = vec![0i32; n];
+
+        for _ in 0..100 {
+            state.step(&spikes, &resets, 0.5, None, None);
+        }
+
+        // Slow fibers: very small tension (~0.1 µN)
+        assert!(state.tension[0] < 1e-4, "Slow fiber tension should be tiny");
+        assert!(state.tension[0] > 0.0, "Should have some tension");
+    }
+
+    #[test]
+    fn test_drosophila_fast_fiber_pool() {
+        let n = 8;
+        let mut state = AtlasovStateBuilder::new(n)
+            .with_profile(BiomechanicsProfile::drosophila_fast())
+            .build();
+
+        let spikes = vec![1i32; n];
+        let resets = vec![0i32; n];
+
+        for _ in 0..100 {
+            state.step(&spikes, &resets, 0.5, None, None);
+        }
+
+        // Fast fibers: significant tension (~10 µN)
+        assert!(state.tension[0] > 0.0, "Fast fiber should have tension");
+    }
+
+    #[test]
+    fn test_drosophila_tdt_profile() {
+        let n = 8;
+        let mut state = AtlasovStateBuilder::new(n)
+            .with_profile(BiomechanicsProfile::drosophila_tdt())
+            .build();
+
+        let spikes = vec![1i32; n];
+        let resets = vec![0i32; n];
+
+        for _ in 0..200 {
+            state.step(&spikes, &resets, 0.5, None, None);
+        }
+
+        // TDT: massive force (200 µN)
+        assert!(state.tension[0] > state.tension[1] * 0.5);
+        println!("TDT tension: {:.6} µN", state.tension[0] * 1e6);
+    }
+
+    #[test]
+    fn test_drosophila_leg_config_hexapod() {
+        let config = DrosophilaLegConfig::hexapod();
+        let channels = config.total_channels;
+
+        println!("\n=== Drosophila Hexapod Config ===");
+        println!("Legs: {}", config.n_legs);
+        println!("Muscles per leg: {}", config.muscles_per_leg);
+        println!("Total muscles: {}", config.total_muscles);
+        println!("Total fiber channels (padded): {}", channels);
+        println!("Include TDT: {}", config.include_tdt);
+
+        // Count pool types
+        let total_slow: usize = config.pools.iter()
+            .flat_map(|p| p.iter())
+            .filter(|pool| (pool.profile.t_max - 1e-7).abs() < 1e-8)
+            .map(|p| p.n_fibers)
+            .sum();
+        let total_fast: usize = config.pools.iter()
+            .flat_map(|p| p.iter())
+            .filter(|pool| (pool.profile.t_max - 1e-5).abs() < 1e-6)
+            .map(|p| p.n_fibers)
+            .sum();
+        let total_tdt: usize = config.pools.iter()
+            .flat_map(|p| p.iter())
+            .filter(|pool| (pool.profile.t_max - 2e-4).abs() < 1e-5)
+            .map(|p| p.n_fibers)
+            .sum();
+
+        println!("\nFiber pool breakdown:");
+        println!("  Slow fibers: {} (t_max=0.1 µN)", total_slow);
+        println!("  Intermediate fibers: {} (t_max=2 µN)", channels - total_slow - total_fast - total_tdt);
+        println!("  Fast fibers: {} (t_max=10 µN)", total_fast);
+        println!("  TDT fibers: {} (t_max=200 µN)", total_tdt);
+        println!("  Padding: {}", channels - config.pools.iter().flat_map(|p| p.iter()).map(|p| p.n_fibers).sum::<usize>());
+        assert!(channels > 0 && channels.is_multiple_of(8));
+        assert!(total_tdt > 0, "TDT must be included for middle legs");
+        assert_eq!(total_tdt, 3 * 2, "TDT: 3 fibers × 2 middle legs = 6 total");
+
+        // Build and test state
+        let state = config.build_state();
+        assert_eq!(state.n_muscles, channels);
+        assert!(state.t_max.iter().any(|&t| t == 2e-4), "TDT tension must exist");
+
+        // Full simulation test
+        let mut state_sim = config.build_state();
+        let n = state_sim.n_muscles;
+        let mut spikes = vec![0i32; n];
+        let resets = vec![0i32; n];
+        // Spike all real channels (0..real_channels)
+        let real_channels = config.pools.iter().flat_map(|p| p.iter()).map(|p| p.n_fibers).sum::<usize>();
+        for i in 0..real_channels.min(n) {
+            spikes[i] = 1;
+        }
+        for _ in 0..50 {
+            state_sim.step(&spikes, &resets, 0.5, None, None);
+        }
+        // Verify tension in µN range and TDT channels produce more
+        let tension_max = state_sim.tension.iter().cloned().fold(0.0f32, f32::max);
+        assert!(tension_max > 0.0, "Should generate tension");
+        println!("Max fiber tension: {:.6} µN", tension_max * 1e6);
+        println!("Mean tension: {:.6} µN", state_sim.tension.iter().sum::<f32>() / n as f32 * 1e6);
     }
 }

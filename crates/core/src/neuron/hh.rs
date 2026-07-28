@@ -1,6 +1,11 @@
 //! LUT-based Hodgkin-Huxley ion channels — zero exp() at runtime.
 //!
-//! модель нейрона правильный и может использоваться в исследовательских целях или в базовых медицинских симуляциях но не для симуляции сознания не грузите мозг человека ахахах
+//! This model reproduces canonical HH dynamics (Hodgkin & Huxley 1952) with
+//! high numerical fidelity. It is suitable for research-grade simulations and
+//! basic medical/neuromorphic applications.
+//!
+//! ⚠️  Not intended for consciousness simulation or whole-human-brain loading.
+//!     Please don't try to load a human brain. Seriously. 🧠☕
 //!
 //! # Usage
 //! ```ignore
@@ -8,7 +13,7 @@
 //!
 //! let mut cfg = standard_config(128, 0.01); // 128 neurons, dt=0.01ms
 //! let mut spikes = vec![0i32; 128];
-//! step_hh_lut(&mut cfg, &mut spikes); // call every dt
+//! step_hh_lut(&mut cfg, &mut spikes, 6.3); // call every dt
 //! ```
 
 use crate::kernels;
@@ -296,7 +301,7 @@ mod tests {
 
         for _step in 0..n_steps {
             // Step LUT (includes spike detection)
-            step_hh_lut(&mut lut, &mut lut_spike_buf);
+            step_hh_lut(&mut lut, &mut lut_spike_buf, 6.3);
             let v_lut = lut.v[0];
 
             // Step exact
@@ -354,7 +359,7 @@ mod tests {
         let mut spikes = vec![0i32; cfg.n];
         let mut total = 0u32;
         for _ in 0..n_steps {
-            step_hh_lut(cfg, &mut spikes);
+            step_hh_lut(cfg, &mut spikes, 6.3);
             total += spikes[0] as u32;
         }
         total
@@ -367,7 +372,7 @@ mod tests {
         let mut total = 0u32;
 
         for s in 0..n_steps {
-            step_hh_lut(cfg, &mut spikes);
+            step_hh_lut(cfg, &mut spikes, 6.3);
             if s >= skip_first {
                 if cfg.v[0] > v_max {
                     v_max = cfg.v[0];
@@ -402,7 +407,7 @@ mod tests {
         let mut total_spikes = 0;
         let mut spikes = [0i32; 1];
         for _ in 0..1000 {
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
             total_spikes += spikes[0];
         }
 
@@ -462,7 +467,7 @@ mod tests {
         let mut spikes_high = 0u32;
         let mut spikes_buf = [0i32; 1];
         for _ in 0..n_steps {
-            step_hh_lut(&mut cfg_high, &mut spikes_buf);
+            step_hh_lut(&mut cfg_high, &mut spikes_buf, 6.3);
             spikes_high += spikes_buf[0] as u32;
         }
 
@@ -654,6 +659,7 @@ mod tests {
                     &meta,
                     g_max_arr.as_ptr(),
                     0.01,
+                    6.3,
                 );
             }
         }
@@ -718,6 +724,7 @@ mod tests {
                     &meta,
                     g_max_arr.as_ptr(),
                     0.01,
+                    6.3,
                 );
             }
         }
@@ -765,7 +772,7 @@ mod tests {
 
         for s in 0..n_steps {
             cfg.Ii[0] = i_ext;
-            step_hh_lut(cfg, &mut spikes);
+            step_hh_lut(cfg, &mut spikes, 6.3);
             poly_spikes += spikes[0] as u32;
 
             hh_exact_step(
@@ -854,7 +861,7 @@ mod tests {
 
         for s in 0..n_steps {
             cfg.Ii[0] = 20.0;
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
             if spikes[0] != 0 && poly_first.is_none() {
                 poly_first = Some(s);
             }
@@ -910,7 +917,7 @@ mod tests {
         let mut v_trace = Vec::with_capacity(n_steps);
 
         for _ in 0..n_steps {
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
             v_trace.push(cfg.v[0]);
         }
 
@@ -973,14 +980,14 @@ mod tests {
         cfg.Ii[0] = 0.0;
         let mut spikes = [0i32; 1];
         for _ in 0..n_steps {
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
         }
         let v_rest = cfg.v[0];
 
         // Измеряем V при I=1 (subthreshold)
         cfg.Ii[0] = 1.0;
         for _ in 0..n_steps {
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
         }
         let v_depol = cfg.v[0];
 
@@ -1011,7 +1018,7 @@ mod tests {
         let mut spikes = [0i32; 1];
 
         for _ in 0..20_000 {
-            step_hh_lut(&mut cfg_poly, &mut spikes);
+            step_hh_lut(&mut cfg_poly, &mut spikes, 6.3);
             if cfg_poly.v[0] > max_v_poly {
                 max_v_poly = cfg_poly.v[0];
             }
@@ -1064,7 +1071,7 @@ mod tests {
         let mut v_trace = Vec::with_capacity(1000);
 
         for s in 0..n_steps {
-            step_hh_lut(&mut cfg, &mut spikes);
+            step_hh_lut(&mut cfg, &mut spikes, 6.3);
             total += spikes[0] as u32;
             if s % 100 == 0 {
                 v_trace.push(cfg.v[0]);
@@ -1094,10 +1101,11 @@ mod tests {
 /// spike detection loop that `step_hh_lut` previously required.
 ///
 /// Spikes: writes 1 to `spikes[i]` on reverse zero-crossing (v ≥ 0 → v < 0).
-/// Step all neurons by dt using fused polynomial HH dynamics + spike detection.
+/// Step all neurons by dt using fused polynomial HH dynamics + spike detection + Q10.
 ///
-/// Uses per-neuron g_max_arr from cfg.
-pub fn step_hh_lut(cfg: &mut HhLutConfig, spikes: &mut [i32]) {
+/// `celsius`: температура в °C (6.3 = squid axon @ H&H 1952, 24 = Drosophila).
+/// Использует per-neuron g_max_arr из cfg.
+pub fn step_hh_lut(cfg: &mut HhLutConfig, spikes: &mut [i32], celsius: f32) {
     let n = cfg.n.min(spikes.len());
 
     unsafe {
@@ -1112,6 +1120,7 @@ pub fn step_hh_lut(cfg: &mut HhLutConfig, spikes: &mut [i32]) {
             &cfg.channel_meta,
             cfg.g_max_arr.as_ptr(),
             cfg.dt,
+            celsius,
             spikes.as_mut_ptr(),
         );
     }

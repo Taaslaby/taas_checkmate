@@ -57,7 +57,7 @@ const E_NMDA: f32 = 0.0;
 const E_GABA_A: f32 = -65.0;
 const E_GABA_B: f32 = -90.0;
 const E_NACHR: f32 = 0.0;
-const E_GLUCL: f32 = -50.0;
+const E_GLUCL: f32 = -70.0; // Drosophila Cl⁻ channel — inhibitory, E_rev ≈ -70 mV
 const E_MACHR: f32 = -90.0;
 
 // ═══════════════════════════════════════════════════════════

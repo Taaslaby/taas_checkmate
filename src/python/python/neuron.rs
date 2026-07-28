@@ -722,6 +722,763 @@ impl PySomatoDendriticNeuron {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  HAAP (Hyperpolarization-Activated Adaptive Pulse-Bursting)
+// ═══════════════════════════════════════════════════════════
+
+/// HAAP neuron — один шаг VNC модели с M-current + HCN адаптацией.
+///
+/// Уравнения:
+///   C_m·dV/dt = -g_L(V-E_L) - g_M·u·(V-E_K) - g_h·h·(V-E_h) + I
+///   τ_u·du/dt = (u_∞(V) - u)
+///   τ_h·dh/dt = (h_∞(V) - h)
+///
+/// u_∞ = sigmoid((V - V_half_u) / k_u) — M-current, активируется деполяризацией
+/// h_∞ = sigmoid((V_half_h - V) / k_h) — HCN, активируется гиперполяризацией
+///
+/// Args:
+///     v: мембранный потенциал [n]
+///     u_state: M-current гейтинг (0..1) [n]
+///     h_state: HCN гейтинг (0..1) [n]
+///     I: ток [n]
+///     spikes: спайки (int32, будет заполнен) [n]
+///     params: упакованные параметры (17 × n)
+///         dt, C_m, g_L, E_L, g_M, E_K, g_h, E_h,
+///         tau_u, tau_h, V_half_u, k_u, V_half_h, k_h,
+///         V_thresh, V_reset, delta_u
+///
+/// Returns: None. Все изменения in-place.
+#[pyfunction]
+#[pyo3(name = "step_haap")]
+pub fn py_step_haap(
+    v: Bound<'_, PyArray1<f32>>,
+    u_state: Bound<'_, PyArray1<f32>>,
+    h_state: Bound<'_, PyArray1<f32>>,
+    I: Bound<'_, PyArray1<f32>>,
+    spikes: Bound<'_, PyArray1<i32>>,
+    params: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    let mut v = v.readwrite();
+    let mut u_state = u_state.readwrite();
+    let mut h_state = h_state.readwrite();
+    let I = I.readonly();
+    let mut spikes = spikes.readwrite();
+    let params = params.readonly();
+
+    let n = v.len()?;
+    assert_eq!(u_state.len()?, n, "u_state length mismatch");
+    assert_eq!(h_state.len()?, n, "h_state length mismatch");
+    assert_eq!(I.len()?, n, "I length mismatch");
+    assert_eq!(spikes.len()?, n, "spikes length mismatch");
+    assert_eq!(params.len()?, n * 17, "params length mismatch: expected {n}*17");
+
+    neuron::step_haap(
+        v.as_slice_mut()?,
+        u_state.as_slice_mut()?,
+        h_state.as_slice_mut()?,
+        I.as_slice()?,
+        spikes.as_slice_mut()?,
+        params.as_slice()?,
+    );
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ChordotonalSensor (Drosophila mechanoreceptor)
+// ═══════════════════════════════════════════════════════════
+
+/// PyO3 класс сенсорного нейрона (Chordotonal organ) — нагрузка → частота.
+#[pyclass(name = "ChordotonalSensor", module = "taas_checkmate.neurons")]
+pub struct PyChordotonalSensor {
+    inner: neuron::ChordotonalState,
+}
+
+#[pymethods]
+impl PyChordotonalSensor {
+    /// Создать новый ChordotonalSensor.
+    ///
+    /// Args:
+    ///     n: количество сенсоров (будет padded до ×8)
+    ///     profile: "mixed" (default), "phasic", или "tonic"
+    ///     dt: шаг по времени (мс)
+    #[new]
+    #[pyo3(signature = (n, profile="mixed".to_string(), dt=1.0))]
+    pub fn new(n: usize, profile: String, dt: f32) -> Self {
+        let prof = match profile.as_str() {
+            "phasic" => neuron::ChordotonalProfile::phasic(),
+            "tonic" => neuron::ChordotonalProfile::tonic(),
+            _ => neuron::ChordotonalProfile::mixed(),
+        };
+        let inner = neuron::ChordotonalBuilder::new(n)
+            .with_profile(prof)
+            .with_dt(dt)
+            .build();
+        Self { inner }
+    }
+
+    /// Один шаг симуляции: нагрузка → скорость стрельбы.
+    ///
+    /// Args:
+    ///     loads: механическая нагрузка/сила контакта, нормализованная 0..1 [n]
+    ///     stretches: растяжение сустава, нормализованное -1..1 [n]
+    ///     d_loads: опционально — производная нагрузки (скорость). None или массив [n]
+    #[pyo3(signature = (loads, stretches, d_loads=None))]
+    pub fn step(
+        &mut self,
+        loads: Bound<'_, PyArray1<f32>>,
+        stretches: Bound<'_, PyArray1<f32>>,
+        d_loads: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<()> {
+        let loads_ro = loads.readonly();
+        let stretches_ro = stretches.readonly();
+
+        let loads_slice = loads_ro.as_slice()?;
+        let stretches_slice = stretches_ro.as_slice()?;
+
+        // Copy d_loads to owned Vec to avoid borrow issues with PyReadonlyArray1
+        let d_loads_owned: Option<Vec<f32>> = match &d_loads {
+            Some(arr) => {
+                let ro = arr.readonly();
+                Some(ro.as_slice()?.to_vec())
+            }
+            None => None,
+        };
+        let d_slice: Option<&[f32]> = d_loads_owned.as_deref();
+
+        self.inner.step(loads_slice, stretches_slice, d_slice);
+        // d_loads_owned (and its borrow d_slice) dropped here
+        Ok(())
+    }
+
+    /// Получить текущие firing rates (Hz) для всех сенсоров.
+    #[getter]
+    pub fn rates<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.firing_rates()))
+    }
+
+    /// Получить рецепторный потенциал V_sens.
+    #[getter]
+    pub fn v_sens<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, &self.inner.v_sens[..self.inner.n]))
+    }
+
+    /// Количество сенсоров.
+    #[getter]
+    pub fn n(&self) -> usize {
+        self.inner.n
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Spike Metrics — firing rates, ISI, CV
+// ═══════════════════════════════════════════════════════════
+
+/// Вычислить firing rates для каждого нейрона по буферу спайков.
+///
+/// Буфер: `[time × neuron]` — `spike_buffer[t * n_neurons + i]`.
+/// Скорость: `rate[i] = spike_count[i] / (n_steps * dt)` в Hz.
+///
+/// Args:
+///     spike_buffer: буфер спайков (int32) [n_neurons * n_steps]
+///     n_neurons: количество нейронов
+///     n_steps: количество временных шагов
+///     dt: шаг по времени (ms)
+///
+/// Returns:
+///     np.ndarray[float32] — firing rate в Hz для каждого нейрона
+#[pyfunction]
+#[pyo3(name = "firing_rates")]
+pub fn py_firing_rates<'py>(
+    py: Python<'py>,
+    spike_buffer: Bound<'py, PyArray1<i32>>,
+    n_neurons: usize,
+    n_steps: usize,
+    dt: f32,
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    let spike_buffer = spike_buffer.readonly();
+    let result = neuron::firing_rates(spike_buffer.as_slice()?, n_neurons, n_steps, dt);
+    Ok(PyArray1::from_vec(py, result))
+}
+
+/// Средний firing rate по всем нейронам.
+///
+/// Args:
+///     spike_buffer: буфер спайков (int32) [n_neurons * n_steps]
+///     n_neurons: количество нейронов
+///     n_steps: количество временных шагов
+///     dt: шаг по времени (ms)
+///
+/// Returns:
+///     float — средний firing rate в Hz
+#[pyfunction]
+#[pyo3(name = "mean_firing_rate")]
+pub fn py_mean_firing_rate(
+    spike_buffer: Bound<'_, PyArray1<i32>>,
+    n_neurons: usize,
+    n_steps: usize,
+    dt: f32,
+) -> PyResult<f32> {
+    let spike_buffer = spike_buffer.readonly();
+    Ok(neuron::mean_firing_rate(spike_buffer.as_slice()?, n_neurons, n_steps, dt))
+}
+
+/// Вычислить межспайковые интервалы (ISI) для одного нейрона.
+///
+/// Args:
+///     spikes: последовательность спайков (int32) [n_steps] — 0/1
+///     dt: шаг по времени (ms)
+///
+/// Returns:
+///     np.ndarray[float32] — ISI в ms
+#[pyfunction]
+#[pyo3(name = "compute_isi")]
+pub fn py_compute_isi<'py>(
+    py: Python<'py>,
+    spikes: Bound<'py, PyArray1<i32>>,
+    dt: f32,
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    let spikes = spikes.readonly();
+    let result = neuron::compute_isi(spikes.as_slice()?, dt);
+    Ok(PyArray1::from_vec(py, result))
+}
+
+/// Вычислить Coefficient of Variation (CV) ISIs для каждого нейрона.
+///
+/// CV ≈ 1 → Poisson, CV < 1 → regular, CV > 1 → bursting.
+///
+/// Args:
+///     spike_buffer: буфер спайков (int32) [n_neurons * n_steps]
+///     n_neurons: количество нейронов
+///     n_steps: количество временных шагов
+///     dt: шаг по времени (ms)
+///
+/// Returns:
+///     np.ndarray[float32] — CV для каждого нейрона
+#[pyfunction]
+#[pyo3(name = "compute_cvs")]
+pub fn py_compute_cvs<'py>(
+    py: Python<'py>,
+    spike_buffer: Bound<'py, PyArray1<i32>>,
+    n_neurons: usize,
+    n_steps: usize,
+    dt: f32,
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    let spike_buffer = spike_buffer.readonly();
+    let result = neuron::compute_cvs(spike_buffer.as_slice()?, n_neurons, n_steps, dt);
+    Ok(PyArray1::from_vec(py, result))
+}
+
+// ═══════════════════════════════════════════════════════════
+//  🧫 AstrocyteState — glial modulation
+// ═══════════════════════════════════════════════════════════
+
+/// PyO3 класс астроцита: медленная глиальная модуляция синаптического усиления,
+/// EAAT очистка глутамата, K⁺ буферизация, Ca²⁺ волны через gap junctions.
+///
+/// The full model runs in Rust SIMD via `crates/kernels/src/neuron/astrocyte.rs`.
+#[pyclass(name = "AstrocyteState", module = "taas_checkmate.neurons")]
+pub struct PyAstrocyteState {
+    inner: std::sync::Mutex<neuron::astrocyte::AstrocyteState>,
+}
+
+#[pymethods]
+impl PyAstrocyteState {
+    /// Создать новую сеть астроцитов.
+    ///
+    /// Args:
+    ///     n: количество астроцитов (обычно = n_neurons)
+    ///     tau_astro: постоянная времени медленной активности (ms, default 1000)
+    ///     alpha: сила модуляции синаптического усиления (default 0.1)
+    #[new]
+    #[pyo3(signature = (n, tau_astro=1000.0, alpha=0.1))]
+    pub fn new(n: usize, tau_astro: f32, alpha: f32) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(neuron::astrocyte::AstrocyteState::new(n, tau_astro, alpha)),
+        }
+    }
+
+    /// Один шаг симуляции: обновить A(t), Ca²⁺, K_ext, EAAT_occ, V_gap.
+    ///
+    /// Args:
+    ///     spikes: спайки (int32, 0/1) [n]
+    ///     gap_pairs: список пар (i, j) для gap junction связей (list of 2-tuples)
+    ///     dt: шаг по времени (ms)
+    pub fn step(
+        &self,
+        spikes: Bound<'_, PyArray1<i32>>,
+        gap_pairs: Vec<(usize, usize)>,
+        dt: f32,
+    ) -> PyResult<()> {
+        let spikes_ro = spikes.readonly();
+        let mut inner = self.inner.lock().unwrap();
+        inner.step(spikes_ro.as_slice()?, &gap_pairs, dt);
+        Ok(())
+    }
+
+    /// Вычислить модуляционное усиление для всех нейронов:
+    /// ``gain[i] = (1 + α·A[i]) · (1 + μ·Ca[i])``
+    ///
+    /// Returns:
+    ///     np.ndarray[float32] — gain для каждого астроцита
+    pub fn compute_gain<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let inner = self.inner.lock().unwrap();
+        let gain = inner.compute_gain();
+        PyArray1::from_vec(py, gain[..inner.n].to_vec())
+    }
+
+    /// Применить K⁺ усталость к порогам: ``V_thresh += sensitivity · (K_ext − K_baseline)``
+    ///
+    /// Args:
+    ///     v_thresh: массив порогов [n] (будет изменён in-place)
+    pub fn modulate_v_thresh(&self, v_thresh: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let mut v_thresh_rw = v_thresh.readwrite();
+        let inner = self.inner.lock().unwrap();
+        inner.modulate_v_thresh(v_thresh_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    /// Применить EAAT очистку + синаптическое усиление к SynapticKinetics.
+    ///
+    /// Args:
+    ///     g_ampa, g_nmda, g_gaba_a, g_gaba_b, g_nachr, g_glucl, g_machr:
+    ///         проводимости [n] (будут изменены in-place)
+    ///     dt: шаг по времени (ms)
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_to_kinetics(
+        &self,
+        g_ampa: Bound<'_, PyArray1<f32>>,
+        g_nmda: Bound<'_, PyArray1<f32>>,
+        g_gaba_a: Bound<'_, PyArray1<f32>>,
+        g_gaba_b: Bound<'_, PyArray1<f32>>,
+        g_nachr: Bound<'_, PyArray1<f32>>,
+        g_glucl: Bound<'_, PyArray1<f32>>,
+        g_machr: Bound<'_, PyArray1<f32>>,
+        dt: f32,
+    ) -> PyResult<()> {
+        let mut a_ampa = g_ampa.readwrite();
+        let mut a_nmda = g_nmda.readwrite();
+        let mut a_gaba_a = g_gaba_a.readwrite();
+        let mut a_gaba_b = g_gaba_b.readwrite();
+        let mut a_nachr = g_nachr.readwrite();
+        let mut a_glucl = g_glucl.readwrite();
+        let mut a_machr = g_machr.readwrite();
+
+        let inner = self.inner.lock().unwrap();
+        let kin = &mut crate::kernels::neuron::synapse::SynapticKinetics::new(inner.n);
+        
+        // Copy Python arrays into kinetics buffers
+        let n = inner.n.min(a_ampa.len()?);
+        kin.g_ampa[..n].copy_from_slice(&a_ampa.as_slice()?[..n]);
+        kin.g_nmda[..n].copy_from_slice(&a_nmda.as_slice()?[..n]);
+        kin.g_gaba_a[..n].copy_from_slice(&a_gaba_a.as_slice()?[..n]);
+        kin.g_gaba_b[..n].copy_from_slice(&a_gaba_b.as_slice()?[..n]);
+        kin.g_nachr[..n].copy_from_slice(&a_nachr.as_slice()?[..n]);
+        kin.g_glucl[..n].copy_from_slice(&a_glucl.as_slice()?[..n]);
+        kin.g_machr[..n].copy_from_slice(&a_machr.as_slice()?[..n]);
+
+        // Apply astrocyte modulation
+        inner.apply_to_kinetics(kin, dt);
+
+        // Copy back
+        a_ampa.as_slice_mut()?[..n].copy_from_slice(&kin.g_ampa[..n]);
+        a_nmda.as_slice_mut()?[..n].copy_from_slice(&kin.g_nmda[..n]);
+        a_gaba_a.as_slice_mut()?[..n].copy_from_slice(&kin.g_gaba_a[..n]);
+        a_gaba_b.as_slice_mut()?[..n].copy_from_slice(&kin.g_gaba_b[..n]);
+        a_nachr.as_slice_mut()?[..n].copy_from_slice(&kin.g_nachr[..n]);
+        a_glucl.as_slice_mut()?[..n].copy_from_slice(&kin.g_glucl[..n]);
+        a_machr.as_slice_mut()?[..n].copy_from_slice(&kin.g_machr[..n]);
+
+        Ok(())
+    }
+
+    /// Применить volume transmission модуляцию к Ii: ``Ii[i] *= (1 + μ·Ca[i])⁻¹``
+    /// или ``Ii[i] *= (1 + μ·Ca[i])`` если excitatory=True.
+    ///
+    /// Args:
+    ///     Ii: массив токов [n] (будет изменён in-place)
+    ///     excitatory: если True — усиливает Ii, если False — ослабляет
+    pub fn modulate_Ii(&self, Ii: Bound<'_, PyArray1<f32>>, excitatory: bool) -> PyResult<()> {
+        let mut Ii_rw = Ii.readwrite();
+        let inner = self.inner.lock().unwrap();
+        inner.modulate_Ii(Ii_rw.as_slice_mut()?, excitatory);
+        Ok(())
+    }
+
+    /// Установить параметр k_per_spike.
+    pub fn set_k_per_spike(&self, val: f32) {
+        self.inner.lock().unwrap().k_per_spike = val;
+    }
+    /// Установить параметр k_sensitivity.
+    pub fn set_k_sensitivity(&self, val: f32) {
+        self.inner.lock().unwrap().k_sensitivity = val;
+    }
+    /// Установить параметр k_baseline.
+    pub fn set_k_baseline(&self, val: f32) {
+        self.inner.lock().unwrap().k_baseline = val;
+    }
+    /// Установить параметр eaat_strength.
+    pub fn set_eaat_strength(&self, val: f32) {
+        self.inner.lock().unwrap().eaat_strength = val;
+    }
+    /// Установить параметр mu (volume transmission gain).
+    pub fn set_mu(&self, val: f32) {
+        self.inner.lock().unwrap().mu = val;
+    }
+    /// Установить параметр g_gap (gap junction conductance).
+    pub fn set_g_gap(&self, val: f32) {
+        self.inner.lock().unwrap().g_gap = val;
+    }
+
+    /// Сбросить все состояния астроцита.
+    pub fn reset(&self) {
+        self.inner.lock().unwrap().reset();
+    }
+
+    /// Текущие значения A(t) (медленная активность) для всех нейронов.
+    #[getter]
+    pub fn a<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let inner = self.inner.lock().unwrap();
+        PyArray1::from_vec(py, inner.a[..inner.n].to_vec())
+    }
+
+    /// Текущие значения Ca²⁺.
+    #[getter]
+    pub fn ca<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let inner = self.inner.lock().unwrap();
+        PyArray1::from_vec(py, inner.ca[..inner.n].to_vec())
+    }
+
+    /// Текущие значения K_ext (внеклеточный K⁺).
+    #[getter]
+    pub fn k_ext<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let inner = self.inner.lock().unwrap();
+        PyArray1::from_vec(py, inner.k_ext[..inner.n].to_vec())
+    }
+
+    /// Текущие значения EAAT_occ (занятость транспортера).
+    #[getter]
+    pub fn eaat_occ<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let inner = self.inner.lock().unwrap();
+        PyArray1::from_vec(py, inner.eaat_occ[..inner.n].to_vec())
+    }
+
+    /// Количество астроцитов.
+    #[getter]
+    pub fn n(&self) -> usize {
+        self.inner.lock().unwrap().n
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NMDA — Voltage-Dependent Mg²⁺ Block (Destexhe et al. 1998)
+// ═══════════════════════════════════════════════════════════
+
+/// NMDA Mg²⁺ block — вольт-зависимый магниевый блок для NMDA рецепторов.
+///
+/// I_NMDA = g_NMDA · B(V) · (V - E_syn)
+/// B(V) = 1 / (1 + [Mg²⁺]/3.57 · exp(-0.062 · V))
+///
+/// Args:
+///     v: мембранный потенциал [n]
+///     g_act: NMDA проводимость [n]
+///     i_out: выходной ток [n] (ДОБАВЛЯЕТСЯ in-place)
+///     g_nmda: максимальная проводимость [n]
+///     E_syn: потенциал реверсии (mV, default 0.0) [n]
+///     mg_conc: концентрация Mg²⁺ (mM, default 1.0) [n]
+#[pyfunction]
+#[pyo3(name = "step_nmda")]
+pub fn py_step_nmda(
+    v: Bound<'_, PyArray1<f32>>,
+    g_act: Bound<'_, PyArray1<f32>>,
+    i_out: Bound<'_, PyArray1<f32>>,
+    g_nmda: Bound<'_, PyArray1<f32>>,
+    E_syn: Bound<'_, PyArray1<f32>>,
+    mg_conc: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    let v_ro = v.readonly();
+    let g_act_ro = g_act.readonly();
+    let mut i_out_rw = i_out.readwrite();
+    let g_nmda_ro = g_nmda.readonly();
+    let E_syn_ro = E_syn.readonly();
+    let mg_conc_ro = mg_conc.readonly();
+
+    let n = v.len()?;
+    let v_slice = v_ro.as_slice()?;
+    let g_act_slice = g_act_ro.as_slice()?;
+    let i_out_slice = i_out_rw.as_slice_mut()?;
+    let g_nmda_slice = g_nmda_ro.as_slice()?;
+    let e_syn_slice = E_syn_ro.as_slice()?;
+    let mg_slice = mg_conc_ro.as_slice()?;
+
+    // Params layout [4 × n]: [g_nmda, E_syn, mg_conc, _pad]
+    let mut params = vec![0.0f32; n * 4];
+    for i in 0..n {
+        params[i * 4] = g_nmda_slice[i];
+        params[i * 4 + 1] = e_syn_slice[i];
+        params[i * 4 + 2] = mg_slice[i];
+    }
+
+    crate::kernels::nmda_mg_block_step(v_slice, g_act_slice, i_out_slice, &params);
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GLIF3 — LIF + After-Spike Current (Allen Institute)
+// ═══════════════════════════════════════════════════════════
+
+/// GLIF3 — LIF с after-spike current (I_ahp).
+///
+/// Allen Institute — Teeter et al. 2018, Nature Communications.
+///
+/// Уравнения:
+///   dv/dt = -g_leak·(v - E_leak) + I_syn + g_ahp·(v - E_ahp)
+///   dg_ahp/dt = -g_ahp / τ_ahp  (exponential Euler)
+///   On spike: v = v_reset, g_ahp += Δg_ahp
+///
+/// Использование:
+///     glif = Glif3State(100, dt=1.0)
+///     I_ext = np.zeros(100, dtype=np.float32)
+///     glif.step(I_ext)
+///     spikes = glif.spikes
+#[pyclass(name = "Glif3State", module = "taas_checkmate.neurons")]
+pub struct PyGlif3State {
+    inner: std::sync::Mutex<neuron::glif::Glif3State>,
+}
+
+#[pymethods]
+impl PyGlif3State {
+    #[new]
+    #[pyo3(signature = (n, dt=1.0, g_leak=0.1, E_leak=-65.0, v_thresh=-50.0, v_reset=-65.0,
+        tau_ahp=30.0, delta_g_ahp=0.01, E_ahp=-80.0, tau_ref=2.0))]
+    fn new(
+        n: usize, dt: f32, g_leak: f32, E_leak: f32, v_thresh: f32, v_reset: f32,
+        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32, tau_ref: f32,
+    ) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(
+                neuron::glif::Glif3State::new(
+                    n, dt, g_leak, E_leak, v_thresh, v_reset,
+                    tau_ahp, delta_g_ahp, E_ahp, tau_ref,
+                ),
+            ),
+        }
+    }
+
+    /// Один шаг симуляции с внешним током I_ext.
+    fn step(&self, I_ext: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let I_ext_ro = I_ext.readonly();
+        let mut inner = self.inner.lock().unwrap();
+        inner.step(Some(I_ext_ro.as_slice()?));
+        Ok(())
+    }
+
+    /// Сброс всех состояний.
+    fn reset(&self) {
+        self.inner.lock().unwrap().reset();
+    }
+
+    /// Настройка параметров конкретного нейрона.
+    #[pyo3(signature = (idx, g_leak, E_leak, v_thresh, v_reset, tau_ahp, delta_g_ahp, E_ahp))]
+    fn set_params(
+        &self, idx: usize, g_leak: f32, E_leak: f32, v_thresh: f32, v_reset: f32,
+        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32,
+    ) {
+        self.inner.lock().unwrap().set_params(
+            idx, g_leak, E_leak, v_thresh, v_reset, tau_ahp, delta_g_ahp, E_ahp,
+        );
+    }
+
+    /// Мембранный потенциал [n].
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.v[..inner.n].to_vec()))
+    }
+
+    /// Спайки (0/1) [n].
+    #[getter]
+    fn spikes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.spikes[..inner.n].to_vec()))
+    }
+
+    /// After-spike conductance g_ahp [n].
+    #[getter]
+    fn g_ahp<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.g_ahp[..inner.n].to_vec()))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Glif3State(n={})", self.inner.lock().unwrap().n)
+    }
+
+    fn n_neurons(&self) -> usize {
+        self.inner.lock().unwrap().n
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GLIF4 — Threshold Adaptation + After-Spike Current
+// ═══════════════════════════════════════════════════════════
+
+/// GLIF4 — GLIF3 + адаптация порога (θ).
+///
+/// Allen Institute — Teeter et al. 2018.
+///
+/// Уравнения:
+///   dv/dt = -g_leak·(v - E_leak) + I_syn + g_ahp·(v - E_ahp)
+///   dg_ahp/dt = -g_ahp / τ_ahp
+///   dθ/dt = -θ / τ_θ
+///   Effective threshold = v_thresh_0 + θ
+///   On spike: v = v_reset, g_ahp += Δg_ahp, θ += Δθ
+#[pyclass(name = "Glif4State", module = "taas_checkmate.neurons")]
+pub struct PyGlif4State {
+    inner: std::sync::Mutex<neuron::glif::Glif4State>,
+}
+
+#[pymethods]
+impl PyGlif4State {
+    #[new]
+    #[pyo3(signature = (n, dt=1.0, g_leak=0.1, E_leak=-65.0, v_thresh_0=-50.0, v_reset=-65.0,
+        tau_ahp=30.0, delta_g_ahp=0.01, E_ahp=-80.0, tau_theta=20.0, delta_theta=3.0, tau_ref=2.0))]
+    fn new(
+        n: usize, dt: f32, g_leak: f32, E_leak: f32, v_thresh_0: f32, v_reset: f32,
+        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32, tau_theta: f32, delta_theta: f32, tau_ref: f32,
+    ) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(
+                neuron::glif::Glif4State::new(
+                    n, dt, g_leak, E_leak, v_thresh_0, v_reset,
+                    tau_ahp, delta_g_ahp, E_ahp, tau_theta, delta_theta, tau_ref,
+                ),
+            ),
+        }
+    }
+
+    /// Один шаг симуляции с внешним током I_ext.
+    fn step(&self, I_ext: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let I_ext_ro = I_ext.readonly();
+        let mut inner = self.inner.lock().unwrap();
+        inner.step(Some(I_ext_ro.as_slice()?));
+        Ok(())
+    }
+
+    /// Сброс всех состояний.
+    fn reset(&self) {
+        self.inner.lock().unwrap().reset();
+    }
+
+    /// Мембранный потенциал [n].
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.v[..inner.n].to_vec()))
+    }
+
+    /// Спайки (0/1) [n].
+    #[getter]
+    fn spikes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.spikes[..inner.n].to_vec()))
+    }
+
+    /// Threshold offset θ [n].
+    #[getter]
+    fn theta<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.theta[..inner.n].to_vec()))
+    }
+
+    /// After-spike conductance g_ahp [n].
+    #[getter]
+    fn g_ahp<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let inner = self.inner.lock().unwrap();
+        Ok(PyArray1::from_vec(py, inner.g_ahp[..inner.n].to_vec()))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Glif4State(n={})", self.inner.lock().unwrap().n)
+    }
+
+    fn n_neurons(&self) -> usize {
+        self.inner.lock().unwrap().n
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Hindmarsh-Rose (HR) — 3-variable spiking & bursting
+// ═══════════════════════════════════════════════════════════
+
+/// Hindmarsh-Rose (HR) — один шаг 3-переменной модели спайкинга/бёрстинга.
+///
+/// Уравнения:
+///   dx/dt = y - a·x³ + b·x² - z + I_ext
+///   dy/dt = c - d·x² - y
+///   dz/dt = r·(s·(x - x_R) - z)
+///
+/// Параметры (по умолчанию): a=1.0, b=3.0, c=1.0, d=5.0, r=0.006, s=4.0, xr=-1.6
+///
+/// Args:
+///     x: быстрая переменная (мембранный потенциал) [n]
+///     y: recovery переменная [n]
+///     z: медленная адаптация [n]
+///     I: внешний ток [n]
+///     spikes: спайки (int32) [n]
+///     dt: шаг по времени (ms)
+///     a, b, c, d, r, s, xr: параметры модели [n]
+#[pyfunction]
+#[pyo3(name = "step_hr")]
+pub fn py_step_hr(
+    x: Bound<'_, PyArray1<f32>>,
+    y: Bound<'_, PyArray1<f32>>,
+    z: Bound<'_, PyArray1<f32>>,
+    I: Bound<'_, PyArray1<f32>>,
+    spikes: Bound<'_, PyArray1<i32>>,
+    dt: f32,
+    a: Bound<'_, PyArray1<f32>>,
+    b: Bound<'_, PyArray1<f32>>,
+    c: Bound<'_, PyArray1<f32>>,
+    d: Bound<'_, PyArray1<f32>>,
+    r: Bound<'_, PyArray1<f32>>,
+    s: Bound<'_, PyArray1<f32>>,
+    xr: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    let mut x_rw = x.readwrite();
+    let mut y_rw = y.readwrite();
+    let mut z_rw = z.readwrite();
+    let I_ro = I.readonly();
+    let mut spikes_rw = spikes.readwrite();
+    let a_ro = a.readonly();
+    let b_ro = b.readonly();
+    let c_ro = c.readonly();
+    let d_ro = d.readonly();
+    let r_ro = r.readonly();
+    let s_ro = s.readonly();
+    let xr_ro = xr.readonly();
+
+    neuron::step_hr(
+        x_rw.as_slice_mut()?,
+        y_rw.as_slice_mut()?,
+        z_rw.as_slice_mut()?,
+        I_ro.as_slice()?,
+        spikes_rw.as_slice_mut()?,
+        dt,
+        a_ro.as_slice()?,
+        b_ro.as_slice()?,
+        c_ro.as_slice()?,
+        d_ro.as_slice()?,
+        r_ro.as_slice()?,
+        s_ro.as_slice()?,
+        xr_ro.as_slice()?,
+    );
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════
+//  e-prop
+// ═══════════════════════════════════════════════════════════
+
 /// Eligibility Propagation (e-prop) SNN learning step.
 ///
 /// Updates eligibility traces and synaptic weights based on local surrogate gradient
@@ -740,11 +1497,16 @@ pub fn step_eprop(
     v_thresh: f32,
     eta: f32,
 ) -> PyResult<()> {
-    let weights_arr = weights.readwrite().as_slice_mut()?;
-    let eligibility_arr = eligibility.readwrite().as_slice_mut()?;
-    let v_post_arr = v_post.readonly().as_slice()?;
-    let spikes_pre_arr = spikes_pre.readonly().as_slice()?;
-    let errors_post_arr = errors_post.readonly().as_slice()?;
+    let mut weights_rw = weights.readwrite();
+    let weights_arr = weights_rw.as_slice_mut()?;
+    let mut elig_rw = eligibility.readwrite();
+    let eligibility_arr = elig_rw.as_slice_mut()?;
+    let v_post_ro = v_post.readonly();
+    let v_post_arr = v_post_ro.as_slice()?;
+    let spikes_pre_ro = spikes_pre.readonly();
+    let spikes_pre_arr = spikes_pre_ro.as_slice()?;
+    let errors_post_ro = errors_post.readonly();
+    let errors_post_arr = errors_post_ro.as_slice()?;
 
     assert_eq!(
         weights_arr.len(),

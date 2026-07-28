@@ -445,7 +445,7 @@ mod tests {
             // Manual sim_hh step:
             cfg.Ii[0] += external_I[0];
             cfg.Ii[1] += external_I[1];
-            taas_core::neuron::hh::step_hh_lut(&mut cfg, &mut spikes_buf);
+            taas_core::neuron::hh::step_hh_lut(&mut cfg, &mut spikes_buf, 6.3);
             if spikes_buf[0] != 0 {
                 q.push(0);
             }
@@ -721,7 +721,7 @@ pub fn sim_lif_synaptic(
 // ─── Izhikevich simulation ─────────────────────────────
 
 /// Pad a Vec to `n_padded` by replicating the last element.
-fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {
+pub fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {
     let mut padded = v.to_vec();
     padded.resize(n_padded, *v.last().unwrap_or(&v[0]));
     padded
@@ -1554,7 +1554,7 @@ pub fn sim_hh(
         }
 
         // 2. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
-        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes);
+        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes, 6.3);
 
         // 4. Push spikes to queue
         push_spikes_to_queue(&spikes, n_neurons, &mut queue);
@@ -1621,7 +1621,7 @@ pub fn sim_hh_synaptic(
         kinetics.compute_currents(&cfg.v, &mut cfg.Ii);
 
         // 4. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
-        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes);
+        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes, 6.3);
 
         // 5. Push spikes to queue
         push_spikes_to_queue(&spikes, n_neurons, &mut queue);

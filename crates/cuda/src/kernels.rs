@@ -176,3 +176,74 @@ pub fn saw_step(
         "saw_step",
     )
 }
+
+pub fn step_morris_lecar(
+    v: &mut [f32],
+    w: &mut [f32],
+    i_in: &mut [f32],
+    spikes: &mut [i32],
+    params: &[f32],
+    dt: f32,
+) -> Result<(), String> {
+    let n = v.len() as c_int;
+    ok_or(
+        unsafe {
+            cuda_morris_lecar_step(
+                v.as_mut_ptr(),
+                w.as_mut_ptr(),
+                i_in.as_mut_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                dt,
+                n,
+            )
+        },
+        "morris_lecar_step",
+    )
+}
+
+pub fn step_nmda_mg_block(
+    v: &[f32],
+    g_act: &[f32],
+    i_out: &mut [f32],
+    params: &[f32],
+) -> Result<(), String> {
+    let n = v.len() as c_int;
+    ok_or(
+        unsafe {
+            cuda_nmda_mg_block_step(
+                v.as_ptr(),
+                g_act.as_ptr(),
+                i_out.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+            )
+        },
+        "nmda_mg_block_step",
+    )
+}
+
+pub fn step_tsodyks_markram(
+    x: &mut [f32],
+    u: &mut [f32],
+    spikes: &[i32],
+    w_eff: &mut [f32],
+    params: &[f32],
+    dt: f32,
+) -> Result<(), String> {
+    let n = x.len() as c_int;
+    ok_or(
+        unsafe {
+            cuda_tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                dt,
+                n,
+            )
+        },
+        "tsodyks_markram_step",
+    )
+}

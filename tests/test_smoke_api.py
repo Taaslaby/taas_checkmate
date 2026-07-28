@@ -49,7 +49,7 @@ section("2. Sub-modules")
 
 expected_modules = [
     "neurons", "t3", "snn", "eprop", "stp", "rl", "trainer",
-    "io", "sparse", "kuramoto", "koit", "connectome", "format",
+    "io", "sparse", "kuramoto", "connectome", "format",
     "autotune",
 ]
 for mod in expected_modules:

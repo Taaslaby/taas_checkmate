@@ -28,6 +28,7 @@ pub(super) const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
 
 /// Per-thread RNG state for deterministic noise sequences.
 use core::cell::Cell;
+
 thread_local! {
     static RNG_STATE: Cell<u32> = const { Cell::new(1) };
 }
@@ -37,7 +38,7 @@ thread_local! {
 // ═══════════════════════════════════════════════════════
 
 #[inline(always)]
-unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
+pub(crate) unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
     f32x8::from([
         *p,
@@ -51,7 +52,7 @@ unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
     ])
 }
 #[inline(always)]
-unsafe fn load8_mut(ptr: *mut f32, off: usize) -> f32x8 {
+pub(crate) unsafe fn load8_mut(ptr: *mut f32, off: usize) -> f32x8 {
     let p = ptr.add(off);
     f32x8::from([
         *p,
@@ -79,7 +80,7 @@ unsafe fn load8_i32(ptr: *const i32, off: usize) -> f32x8 {
     ])
 }
 #[inline(always)]
-unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
+pub(crate) unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
     let a = v.to_array();
     let p = ptr.add(off);
     *p = a[0];
@@ -246,10 +247,18 @@ fn surrogate_gradient(v: f32, v_thresh: f32, tau_sg: f32) -> f32 {
 pub mod adex; // Adaptive Exponential (AdEx)
 pub mod fhn; // FitzHugh-Nagumo
 pub mod glif; // GLIF3/4 (Generalized LIF — Allen Institute)
+pub mod haap; // HAAP (Hyperpolarization-Activated Adaptive Pulse-Bursting) — VNC neuron
 pub mod hh; // LUT Hodgkin-Huxley (NaV, KV, CaV-T)
-pub mod hr;
 pub mod izhikevich; // Izhikevich (2003)
-pub mod lif; // LIF + LIF-AT + eProp-LIF // Hindmarsh-Rose (bursting)
+pub mod lif; // LIF + LIF-AT + eProp-LIF
+pub mod hr; // Hindmarsh-Rose (bursting model)
+pub mod morris_lecar; // Morris-Lecar (2-variable, barnacle muscle)
+pub mod nmda; // NMDA synapse with Mg²⁺ block
+pub mod tsodyks_markram; // Tsodyks-Markram short-term plasticity
+
+pub use morris_lecar::*;
+pub use nmda::*;
+pub use tsodyks_markram::*;
 
 // ═══════════════════════════════════════════════════════
 //  🌊 Wave / Oscillator Models (волновые и осцилляторные)
@@ -262,14 +271,16 @@ pub mod wc; // Wilson-Cowan (population rate model)
 //  🔗 Synaptic / Plasticity Kernels (синапсы и пластичность)
 // ═══════════════════════════════════════════════════════
 pub mod dopamine; // DA-modulated STDP
-pub mod eprop;
+pub mod eprop; // Eligibility Propagation traces (Bellec 2020)
+pub mod bcm; // BCM rule (Bienenstock-Cooper-Munro 1982) + Homeostatic Scaling
 pub mod stp; // Short-Term Plasticity (Tsodyks-Markram)
-pub mod synapse; // Multi-receptor dynamics (nAChR, GluCl, GABA_A/B) // Eligibility Propagation traces (Bellec 2020)
+pub mod synapse; // Multi-receptor dynamics (nAChR, GluCl, GABA_A/B)
 
 // ═══════════════════════════════════════════════════════
 //  🏋️ Motor / Embodied Kernels (мышцы и телесная физика)
 // ═══════════════════════════════════════════════════════
 pub mod atlasov_neuromotor; // Atlasov Ca²⁺ muscle + Tug-of-War joints
+pub mod chordotonal; // Chordotonal sensory organ (load → firing rate)
 pub mod dendrite; // Cable dendrite + active Na⁺/K⁺/Ca²⁺ channels
 
 // ═══════════════════════════════════════════════════════
@@ -280,5 +291,5 @@ pub mod astrocyte; // Astrocyte Ca²⁺ waves + Gap Junctions
 // ═══════════════════════════════════════════════════════
 //  ⚡ Infrastructure (инфраструктура и оптимизации)
 // ═══════════════════════════════════════════════════════
-pub mod delay;
-pub mod fused; // Fused LIF+synapse (single-pass SIMD) // Circular delay buffer
+pub mod delay; // Circular delay buffer
+pub mod fused; // Fused LIF+synapse (single-pass SIMD)

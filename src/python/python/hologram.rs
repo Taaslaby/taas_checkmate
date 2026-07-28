@@ -126,7 +126,7 @@ impl PyHologramBridge {
         }
 
         // 2+3+4. HH step with built-in spike detection
-        step_hh_lut(&mut self.cfg, &mut self.spike_buf);
+        step_hh_lut(&mut self.cfg, &mut self.spike_buf, 6.3);
 
         // 4b. EPSC: all-to-all pre→post (note: spike_buf uses reverse zero-crossing)
         let n_spikes: usize = self.spike_buf.iter().map(|&s| s as usize).sum();

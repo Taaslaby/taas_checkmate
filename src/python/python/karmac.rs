@@ -153,3 +153,44 @@ impl PyCarmackBsp {
         self.inner.speedup_factor()
     }
 }
+
+/// PyMinBrain: Minimal Brain Model (PFC, GNW, Basal Ganglia)
+#[pyclass(name = "MinBrain", module = "taas_checkmate.karmac")]
+pub struct PyMinBrain {
+    inner: karmac::min_brain::MinBrain,
+}
+
+#[pymethods]
+impl PyMinBrain {
+    #[new]
+    #[pyo3(signature = (sensory_dim=128, workspace_size=64, pfc_slots=4, n_actions=8, clear_threshold=0.8))]
+    pub fn new(
+        sensory_dim: usize,
+        workspace_size: usize,
+        pfc_slots: usize,
+        n_actions: usize,
+        clear_threshold: f32,
+    ) -> Self {
+        let config = karmac::min_brain::MinBrainConfig {
+            sensory_dim,
+            workspace_size,
+            pfc_slots,
+            n_actions,
+            clear_threshold,
+        };
+        Self {
+            inner: karmac::min_brain::MinBrain::new(config),
+        }
+    }
+
+    pub fn step(&mut self, sensory_input: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+        let slice = sensory_input.readonly();
+        let s = slice.as_slice().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        Ok(self.inner.step(s))
+    }
+
+    pub fn get_pfc_state<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        PyArray1::from_vec(py, self.inner.pfc_state())
+    }
+}
+

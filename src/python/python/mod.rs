@@ -11,7 +11,6 @@
 //! - `taas_checkmate.connectome` — connectome benchmarks
 //! - `taas_checkmate.stp` — Poisson + STP + LFP
 //! - `taas_checkmate.rl` — RL agent
-//! - `taas_checkmate.koit` — XOR attention + RNG
 //! - `taas_checkmate.format` — .taas save/load
 //!
 //! Root-level aliases (backward compat) maintained for all public functions + classes.
@@ -25,7 +24,6 @@ pub mod hh;
 #[cfg(feature = "cuda")]
 pub mod hh_gpu;
 pub mod io;
-pub mod koit;
 pub mod kuramoto;
 pub mod lif_connectome;
 pub mod neuron;
@@ -86,6 +84,7 @@ macro_rules! export_class {
 /// taas-checkmate Python module — zero-copy numpy bindings.
 #[pymodule]
 fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
+
     // ─── neurons ──────────────────────────────────────
     let neurons = make_sub(m.py(), m, "neurons")?;
     macro_rules! add_fn {
@@ -95,23 +94,34 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
         };
     }
 
+
     add_fn!(neurons, neuron::py_step_izhikevich);
     add_fn!(neurons, neuron::py_step_saw);
     add_fn!(neurons, neuron::py_step_gco);
     add_fn!(neurons, neuron::py_step_lif);
     add_fn!(neurons, neuron::py_step_adex);
     add_fn!(neurons, neuron::py_step_fhn);
+    add_fn!(neurons, neuron::py_step_haap);
+    add_fn!(neurons, neuron::py_step_nmda);
+    add_fn!(neurons, neuron::py_step_hr);
     add_fn!(neurons, neuron::py_step_wc);
     add_fn!(neurons, neuron::py_step_atlasov_neuromotor);
     add_fn!(neurons, neuron::py_stdp_update);
     add_fn!(neurons, neuron::py_stdp_homeostatic);
+    add_fn!(neurons, neuron::py_firing_rates);
+    add_fn!(neurons, neuron::py_mean_firing_rate);
+    add_fn!(neurons, neuron::py_compute_isi);
+    add_fn!(neurons, neuron::py_compute_cvs);
     add_fn!(neurons, neuron::step_eprop);
     export_class!(m, neurons, neuron::PySomatoDendriticNeuron);
+    export_class!(m, neurons, neuron::PyGlif3State);
+    export_class!(m, neurons, neuron::PyGlif4State);
     // export_class!(m, neurons, depth_wave::PyDepthWave);
 
     // ─── karmac ────────────────────────────────────────
     let karmac_sub = make_sub(m.py(), m, "karmac")?;
     export_class!(m, karmac_sub, karmac::PyCarmackBsp);
+    export_class!(m, karmac_sub, karmac::PyMinBrain);
 
     // ─── kuramoto ──────────────────────────────────────
     let kuramoto = make_sub(m.py(), m, "kuramoto")?;
@@ -162,10 +172,6 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(sparse, sparse::py_rate_step);
     add_fn!(sparse, sparse::py_apply_stdp_ltd);
 
-    // ─── koit ──────────────────────────────────────────
-    let koit = make_sub(m.py(), m, "koit")?;
-    add_fn!(koit, koit::py_xor_attention);
-    add_fn!(koit, koit::py_rdrand_fill);
 
     // ─── t3 ────────────────────────────────────────────
     let t3 = make_sub(m.py(), m, "t3")?;
@@ -247,6 +253,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, stp, poisson_stp::PyPoissonGenerator);
     export_class!(m, stp, poisson_stp::PyShortTermPlasticity);
     add_fn!(stp, poisson_stp::py_compute_lfp);
+    export_class!(m, neurons, neuron::PyAstrocyteState);  // 🧫 Astrocyte + Gap Junctions
 
     // ─── rl ────────────────────────────────────────────
     let rl = make_sub(m.py(), m, "rl")?;
@@ -260,6 +267,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let connectome_brain = make_sub(m.py(), m, "connectome_brain")?;
     export_class!(m, connectome_brain, connectome_brain::PyConnectomeData);
     export_class!(m, connectome_brain, connectome_brain::PyBrainSimulator);
+    export_class!(m, connectome_brain, connectome_brain::PyBrainRunner);
     export_class!(m, connectome_brain, connectome_brain::PySpikeRecorder);
 
     // ─── format ────────────────────────────────────────

@@ -19,13 +19,26 @@
 #include <math.h>
 
 // ═══════════════════════════════════════════════════════
+//  vtrap — численно стабильная экспонента (NEURON hh.mod)
+// ═══════════════════════════════════════════════════════
+
+/// vtrap(x, y) = x / (exp(x/y) - 1) с Taylor expansion при |x/y| < 1e-6.
+/// В точности как NEURON hh.mod `FUNCTION vtrap`.
+/// Предотвращает 0/0 при x → 0.
+__device__ inline float vtrap(float x, float y) {
+    float ratio = x / y;
+    if (fabsf(ratio) < 1e-6f) {
+        return y - x * 0.5f; // Taylor: y - x/2
+    }
+    return x / (__expf(ratio) - 1.0f);
+}
+
+// ═══════════════════════════════════════════════════════
 //  Rate functions — NaV (Hodgkin & Huxley 1952)
 // ═══════════════════════════════════════════════════════
 
 __device__ inline float na_m_alpha(float v) {
-    float v_ = v + 40.0f;
-    if (fabsf(v_) < 1e-6f) return 1.0f;
-    return 0.1f * v_ / (1.0f - __expf(-v_ / 10.0f));
+    return 0.1f * vtrap(-(v + 40.0f), 10.0f);
 }
 __device__ inline float na_m_beta(float v) {
     return 4.0f * __expf(-(v + 65.0f) / 18.0f);
@@ -43,9 +56,7 @@ __device__ inline float na_h_beta(float v) {
 // ═══════════════════════════════════════════════════════
 
 __device__ inline float k_n_alpha(float v) {
-    float v_ = v + 55.0f;
-    if (fabsf(v_) < 1e-6f) return 0.1f;
-    return 0.01f * v_ / (1.0f - __expf(-v_ / 10.0f));
+    return 0.01f * vtrap(-(v + 55.0f), 10.0f);
 }
 __device__ inline float k_n_beta(float v) {
     return 0.125f * __expf(-(v + 65.0f) / 80.0f);
@@ -110,10 +121,17 @@ extern "C" __global__ void hh_step_kernel(
     const float* g_max_arr,  // [n_channels] conductance per channel
     const unsigned int* powers,      // [n_gates] gate power (exponent)
     const int* n_gates_per_ch,       // [n_channels] gates per channel
-    int n_channels           // number of channels (2=NaV+KV, 3=+CaV-T)
+    int n_channels,          // number of channels (2=NaV+KV, 3=+CaV-T)
+    float celsius            // temperature (°C), Q10 = 3^((celsius-6.3)/10)
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
+
+    // ─── Temperature correction (Q10) ─
+    float q10 = 1.0f;
+    if (fabsf(celsius - 6.3f) > 0.1f) {
+        q10 = powf(3.0f, (celsius - 6.3f) / 10.0f);
+    }
 
     // ─── Refractory Timer Update (Do NOT skip ODE dynamics) ─
     float ref = refractory[idx];
@@ -145,15 +163,14 @@ extern "C" __global__ void hh_step_kernel(
                 cat_rate(vi, gate_in_ch, &alpha, &beta);
             }
 
-            float sum = alpha + beta + 1e-12f;
-            float m_inf = alpha / sum;
-            float tau = 1.0f / sum;
-            float decay = __expf(-dt / tau);
+            float sum_q10 = (alpha + beta + 1e-12f) * q10;
+            float m_inf = alpha / (alpha + beta + 1e-12f);  // Q10 не влияет на steady-state
+            float decay = __expf(-dt * sum_q10);
 
             // SOA gate access: gates[gate_idx * n + neuron_idx]
             float* g_ptr = &gates[gi * n];
 
-            // Rush-Larsen gate update: g(t+dt) = m_inf + (g(t) - m_inf) * exp(-dt/tau)
+            // Rush-Larsen gate update: g(t+dt) = m_inf + (g(t) - m_inf) * exp(-dt * sum_q10)
             float g_val = m_inf + (g_ptr[idx] - m_inf) * decay;
             g_ptr[idx] = g_val;
 

@@ -7,7 +7,6 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::manual_clamp)]
 
-pub mod koit;
 pub mod kuramoto;
 pub mod neuron;
 pub mod sparse;

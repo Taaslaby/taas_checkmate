@@ -43,6 +43,7 @@ pub mod data;
 pub mod propagate;
 pub mod rcm;
 pub mod record;
+pub mod runner;
 pub mod sim;
 pub mod types;
 
@@ -57,9 +58,10 @@ pub use rcm::{
     build_adjacency, fiedler_vector, mean_bandwidth, reverse_cuthill_mckee, spectral_ordering,
 };
 pub use record::{SpikeRecorder, SpikeRecordings};
+pub use runner::{BrainConfig, BrainRunner, LearningRule, NeuronConfig, PoissonGroup};
 pub use sim::{
     csr_propagate, csr_propagate_conductance_from_queue, csr_propagate_from_queue,
-    push_spikes_to_queue, sim_gco, sim_gco_record, sim_hh, sim_hh_synaptic, sim_izhikevich,
+    pad_to, push_spikes_to_queue, sim_gco, sim_gco_record, sim_hh, sim_hh_synaptic, sim_izhikevich,
     sim_izhikevich_dual, sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate, BrainState,
     GcoParams, IzhikevichDualParams, IzhikevichParams, LifParams, NeuronModel, RateParams,
     SpikeQueue,

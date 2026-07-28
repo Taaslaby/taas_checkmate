@@ -30,7 +30,11 @@
 //! this module account for this 10× kernel scale, so `weight_scale`
 //! refers to the **raw** init scale (before kernel multiplication).
 //!
-//! репер тоже любит автонастройку байасов хотя сам их не любит и ненавидит когда ему мешают подумать о своем бытие и и
+//! The tuner loves Bayesian auto-tuning even though it pretends not to.
+//! Never interrupt someone mid-trance when they're contemplating existence.
+//!
+//! репер тоже любит автонастройку байеса, хотя сам их не любит
+//! и ненавидит, когда ему мешают подумать о своём бытии
 
 use rand::rngs::StdRng;
 use rand::Rng;

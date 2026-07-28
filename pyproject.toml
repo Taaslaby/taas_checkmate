@@ -9,6 +9,25 @@ requires-python = ">=3.10"
 description = "Pure Rust wavelet neural engine — SIMD, CUDA, FlyWire connectome"
 authors = [{ name = "TaasLab", email = "taaslab@proton.me" }]
 license = "GPL-3.0-only"
+dependencies = [
+    "click>=8.0",
+    "rich>=10.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.5"]
+dashboard = ["streamlit>=1.20", "plotly>=5.10"]
+notebooks = ["jupyter>=1.0", "nbformat>=5.0"]
+eeg = ["scipy>=1.8"]
+all = ["matplotlib>=3.5", "streamlit>=1.20", "plotly>=5.10", "jupyter>=1.0", "nbformat>=5.0", "scipy>=1.8"]
+
+[project.scripts]
+taas = "taas.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["taas*"]
 
 [tool.maturin]
 bindings = "pyo3"

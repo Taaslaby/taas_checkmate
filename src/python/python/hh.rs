@@ -62,7 +62,7 @@ impl PyHhLut {
     /// Returns: total spike count (int), via reverse zero-crossing detection
     pub fn step(&mut self) -> usize {
         let mut spikes = vec![0i32; self.cfg.n];
-        step_hh_lut(&mut self.cfg, &mut spikes);
+        step_hh_lut(&mut self.cfg, &mut spikes, 6.3);
         spikes.iter().map(|&s| s as usize).sum()
     }
 

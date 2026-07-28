@@ -11,37 +11,9 @@
 //!   и подавляет хаотический шум при переключении фаз.
 
 use super::wrap_phase;
+use crate::neuron::{load8, store8};
 use core::f32::consts::TAU;
 use wide::f32x8;
-
-/// Helper: load f32x8 from raw pointer
-#[inline(always)]
-unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
-    let p = ptr.add(off);
-    f32x8::from([
-        *p,
-        *p.add(1),
-        *p.add(2),
-        *p.add(3),
-        *p.add(4),
-        *p.add(5),
-        *p.add(6),
-        *p.add(7),
-    ])
-}
-#[inline(always)]
-unsafe fn store8(ptr: *mut f32, off: usize, v: f32x8) {
-    let a = v.to_array();
-    let p = ptr.add(off);
-    *p = a[0];
-    *p.add(1) = a[1];
-    *p.add(2) = a[2];
-    *p.add(3) = a[3];
-    *p.add(4) = a[4];
-    *p.add(5) = a[5];
-    *p.add(6) = a[6];
-    *p.add(7) = a[7];
-}
 
 /// Wrap phases to [0, 2π) and compute sin/cos in one pass.
 ///

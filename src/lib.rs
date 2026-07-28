@@ -56,7 +56,7 @@ pub mod python;
 pub mod unity;
 
 // ─── Backward compatibility re-exports ──────────────────
-pub use core::{koit, sparse};
+pub use core::sparse;
 pub use core::{kuramoto, neuron};
 pub use train::rl;
 

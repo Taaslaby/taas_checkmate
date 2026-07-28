@@ -9,7 +9,7 @@
 //! | GABA_A   | Shunting inh (insect) | 10 ms | -65 mV | Cl⁻ |
 //! | GABA_B   | Slow inh | 200 ms| -90 mV | G-protein |
 //! | nAChR    | Fast exc (insect ACh) | 3 ms | 0 mV  | Na⁺/K⁺ |
-//! | GluCl    | Mildly depol (insect GLUT) | 5 ms | -50 mV | Cl⁻ |
+//! | GluCl    | Inhibitory Cl⁻ channel (insect GLUT) | 5 ms | -70 mV | Cl⁻ |
 //! | mAChR    | Slow mod (DA/SER/OCT) | 150 ms | -90 mV | GPCR |
 //!
 //! # Usage
@@ -61,10 +61,9 @@ pub enum ReceptorType {
     GABA_B = 3,
     /// nAChR: fast excitatory (insect ACh), Na⁺/K⁺ influx, τ=3ms, E_rev=0mV
     /// Main excitatory receptor in Drosophila CNS.
-    nAChR = 4,
-    /// GluCl: mildly depolarizing (insect glutamate), Cl⁻ efflux, τ=5ms, E_rev=-50mV
-    /// Glutamate-gated chloride channel — depolarizing in Drosophila (Cl⁻ efflux).
-    GluCl = 5,
+    nAChR = 4,        /// GluCl: inhibitory Cl⁻ channel (insect glutamate), Cl⁻ influx, τ=5ms, E_rev=-70mV
+        /// Glutamate-gated chloride channel — inhibitory in Drosophila (Cl⁻ influx).
+        GluCl = 5,
     /// mAChR-like: slow modulatory (DA/SER/OCT), G-protein coupled, τ=150ms, E_rev=-90mV
     /// Muscarinic-like receptors for biogenic amines in insects.
     mAChR = 6,
@@ -97,7 +96,7 @@ impl ReceptorType {
             ReceptorType::GABA_A => -65.0,
             ReceptorType::GABA_B => -90.0,
             ReceptorType::nAChR => 0.0,
-            ReceptorType::GluCl => -50.0,
+            ReceptorType::GluCl => -70.0,
             ReceptorType::mAChR => -90.0,
         }
     }
@@ -421,196 +420,19 @@ impl SynapticKinetics {
 //  Astrocyte — slow glial modulation of synaptic gain
 // ═══════════════════════════════════════════════════════════
 
-/// Astrocyte state: integrates local spiking activity into a slow `A(t)` variable
-/// (τ ~ seconds) and modulates synaptic gain as `g_syn *= 1 + α·A(t)`.
-///
-/// # Dynamics
-///
-/// ```text
-/// dA/dt = -A / τ_astro + Ca_per_spike · pre_spikes
-/// ```
-///
-/// Forward Euler update:
-/// ```text
-/// A += dt · (-A / τ_astro + pre_spikes_as_f32 · Ca_per_spike)
-/// ```
-///
-/// # Usage
-/// ```ignore
-/// let mut astro = AstrocyteState::new(n, 1000.0, 0.1);  // τ=1s, α=0.1
-/// astro.step(&pre_spikes, dt);
-/// kin.apply_astrocyte_gain(&astro);
-/// kin.decay_all(&factors);
-/// // ... propagate spikes ...
-/// kin.compute_currents(&v, &mut I_syn);
-/// ```
-#[derive(Debug, Clone)]
-pub struct AstrocyteState {
-    pub n: usize,
-    pub n_padded: usize,
-    /// Slow astrocyte activity per neuron: `A(t)` ∈ [0, ∞)
-    pub a: Vec<f32>,
-    /// Time constant in ms (∼1000 = seconds-scale)
-    pub tau_astro: f32,
-    /// Modulation strength: gain = 1 + α·A
-    pub alpha: f32,
-    /// Calcium influx per pre-synaptic spike (default 1.0)
-    pub ca_per_spike: f32,
-}
-
-impl AstrocyteState {
-    /// Create new astrocyte state for `n_neurons`.
-    #[inline]
-    pub fn new(n_neurons: usize, tau_astro: f32, alpha: f32) -> Self {
-        let n_padded = n_neurons.div_ceil(8) * 8;
-        Self {
-            n: n_neurons,
-            n_padded,
-            a: vec![0.0; n_padded],
-            tau_astro,
-            alpha,
-            ca_per_spike: 1.0,
-        }
-    }
-
-    /// Reset astrocyte activity to zero.
-    #[inline]
-    pub fn reset(&mut self) {
-        self.a.fill(0.0);
-    }
-
-    /// Forward Euler step: `A += dt · (-A / τ_astro + pre_spikes · Ca_per_spike)`.
-    ///
-    /// Uses `f32x8` SIMD — 8 neurons per iteration.
-    /// Clamps astrocyte activity to [0, 10] to prevent runaway modulation.
-    pub fn step(&mut self, pre_spikes: &[i32], dt: f32) {
-        let n = self.n.min(pre_spikes.len());
-        let n8 = n & !7;
-        let decay = f32x8::splat(1.0 - dt / self.tau_astro);
-        let influx = f32x8::splat(dt * self.ca_per_spike);
-        let zero = f32x8::splat(0.0);
-        let max_a = f32x8::splat(10.0);
-
-        unsafe {
-            for off in (0..n8).step_by(8) {
-                let a_cur = load8(self.a.as_ptr(), off);
-                // Convert i32 spikes to f32 properly (NOT bit-reinterpretation)
-                let sp = f32x8::new([
-                    pre_spikes[off] as f32,
-                    pre_spikes[off + 1] as f32,
-                    pre_spikes[off + 2] as f32,
-                    pre_spikes[off + 3] as f32,
-                    pre_spikes[off + 4] as f32,
-                    pre_spikes[off + 5] as f32,
-                    pre_spikes[off + 6] as f32,
-                    pre_spikes[off + 7] as f32,
-                ]);
-                let a_new = a_cur * decay + sp * influx;
-                store8(self.a.as_mut_ptr(), off, a_new.max(zero).min(max_a));
-            }
-        }
-
-        // Scalar tail
-        for i in n8..n {
-            let a_cur = self.a[i];
-            let sp = pre_spikes[i] as f32;
-            self.a[i] = (a_cur * (1.0 - dt / self.tau_astro) + sp * dt * self.ca_per_spike)
-                .max(0.0)
-                .min(10.0);
-        }
-    }
-
-    /// Compute modulation gain for all neurons: `gain[i] = 1 + α·A[i]`.
-    ///
-    /// Returns a Vec<f32> of length `n_padded`.
-    pub fn compute_gain(&self) -> Vec<f32> {
-        let mut gain = vec![1.0; self.n_padded];
-        let alpha_s = f32x8::splat(self.alpha);
-        let one = f32x8::splat(1.0);
-        let n8 = self.n & !7;
-
-        unsafe {
-            for off in (0..n8).step_by(8) {
-                let a_v = load8(self.a.as_ptr(), off);
-                store8(gain.as_mut_ptr(), off, one + a_v * alpha_s);
-            }
-        }
-        for i in n8..self.n {
-            gain[i] = 1.0 + self.a[i] * self.alpha;
-        }
-
-        gain
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  Apply astrocyte gain to synaptic conductances
-// ═══════════════════════════════════════════════════════════
+// AstrocyteState is now in `super::astrocyte::AstrocyteState` (full model
+// with EAAT, K⁺ buffering, Ca²⁺ waves, gap junctions, and volume transmission).
+// The old `AstrocyteState` from this file has been moved there.
 
 impl SynapticKinetics {
-    /// Multiply all conductances by astrocyte modulation gain `(1 + α·A[i])`.
+    /// Apply astrocyte modulation to all conductances.
     ///
-    /// Uses `f32x8` SIMD — 8 neurons per iteration. No heap allocation —
-    /// computes gain factor inline from astrocyte activity.
-    pub fn apply_astrocyte_gain(&mut self, astro: &AstrocyteState) {
-        let n = self.n.min(astro.n);
-        let n8 = n & !7;
-        let alpha = f32x8::splat(astro.alpha);
-        let one = f32x8::splat(1.0);
-
-        unsafe {
-            for off in (0..n8).step_by(8) {
-                let a_v = load8(astro.a.as_ptr(), off);
-                let g = one + a_v * alpha;
-                store8(
-                    self.g_ampa.as_mut_ptr(),
-                    off,
-                    load8(self.g_ampa.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_nmda.as_mut_ptr(),
-                    off,
-                    load8(self.g_nmda.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_gaba_a.as_mut_ptr(),
-                    off,
-                    load8(self.g_gaba_a.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_gaba_b.as_mut_ptr(),
-                    off,
-                    load8(self.g_gaba_b.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_nachr.as_mut_ptr(),
-                    off,
-                    load8(self.g_nachr.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_glucl.as_mut_ptr(),
-                    off,
-                    load8(self.g_glucl.as_ptr(), off) * g,
-                );
-                store8(
-                    self.g_machr.as_mut_ptr(),
-                    off,
-                    load8(self.g_machr.as_ptr(), off) * g,
-                );
-            }
-        }
-
-        // Scalar tail
-        for i in n8..n {
-            let g = 1.0 + astro.a[i] * astro.alpha;
-            self.g_ampa[i] *= g;
-            self.g_nmda[i] *= g;
-            self.g_gaba_a[i] *= g;
-            self.g_gaba_b[i] *= g;
-            self.g_nachr[i] *= g;
-            self.g_glucl[i] *= g;
-            self.g_machr[i] *= g;
-        }
+    /// Delegates to `AstrocyteState::apply_to_kinetics()` (full EAAT + gain).
+    /// Requires `dt` for EAAT clearance computation.
+    pub fn apply_astrocyte_gain(&mut self, astro: &super::astrocyte::AstrocyteState, dt: f32) {
+        // Intentionally keep `apply_astrocyte_gain` as a convenience:
+        // delegates to the full astrocyte modulation pipeline.
+        astro.apply_to_kinetics(self, dt);
     }
 }
 
@@ -861,8 +683,10 @@ mod tests {
 
     #[test]
     fn test_synapse_glucl_depolarizing() {
-        // GluCl (E_rev=-50): при V=-65 ток = g · (-50 - (-65)) = g · 15 > 0 (деполяризующий!)
-        // У Drosophila Cl⁻ efflux — GluCl слабо деполяризует.
+        // GluCl (E_rev=-70, биологическое для Cl⁻ насекомых):
+        //   при V=-65: ток = g · (-70 - (-65)) = -5 (слабо гиперполяризующий)
+        //   при V=-30: ток = g · (-70 - (-30)) = -40 (сильно гиперполяризующий)
+        // У Drosophila Cl⁻ efflux = Cl⁻ influx при деполяризации → торможение.
         let mut kin = SynapticKinetics::new(2);
         let v = vec![-65.0, -30.0];
         let mut i_out = vec![0.0, 0.0];
@@ -871,14 +695,14 @@ mod tests {
         kin.compute_currents(&v, &mut i_out);
 
         assert!(
-            (i_out[0] - 15.0).abs() < 0.1,
-            "GluCl I_syn={} at V=-65 should be ~15 (depolarizing)",
+            (i_out[0] - (-5.0)).abs() < 0.1,
+            "GluCl I_syn={} at V=-65 should be ~-5 (slightly inhibitory)",
             i_out[0]
         );
-        // At V=-30: I = g · (-50 - (-30)) = -20 (inhibitory at depolarized V)
+        // At V=-30: I = g · (-70 - (-30)) = -40 (inhibitory at depolarized V)
         assert!(
-            (i_out[1] - (-20.0)).abs() < 0.1,
-            "GluCl I_syn={} at V=-30 should be ~-20 (inhibitory)",
+            (i_out[1] - (-40.0)).abs() < 0.1,
+            "GluCl I_syn={} at V=-30 should be ~-40 (inhibitory)",
             i_out[1]
         );
     }
@@ -1032,169 +856,8 @@ mod tests {
 
     // ─── 9. Astrocyte modulation ────────────────────
 
-    #[test]
-    fn test_astrocyte_basics() {
-        let mut astro = AstrocyteState::new(4, 1000.0, 0.1);
-        // Initial: all zero
-        assert!(astro.a.iter().all(|&a| a == 0.0));
-
-        // Step without spikes — A should stay 0 (decay from 0 stays 0)
-        let pre_spikes = vec![0i32; 4];
-        astro.step(&pre_spikes, 1.0);
-        assert!(astro.a.iter().all(|&a| a == 0.0));
-
-        // Step with spikes — A should increase
-        let pre_spikes = vec![1i32; 4];
-        astro.step(&pre_spikes, 1.0);
-        // dt=1, tau=1000, Ca=1: A = 0*0.999 + 1*0.001 = 0.001
-        // With Euler: A += 1*(-0/1000 + 1*1) = 1.0 → Actually wait, Ca_per_spike=1.0
-        // A += dt * (-A/tau + pre_spikes * Ca) = 1 * (-0/1000 + 1*1) = 1.0
-        assert!(
-            astro.a[0] > 0.0,
-            "A should increase after spike, got {}",
-            astro.a[0]
-        );
-
-        // Gain should be > 1.0
-        let gain = astro.compute_gain();
-        assert!(
-            gain[0] > 1.0,
-            "gain should be > 1.0 after spike, got {}",
-            gain[0]
-        );
-    }
-
-    #[test]
-    fn test_astrocyte_slow_dynamics() {
-        // Astrocyte should integrate spikes slowly (τ ~ seconds)
-        let mut astro = AstrocyteState::new(8, 1000.0, 0.1);
-        let pre_spikes = vec![1i32; 8];
-
-        // Multiple spikes should accumulate
-        for _ in 0..10 {
-            astro.step(&pre_spikes, 1.0);
-        }
-
-        // A should be > 0 (spikes accumulated)
-        assert!(
-            astro.a[0] > 5.0,
-            "A should accumulate spikes: {}",
-            astro.a[0]
-        );
-
-        // Without spikes, A should decay slowly
-        let pre_spikes = vec![0i32; 8];
-        for _ in 0..10 {
-            astro.step(&pre_spikes, 1.0);
-        }
-        // After 10ms, A should be slightly lower but not zero (slow decay)
-        assert!(astro.a[0] < 10.0, "A should decay: {}", astro.a[0]);
-        assert!(
-            astro.a[0] > 1.0,
-            "A should still be > 0 after 10ms decay: {}",
-            astro.a[0]
-        );
-    }
-
-    #[test]
-    fn test_astrocyte_apply_gain() {
-        let mut kin = SynapticKinetics::new(8);
-        let mut astro = AstrocyteState::new(8, 1000.0, 0.1);
-
-        // Set some conductances
-        kin.g_ampa[0] = 1.0;
-        kin.g_gaba_a[1] = 2.0;
-
-        // Spikes drive astrocyte
-        let pre_spikes = vec![1i32; 8];
-        astro.step(&pre_spikes, 1.0);
-
-        // Apply gain
-        kin.apply_astrocyte_gain(&astro);
-
-        // Gain should modulate conductances
-        let gain0 = 1.0 + astro.a[0] * astro.alpha;
-        assert!(
-            (kin.g_ampa[0] - gain0).abs() < 0.001,
-            "AMPA g[0] should be gain={gain0}, got {}",
-            kin.g_ampa[0]
-        );
-        assert!(
-            (kin.g_gaba_a[1] - 2.0 * gain0).abs() < 0.001,
-            "GABA_A g[1] should be 2×gain={}, got {}",
-            2.0 * gain0,
-            kin.g_gaba_a[1]
-        );
-    }
-
-    #[test]
-    fn test_astrocyte_simd_vs_scalar_tail() {
-        // n=9: SIMD processes 0..8, scalar tail processes 8..9
-        // Both should produce identical A values
-        let mut astro = AstrocyteState::new(9, 1000.0, 0.1);
-        let pre_spikes = vec![1i32; 9];
-
-        for _ in 0..100 {
-            astro.step(&pre_spikes, 1.0);
-        }
-
-        let diff = (astro.a[0] - astro.a[8]).abs();
-        assert!(
-            diff < 1e-6,
-            "SIMD vs scalar tail mismatch: A[0]={}, A[8]={}, diff={}",
-            astro.a[0],
-            astro.a[8],
-            diff
-        );
-    }
-
-    #[test]
-    fn test_astrocyte_reset() {
-        let mut astro = AstrocyteState::new(8, 1000.0, 0.1);
-        let pre_spikes = vec![1i32; 8];
-        for _ in 0..20 {
-            astro.step(&pre_spikes, 1.0);
-        }
-        assert!(astro.a[0] > 0.0, "A should be > 0 after spikes");
-
-        astro.reset();
-        assert!(
-            astro.a.iter().all(|&a| a == 0.0),
-            "A should be 0 after reset"
-        );
-    }
-
-    #[test]
-    fn test_astrocyte_gain_computation() {
-        let mut astro = AstrocyteState::new(4, 1000.0, 0.5);
-        // Manually set A values
-        astro.a[0] = 0.0;
-        astro.a[1] = 1.0;
-        astro.a[2] = 2.0;
-        astro.a[3] = 5.0;
-
-        let gain = astro.compute_gain();
-        assert!(
-            (gain[0] - 1.0).abs() < 1e-6,
-            "A=0 → gain=1, got {}",
-            gain[0]
-        );
-        assert!(
-            (gain[1] - 1.5).abs() < 1e-6,
-            "A=1, α=0.5 → gain=1.5, got {}",
-            gain[1]
-        );
-        assert!(
-            (gain[2] - 2.0).abs() < 1e-6,
-            "A=2, α=0.5 → gain=2.0, got {}",
-            gain[2]
-        );
-        assert!(
-            (gain[3] - 3.5).abs() < 1e-6,
-            "A=5, α=0.5 → gain=3.5, got {}",
-            gain[3]
-        );
-    }
+    // Astrocyte integration tests: uses `super::astrocyte::AstrocyteState`
+    // (not the removed local one). The astrocyte module has its own tests.
 
     // ─── 10. Receptor type utilities ──────────────────
 

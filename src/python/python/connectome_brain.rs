@@ -130,7 +130,7 @@ impl PyConnectomeData {
     /// ``nt_map`` must be ``[n_neurons]`` float32 array with FlyWire NT codes:
     ///   +1.0 = ACh → nAChR (fast exc, E_rev=0)
     ///   -1.0 = GABA → GABA_A (shunting inh, E_rev=-65, Cl⁻ shunt at rest)
-    ///   +2.0 = GLUT → GluCl (mildly depol, E_rev=-50, Drosophila Cl⁻ efflux)
+    ///   +2.0 = GLUT → GluCl (inhibitory Cl⁻ channel, E_rev=-70, Drosophila Cl⁻ influx)
     ///   -2.0 = DA/SER/OCT → mAChR (slow mod, E_rev=-90)
     ///
     /// For Princeton baked data with +1/-1 nt_types, pass ``nt_types`` as nt_map.
@@ -731,6 +731,7 @@ impl PyBrainSimulator {
         external_I: Bound<'_, PyArray2<f32>>,
         steps_per_input: usize,
         dt_ms: f32,
+        #[allow(unused_variables)]
         tau: f32,
         record_every: usize,
     ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
@@ -875,6 +876,188 @@ impl PyBrainSimulator {
             d_sl,
         );
         Ok(spike_buf.into_pyarray(py))
+    }
+}
+
+// ─── BrainRunner ──────────────────────────────────
+
+/// Universal brain runner — ONE Rust call replaces the slow Python loop.
+///
+/// Supports all neuron models: ``"lif"``, ``"lif_synaptic"``, ``"izh"``,
+/// ``"izh_synaptic"``, ``"izh_dual"``, ``"izh_eprop"``, ``"hh"``,
+/// ``"hh_synaptic"``, ``"rate"``, ``"gco"``.
+///
+/// Usage:
+/// ```python
+/// runner = tcm.BrainRunner(connectome, "lif", dt_ms=0.5)
+/// runner.add_poisson_group(asc_indices, rate=150.0, weight=10.0)
+/// spike_buf = runner.run(n_steps=50, external_I=ext_I)
+/// trains = runner.spike_trains(dt_ms=0.5)
+/// rates = runner.firing_rates(dt_ms=0.5)
+/// ```
+#[pyclass(name = "BrainRunner", module = "taas_checkmate.connectome_brain")]
+pub struct PyBrainRunner {
+    inner: conn::BrainRunner,
+}
+
+#[pymethods]
+impl PyBrainRunner {
+    #[new]
+    #[pyo3(signature = (connectome, model="lif".to_string(), dt_ms=0.5, tau_ref=2.0, tau_m=20.0, v_rest=-70.0, v_thresh=-58.0, v_reset=-70.0, pacemaking=false))]
+    pub fn new(
+        connectome: &PyConnectomeData,
+        model: String,
+        dt_ms: f32,
+        tau_ref: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        pacemaking: bool,
+    ) -> PyResult<Self> {
+        let config = match model.as_str() {
+            "lif" => conn::BrainConfig::lif(dt_ms),
+            "lif_synaptic" => conn::BrainConfig::lif_synaptic(dt_ms),
+            "izh" | "izhikevich" => conn::BrainConfig::izh(dt_ms),
+            "izh_synaptic" => conn::BrainConfig::izh(dt_ms), // + receptor_types
+            "izh_dual" => conn::BrainConfig::izh_dual(dt_ms),
+            "izh_eprop" => conn::BrainConfig::izh_eprop(dt_ms),
+            "hh" => {
+                if pacemaking {
+                    conn::BrainConfig::hh_pacemaking(dt_ms)
+                } else {
+                    conn::BrainConfig::hh(dt_ms)
+                }
+            }
+            "hh_synaptic" => conn::BrainConfig::hh_synaptic(dt_ms),
+            "rate" => conn::BrainConfig::rate(dt_ms, tau_m),
+            "gco" => conn::BrainConfig::gco(dt_ms),
+            other => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Unknown model '{other}'. Use: lif, lif_synaptic, izh, izh_synaptic, izh_dual, izh_eprop, hh, hh_synaptic, rate, gco"
+                )))
+            }
+        };
+
+        let inner = conn::BrainRunner::new(connectome.inner.clone(), config)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))?;
+
+        Ok(Self { inner })
+    }
+
+    /// Number of neurons.
+    #[getter]
+    pub fn n_neurons(&self) -> usize {
+        self.inner.n_neurons()
+    }
+
+    /// Add a Poisson stimulation group.
+    pub fn add_poisson_group(&mut self, indices: Vec<usize>, rate: f32, weight: f32) {
+        self.inner.add_poisson_group(&indices, rate, weight);
+    }
+
+    /// Clear all Poisson groups.
+    pub fn clear_poisson_groups(&mut self) {
+        self.inner.clear_poisson_groups();
+    }
+
+    /// Run `n_steps` simulation steps.
+    ///
+    /// Args:
+    ///     n_steps: number of simulation steps.
+    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    pub fn run<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_steps: usize,
+        external_I: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let n = self.inner.n_neurons();
+        let ext_I: Vec<f32> = match external_I {
+            Some(arr) => {
+                let ro = arr.readonly();
+                let sl = ro.as_slice()?;
+                let mut v = vec![0.0f32; n];
+                let copy_n = sl.len().min(n);
+                v[..copy_n].copy_from_slice(&sl[..copy_n]);
+                v
+            }
+            None => vec![0.0f32; n],
+        };
+
+        let spike_buf = self.inner.run(n_steps, &ext_I).to_vec();
+        Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Build spike trains from the spike buffer.
+    ///
+    /// Returns dict ``{neuron_idx: list_of_spike_times_ms}``.
+    pub fn spike_trains(&self, dt_ms: f32) -> std::collections::HashMap<usize, Vec<f32>> {
+        self.inner.spike_trains(dt_ms)
+    }
+
+    /// Compute firing rates (Hz) for all neurons.
+    pub fn firing_rates(&self, dt_ms: f32) -> Vec<f32> {
+        self.inner.firing_rates(dt_ms)
+    }
+
+    /// Compute firing rates (Hz) for a neuron group.
+    pub fn firing_rates_group(&self, indices: Vec<usize>, n_steps: usize, dt_ms: f32) -> Vec<f32> {
+        self.inner.firing_rates_group(&indices, n_steps, dt_ms)
+    }
+
+    /// Get current membrane potentials (v) — read-only snapshot.
+    pub fn get_v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        self.inner.get_v().to_vec().into_pyarray(py)
+    }
+
+    /// Set membrane potentials from numpy array.
+    pub fn set_v(&mut self, v_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = v_arr.readonly();
+        let sl = ro.as_slice()?;
+        self.inner.set_v(sl);
+        Ok(())
+    }
+
+    /// Get current recovery variables (u).
+    pub fn get_u<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        self.inner.get_u().to_vec().into_pyarray(py)
+    }
+
+    /// Set recovery variables from numpy array.
+    pub fn set_u(&mut self, u_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = u_arr.readonly();
+        let sl = ro.as_slice()?;
+        self.inner.set_u(sl);
+        Ok(())
+    }
+
+    /// Get the accumulated spike buffer.
+    pub fn spike_buffer<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<i32>> {
+        self.inner.spike_buffer().to_vec().into_pyarray(py)
+    }
+
+    /// Total steps simulated so far.
+    pub fn step_counter(&self) -> usize {
+        self.inner.step_counter()
+    }
+
+    /// Reset simulator state (v, u, I_buf, spikes, kinetics).
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    /// Get eligibility traces from E-Prop.
+    pub fn eligibility_traces<'py>(&self, py: Python<'py>) -> Vec<f32> {
+        self.inner.eligibility_traces().to_vec()
+    }
+
+    /// Apply E-Prop weight update.
+    pub fn apply_eprop_update(&mut self, learning_signals: Vec<f32>, lr: f32) {
+        self.inner.apply_eprop_update(&learning_signals, lr);
     }
 }
 

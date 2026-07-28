@@ -34,6 +34,7 @@ fn main() {
         "edge_predictor.cu",
         "gmm_sampler.cu",
         "topk_select.cu",
+        "biophys.cu",
     ];
     let mut obj_files = Vec::new();
     let nvcc = which_nvcc();

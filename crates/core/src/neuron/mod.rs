@@ -19,21 +19,25 @@
 //  🧠 Model Wrappers (safe API поверх SIMD ядер)
 // ═══════════════════════════════════════════════════════
 pub mod adex; // AdEx & E-Prop AdEx
-pub mod atlasov_neuromotor;
 pub mod fhn; // FitzHugh-Nagumo
 pub mod glif; // GLIF3/4 (Generalized LIF — Allen Institute)
+pub mod haap; // HAAP (Hyperpolarization-Activated Adaptive Pulse-Bursting)
 pub mod hh; // LUT Hodgkin-Huxley
 pub mod hr; // Hindmarsh-Rose
 pub mod izhikevich; // Izhikevich & E-Prop Izhikevich
 pub mod lif; // LIF, LIF-AT & E-Prop LIF
 pub mod saw; // SAW, ψ-wave & E-Prop SAW
-pub mod wc; // Wilson-Cowan population // Atlasov Neuromotor joint control
+pub mod wc; // Wilson-Cowan population
+pub mod atlasov_neuromotor; // Atlasov Neuromotor joint control
+pub mod chordotonal; // Chordotonal sensory organ (load→rate)
+pub mod astrocyte; // Astrocyte Ca²⁺ waves + Gap Junctions
 
 // ═══════════════════════════════════════════════════════
 //  🔗 Plasticity & Learning (обучение и пластичность)
 // ═══════════════════════════════════════════════════════
 pub mod eprop; // Surrogate gradient & eprop_update
 pub mod sorn; // Self-Organizing Recurrent Network
+pub mod bcm; // BCM rule (Bienenstock-Cooper-Munro 1982) + Homeostatic Scaling
 pub mod stdp; // STDP, homeostatic STDP & dopamine STDP
 pub mod stp; // Short-Term Plasticity & LFP
 pub mod trainer; // EPropTrainer (high-level training loop)
@@ -42,20 +46,25 @@ pub mod trainer; // EPropTrainer (high-level training loop)
 //  🧩 Multi-compartment & Analysis
 // ═══════════════════════════════════════════════════════
 pub mod autotune; // Automatic threshold/rate tuning
-pub mod delay;
+pub mod delay; // Circular delay buffer
 pub mod encoding; // BSA, phase & TTFS spike encoding
 pub mod poisson; // Poisson spike generator
 pub mod soma_dendrite; // Somato-dendritic integration
-pub mod stats; // SpikeRaster, firing rates, ISI, CV // Circular delay buffer
+pub mod stats; // SpikeRaster, firing rates, ISI, CV
 
 // ─── Re-exports ──────────────────────────────────────────
 pub use adex::{step_adex, EPropAdExMulti};
-pub use atlasov_neuromotor::{step_atlasov_neuromotor, AtlasovState};
+pub use atlasov_neuromotor::{
+    step_atlasov_neuromotor, AtlasovState, AtlasovStateBuilder,
+    BiomechanicsProfile, DrosophilaLegConfig, FiberPoolConfig,
+};
+pub use chordotonal::{ChordotonalBuilder, ChordotonalProfile, ChordotonalState};
 pub use autotune::{probe_fr, suggest_config, EPropTunerConfig, FrProbePoint};
 pub use delay::DelayBuffer;
 pub use encoding::{bsa_encode, bsa_kernel_hamming, phase_encode, TtfsEncoder};
 pub use eprop::{eprop_update, surrogate_gradient};
 pub use fhn::step_fhn;
+pub use haap::{step_haap, HaapProfile, HaapState, HaapStateBuilder};
 pub use hh::{standard_config, step_hh_lut, HhLutConfig, HhParams, HhState};
 pub use hr::step_hr;
 pub use izhikevich::{step_izhikevich, EPropIzhikevich, EPropIzhikevichMulti};
