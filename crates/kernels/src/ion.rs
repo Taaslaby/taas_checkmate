@@ -9,29 +9,15 @@
 //!
 //! ```rust,ignore
 //! // Cl⁻ каналы — гарантированно одинаковый E_rev
-//! let glucl = IonChannel::<Chloride>::new(-70.0);
-//! let gaba = IonChannel::<Chloride>::new(-70.0);
+//! let glucl = IonChannel::<Chloride>::new(1.0);
+//! let gaba = IonChannel::<Chloride>::new(1.0);
 //!
 //! // Na⁺ каналы — независимый E_rev
-//! let nachr = IonChannel::<Sodium>::new(0.0);
-//! let ampa = IonChannel::<Sodium>::new(0.0);
+//! let nachr = IonChannel::<Sodium>::new(1.0);
+//! let ampa = IonChannel::<Sodium>::new(1.0);
 //!
 //! // Компилятор НЕ даст:
-//! // let wrong = IonChannel::<Chloride>::new(0.0); // compile error!
-//! ```
-//!
-//! ## Проверки
-//!
-//! ```rust,ignore
-//! // Все Cl⁻ каналы в проекте должны быть созданы через IonChannel<Chloride>
-//! // Это гарантирует, что GluCl и GABA_A не могут иметь разный E_rev.
-//!
-//! // Future: макрос #[derive(IonChannel)] для enum ReceptorType
-//! #[derive(IonChannel)]
-//! enum ReceptorType {
-//!     #[ion = Chloride]  GABA_A = 2,
-//!     #[ion = Chloride]  GluCl  = 5,  // compile error if E_rev differs!
-//! }
+//! // let wrong = IonChannel::<Chloride>::new(1.0); // compile error!
 //! ```
 
 /// Marker type for Chloride ions (Cl⁻).
@@ -62,8 +48,6 @@ pub struct IonChannel<Ion> {
     e_rev: f32,
     /// Maximum conductance in µS.
     g_max: f32,
-    /// Decay time constant in ms.
-    tau_decay: f32,
     /// Phantom type to parameterize by ion species.
     _ion: core::marker::PhantomData<Ion>,
 }
@@ -76,21 +60,19 @@ impl IonChannel<Chloride> {
     pub const E_REV: f32 = -70.0;
 
     /// Create a new Cl⁻ channel with E_rev = -70 mV (Drosophila default).
-    pub fn new(g_max: f32, tau_decay: f32) -> Self {
+    pub fn new(g_max: f32) -> Self {
         Self {
             e_rev: Self::E_REV,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
 
     /// Create with a custom E_rev (e.g., GABA_A with HCO₃⁻ permeability → -65 mV).
-    pub fn new_custom(e_rev: f32, g_max: f32, tau_decay: f32) -> Self {
+    pub fn new_custom(e_rev: f32, g_max: f32) -> Self {
         Self {
             e_rev,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
@@ -101,20 +83,18 @@ impl IonChannel<Chloride> {
 // ─── Na⁺ channel: E_rev = 0 mV (insect excitatory) ───
 
 impl IonChannel<Sodium> {
-    pub fn new(g_max: f32, tau_decay: f32) -> Self {
+    pub fn new(g_max: f32) -> Self {
         Self {
             e_rev: 0.0,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
 
-    pub fn new_custom(e_rev: f32, g_max: f32, tau_decay: f32) -> Self {
+    pub fn new_custom(e_rev: f32, g_max: f32) -> Self {
         Self {
             e_rev,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
@@ -127,20 +107,18 @@ impl IonChannel<Sodium> {
 // ─── K⁺ channel: E_rev = -80 mV (delayed rectifier) ───
 
 impl IonChannel<Potassium> {
-    pub fn new(g_max: f32, tau_decay: f32) -> Self {
+    pub fn new(g_max: f32) -> Self {
         Self {
             e_rev: -80.0,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
 
-    pub fn new_custom(e_rev: f32, g_max: f32, tau_decay: f32) -> Self {
+    pub fn new_custom(e_rev: f32, g_max: f32) -> Self {
         Self {
             e_rev,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
@@ -153,20 +131,18 @@ impl IonChannel<Potassium> {
 // ─── Ca²⁺ channel: E_rev = 0 mV (NMDA-like) ───
 
 impl IonChannel<Calcium> {
-    pub fn new(g_max: f32, tau_decay: f32) -> Self {
+    pub fn new(g_max: f32) -> Self {
         Self {
             e_rev: 0.0,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
 
-    pub fn new_custom(e_rev: f32, g_max: f32, tau_decay: f32) -> Self {
+    pub fn new_custom(e_rev: f32, g_max: f32) -> Self {
         Self {
             e_rev,
             g_max,
-            tau_decay,
             _ion: core::marker::PhantomData,
         }
     }
@@ -209,6 +185,12 @@ pub struct SynapticSum {
     pub g_ca: f32,    // Ca²⁺ conductance (NMDA)
 }
 
+impl Default for SynapticSum {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SynapticSum {
     pub fn new() -> Self {
         Self { g_cl: 0.0, g_na: 0.0, g_k: 0.0, g_ca: 0.0 }
@@ -216,10 +198,10 @@ impl SynapticSum {
 
     /// Compute total current: I = g_Cl*(E_Cl - V) + g_Na*(E_Na - V) + g_K*(E_K - V) + g_Ca*(E_Ca - V)
     pub fn current(&self, v: f32) -> f32 {
-        let cl = IonChannel::<Chloride>::new(1.0, 1.0);
-        let na = IonChannel::<Sodium>::new(1.0, 1.0);
-        let k = IonChannel::<Potassium>::new(1.0, 1.0);
-        let ca = IonChannel::<Calcium>::new(1.0, 1.0);
+        let cl = IonChannel::<Chloride>::new(1.0);
+        let na = IonChannel::<Sodium>::new(1.0);
+        let k = IonChannel::<Potassium>::new(1.0);
+        let ca = IonChannel::<Calcium>::new(1.0);
 
         self.g_cl * (cl.e_rev() - v)
             + self.g_na * (na.e_rev() - v)
@@ -240,8 +222,8 @@ mod tests {
     #[test]
     fn test_cl_channels_same_erev() {
         // Cl⁻ каналы: GluCl и GABA_A — оба Cl⁻, одинаковый E_rev
-        let glucl = IonChannel::<Chloride>::new(1.0, 5.0);
-        let gaba_a = IonChannel::<Chloride>::new(1.0, 10.0);
+        let glucl = IonChannel::<Chloride>::new(1.0);
+        let gaba_a = IonChannel::<Chloride>::new(1.0);
 
         assert_eq!(glucl.e_rev(), gaba_a.e_rev(),
             "Cl⁻ channels must have same E_rev! Got {} and {}",
@@ -254,8 +236,8 @@ mod tests {
 
     #[test]
     fn test_na_channels() {
-        let nachr = IonChannel::<Sodium>::new(1.0, 3.0);
-        let ampa = IonChannel::<Sodium>::new(1.0, 2.0);
+        let nachr = IonChannel::<Sodium>::new(1.0);
+        let ampa = IonChannel::<Sodium>::new(1.0);
 
         assert_eq!(nachr.e_rev(), ampa.e_rev(),
             "Sodium channels must have same E_rev");
@@ -266,14 +248,14 @@ mod tests {
     #[test]
     fn test_synaptic_current_direction() {
         // Cl⁻ при V = -65: I = g * (-70 - (-65)) = -5 (слабо гиперполяризующий)
-        let cl = IonChannel::<Chloride>::new(1.0, 5.0);
+        let cl = IonChannel::<Chloride>::new(1.0);
         let i_at_rest = synaptic_current(&cl, -65.0);
         assert!(i_at_rest < 0.0,
             "Cl⁻ current at V=-65 should be negative (hyperpolarizing), got {}",
             i_at_rest);
 
         // Na⁺ при V = -65: I = g * (0 - (-65)) = 65 (возбуждающий)
-        let na = IonChannel::<Sodium>::new(1.0, 2.0);
+        let na = IonChannel::<Sodium>::new(1.0);
         let i_na = synaptic_current(&na, -65.0);
         assert!(i_na > 0.0,
             "Na⁺ current at V=-65 should be positive (depolarizing), got {}",
@@ -303,8 +285,8 @@ mod tests {
         // До фикса: GluCl E_rev = -50 mV, GABA_A E_rev = -65 mV
         // После фикса: оба -70 mV (биологически корректно для Drosophila)
 
-        let _glucl = IonChannel::<Chloride>::new(1.0, 5.0);
-        let _gaba_a = IonChannel::<Chloride>::new(1.0, 10.0);
+        let _glucl = IonChannel::<Chloride>::new(1.0);
+        let _gaba_a = IonChannel::<Chloride>::new(1.0);
 
         // Если бы GluCl был создан с E_rev = -50, а GABA_A с -65,
         // компилятор всё равно позволил бы это (они оба IonChannel<Chloride>).

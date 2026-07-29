@@ -465,7 +465,7 @@ impl DrosophilaLegConfig {
             .sum();
 
         // Pad to multiple of 8 for SIMD
-        let n_padded = (total_channels + 7) / 8 * 8;
+        let n_padded = total_channels.div_ceil(8) * 8;
 
         Self {
             n_legs,

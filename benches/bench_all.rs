@@ -362,27 +362,6 @@ fn bench_ring_synthesis(c: &mut Criterion) {
 //  attention kernels
 // ═══════════════════════════════════════════════════════════
 
-fn bench_rdrand_fill(c: &mut Criterion) {
-    let mut g = c.benchmark_group("rdrand_fill");
-    let mut buf8 = vec![0.0f32; 8];
-    g.throughput(Throughput::Elements(8));
-    g.bench_function("simd_n8", |b| {
-        b.iter(|| {
-            kernels::rdrand_fill(&mut buf8);
-            black_box(());
-        })
-    });
-    let mut buf1024 = vec![0.0f32; 1024];
-    g.throughput(Throughput::Elements(1024));
-    g.bench_function("simd_n1024", |b| {
-        b.iter(|| {
-            kernels::rdrand_fill(&mut buf1024);
-            black_box(());
-        })
-    });
-    g.finish();
-}
-
 // ═══════════════════════════════════════════════════════════
 //  neuron kernels
 // ═══════════════════════════════════════════════════════════
@@ -627,6 +606,7 @@ fn bench_hh_fused_vs_original(c: &mut Criterion) {
                     &channel_meta,
                     g_max_per_neuron.as_ptr(),
                     dt,
+                    6.3,
                 );
             }
             for i in 0..n {
@@ -658,6 +638,7 @@ fn bench_hh_fused_vs_original(c: &mut Criterion) {
                     &channel_meta,
                     g_max_per_neuron.as_ptr(),
                     dt,
+                    6.3,
                     spikes.as_mut_ptr(),
                 );
             }
@@ -719,7 +700,7 @@ criterion_group!(
     // decode
     bench_ring_synthesis,
     // attention
-    bench_rdrand_fill,
+
     // neuron
     bench_stp_step,
     bench_dopamine_traces,

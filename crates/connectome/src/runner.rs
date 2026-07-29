@@ -283,20 +283,17 @@ pub struct PoissonGroup {
 
 /// Configuration for online learning during simulation.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum LearningRule {
     /// Hebbian plasticity (used with IzhDual).
     Hebbian { lr: f32, decay: f32 },
     /// E-Prop eligibility traces (used with IzhEprop).
     Eprop { tau_e: f32, surrogate_tau: f32 },
     /// No learning.
+    #[default]
     None,
 }
 
-impl Default for LearningRule {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 // ═══════════════════════════════════════════════════════════
 //  BrainRunner — the main struct

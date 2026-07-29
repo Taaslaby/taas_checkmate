@@ -5,6 +5,10 @@ edition.workspace = true
 description = "Spiking neuron models + Kuramoto + NN layers"
 
 [dependencies]
+pillars = { path = "../pillars" }
 taas-kernels = { path = "../kernels" }
 rand = "0.8"
 rayon = "1"
+
+[features]
+rayon = ["pillars/rayon"]

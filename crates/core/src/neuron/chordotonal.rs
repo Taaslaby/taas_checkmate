@@ -27,7 +27,7 @@
 //! // sensor.rates[0] ≈ firing rate in Hz
 //! ```
 
-use crate::kernels;
+use pillars::model::sensors::chordotonal_step;
 
 /// Chordotonal sensory organ state — load/stretch → firing rate.
 #[derive(Debug, Clone)]
@@ -212,7 +212,7 @@ impl ChordotonalState {
         };
 
         unsafe {
-            kernels::neuron::chordotonal::chordotonal_step(
+            chordotonal_step(
                 self.v_sens.as_mut_ptr(),
                 self.adapt.as_mut_ptr(),
                 self.rates.as_mut_ptr(),

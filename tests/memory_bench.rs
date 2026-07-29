@@ -75,6 +75,7 @@ fn bench_200m_neurons() {
             &channel_meta,
             g_max.as_ptr(),
             dt,
+            6.3,
         );
     }
     let t_step = t_step.elapsed();

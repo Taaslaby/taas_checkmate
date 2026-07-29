@@ -139,6 +139,7 @@ fn run_our_hh(
                 channel_meta,
                 g_max_per_neuron.as_ptr(),
                 dt,
+                6.3,
             );
         }
         v_trace.push(v[0]);

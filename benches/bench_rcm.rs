@@ -9,6 +9,7 @@
 //! - Время csr_propagate_from_queue (5% firing rate) до/после RCM
 
 #![allow(non_snake_case)]
+#![cfg(feature = "connectome")]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};

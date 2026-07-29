@@ -11,6 +11,7 @@ name = "taas_kernels"
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 rayon = "1.8"
+pillars = { path = "../pillars" }
 
 [features]
 # Precise integrators (Crank-Nicolson for LIF, parallel Euler for others)

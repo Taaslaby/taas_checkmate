@@ -6,7 +6,7 @@
 use taas_checkmate::sparse;
 
 fn make_padded(n: usize) -> usize {
-    (n + 7) / 8 * 8
+    n.div_ceil(8) * 8
 }
 
 /// Build a simple ring CSR: neuron i → (i+1) % n with weight 1.0
@@ -21,8 +21,8 @@ fn ring_csr(n: usize) -> (Vec<i32>, Vec<i32>, Vec<f32>) {
     }
     row_ptr[n] = n as i32;
     // Fill padding: duplicate last row
-    for i in n..=n_pad {
-        row_ptr[i] = n as i32;
+    for item in row_ptr[n..=n_pad].iter_mut() {
+        *item = n as i32;
     }
     (row_ptr, col_indices, values)
 }
@@ -57,12 +57,12 @@ fn test_propagate_spikes_basic() {
         input_buf[1]
     );
     // All others should be 0
-    for i in 2..n {
+    for (i, &val) in input_buf[2..n].iter().enumerate() {
         assert!(
-            (input_buf[i] - 0.0).abs() < 1e-5,
+            val.abs() < 1e-5,
             "Neuron {} should get 0, got {}",
-            i,
-            input_buf[i]
+            i + 2,
+            val
         );
     }
 }

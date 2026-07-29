@@ -219,9 +219,9 @@ extern "C" __global__ void hh_step_kernel(
 //  Host wrapper (sync — one-shot call, no context)
 // ═══════════════════════════════════════════════════════
 
-extern "C" int cuda_hh_step(
-    float* v, float* gates,
-    const float* Ii, int* spikes, float* refractory,
+extern "C" int hh_step(
+    float* v, float* gates, const float* Ii,
+    int* spikes, float* refractory,
     const float* g_leak, const float* E_leak, const float* C_m,
     int n, int n_gates, float dt, float tau_ref,
     const float* E_rev_arr, const float* g_max_arr,
@@ -234,7 +234,7 @@ extern "C" int cuda_hh_step(
         v, gates, Ii, spikes, refractory,
         g_leak, E_leak, C_m,
         n, n_gates, dt, tau_ref,
-        E_rev_arr, g_max_arr, powers, n_gates_per_ch, n_channels);
+        E_rev_arr, g_max_arr, powers, n_gates_per_ch, n_channels, 6.3f);
     cudaDeviceSynchronize();
     return (int)cudaGetLastError();
 }
@@ -272,6 +272,7 @@ extern "C" int gpu_hh_step_async(void* vctx, float dt, float tau_ref) {
         ctx->d_hh_g_max_arr,
         ctx->d_hh_powers,
         ctx->d_hh_n_gates_per_ch,
-        n_channels);
+        n_channels,
+        6.3f);
     return (int)cudaGetLastError();
 }

@@ -3,7 +3,7 @@
 use taas_checkmate::kuramoto;
 
 fn make_padded(n: usize) -> usize {
-    (n + 7) / 8 * 8
+    n.div_ceil(8) * 8
 }
 
 // ─── Kuramoto step ───────────────────────────────────────

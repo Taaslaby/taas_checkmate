@@ -7,7 +7,7 @@
 use taas_checkmate::neuron;
 
 fn make_padded(n: usize) -> usize {
-    (n + 7) / 8 * 8
+    n.div_ceil(8) * 8
 }
 
 // ─── Izhikevich ──────────────────────────────────────────
@@ -192,7 +192,7 @@ fn test_gco_step() {
     let mut i_ext = vec![0.0f32; n];
     let mut speed = vec![0.0f32; n];
     let dt = 0.05;
-    let hbar = 1.0;
+    let _hbar = 1.0;
 
     neuron::step_gco(
         &mut v,
@@ -518,8 +518,8 @@ fn test_delay_buffer_push_read() {
 fn test_delay_buffer_multi_tap() {
     let mut buf = neuron::DelayBuffer::new(32);
     let mut data = [0.0f32; 32];
-    for i in 0..32 {
-        data[i] = i as f32;
+    for (i, item) in data.iter_mut().enumerate() {
+        *item = i as f32;
     }
     buf.push(&data);
 
@@ -529,14 +529,14 @@ fn test_delay_buffer_multi_tap() {
     let pos = 0;
     let n = 32;
     let delays = [
-        ((pos + n - 1) % n) as i32, // delay 1 → buf[31] = 31.0
-        ((pos + n - 2) % n) as i32, // delay 2 → buf[30] = 30.0
-        ((pos + n - 3) % n) as i32,
-        ((pos + n - 4) % n) as i32,
-        ((pos + n - 5) % n) as i32,
-        ((pos + n - 6) % n) as i32,
-        ((pos + n - 7) % n) as i32,
-        ((pos + n - 8) % n) as i32, // delay 8 → buf[24] = 24.0
+        ((pos + n - 1) % n), // delay 1 → buf[31] = 31.0
+        ((pos + n - 2) % n), // delay 2 → buf[30] = 30.0
+        ((pos + n - 3) % n),
+        ((pos + n - 4) % n),
+        ((pos + n - 5) % n),
+        ((pos + n - 6) % n),
+        ((pos + n - 7) % n),
+        ((pos + n - 8) % n), // delay 8 → buf[24] = 24.0
     ];
     let out = buf.read_multi(&delays);
     assert!(
@@ -939,13 +939,13 @@ fn test_eprop_multi_step_basic() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropIzhikevichMulti::new(n_pre, n_post, 0.5, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [0, 1];
     let I_ext = vec![10.0; n_post];
     let mut spikes = vec![0; n_post];
 
     let v_before = eprop.v.clone();
-    let count = eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    let count = eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
     assert!(eprop.v[0] > v_before[0], "v should increase after step");
     assert_eq!(count, 0, "no spikes with moderate I");
 }
@@ -955,19 +955,19 @@ fn test_eprop_multi_eligibility_per_synapse() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropIzhikevichMulti::new(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     // Only pre-synapse 0 fires
     let z_pre = [1, 0];
     let I_ext = vec![100.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
-    // e[0 * n_post + j] — eligibility for synapse 0 → should be non-zero
-    // e[1 * n_post + j] — eligibility for synapse 1 → should be 0 (no pre-spike)
+// e[j] — eligibility for synapse 0 → should be non-zero
+// e[n_post + j] — eligibility for synapse 1 → should be 0 (no pre-spike)
     for j in 0..n_post {
-        let e0 = eprop.e[0 * n_post + j];
-        let e1 = eprop.e[1 * n_post + j];
+        let e0 = eprop.e[j];
+        let e1 = eprop.e[n_post + j];
         assert_ne!(
             e0, 0.0,
             "synapse 0 eligibility should be non-zero (z_pre=1), got {}",
@@ -986,17 +986,17 @@ fn test_eprop_multi_both_inputs_active() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropIzhikevichMulti::new(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 1]; // both inputs fire
     let I_ext = vec![100.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
     // Both synapses should have non-zero eligibility
     for j in 0..n_post {
-        let e0 = eprop.e[0 * n_post + j];
-        let e1 = eprop.e[1 * n_post + j];
+        let e0 = eprop.e[j];
+        let e1 = eprop.e[n_post + j];
         assert_ne!(e0, 0.0, "synapse 0 eligibility should be non-zero");
         assert_ne!(e1, 0.0, "synapse 1 eligibility should be non-zero");
         // With same z_pre=1 and same psi_j, both should be equal
@@ -1020,7 +1020,7 @@ fn test_eprop_multi_update_weights() {
     let mut spikes = vec![0; n_post];
 
     // Step to generate eligibility
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
     // Update weights — only synapse 0 should change (eligibility != 0)
     let w_before = weights.clone();
@@ -1029,12 +1029,12 @@ fn test_eprop_multi_update_weights() {
 
     // Synapse 0: weights should change
     assert!(
-        (weights[0 * n_post + 0] - w_before[0 * n_post + 0]).abs() > 0.0,
+        (weights[0] - w_before[0]).abs() > 0.0,
         "synapse 0 weight should change"
     );
     // Synapse 1: weights should stay (eligibility = 0)
     assert!(
-        (weights[1 * n_post + 0] - w_before[1 * n_post + 0]).abs() < 1e-10,
+        (weights[n_post] - w_before[n_post]).abs() < 1e-10,
         "synapse 1 weight should not change"
     );
 }
@@ -1044,12 +1044,12 @@ fn test_eprop_multi_reset() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropIzhikevichMulti::new(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 1];
     let I_ext = vec![100.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
     assert!(
         eprop.e.iter().any(|&e| e != 0.0),
         "eligibility should be non-zero after step"
@@ -1095,10 +1095,10 @@ fn test_eprop_multi_learns_xor() {
                 .map(|j| {
                     let mut I = 0.0;
                     if in0 != 0 {
-                        I += weights[0 * n_post + j];
+                        I += weights[j];
                     }
                     if in1 != 0 {
-                        I += weights[1 * n_post + j];
+                        I += weights[n_post + j];
                     }
                     I * 15.0 // scale up to firing range
                 })
@@ -1113,7 +1113,7 @@ fn test_eprop_multi_learns_xor() {
 
             // Run for n_steps with the same pre-spike pattern
             for _ in 0..n_steps {
-                eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+                eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
             }
 
             // Readout
@@ -1146,10 +1146,10 @@ fn test_eprop_multi_learns_xor() {
             .map(|j| {
                 let mut I = 0.0;
                 if in0 != 0 {
-                    I += weights[0 * n_post + j];
+                    I += weights[j];
                 }
                 if in1 != 0 {
-                    I += weights[1 * n_post + j];
+                    I += weights[n_post + j];
                 }
                 I * 15.0
             })
@@ -1162,7 +1162,7 @@ fn test_eprop_multi_learns_xor() {
         eprop.e.fill(0.0);
 
         for _ in 0..n_steps {
-            eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+            eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
         }
 
         let spike_count: f32 = spikes.iter().map(|&s| s as f32).sum();
@@ -1188,13 +1188,13 @@ fn test_eprop_adex_multi_step_basic() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropAdExMulti::new_default(n_pre, n_post, 0.5, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [0, 1];
     let I_ext = vec![5.0; n_post];
     let mut spikes = vec![0; n_post];
 
     let v_before = eprop.v.clone();
-    let count = eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    let count = eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
     assert!(
         eprop.v[0] > v_before[0],
         "v should increase after step, {} → {}",
@@ -1209,16 +1209,16 @@ fn test_eprop_adex_multi_eligibility_per_synapse() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropAdExMulti::new_default(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 0]; // only synapse 0 fires
     let I_ext = vec![50.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
     for j in 0..n_post {
-        let e0 = eprop.e[0 * n_post + j];
-        let e1 = eprop.e[1 * n_post + j];
+        let e0 = eprop.e[j];
+        let e1 = eprop.e[n_post + j];
         assert_ne!(
             e0, 0.0,
             "synapse 0 eligibility should be non-zero (z_pre=1)"
@@ -1232,16 +1232,16 @@ fn test_eprop_adex_multi_both_inputs_active() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropAdExMulti::new_default(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 1];
     let I_ext = vec![50.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
     for j in 0..n_post {
-        let e0 = eprop.e[0 * n_post + j];
-        let e1 = eprop.e[1 * n_post + j];
+        let e0 = eprop.e[j];
+        let e1 = eprop.e[n_post + j];
         assert_ne!(e0, 0.0, "synapse 0 eligibility should be non-zero");
         assert_ne!(e1, 0.0, "synapse 1 eligibility should be non-zero");
         assert!(
@@ -1263,7 +1263,7 @@ fn test_eprop_adex_multi_update_weights() {
     let I_ext = vec![50.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
     let w_before = weights.clone();
     let ls = vec![1.0; n_post];
@@ -1271,12 +1271,12 @@ fn test_eprop_adex_multi_update_weights() {
 
     // Synapse 0: weights should change
     assert!(
-        (weights[0 * n_post + 0] - w_before[0 * n_post + 0]).abs() > 0.0,
+        (weights[0] - w_before[0]).abs() > 0.0,
         "synapse 0 weight should change"
     );
     // Synapse 1: weights should stay
     assert!(
-        (weights[1 * n_post + 0] - w_before[1 * n_post + 0]).abs() < 1e-10,
+        (weights[n_post] - w_before[n_post]).abs() < 1e-10,
         "synapse 1 weight should not change"
     );
 }
@@ -1286,12 +1286,12 @@ fn test_eprop_adex_multi_reset() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropAdExMulti::new_default(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 1];
     let I_ext = vec![50.0; n_post];
     let mut spikes = vec![0; n_post];
 
-    eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+    eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
     assert!(
         eprop.e.iter().any(|&e| e != 0.0),
         "eligibility should be non-zero"
@@ -1314,14 +1314,14 @@ fn test_eprop_adex_multi_spike_production() {
     let n_pre = 2;
     let n_post = 8;
     let mut eprop = neuron::EPropAdExMulti::new_default(n_pre, n_post, 1.0, 20.0);
-    let mut weights = vec![0.5; n_pre * n_post];
+    let weights = vec![0.5; n_pre * n_post];
     let z_pre = [1, 0];
     let I_ext = vec![100.0; n_post]; // strong current
     let mut spikes = vec![0; n_post];
 
     let mut total = 0;
     for _ in 0..30 {
-        total += eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+        total += eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
     }
     assert!(
         total > 0,
@@ -1687,12 +1687,11 @@ fn test_ttfs_cycle() {
     // Let's just verify we reach the spike
     let mut found_spike = false;
     for _ in 0..12 {
-        if ttfs.encode_step(&values, &mut spikes) {
-            if spikes.iter().any(|&s| s != 0) {
+        if ttfs.encode_step(&values, &mut spikes)
+            && spikes.iter().any(|&s| s != 0) {
                 found_spike = true;
                 break;
             }
-        }
     }
     assert!(found_spike, "TTFS should spike after max_delay steps");
 }
@@ -1771,8 +1770,8 @@ fn test_spike_raster_basic() {
 
     let (dense, n_steps) = raster.to_dense(4);
     assert_eq!(n_steps, 2);
-    assert_eq!(dense[0 * 4 + 1], 1);
-    assert_eq!(dense[1 * 4 + 3], 1);
+    assert_eq!(dense[1], 1);
+    assert_eq!(dense[4 + 3], 1);
 
     raster.reset();
     assert_eq!(raster.total_spikes(), 0);
@@ -1789,7 +1788,7 @@ fn test_firing_rates_basic() {
     let mut buf = vec![0i32; n_steps * n_neurons];
     for t in 0..n_steps {
         if t % 10 == 0 {
-            buf[t * n_neurons + 0] = 1;
+            buf[t * n_neurons] = 1;
         }
     }
 
@@ -2184,7 +2183,7 @@ fn run_golden_dopamine_stdp(steps: usize, dt: f32, tau_pre: f32, tau_post: f32, 
 
     for s in 0..steps {
         let post_s = &spikes; // both pre and post fire every step
-        stdp.step(&spikes, &post_s);
+        stdp.step(&spikes, post_s);
 
         if s == steps - 1 {
             // Single step only — fast_exp_simd vs std::exp causes trace
@@ -2231,7 +2230,7 @@ fn run_golden_eprop_adex(steps: usize, I_val: f32, dt: f32, tau_e: f32) {
     // After padding: eprop.n_post = 16, but kernel reads n=min(16, 9, 9) = 9 from I_ext.len()
     // → SIMD processes 0..8, scalar tail processes 8..9
 
-    let mut weights = vec![0.5; 1 * eprop.n_post]; // 1 pre × 16 padded
+    let weights = vec![0.5; eprop.n_post]; // 1 pre × 16 padded
     let z_pre = [1];
     // MUST pad I_ext and spikes to eprop.n_post (16) — the kernel reads n from v.len(),
     // and the safe wrapper asserts I_ext.len() == spikes.len() == v.len().
@@ -2239,7 +2238,7 @@ fn run_golden_eprop_adex(steps: usize, I_val: f32, dt: f32, tau_e: f32) {
     let mut spikes = vec![0; eprop.n_post];
 
     for s in 0..steps {
-        eprop.step(&mut weights, &z_pre, &I_ext, &mut spikes);
+        eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
         if s % 50 == 0 || s == steps - 1 {
             // AdEx uses Forward Euler, no exp in membrane dynamics.
@@ -2450,7 +2449,7 @@ fn test_hh_spike_detection_reverse_crossing() {
     let mut spikes0 = vec![0i32; 1];
     let mut total0 = 0;
     for _ in 0..10_000 {
-        neuron::step_hh_lut(&mut cfg0, &mut spikes0);
+        neuron::step_hh_lut(&mut cfg0, &mut spikes0, 6.3);
         total0 += spikes0[0];
     }
     // With I=0, an HH neuron at rest should stay subthreshold
@@ -2604,6 +2603,7 @@ fn test_hh_high_current_stability() {
             &meta,
             g_max_per_neuron.as_ptr(),
             0.01,
+            6.3,
         );
     }
 
@@ -2815,7 +2815,7 @@ fn test_cv_regular_vs_bursting() {
     // Neuron 1: Poisson-like (random)
     let mut buf = vec![0i32; n_steps * n_neurons];
     for t in (0..n_steps).step_by(10) {
-        buf[t * n_neurons + 0] = 1;
+        buf[t * n_neurons] = 1;
     }
     // Neuron 1: 5 spikes then 20 gap, repeat
     for cycle in 0..6 {

@@ -17,7 +17,7 @@ use taas_checkmate::neuron::{self, SpikeRaster};
 
 /// Pad n to multiple of 8 (SIMD requirement).
 fn make_padded(n: usize) -> usize {
-    (n + 7) / 8 * 8
+    n.div_ceil(8) * 8
 }
 
 /// Run a single Izhikevich neuron for `n_steps` at `dt` and return spike times (in ms).
@@ -116,7 +116,7 @@ fn test_rs_regular_spiking() {
         // Expect 15-40 Hz (Izhikevich 2004: ~40 Hz at I=10;
         // but actual rate with dt=0.5 is ~22 Hz per reference Python)
         assert!(
-            firing_rate >= 12.0 && firing_rate <= 40.0,
+            (12.0..=40.0).contains(&firing_rate),
             "RS firing rate {:.0} Hz outside expected [12, 40] Hz",
             firing_rate
         );
@@ -193,7 +193,7 @@ fn test_fs_fast_spiking() {
         // Fast spiking: 80-350 Hz at I=10
         // Reference Python with dt=0.5, tau_ref=0: ~113 Hz
         assert!(
-            firing_rate >= 80.0 && firing_rate <= 350.0,
+            (80.0..=350.0).contains(&firing_rate),
             "FS firing rate {:.0} Hz outside expected [80, 350] Hz",
             firing_rate
         );
@@ -255,7 +255,7 @@ fn test_rs_at_i20_produces_40hz() {
 
         // Expect ~44 Hz at I=20
         assert!(
-            firing_rate >= 30.0 && firing_rate <= 60.0,
+            (30.0..=60.0).contains(&firing_rate),
             "RS(I=20) rate {:.0} Hz outside expected [30, 60] Hz",
             firing_rate
         );
@@ -323,7 +323,7 @@ fn test_fs_at_i15_produces_200hz() {
 
         // Expect ~200 Hz at I=15
         assert!(
-            firing_rate >= 150.0 && firing_rate <= 300.0,
+            (150.0..=300.0).contains(&firing_rate),
             "FS(I=15) rate {:.0} Hz outside expected [150, 300] Hz",
             firing_rate
         );

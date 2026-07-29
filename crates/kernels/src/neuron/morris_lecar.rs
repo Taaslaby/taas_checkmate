@@ -119,7 +119,7 @@ pub unsafe fn morris_lecar_step(
         store8(v, off, new_v);
         store8(w, off, new_w);
 
-        let p_spk = spikes.add(off) as *mut i32;
+        let p_spk = spikes.add(off);
         let arr_spk = is_spike.to_array();
         for i in 0..8 {
             *p_spk.add(i) = if arr_spk[i].to_bits() != 0 { 1 } else { 0 };

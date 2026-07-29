@@ -3,7 +3,7 @@
 use taas_checkmate::io;
 
 fn make_padded(n: usize) -> usize {
-    (n + 7) / 8 * 8
+    n.div_ceil(8) * 8
 }
 
 // ─── Safety Clamp ────────────────────────────────────────
@@ -234,14 +234,14 @@ fn test_echo_tap() {
     io::echo_tap(&mut output, &buf, n_osc, delay_len, 0);
 
     // delay_idx=0 → buf[i * delay_len + 0] for each osc i
-    for osc in 0..n_osc {
-        let expected = (osc * 100 + 0) as f32;
+    for (osc, &val) in output.iter().enumerate() {
+        let expected = (osc * 100) as f32;
         assert!(
-            (output[osc] - expected).abs() < 1e-5,
+            (val - expected).abs() < 1e-5,
             "Echo tap osc {}: expected {}, got {}",
             osc,
             expected,
-            output[osc]
+            val
         );
     }
 }
@@ -262,14 +262,14 @@ fn test_echo_tap_delay() {
     io::echo_tap(&mut output, &buf, n_osc, delay_len, 5);
 
     // delay_idx=5 → buf[i * delay_len + 5] for each osc i
-    for osc in 0..n_osc {
+    for (osc, &val) in output.iter().enumerate() {
         let expected = (osc * 100 + 5) as f32;
         assert!(
-            (output[osc] - expected).abs() < 1e-5,
+            (val - expected).abs() < 1e-5,
             "Echo tap delay=5 osc {}: expected {}, got {}",
             osc,
             expected,
-            output[osc]
+            val
         );
     }
 }

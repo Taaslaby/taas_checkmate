@@ -244,44 +244,6 @@ fn bench_saw(c: &mut Criterion) {
     g.finish();
 }
 
-fn bench_psi(c: &mut Criterion) {
-    let mut g = c.benchmark_group("psi_wave");
-    let (mut v1, mut u1, mut hr1, mut hi1, mut ie1, mut sp1) = (
-        vec![1.0f32],
-        vec![0.0f32],
-        vec![0.5f32],
-        vec![0.5f32],
-        vec![0.1f32],
-        vec![0.5f32],
-    );
-    g.throughput(Throughput::Elements(1));
-    g.bench_function("scalar_n1", |b| {
-        b.iter(|| {
-            kernels::psi_wave_step(
-                &mut v1, &mut u1, &mut hr1, &mut hi1, &mut ie1, &mut sp1, 0.5, 1.0,
-            );
-            black_box(());
-        })
-    });
-    let (mut v8, mut u8, mut hr8, mut hi8, mut ie8, mut sp8) = (
-        vec![1.0f32; 8],
-        vec![0.0f32; 8],
-        vec![0.5f32; 8],
-        vec![0.5f32; 8],
-        vec![0.1f32; 8],
-        vec![0.5f32; 8],
-    );
-    g.throughput(Throughput::Elements(8));
-    g.bench_function("simd_n8", |b| {
-        b.iter(|| {
-            kernels::psi_wave_step(
-                &mut v8, &mut u8, &mut hr8, &mut hi8, &mut ie8, &mut sp8, 0.5, 1.0,
-            );
-            black_box(());
-        })
-    });
-    g.finish();
-}
 
 fn bench_stdp(c: &mut Criterion) {
     let mut g = c.benchmark_group("stdp");
@@ -462,7 +424,7 @@ fn bench_hh_poly(c: &mut Criterion) {
         .bench_function("scalar_n1", |b| {
             b.iter(|| {
                 taas_checkmate::kernels::hh_poly_step(
-                    &mut v1, &mut g1, &I1, &gl1, &El1, &cm1, &meta, &gmax1, 0.01, None,
+                    &mut v1, &mut g1, &I1, &gl1, &El1, &cm1, &meta, &gmax1, 0.01, 6.3, None,
                 );
                 black_box(());
             })
@@ -481,7 +443,7 @@ fn bench_hh_poly(c: &mut Criterion) {
         .bench_function("simd_n8", |b| {
             b.iter(|| {
                 taas_checkmate::kernels::hh_poly_step(
-                    &mut v8, &mut g8, &I8, &gl8, &El8, &cm8, &meta, &gmax8, 0.01, None,
+                    &mut v8, &mut g8, &I8, &gl8, &El8, &cm8, &meta, &gmax8, 0.01, 6.3, None,
                 );
                 black_box(());
             })
@@ -501,7 +463,7 @@ fn bench_hh_poly(c: &mut Criterion) {
             b.iter(|| {
                 taas_checkmate::kernels::hh_poly_step(
                     &mut v1024, &mut g1024, &I1024, &gl1024, &El1024, &cm1024, &meta, &gmax1024,
-                    0.01, None,
+                    0.01, 6.3, None,
                 );
                 black_box(());
             })
@@ -524,10 +486,10 @@ fn bench_hh_lut(c: &mut Criterion) {
     let mut powers: Vec<u32> = Vec::new();
     let mut n_gates_per_ch: Vec<usize> = Vec::new();
     for (ch_idx, ch) in channels.iter().enumerate() {
-        for gate_idx in 0..ch.gates.len() {
+        for (gate_idx, gate) in ch.gates.iter().enumerate() {
             m_inf_luts_ptrs.push(luts[ch_idx][gate_idx].m_inf.as_ptr());
             decay_luts_ptrs.push(luts[ch_idx][gate_idx].decay.as_ptr());
-            powers.push(ch.gates[gate_idx].power);
+            powers.push(gate.power);
         }
         e_rev_arr.push(ch.E_rev);
         g_max_arr.push(ch.g_max);
@@ -670,7 +632,6 @@ criterion_group!(
     bench_lif_at,
     bench_adex,
     bench_saw,
-    bench_psi,
     bench_stdp,
     bench_kuramoto,
     bench_t3,

@@ -797,6 +797,7 @@ fn test_hh_poly_step_basic() {
         &meta,
         &g_max_per_neuron,
         0.01,
+        6.3,
         None,
     );
     assert_no_nan(&v, "hh_poly v");
@@ -836,6 +837,7 @@ fn test_hh_poly_step_no_spike_small_current() {
             &meta,
             &g_max_per_neuron,
             0.01,
+            6.3,
             None,
         );
     }

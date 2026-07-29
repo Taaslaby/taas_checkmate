@@ -9,12 +9,27 @@ description = "Pillars — reusable SIMD bio primitives for neural computation"
 [dependencies]
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
+rayon = { version = "1.8", optional = true }
 pillars-macros = { path = "../pillars-macros", optional = true }
 
+[[bench]]
+name = "bench_lif"
+harness = false
+
+[[bench]]
+name = "bench_lif_par"
+harness = false
+required-features = ["rayon"]
+
 [features]
-default = []
+default = ["rayon"]
+rayon = ["dep:rayon"]
 checker = ["pillars-macros"]
+vm = []  # TNMT bytecode VM (legacy, ~60 opcodes, mostly untested)
 
 [dev-dependencies]
 pillars-macros = { path = "../pillars-macros" }
 rand = "0.8"
+taas-kernels = { path = "../kernels" }
+criterion = { version = "0.5", features = ["rayon"] }
+num_cpus = "1.0"

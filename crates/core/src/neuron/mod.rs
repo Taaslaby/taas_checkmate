@@ -1,19 +1,30 @@
-//! Spiking neuron models — safe Rust wrappers over SIMD kernels.
+//! Spiking neuron models — wrappers around Pillars SIMD kernels + learning utilities.
 //!
-//! Sub-modules by model family:
-//! - [`izhikevich`] — Izhikevich & E-Prop Izhikevich
-//! - [`saw`] — SAW, ψ-wave & E-Prop SAW
-//! - [`lif`] — LIF, LIF-AT & E-Prop LIF
-//! - [`adex`] — AdEx & E-Prop AdEx
-//! - [`stdp`] — STDP, homeostatic STDP & dopamine-modulated STDP
-//! - [`stp`] — Short-Term Plasticity (Tsodyks-Markram) & LFP
-//! - [`sorn`] — Self-Organizing Recurrent Network
-//! - [`encoding`] — BSA, phase & TTFS spike encoding
-//! - [`poisson`] — Poisson spike generator
-//! - [`delay`] — Circular delay buffer
-//! - [`stats`] — SpikeRaster, firing rates, ISI, CV
-//! - [`eprop`] — Surrogate gradient & E-Prop weight update
-//! - [`soma_dendrite`] — Somato-dendritic integration (LIF soma + cable dendrites)
+//! ## Architecture
+//!
+//! **Neuron models** (step functions) delegate to [`pillars::model`] for SIMD execution.
+//! For new code, prefer using `pillars` directly:
+//! ```rust
+//! use pillars::prelude::*;
+//! unsafe { run_neuron::<LIFModel>(v, refr, ..., i_syn, spikes, params, n); }
+//! ```
+//!
+//! **Learning & Plasticity** (E-Prop, STDP, STP, SORN, BCM) remain in `core` —
+//! they are not SIMD neuron models and don't fit the `pillars::Model` trait.
+//!
+//! **Utilities** (encoding, poisson, delay, stats, autotune) also remain in `core`.
+//!
+//! ## Pillars re-exports
+//!
+//! All neuron models from `pillars` are re-exported for convenience:
+//! ```rust
+//! use taas_core::neuron::{LIFModel, HHModel, run_neuron};
+//! ```
+//!
+//! Sub-modules by category:
+//! - Model wrappers: [`izhikevich`], [`saw`], [`lif`], [`adex`], [`hh`], etc.
+//! - Plasticity: [`stdp`], [`stp`], [`sorn`], [`eprop`], [`bcm`], [`trainer`]
+//! - Utility: [`encoding`], [`poisson`], [`delay`], [`stats`], [`autotune`], [`soma_dendrite`]
 
 // ═══════════════════════════════════════════════════════
 //  🧠 Model Wrappers (safe API поверх SIMD ядер)
@@ -51,6 +62,23 @@ pub mod encoding; // BSA, phase & TTFS spike encoding
 pub mod poisson; // Poisson spike generator
 pub mod soma_dendrite; // Somato-dendritic integration
 pub mod stats; // SpikeRaster, firing rates, ISI, CV
+
+// ─── Pillars Model Re-exports ────────────────────────────
+pub use pillars::model::{
+    Model, SimdLane,
+    run_neuron,
+    LIFModel, IzhikevichModel, AdExModel, FHNModel,
+    HAAPModel, HRModel, WCModel, MorrisLecarModel,
+    GLIF3Model, GLIF4Model, HHModel, SAWModel,
+    VSNModel, AstrocyteModel, CaPlasticityModel,
+    AtlasovNeuromotorModel, Exp2SynModel,
+};
+#[cfg(feature = "rayon")]
+pub use pillars::model::run_neuron_par;
+
+// ─── Pillars Sensor/Synapse Re-exports ────────────────────
+pub use pillars::model::sensors::chordotonal_step;
+pub use pillars::model::synapses::{nmda_mg_block_step, tsodyks_markram_step};
 
 // ─── Re-exports ──────────────────────────────────────────
 pub use adex::{step_adex, EPropAdExMulti};

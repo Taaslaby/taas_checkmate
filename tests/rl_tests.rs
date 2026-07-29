@@ -28,7 +28,7 @@ fn test_agent_act_returns_action_within_bounds() {
         "action should be in [0, n_actions), got {action}"
     );
     assert!(
-        value >= 0.0 && value <= 1.0,
+        (0.0..=1.0).contains(&value),
         "value should be in [0, 1], got {value}"
     );
 }
@@ -101,7 +101,7 @@ fn test_agent_negative_reward_decreases_performance() {
     // Act to build up some eligibility
     agent.act(&state);
     // Apply negative dopamine
-    let (_, next_val) = agent.act(&vec![0.0, 0.0]);
+    let (_, next_val) = agent.act(&[0.0, 0.0]);
     agent.learn(-1.0, next_val, true);
 
     // Just verify no crash
@@ -180,7 +180,7 @@ fn test_softmax_sampling() {
     let state = vec![0.3, -0.1];
     let (action, value) = agent.act(&state);
     assert!(action < 2);
-    assert!(value >= 0.0 && value <= 1.0);
+    assert!((0.0..=1.0).contains(&value));
 }
 
 /// Test that the agent's eligibility accumulates properly over internal steps.
@@ -201,5 +201,5 @@ fn test_eligibility_accumulates() {
         || agent.elig_ic.iter().any(|&e| e != 0.0);
     // Note: it's possible no eligibility accumulates if no spikes occurred
     // This test just checks the code runs without error
-    assert!(true, "eligibility code runs without error");
+    // eligibility code runs without error
 }
