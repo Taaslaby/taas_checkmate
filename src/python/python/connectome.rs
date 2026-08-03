@@ -354,9 +354,9 @@ pub fn py_bench_connectome_gpu(
             external_I,
             spikes,
         );
-        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             "CUDA not available — rebuild with --features cuda".to_string(),
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]
@@ -544,9 +544,9 @@ pub fn py_bench_connectome_gpu_stdp(
             w_min,
             w_max,
         );
-        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             "CUDA not available — rebuild with --features cuda".to_string(),
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]
@@ -794,9 +794,9 @@ pub fn py_bench_connectome_gpu_recording(
             _spikes,
             spike_buffer,
         );
-        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             "CUDA not available — rebuild with --features cuda".to_string(),
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]
@@ -1017,9 +1017,9 @@ pub fn py_bench_gco_gpu(
     #[cfg(not(feature = "cuda"))]
     {
         let _ = (row_ptr, col_indices, values, v, u, dt, tau, n_steps, i_ext);
-        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
             "CUDA not available — rebuild with --features cuda",
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]
@@ -1088,9 +1088,9 @@ pub fn py_bench_gco_aberton_gpu(
             aber_real,
             aber_imag,
         );
-        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
             "CUDA not available — rebuild with --features cuda",
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]

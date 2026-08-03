@@ -256,3 +256,6 @@ fn joint_moved(angle_before: f32, angle_after: f32, threshold: f32) -> bool {
 - Phase 2: Biological calibration (sweep K_d, τ_pump, match published twitch kinetics)
 - Phase 3: GPU optimization (SIMD/CUDA benchmarks)
 - Phase 4: Behavior exploration (navigation, obstacle avoidance, etc.)
+
+> ⚠️ **SUPERSEDED (2026-08-03):** план реализован — `taas-embodied` больше не отдельный крейт.
+> Код свёрнут в `crates/core/src/neuron/embodied.rs` (`core::neuron::embodied`) при консолидации воркспейса 13 → 9 крейтов.

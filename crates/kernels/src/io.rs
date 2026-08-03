@@ -7,10 +7,10 @@ use super::safe;
 
 // ─── Safety ──────────────────────────────────────────────
 
-/// Clamp all values in `data` to `[min, max]` using SIMD.
-pub fn safety_clamp(data: &mut [f32], min: f32, max: f32) {
-    safe::safety_clamp(data, min, max);
-}
+/// Clamp all values in `data` to `[min, max]` — single-sourced from pillars.
+///
+/// Канон: `pillars::kernels::signal::safety_clamp` (Фаза 1 консолидации).
+pub use super::safe::safety_clamp;
 
 // ─── PWM Encoder ─────────────────────────────────────────
 

@@ -649,7 +649,7 @@ mod tests {
             "Attention + phase gate should work together"
         );
         let r = tri.order_parameter(&tri.th1);
-        assert!(r >= 0.0 && r <= 1.0, "Order param in [0,1]: {}", r);
+        assert!((0.0..=1.0).contains(&r), "Order param in [0,1]: {}", r);
     }
 
     // ─── 9. Reset preserves attention config ──

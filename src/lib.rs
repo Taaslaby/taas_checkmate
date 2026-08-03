@@ -15,7 +15,16 @@
 //! ## Architecture
 //!
 //! ```text
-//! Python (PyO3) ⇄ Rust safe wrappers ⇄ SIMD kernels (wide::f32x8) / CUDA
+//! Python (PyO3) ⇄ Rust safe wrappers ⇄ Pillars SIMD engine (wide::f32x8) / CUDA
+//! ```
+//!
+//! The computational core of the crate is **[`pillars`]** — the zero-cost SIMD
+//! engine for neural dynamics. Every neuron model, synapse, sensor and
+//! plasticity rule lives in `pillars`, and the top-level API of this crate is
+//! a direct re-export of it:
+//!
+//! ```rust
+//! use taas_checkmate::{LIFModel, NeuralPopulation, run_neuron};
 //! ```
 //!
 //! ## Feature gates
@@ -30,11 +39,17 @@
 //! | python     | PyO3 bindings (implies t3 + connectome + train + karmac) |
 //! | unity      | C ABI for Unity (implies connectome) |
 
-// ─── Internal crate re-exports ─────────────────────────
-pub use taas_core as core;
+// ═══════════════════════════════════════════════════════
+//  🏛️ Pillars — the engine (primary API)
+// ═══════════════════════════════════════════════════════
+pub use pillars;
+pub use pillars::prelude::*;
+
+// ═══════════════════════════════════════════════════════
+//  Internal crate re-exports
+// ═══════════════════════════════════════════════════════
 pub use taas_format;
-pub use taas_iit as iit;
-pub use taas_kernels as kernels;
+pub use core::iit as iit;
 pub use taas_train as train;
 
 #[cfg(feature = "t3")]
@@ -46,7 +61,13 @@ pub use taas_connectome as connectome;
 #[cfg(feature = "cuda")]
 pub use cuda_kernels as cuda;
 
-// ─── Main crate modules ────────────────────────────────
+// Cognitive architecture (GNW, LOD, BasalGanglia) — свернуто из отдельного крейта
+#[cfg(feature = "karmac")]
+pub mod karmac;
+
+// ═══════════════════════════════════════════════════════
+//  Main crate modules
+// ═══════════════════════════════════════════════════════
 pub mod io;
 
 #[cfg(feature = "python")]
@@ -55,7 +76,13 @@ pub mod python;
 #[cfg(feature = "unity")]
 pub mod unity;
 
-// ─── Backward compatibility re-exports ──────────────────
+// ═══════════════════════════════════════════════════════
+//  Legacy bridges — stable aliases for pre-pillars crates
+//  (still used by python bindings, benches and tests)
+// ═══════════════════════════════════════════════════════
+pub use taas_core as core;
+pub use taas_kernels as kernels;
+
 pub use core::sparse;
 pub use core::{kuramoto, neuron};
 pub use train::rl;

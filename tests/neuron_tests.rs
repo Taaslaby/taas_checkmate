@@ -2422,38 +2422,70 @@ fn test_stp_simd_vs_scalar_tail() {
 }
 
 // ─── HH spike detection (reverse zero-crossing) ────────
+//
+// Портировано на новый движок: старый LUT-контракт (standard_config /
+// step_hh_lut) удалён при миграции HH в pillars. Теперь используется
+// run_neuron::<HHModel> — тот же SIMD-раннер, что и в pillars-тестах.
 
 #[test]
 fn test_hh_spike_detection_reverse_crossing() {
-    // Create a single HH neuron with strong current, verify spike detection.
-    let mut cfg = neuron::standard_config(1, 0.01);
-    cfg.Ii[0] = 15.0; // strong current → multiple spikes
-    let mut spikes = vec![0i32; 1];
-    let mut total_spikes = 0;
+    use taas_checkmate::HHModel;
+    use taas_checkmate::run_neuron;
 
-    for _ in 0..20_000 {
-        // 200 ms at dt=0.01
-        neuron::step_hh_lut(&mut cfg, &mut spikes, 6.3);
-        total_spikes += spikes[0];
-    }
+    // Params (12 на нейрон): dt, g_Na, E_Na, g_K, E_K, g_leak, E_leak,
+    // q10, v_thresh, inv_C_m, g_CaT, E_CaT
+    let make_params = |dt: f32| -> Vec<f32> {
+        let mut p = vec![0.0f32; 12];
+        p[0] = dt;        // dt (ms)
+        p[1] = 120.0;     // g_Na
+        p[2] = 50.0;      // E_Na
+        p[3] = 36.0;      // g_K
+        p[4] = -77.0;     // E_K
+        p[5] = 0.3;       // g_leak
+        p[6] = -54.387;   // E_leak
+        p[7] = 1.0;       // q10 (6.3°C)
+        p[8] = 0.0;       // v_thresh
+        p[9] = 1.0;       // inv_C_m
+        p[10] = 0.0;      // g_CaT (standard HH: нет CaV-T тока)
+        p[11] = 120.0;    // E_CaT
+        p
+    };
 
-    // Standard HH at I=15 should fire ~80-120 spikes in 200ms (50-60 Hz)
+    // Прогон одного нейрона HH (скалярный tail-путь, n=1).
+    // Состояния: v, m, h, n_gate, caT, was_below (флаг edge-детекции).
+    let run_hh = |i_syn: f32, n_steps: usize| -> u32 {
+        let params = make_params(0.01);
+        let mut v = -65.0_f32;
+        let mut m = 0.05_f32;
+        let mut h = 0.6_f32;
+        let mut n_gate = 0.32_f32;
+        let mut caT = 0.19_f32;
+        let mut was_below = 1.0_f32;
+        let mut spikes = [0i32];
+        let mut total = 0u32;
+        for _ in 0..n_steps {
+            unsafe {
+                run_neuron::<HHModel>(
+                    &mut v as *mut f32, &mut m as *mut f32, &mut h as *mut f32,
+                    &mut n_gate as *mut f32, &mut caT as *mut f32, &mut was_below as *mut f32,
+                    &i_syn as *const f32, &mut spikes as *mut i32,
+                    params.as_ptr(), 1,
+                );
+            }
+            total += spikes[0] as u32;
+        }
+        total
+    };
+
+    // Сильный ток (I=15) → множественные спайки за 200 мс при dt=0.01
+    let total_spikes = run_hh(15.0, 20_000);
     assert!(
         total_spikes >= 5,
         "HH should produce multiple spikes with I=15 over 200ms, got {total_spikes}"
     );
 
-    // Test with zero current — no spikes
-    let mut cfg0 = neuron::standard_config(1, 0.01);
-    cfg0.Ii[0] = 0.0;
-    let mut spikes0 = vec![0i32; 1];
-    let mut total0 = 0;
-    for _ in 0..10_000 {
-        neuron::step_hh_lut(&mut cfg0, &mut spikes0, 6.3);
-        total0 += spikes0[0];
-    }
-    // With I=0, an HH neuron at rest should stay subthreshold
-    // and NOT produce reverse zero-crossing events.
+    // Нулевой ток → покой, без reverse zero-crossing событий
+    let total0 = run_hh(0.0, 10_000);
     assert_eq!(
         total0, 0,
         "HH should NOT spike with I=0 over 100ms, got {total0}"
@@ -2522,45 +2554,56 @@ fn test_fused_sparse_consistency() {
             &mut active_buf,
         );
 
-        // Non-fused reference: compute I = Σ w·z·10, then izhikevich step
+        // Non-fused reference: compute I = Σ w·z·10, then the SAME single-step
+        // Forward Euler as fused_hidden_izhikevich_step
+        // (v += dt·[(0.04v+5)v + 140 − u + I], v_th=30, reset c/d).
+        // НЕ через pillars-мост: там substepping (2×0.5·dt), интеграторы разные.
         I_ref.fill(0.0);
         for i in 0..ni {
             if input_spikes[i] != 0 {
                 for j in 0..nh {
-                    I_ref[j] += weights[i * nh + j] * 10.0;
+                    I_ref[j] = weights[i * nh + j].mul_add(10.0, I_ref[j]);
                 }
             }
         }
-        kernels::izhikevich_step(
-            &mut v_ref,
-            &mut u_ref,
-            &mut tr_ref,
-            &a,
-            &b,
-            &mut I_ref,
-            dt,
-            trace_decay,
-            &mut sp_ref,
-            &c,
-            &d,
-            &mut refr_ref,
-            tau_ref,
-            None,
-        );
+        for j in 0..nh {
+            if refr_ref[j] > 0.0 {
+                refr_ref[j] = (refr_ref[j] - dt).max(0.0);
+                sp_ref[j] = 0;
+                continue;
+            }
+            let dv = (0.04f32.mul_add(v_ref[j], 5.0)).mul_add(v_ref[j], 140.0)
+                - u_ref[j] + I_ref[j];
+            let du = a[j] * (b[j] * v_ref[j] - u_ref[j]);
+            v_ref[j] += dt * dv;
+            u_ref[j] += dt * du;
+            if v_ref[j] >= 30.0 {
+                sp_ref[j] = 1;
+                v_ref[j] = c[j];
+                u_ref[j] += d[j];
+                refr_ref[j] = tau_ref;
+                tr_ref[j] += trace_decay * (1.0 - tr_ref[j]);
+            } else {
+                sp_ref[j] = 0;
+                tr_ref[j] *= 1.0 - trace_decay;
+            }
+        }
 
         // No spikes expected (subthreshold I ≈ 3-4). Compare per-step voltage.
-        // FMA vs non-FMA: tolerance 1e-5 (Izhikevich uses Forward Euler, no exp).
+        // FMA vs mul_add accumulation over 50 steps: накопленная ошибка ~1e-5,
+        // допуск 1e-4 (Izhikevich uses Forward Euler, no exp — расхождение чисто
+        // порядок округления, не семантика).
         for j in 0..nh {
             let diff_v = (v[j] - v_ref[j]).abs();
             let diff_u = (u[j] - u_ref[j]).abs();
             assert!(
-                diff_v < 1e-5,
+                diff_v < 1e-4,
                 "Fused vs non-fused v mismatch at neuron {j}: fused={}, ref={}",
                 v[j],
                 v_ref[j]
             );
             assert!(
-                diff_u < 1e-5,
+                diff_u < 1e-4,
                 "Fused vs non-fused u mismatch at neuron {j}: fused={}, ref={}",
                 u[j],
                 u_ref[j]

@@ -15,8 +15,8 @@
 //!   0.1   → 21.2    8       [-72.82, 41.79]     dt=0.01, 0.025, 0.05 all give 8
 //!   0.2   → 42.4    3       [-73.62, 43.29]     CVode adaptive step — see I=200 note
 
-use pillars::model::models::HHModel;
-use pillars::model::runner::run_neuron;
+use pillars::prelude::HHModel;
+use pillars::prelude::run_neuron;
 
 /// NEURON area-based conversion: 1/4.7124e-6 cm² / 1000 * 1e6 ≈ 212.2
 const NA_TO_UA: f32 = 212.2;
@@ -38,7 +38,7 @@ const CONFIGS: &[Cfg] = &[
 ];
 
 fn make_params(num: usize, dt: f32) -> Vec<f32> {
-    let mut p = vec![0.0f32; num * 10];
+    let mut p = vec![0.0f32; num * 12];
     for i in 0..num {
         p[i] = dt;              // dt (ms)
         p[num+i] = 120.0;       // g_Na (mS/cm²)
@@ -50,6 +50,8 @@ fn make_params(num: usize, dt: f32) -> Vec<f32> {
         p[7*num+i] = 1.0;       // q10 (6.3°C)
         p[8*num+i] = 0.0;       // v_thresh (mV)
         p[9*num+i] = 1.0;       // inv_C_m (1/µF)
+        p[10*num+i] = 0.0;      // g_CaT (standard: no CaT current)
+        p[11*num+i] = 120.0;    // E_CaT (mV)
     }
     p
 }
@@ -65,8 +67,8 @@ fn run_hh(num: usize, dt: f32, i_syn: f32, t_ms: f32) -> (Vec<u32>, f32, f32, f3
     let mut m = vec![0.05f32; num];
     let mut h = vec![0.6f32; num];
     let mut k = vec![0.32f32; num];
+    let mut cat = vec![0.19f32; num];
     let mut flag = vec![1.0f32; num];
-    let mut _dummy = [0.0f32; 8];
     let mut i_arr = vec![0.0f32; num];
     let mut spikes = vec![0i32; num];
     let mut per = vec![0u32; num];
@@ -78,7 +80,7 @@ fn run_hh(num: usize, dt: f32, i_syn: f32, t_ms: f32) -> (Vec<u32>, f32, f32, f3
         unsafe {
             run_neuron::<HHModel>(
                 v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k.as_mut_ptr(),
-                flag.as_mut_ptr(), _dummy.as_mut_ptr(),
+                cat.as_mut_ptr(), flag.as_mut_ptr(),
                 i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
             );
         }
@@ -99,15 +101,15 @@ fn test_hh_resting_rates_match_neuron() {
     let mut m = vec![0.05f32; 8];
     let mut h = vec![0.6f32; 8];
     let mut k = vec![0.32f32; 8];
+    let mut cat = vec![0.19f32; 8];
     let mut flag = vec![1.0f32; 8];
-    let mut _dummy = [0.0f32; 8];
-    let i_arr = vec![0.0f32; 8];
+    let i_arr = [0.0f32; 8];
     let mut spikes = vec![0i32; 8];
 
     for _ in 0..5000 {
         unsafe { run_neuron::<HHModel>(
             v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k.as_mut_ptr(),
-            flag.as_mut_ptr(), _dummy.as_mut_ptr(),
+            cat.as_mut_ptr(), flag.as_mut_ptr(),
             i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), 8,
         ); }
     }

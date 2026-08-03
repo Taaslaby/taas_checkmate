@@ -215,3 +215,6 @@ serde = { version = "1.0", features = ["derive"] }
 criterion = "0.5"  # for benches
 ```
 
+
+> ⚠️ **SUPERSEDED (2026-08-03):** план реализован — `taas-embodied` больше не отдельный крейт.
+> Код свёрнут в `crates/core/src/neuron/embodied.rs` (`core::neuron::embodied`) при консолидации воркспейса 13 → 9 крейтов.

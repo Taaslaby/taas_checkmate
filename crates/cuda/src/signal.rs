@@ -1759,9 +1759,7 @@ mod tests {
         check_gpu!();
         let q = vec![0u8; 8];
         let mut k = vec![0xFFu8; 64];
-        for i in 0..8 {
-            k[i] = 0x00;
-        }
+        k[..8].fill(0x00);
         let v = vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut o = vec![0.0f32];
         xor_attention(&q, &k, &v, &mut o, 8, 8).unwrap();
@@ -1776,7 +1774,7 @@ mod tests {
         let mut data = vec![-10.0f32, -5.0, 0.0, 5.0, 10.0, -3.0, 3.0, 100.0];
         safety_clamp(&mut data, -1.0, 1.0).unwrap();
         for &v in &data {
-            assert!(v >= -1.0 && v <= 1.0);
+            assert!((-1.0..=1.0).contains(&v));
         }
         println!("safety_clamp: {:?}", data);
     }
@@ -1985,8 +1983,8 @@ mod tests {
     #[test]
     fn test_lif_at_cpu_gpu_identity() {
         check_gpu!();
-        let raw_n = 64;
-        let n = (raw_n + 7) / 8 * 8; // pad for CPU ASM
+        let raw_n: usize = 64;
+        let n = raw_n.div_ceil(8) * 8; // pad for CPU ASM
         let ctx = GpuContext::new(n, n).unwrap();
 
         // Identical initial state for both backends

@@ -371,7 +371,7 @@ mod tests {
         let mut joint_df = vec![0.0f32; 1];
         let mut joint_stf = vec![0.0f32; 1];
         let mut joint_dmp = vec![0.0f32; 1];
-        let joint_params = vec![1.0f32, 2.0f32, 0.1f32, 0.5f32]; // K0 = 1.0, beta = 2.0, B0 = 0.1, alpha = 0.5
+        let joint_params = [1.0f32, 2.0f32, 0.1f32, 0.5f32]; // K0 = 1.0, beta = 2.0, B0 = 0.1, alpha = 0.5
 
         unsafe {
             atlasov_neuromotor_step(

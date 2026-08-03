@@ -251,7 +251,7 @@ mod tests {
         let depth = vec![0.5; n];
         let dw = GcoState::new(n, depth, 0.0, 0.5, 42);
         let coh = dw.coherence();
-        assert!(coh >= 0.0 && coh <= 1.0);
+        assert!((0.0..=1.0).contains(&coh));
     }
 
     #[test]

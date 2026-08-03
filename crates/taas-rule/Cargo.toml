@@ -1,0 +1,20 @@
+[package]
+name = "taas-rule"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "Программируемые нейроны: интерпретируемая VM правил с двухконтурной пластичностью ST/LT"
+
+[dependencies]
+# Самодостаточный крейт — только std, без внешних зависимостей.
+
+[dev-dependencies]
+
+[[example]]
+name = "conditioning"

@@ -80,3 +80,47 @@ jobs:
 
       - name: Test with python
         run: cargo test --features python
+
+      - name: Smoke test (runtime API)
+        # The smoke test caught a real root-name collision before —
+        # keep it in CI as a runtime regression guard.
+        run: |
+          pip install maturin numpy
+          maturin build
+          pip install --force-reinstall --no-deps target/wheels/*.whl
+          python tests/test_smoke_api.py
+
+  windows:
+    # Windows (MSVC) migration guard — no nvcc on these runners, so
+    # cuda-kernels is excluded (its build.rs panics: "nvcc not found").
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check workspace (no cuda)
+        run: cargo check --workspace --exclude cuda-kernels
+
+      - name: Clippy pillars
+        run: cargo clippy -p pillars --lib -- -D warnings
+
+      - name: Test workspace (no cuda)
+        run: cargo test --workspace --exclude cuda-kernels
+
+      - name: Check examples
+        run: cargo check -p pillars --examples
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check python bindings
+        run: cargo check --features python

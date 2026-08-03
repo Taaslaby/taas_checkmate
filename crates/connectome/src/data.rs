@@ -512,6 +512,47 @@ pub fn build_receptor_types_from_csv(
 }
 
 // ═══════════════════════════════════════════════════════════
+//  BrainIO
+// ═══════════════════════════════════════════════════════════
+
+impl BrainIO {
+    /// Apply input signal to `external_I` buffer using per-channel encoding.
+    ///
+    /// `signal` length must equal `input_channels.len()`.
+    ///
+    /// | Encoding  | Behaviour |
+    /// |-----------|-----------|
+    /// | `Direct`  | `I[neuron] += signal[i] * scale` |
+    /// | `Poisson` | Same as Direct (caller should generate Poisson spikes externally) |
+    pub fn apply_input(&self, signal: &[f32], external_I: &mut [f32]) {
+        for (ch, &val) in self.input_channels.iter().zip(signal) {
+            let current = val * ch.scale;
+            match ch.encoding {
+                InputEncoding::Direct => {
+                    for &idx in &ch.neuron_indices {
+                        if idx < external_I.len() {
+                            external_I[idx] += current;
+                        }
+                    }
+                }
+                InputEncoding::Poisson => {
+                    for &idx in &ch.neuron_indices {
+                        if idx < external_I.len() {
+                            external_I[idx] += current;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reset `external_I` to just the bias (zero all, then add bias to all neurons).
+    pub fn reset_current(&self, external_I: &mut [f32]) {
+        external_I.fill(self.bias);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════
 
@@ -643,46 +684,5 @@ mod tests {
         conn.save_baked(&mut buf).unwrap();
         let loaded = ConnectomeData::load_baked(&mut &buf[..]).unwrap();
         assert!(loaded.receptor_types.is_empty());
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  BrainIO
-// ═══════════════════════════════════════════════════════════
-
-impl BrainIO {
-    /// Apply input signal to `external_I` buffer using per-channel encoding.
-    ///
-    /// `signal` length must equal `input_channels.len()`.
-    ///
-    /// | Encoding  | Behaviour |
-    /// |-----------|-----------|
-    /// | `Direct`  | `I[neuron] += signal[i] * scale` |
-    /// | `Poisson` | Same as Direct (caller should generate Poisson spikes externally) |
-    pub fn apply_input(&self, signal: &[f32], external_I: &mut [f32]) {
-        for (ch, &val) in self.input_channels.iter().zip(signal) {
-            let current = val * ch.scale;
-            match ch.encoding {
-                InputEncoding::Direct => {
-                    for &idx in &ch.neuron_indices {
-                        if idx < external_I.len() {
-                            external_I[idx] += current;
-                        }
-                    }
-                }
-                InputEncoding::Poisson => {
-                    for &idx in &ch.neuron_indices {
-                        if idx < external_I.len() {
-                            external_I[idx] += current;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Reset `external_I` to just the bias (zero all, then add bias to all neurons).
-    pub fn reset_current(&self, external_I: &mut [f32]) {
-        external_I.fill(self.bias);
     }
 }

@@ -7,9 +7,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use std::ffi::{c_float, c_int};
 
-use karmac::gnw::GlobalWorkspace;
-use karmac::semantic_pointer::SemanticPointer;
-use karmac::working_memory::WorkingMemory;
+use crate::karmac::gnw::GlobalWorkspace;
+use crate::karmac::semantic_pointer::SemanticPointer;
+use crate::karmac::working_memory::WorkingMemory;
 use taas_connectome::ConnectomeData;
 use taas_format::{load_connectome, TaasReader};
 

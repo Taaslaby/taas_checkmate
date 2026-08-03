@@ -1,4 +1,4 @@
-//! 🔬 LIF Parallel Benchmark: pillars::model run_neuron_par vs run_neuron
+//! 🔬 LIF Parallel Benchmark: pillars::zoo run_neuron_par vs run_neuron
 //!
 //! Сравнивает многопоточный `run_neuron_par::<LIFModel>` (Rayon) с однопоточным `run_neuron`.
 //!
@@ -11,7 +11,7 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use pillars::model::{Model, SimdLane, SimdContext, run_neuron, run_neuron_par};
+use pillars::prelude::*;
 
 // ─── LIFModel (pillars) ─────────────────────────────────
 
@@ -21,6 +21,7 @@ impl Model for LIFModel {
     const N_STATE: usize = 2;
     const HAS_SPIKE: bool = true;
 
+    #[inline(always)]
     fn step<S: SimdLane>(ctx: &mut SimdContext<S>) {
         let v = ctx.s(0);
         let refr = ctx.s(1);
@@ -53,7 +54,7 @@ fn make_params(n: usize) -> Vec<f32> {
     let mut p = vec![0.0f32; n * 6];
     for i in 0..n {
         p[i] = DT;
-        p[1*n + i] = TAU_M;
+        p[n + i] = TAU_M;
         p[2*n + i] = V_REST;
         p[3*n + i] = V_THRESH;
         p[4*n + i] = V_RESET;

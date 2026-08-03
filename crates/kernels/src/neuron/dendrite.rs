@@ -739,11 +739,9 @@ impl CableDendriteState {
 pub type DendriteState = CableDendriteState;
 /// Устаревший тип — используйте [`DendriteConfig`].
 // (DendriteConfig уже существует — это новый улучшенный вариант)
-
 // ═══════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1231,7 +1229,7 @@ mod tests {
         dend.jump_gaba_a(2, 1, 0.2);
 
         assert!(dend.g_ampa[0] > 0.0);
-        assert!(dend.g_nmda[1 * dend.n_padded + 1] > 0.0);
+        assert!(dend.g_nmda[dend.n_padded + 1] > 0.0);
 
         dend.reset_conductances();
 
@@ -1264,8 +1262,8 @@ mod tests {
         dend.jump_by_index(2, 0, 2, 0.2); // GABA_A
 
         assert!((dend.g_ampa[0] - 0.5).abs() < 1e-6);
-        assert!((dend.g_nachr[1 * dend.n_padded + 1] - 0.3).abs() < 1e-6);
-        assert!((dend.g_gaba_a[0 * dend.n_padded + 2] - 0.2).abs() < 1e-6);
+        assert!((dend.g_nachr[dend.n_padded + 1] - 0.3).abs() < 1e-6);
+        assert!((dend.g_gaba_a[2] - 0.2).abs() < 1e-6);
     }
 
     // ─── 15. Active dendritic channels (Na, K, Ca) ─────────

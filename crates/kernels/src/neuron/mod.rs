@@ -8,19 +8,19 @@
 //!
 //! | Function | Model | Integration |
 //! |---|---|---|
-//! | `lif_step` | LIF (Leaky Integrate-and-Fire) | Exponential Euler — exact for constant I |
 //! | `lif_at_step` | LIF-AT (adaptive threshold) | Exponential Euler + θ·exp(-dt/τ_θ) |
 //! | `eprop_lif_step` | eProp LIF (eligibility trace) | Exponential Euler + exact eligibility |
-//! | `izhikevich_step` | Izhikevich (2003) | Forward Euler (quadratic v² term) |
-//! | `adex_step` | AdEx (adaptive exponential) | Forward Euler + exponential spike |
 //! | `saw_step` | SAW (Spike-Adaptive-Width) | Forward Euler + noise |
 //! | `gco_step` | Graph-coupled oscillator | coupled phases on unit circle |
 //! | `hh_lut_step` | LUT-HH (Hodgkin-Huxley) | LUT-interpolated exponential Euler |
+//!
+//! > **Примечание (Фаза 3 консолидации):** batch-ядра `lif_step`, `izhikevich_step`,
+//! > `adex_step` удалены из `neuron/*` — они живут в `crate::safe` как тонкие
+//! > обёртки над `pillars::run_neuron` (см. `safe.rs` и `docs/DUPLICATION_MAP.md`).
 
 #![allow(non_snake_case)]
 
 use wide::f32x8;
-use wide::i32x8;
 
 const RNG_SCALE_16: f32 = 1.0 / 65536.0;
 /// 24-bit scale: for Poisson spike generation (fused kernel uses state>>8)
@@ -119,67 +119,23 @@ fn rand_f32() -> f32 {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Fast exp — SIMD range reduction + polynomial
+//  Fast exp — single-sourced from pillars::math (Phase 1)
 // ═══════════════════════════════════════════════════════
+//
+//  Канонические реализации живут в `pillars::math::fast_exp`:
+//  - `fast_exp`     (скаляр)     ↔ `pillars::math::fast_exp::fast_exp`
+//  - `fast_exp_simd` (SIMD-полином) ↔ `pillars::math::fast_exp::fast_exp_poly_simd`//  ⚠️ НЕ `pillars::fast_exp_simd` — тот аппаратный vexp (≈1 ULP)!
+//  Бит-идентичность подтверждена `tests/parity_pillars.rs` на сетке [-87, 87]
+//  (max rel diff скаляра = 0.0, SIMD — побитово).
+//
+//  Контракт точности — ТОЛЬКО на [-87, 87]. За пределами: старый kernels-путь
+//  клампил вход к ±87 (exp(±87) ≈ 2.6e37 / ~0), pillars-полином НЕ клампит,
+//  а блендит шкалу к 0.0/inf при n<-126/n>127. Все kernels-вызовы (hh vtrap,
+//  adex arg-clamp-to-20, nmda mg-block, dt/τ-decays, pre-clamped synapse args)
+//  лежат внутри ±87 — граница недостижима на практике.
 
-#[inline(always)]
-pub fn fast_exp(x: f32) -> f32 {
-    let log2e = std::f32::consts::LOG2_E;
-    let t = x * log2e;
-    let n = t.floor() as i32;
-    let f = t - n as f32;
-
-    let c1 = std::f32::consts::LN_2;
-    let c2 = 0.240_226_5_f32;
-    let c3 = 0.055_504_11_f32;
-    let c4 = 0.009_618_129_f32;
-    let c5 = 0.001_333_356_f32;
-    let c6 = 0.000_154_035_3_f32;
-    let poly = (((c6 * f + c5) * f + c4) * f + c3) * f + c2;
-    let poly = (poly * f + c1) * f + 1.0;
-    let exp2f = poly;
-
-    let exp2n = if n < -126 {
-        0.0
-    } else if n > 127 {
-        f32::INFINITY
-    } else {
-        let biased = (n + 127) as u32;
-        f32::from_bits(biased << 23)
-    };
-
-    exp2n * exp2f
-}
-
-#[inline(always)]
-pub fn fast_exp_simd(x: f32x8) -> f32x8 {
-    let x = x.max(f32x8::splat(-87.0)).min(f32x8::splat(87.0));
-    let log2e = f32x8::splat(std::f32::consts::LOG2_E);
-    let t = x * log2e;
-
-    let n = t.floor();
-    let ff = t - n;
-
-    let c1 = f32x8::splat(std::f32::consts::LN_2);
-    let c2 = f32x8::splat(0.240_226_5_f32);
-    let c3 = f32x8::splat(0.055_504_11_f32);
-    let c4 = f32x8::splat(0.009_618_129_f32);
-    let c5 = f32x8::splat(0.001_333_356_f32);
-    let c6 = f32x8::splat(0.000_154_035_3_f32);
-
-    let poly = ff.mul_add(c6, c5);
-    let poly = ff.mul_add(poly, c4);
-    let poly = ff.mul_add(poly, c3);
-    let poly = ff.mul_add(poly, c2);
-    let poly = ff.mul_add(poly, c1);
-    let poly = ff.mul_add(poly, f32x8::splat(1.0));
-
-    let n_i32: i32x8 = n.fast_round_int();
-    let biased = n_i32 + i32x8::splat(127);
-    let exp2n: f32x8 = bytemuck::cast(biased << 23_u32);
-
-    exp2n * poly
-}
+pub use pillars::math::fast_exp::fast_exp;
+pub use pillars::math::fast_exp::fast_exp_poly_simd as fast_exp_simd;
 
 #[inline(always)]
 pub fn fast_sincos_simd(x: f32x8) -> (f32x8, f32x8) {

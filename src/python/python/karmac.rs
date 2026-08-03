@@ -3,7 +3,7 @@
 #![allow(non_snake_case)]
 #![allow(deprecated)]
 
-use karmac::CarmackBsp;
+use crate::karmac::CarmackBsp;
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -157,7 +157,7 @@ impl PyCarmackBsp {
 /// PyMinBrain: Minimal Brain Model (PFC, GNW, Basal Ganglia)
 #[pyclass(name = "MinBrain", module = "taas_checkmate.karmac")]
 pub struct PyMinBrain {
-    inner: karmac::min_brain::MinBrain,
+    inner: crate::karmac::min_brain::MinBrain,
 }
 
 #[pymethods]
@@ -171,7 +171,7 @@ impl PyMinBrain {
         n_actions: usize,
         clear_threshold: f32,
     ) -> Self {
-        let config = karmac::min_brain::MinBrainConfig {
+        let config = crate::karmac::min_brain::MinBrainConfig {
             sensory_dim,
             workspace_size,
             pfc_slots,
@@ -179,7 +179,7 @@ impl PyMinBrain {
             clear_threshold,
         };
         Self {
-            inner: karmac::min_brain::MinBrain::new(config),
+            inner: crate::karmac::min_brain::MinBrain::new(config),
         }
     }
 

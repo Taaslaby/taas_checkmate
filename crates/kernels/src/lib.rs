@@ -45,7 +45,7 @@ mod tests {
         let mut data = vec![-10.0, -5.0, 0.0, 5.0, 10.0, -3.0, 3.0, 100.0, 0.5];
         safety_clamp(&mut data, -1.0, 1.0);
         for &v in &data {
-            assert!(v >= -1.0 && v <= 1.0, "safety_clamp: {v} out of range");
+            assert!((-1.0..=1.0).contains(&v), "safety_clamp: {v} out of range");
         }
     }
 
@@ -329,7 +329,7 @@ mod tests {
         assert!(phases[0].abs() > 0.001, "t3_update should advance phases");
         // Amplitudes should stay in range
         for &r in &amps {
-            assert!(r >= 0.001 && r <= 10.0, "t3_update amp out of range: {r}");
+            assert!((0.001..=10.0).contains(&r), "t3_update amp out of range: {r}");
         }
     }
 

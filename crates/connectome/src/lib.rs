@@ -61,10 +61,11 @@ pub use record::{SpikeRecorder, SpikeRecordings};
 pub use runner::{BrainConfig, BrainRunner, LearningRule, NeuronConfig, PoissonGroup};
 pub use sim::{
     csr_propagate, csr_propagate_conductance_from_queue, csr_propagate_from_queue,
-    pad_to, push_spikes_to_queue, sim_gco, sim_gco_record, sim_hh, sim_hh_synaptic, sim_izhikevich,
-    sim_izhikevich_dual, sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate, BrainState,
-    GcoParams, IzhikevichDualParams, IzhikevichParams, LifParams, NeuronModel, RateParams,
-    SpikeQueue,
+    hh_population_pacemaking, hh_population_standard, pad_to, push_spikes_to_queue, sim_gco,
+    sim_gco_record, sim_hh_pillars, sim_hh_synaptic_pillars, sim_izhikevich,
+    sim_izhikevich_dual, sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate,
+    BrainState, GcoParams, IzhikevichDualParams, IzhikevichParams, LifParams, NeuronModel,
+    RateParams, SpikeQueue,
 };
 pub use taas_kernels::neuron::synapse::{DecayFactors, ReceptorType, SynapticKinetics};
 

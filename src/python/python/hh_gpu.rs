@@ -23,9 +23,57 @@ use numpy::{PyArray1, PyArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use crate::core::neuron::hh::{build_config_from_channels, standard_config, HhLutConfig};
 #[cfg(feature = "cuda")]
 use crate::cuda::GpuContext;
+
+/// CPU-side HH template — initial state + channel metadata built directly from
+/// channel specs (no legacy `HhLutConfig`).
+#[cfg(feature = "cuda")]
+struct CpuHhInit {
+    v: Vec<f32>,
+    gates: Vec<f32>, // AOS row-major [n * n_gates]
+    Ii: Vec<f32>,
+    g_leak: Vec<f32>,
+    E_leak: Vec<f32>,
+    C_m: Vec<f32>,
+    n_gates: usize,
+    n_channels: usize,
+    E_rev_arr: Vec<f32>,
+    per_ch_gmax: Vec<f32>,
+    powers: Vec<u32>,
+    n_gates_per_ch: Vec<i32>,
+}
+
+#[cfg(feature = "cuda")]
+fn cpu_hh_init(n: usize, pacemaking: bool) -> CpuHhInit {
+    use crate::kernels::neuron::hh::{pacemaking_channels, standard_channels, steady_state_gates};
+    let channels = if pacemaking {
+        pacemaking_channels()
+    } else {
+        standard_channels()
+    };
+    let n_gates: usize = channels.iter().map(|c| c.gates.len()).sum();
+    let n_channels = channels.len();
+    let init_gates = steady_state_gates(-65.0, &channels);
+    let mut gates = Vec::with_capacity(n * n_gates);
+    for _ in 0..n {
+        gates.extend_from_slice(&init_gates);
+    }
+    CpuHhInit {
+        v: vec![-65.0; n],
+        gates,
+        Ii: vec![0.0; n],
+        g_leak: vec![0.3; n],
+        E_leak: vec![-65.0; n],
+        C_m: vec![1.0; n],
+        n_gates,
+        n_channels,
+        E_rev_arr: channels.iter().map(|c| c.E_rev).collect(),
+        per_ch_gmax: channels.iter().map(|c| c.g_max).collect(),
+        powers: channels.iter().flat_map(|c| c.gates.iter().map(|g| g.power)).collect(),
+        n_gates_per_ch: channels.iter().map(|c| c.gates.len() as i32).collect(),
+    }
+}
 
 /// GPU-accelerated Hodgkin-Huxley simulator.
 ///
@@ -68,55 +116,35 @@ impl PyGpuHhLut {
 
         #[cfg(feature = "cuda")]
         {
-            let cpu_cfg: HhLutConfig = if pacemaking.unwrap_or(false) {
-                let channels = crate::kernels::neuron::hh::pacemaking_channels();
-                build_config_from_channels(&channels, n, dt, -100.0, 60.0, 1024)
-            } else {
-                standard_config(n, dt)
-            };
-
+            let cpu = cpu_hh_init(n, pacemaking.unwrap_or(false));
             let ctx = GpuContext::new(n, 0)
                 .map_err(|e| PyValueError::new_err(format!("GpuContext: {e}")))?;
 
-            let mut gates = Vec::with_capacity(n * cpu_cfg.n_gates);
-            for _ in 0..n {
-                gates.extend_from_slice(&cpu_cfg.init_gates);
-            }
-
             ctx.hh_upload_state(
-                &cpu_cfg.v,
-                &gates,
-                &cpu_cfg.Ii,
-                &cpu_cfg.g_leak,
-                &cpu_cfg.E_leak,
-                &cpu_cfg.C_m,
-                cpu_cfg.n_gates,
+                &cpu.v,
+                &cpu.gates,
+                &cpu.Ii,
+                &cpu.g_leak,
+                &cpu.E_leak,
+                &cpu.C_m,
+                cpu.n_gates,
             )
             .map_err(|e| PyValueError::new_err(format!("hh_upload_state: {e}")))?;
 
-            let n_gates_per_ch_i32: Vec<i32> =
-                cpu_cfg.n_gates_per_ch.iter().map(|&x| x as i32).collect();
-
-            // HhLutConfig.g_max_arr is per-neuron [n_channels * n], but GPU expects
-            // per-channel [n_channels]. Extract the first value of each channel's block.
-            // At n=1 both layouts coincide, at n>1 we'd send wrong g_max otherwise.
-            let per_ch_gmax: Vec<f32> = (0..cpu_cfg.n_channels)
-                .map(|ch_i| cpu_cfg.g_max_arr[ch_i * n])
-                .collect();
             ctx.hh_upload_channels(
-                &cpu_cfg.E_rev_arr,
-                &per_ch_gmax,
-                &cpu_cfg.powers,
-                &n_gates_per_ch_i32,
-                cpu_cfg.n_gates,
-                cpu_cfg.n_channels,
+                &cpu.E_rev_arr,
+                &cpu.per_ch_gmax,
+                &cpu.powers,
+                &cpu.n_gates_per_ch,
+                cpu.n_gates,
+                cpu.n_channels,
             )
             .map_err(|e| PyValueError::new_err(format!("hh_upload_channels: {e}")))?;
 
             Ok(PyGpuHhLut {
                 ctx,
                 n,
-                n_gates: cpu_cfg.n_gates,
+                n_gates: cpu.n_gates,
                 dt,
                 tau_ref: tau_ref.unwrap_or(0.0),
                 connectome_uploaded: false,
@@ -343,36 +371,26 @@ impl PyGpuHhLut {
 
         #[cfg(feature = "cuda")]
         {
-            let cpu_cfg = standard_config(self.n, self.dt);
-            let mut gates = Vec::with_capacity(self.n * self.n_gates);
-            for _ in 0..self.n {
-                gates.extend_from_slice(&cpu_cfg.init_gates);
-            }
+            let cpu = cpu_hh_init(self.n, false);
             self.ctx
                 .hh_upload_state(
-                    &cpu_cfg.v,
-                    &gates,
-                    &cpu_cfg.Ii,
-                    &cpu_cfg.g_leak,
-                    &cpu_cfg.E_leak,
-                    &cpu_cfg.C_m,
+                    &cpu.v,
+                    &cpu.gates,
+                    &cpu.Ii,
+                    &cpu.g_leak,
+                    &cpu.E_leak,
+                    &cpu.C_m,
                     self.n_gates,
                 )
                 .map_err(PyValueError::new_err)?;
-            // Re-upload channels (g_max_arr fix applies to reset too)
-            let n_gates_per_ch_i32: Vec<i32> =
-                cpu_cfg.n_gates_per_ch.iter().map(|&x| x as i32).collect();
-            let per_ch_gmax: Vec<f32> = (0..cpu_cfg.n_channels)
-                .map(|ch_i| cpu_cfg.g_max_arr[ch_i * self.n])
-                .collect();
             self.ctx
                 .hh_upload_channels(
-                    &cpu_cfg.E_rev_arr,
-                    &per_ch_gmax,
-                    &cpu_cfg.powers,
-                    &n_gates_per_ch_i32,
-                    cpu_cfg.n_gates,
-                    cpu_cfg.n_channels,
+                    &cpu.E_rev_arr,
+                    &cpu.per_ch_gmax,
+                    &cpu.powers,
+                    &cpu.n_gates_per_ch,
+                    cpu.n_gates,
+                    cpu.n_channels,
                 )
                 .map_err(PyValueError::new_err)
         }
@@ -391,19 +409,15 @@ impl PyGpuHhLut {
         #[cfg(feature = "cuda")]
         {
             // We can't directly download d_hh_gates from GpuContext.
-            // Instead, reconstruct from init_gates (same as upload logic).
-            let cpu_cfg = standard_config(self.n, self.dt);
-            let mut gates = Vec::with_capacity(self.n * self.n_gates);
-            for _ in 0..self.n {
-                gates.extend_from_slice(&cpu_cfg.init_gates);
-            }
+            // Instead, reconstruct from init gates (same as upload logic).
+            let cpu = cpu_hh_init(self.n, false);
             // Convert AOS -> SOA (same as gpu_hh_upload_state)
             let n = self.n;
             let n_gates = self.n_gates;
             let mut soa = vec![0.0f32; n * n_gates];
             for ni in 0..n {
                 for gi in 0..n_gates {
-                    soa[gi * n + ni] = gates[ni * n_gates + gi];
+                    soa[gi * n + ni] = cpu.gates[ni * n_gates + gi];
                 }
             }
             Ok(PyArray1::from_vec(py, soa))

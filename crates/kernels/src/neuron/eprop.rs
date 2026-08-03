@@ -107,7 +107,7 @@ mod tests {
         // Шаг 2: Без спайков след затухает по alpha_e
         let e_prev = eprop.eligibility[0];
         let spikes_zero = vec![0, 0];
-        eprop.update(&mut weights, &v_post, &spikes_zero, &vec![0.0, 0.0]);
+        eprop.update(&mut weights, &v_post, &spikes_zero, &[0.0, 0.0]);
         assert!(eprop.eligibility[0] < e_prev);
     }
 }

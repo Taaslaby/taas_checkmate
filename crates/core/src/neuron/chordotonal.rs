@@ -27,7 +27,7 @@
 //! // sensor.rates[0] ≈ firing rate in Hz
 //! ```
 
-use pillars::model::sensors::chordotonal_step;
+use pillars::zoo::sensors::chordotonal_step;
 
 /// Chordotonal sensory organ state — load/stretch → firing rate.
 #[derive(Debug, Clone)]

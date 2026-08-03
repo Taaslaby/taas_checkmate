@@ -2,11 +2,38 @@
 //!
 //! ## Architecture
 //!
-//! **Neuron models** (step functions) delegate to [`pillars::model`] for SIMD execution.
+//! **Neuron models** (step functions) delegate to [`pillars::zoo`] for SIMD execution.
 //! For new code, prefer using `pillars` directly:
 //! ```rust
 //! use pillars::prelude::*;
-//! unsafe { run_neuron::<LIFModel>(v, refr, ..., i_syn, spikes, params, n); }
+//!
+//! // SoA layout: each parameter is a column of `n` floats (column stride = n).
+//! // LIFModel params: [dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref]
+//! let n = 8;
+//! let mut params = vec![0.0f32; n * 6];
+//! params[..n].fill(0.5);
+//! params[n..2 * n].fill(0.1);
+//! params[2 * n..3 * n].fill(-70.0);
+//! params[3 * n..4 * n].fill(-54.0);
+//! params[4 * n..5 * n].fill(-70.0);
+//! params[5 * n..6 * n].fill(2.0);
+//!
+//! let mut v = vec![-70.0f32; n];
+//! let mut u = vec![0.0f32; n];
+//! let mut h = vec![0.0f32; n];
+//! let mut r = vec![0.0f32; n]; // refractory counter
+//! let i_in = vec![30.0f32; n];
+//! let mut spikes = vec![0i32; n];
+//!
+//! unsafe {
+//!     run_neuron::<LIFModel>(
+//!         v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
+//!         r.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut(),
+//!         i_in.as_ptr(), spikes.as_mut_ptr(),
+//!         params.as_ptr(), n,
+//!     );
+//! }
+//! assert!(v[0] > -70.0, "v should depolarize under current injection");
 //! ```
 //!
 //! **Learning & Plasticity** (E-Prop, STDP, STP, SORN, BCM) remain in `core` —
@@ -33,7 +60,6 @@ pub mod adex; // AdEx & E-Prop AdEx
 pub mod fhn; // FitzHugh-Nagumo
 pub mod glif; // GLIF3/4 (Generalized LIF — Allen Institute)
 pub mod haap; // HAAP (Hyperpolarization-Activated Adaptive Pulse-Bursting)
-pub mod hh; // LUT Hodgkin-Huxley
 pub mod hr; // Hindmarsh-Rose
 pub mod izhikevich; // Izhikevich & E-Prop Izhikevich
 pub mod lif; // LIF, LIF-AT & E-Prop LIF
@@ -42,6 +68,7 @@ pub mod wc; // Wilson-Cowan population
 pub mod atlasov_neuromotor; // Atlasov Neuromotor joint control
 pub mod chordotonal; // Chordotonal sensory organ (load→rate)
 pub mod astrocyte; // Astrocyte Ca²⁺ waves + Gap Junctions
+pub mod embodied; // FlyWire Embodied Neuromotor Engine (поглощён из taas-embodied)
 
 // ═══════════════════════════════════════════════════════
 //  🔗 Plasticity & Learning (обучение и пластичность)
@@ -64,9 +91,9 @@ pub mod soma_dendrite; // Somato-dendritic integration
 pub mod stats; // SpikeRaster, firing rates, ISI, CV
 
 // ─── Pillars Model Re-exports ────────────────────────────
-pub use pillars::model::{
-    Model, SimdLane,
-    run_neuron,
+pub use pillars::core::{run_neuron, SimdLane};
+pub use pillars::zoo::{
+    Model,
     LIFModel, IzhikevichModel, AdExModel, FHNModel,
     HAAPModel, HRModel, WCModel, MorrisLecarModel,
     GLIF3Model, GLIF4Model, HHModel, SAWModel,
@@ -74,11 +101,11 @@ pub use pillars::model::{
     AtlasovNeuromotorModel, Exp2SynModel,
 };
 #[cfg(feature = "rayon")]
-pub use pillars::model::run_neuron_par;
+pub use pillars::core::run_neuron_par;
 
 // ─── Pillars Sensor/Synapse Re-exports ────────────────────
-pub use pillars::model::sensors::chordotonal_step;
-pub use pillars::model::synapses::{nmda_mg_block_step, tsodyks_markram_step};
+pub use pillars::zoo::sensors::chordotonal_step;
+pub use pillars::zoo::synapses::{nmda_mg_block_step, tsodyks_markram_step};
 
 // ─── Re-exports ──────────────────────────────────────────
 pub use adex::{step_adex, EPropAdExMulti};
@@ -93,7 +120,6 @@ pub use encoding::{bsa_encode, bsa_kernel_hamming, phase_encode, TtfsEncoder};
 pub use eprop::{eprop_update, surrogate_gradient};
 pub use fhn::step_fhn;
 pub use haap::{step_haap, HaapProfile, HaapState, HaapStateBuilder};
-pub use hh::{standard_config, step_hh_lut, HhLutConfig, HhParams, HhState};
 pub use hr::step_hr;
 pub use izhikevich::{step_izhikevich, EPropIzhikevich, EPropIzhikevichMulti};
 pub use lif::{step_lif, step_lif_at, EPropLIF};
@@ -113,9 +139,6 @@ pub use trainer::EPropTrainer;
 pub use wc::step_wc;
 
 // ─── Constants ──────────────────────────────────────────
-
-/// Current clamp limit for Izhikevich input (prevents runaway).
-pub const I_CLAMP: f32 = 100.0;
 
 /// Scale factor: 1/2^24, converts 24-bit random state to [0, 1)
 pub const RNG_SCALE_24: f32 = 1.0 / 16777216.0;

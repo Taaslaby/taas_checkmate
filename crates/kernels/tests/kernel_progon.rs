@@ -45,7 +45,7 @@ fn test_safety_clamp_correctness() {
         let mut data: Vec<f32> = (0..n).map(|i| (i as f32 - 50.0) * 0.1).collect();
         safety_clamp(&mut data, -1.0, 1.0);
         for &v in &data {
-            assert!(v >= -1.0 && v <= 1.0, "n={n}: clamp failed, v={v}");
+            assert!((-1.0..=1.0).contains(&v), "n={n}: clamp failed, v={v}");
         }
     }
 }
@@ -91,7 +91,7 @@ fn test_safety_clamp_no_nan() {
     safety_clamp(&mut data, -1.0, 1.0);
     assert_no_nan(&data, "safety_clamp(nan/inf)");
     for &v in &data {
-        assert!(v >= -1.0 && v <= 1.0, "clamp(nan/inf) failed: {v}");
+        assert!((-1.0..=1.0).contains(&v), "clamp(nan/inf) failed: {v}");
     }
 }
 
@@ -113,11 +113,10 @@ fn test_relu_simd_correctness() {
 #[test]
 fn test_add_simd_correctness() {
     let mut a: Vec<f32> = (0..16).map(|i| i as f32).collect();
-    let b: Vec<f32> = (0..16).map(|i| 10.0 - i as f32).collect();
-    add_simd(&mut a, &b);
-    for i in 0..16 {
-        assert!((a[i] - 10.0).abs() < 1e-6, "add[{i}]: {}", a[i]);
-    }
+    let b: Vec<f32> = (0..16).map(|i| 10.0 - i as f32).collect();      add_simd(&mut a, &b);
+      for (i, &ai) in a.iter().enumerate() {
+          assert!((ai - 10.0).abs() < 1e-6, "add[{i}]: {}", ai);
+      }
 }
 
 #[test]
@@ -131,7 +130,7 @@ fn test_sigmoid_gate_correctness() {
             let expected = 1.0 / (1.0 + (-x).exp());
             let diff = (v - expected).abs();
             assert!(diff < 0.01, "sigmoid n={n}[{i}]: {v:.4} != {expected:.4}");
-            assert!(v >= 0.0 && v <= 1.0, "sigmoid n={n}[{i}] out of [0,1]: {v}");
+            assert!((0.0..=1.0).contains(&v), "sigmoid n={n}[{i}] out of [0,1]: {v}");
         }
     }
 }
@@ -223,11 +222,10 @@ fn test_kuramoto_update_correctness() {
     let n = 8;
     let mut phases = vec![0.0; n];
     let omegas = vec![1.0; n];
-    let coupling = vec![0.0; n];
-    kuramoto_update(&mut phases, &omegas, &coupling, 0.01);
-    for i in 0..n {
-        assert!((phases[i] - 0.01).abs() < 1e-6, "kuramoto_update[{i}]");
-    }
+    let coupling = vec![0.0; n];      kuramoto_update(&mut phases, &omegas, &coupling, 0.01);
+      for (i, &p) in phases.iter().enumerate() {
+          assert!((p - 0.01).abs() < 1e-6, "kuramoto_update[{i}]");
+      }
 }
 
 #[test]
@@ -235,11 +233,10 @@ fn test_kuramoto_update_viscous_delegation() {
     let n = 16;
     let mut phases = vec![0.0; n];
     let omegas = vec![1.0; n];
-    let coupling = vec![0.0; n];
-    kuramoto_update_viscous(&mut phases, &omegas, &coupling, 0.0, 0.01);
-    for i in 0..n {
-        assert!((phases[i] - 0.01).abs() < 1e-6, "viscous eta=0 [{i}]");
-    }
+    let coupling = vec![0.0; n];      kuramoto_update_viscous(&mut phases, &omegas, &coupling, 0.0, 0.01);
+      for (i, &p) in phases.iter().enumerate() {
+          assert!((p - 0.01).abs() < 1e-6, "viscous eta=0 [{i}]");
+      }
 }
 
 #[test]
@@ -285,7 +282,7 @@ fn test_t3_update_basic() {
         "t3_update should advance phases"
     );
     for &r in &amps {
-        assert!(r >= 0.001 && r <= 10.0, "t3 amp out of range: {r}");
+        assert!((0.001..=10.0).contains(&r), "t3 amp out of range: {r}");
     }
     assert_no_nan(&phases, "t3_update phases");
     assert_no_nan(&amps, "t3_update amps");
@@ -484,7 +481,6 @@ fn test_spike_entropy_sparse() {
 //  5. ATTENTION KERNELS
 // ═══════════════════════════════════════════════════════
 
-#[test]
 // ═══════════════════════════════════════════════════════
 //  6. IZHKEVICH REFRACTORY
 // ═══════════════════════════════════════════════════════
@@ -620,11 +616,11 @@ fn test_lif_analytical_accuracy() {
             None,
         );
     }
-    for i in 0..n {
+    for &vi in &v {
         assert!(
-            (v[i] - (-55.0)).abs() < 0.1,
+            (vi - (-55.0)).abs() < 0.1,
             "LIF steady state: {:.4}",
-            v[i]
+            vi
         );
     }
 }
@@ -949,6 +945,52 @@ fn test_adex_step_basic() {
     }
 }
 
+#[test]
+fn test_eprop_adex_step_multi_smoke() {
+    for &n in &[1, 7, 8, 13] {
+        let n_pre = 3;
+        let mut v = vec![-65.0; n];
+        let mut w = vec![-13.0; n];
+        let mut psi = vec![0.0; n];
+        let mut e = vec![0.0; n_pre * n]; // [n_pre × n] column-major
+        let z_pre = vec![1i32; n_pre];
+        let i_ext = vec![25.0; n];
+        let weights = vec![1.0; n_pre * n];
+        let mut spikes = vec![0i32; n];
+        let mut total = 0usize;
+        for _ in 0..200 {
+            total += eprop_adex_step_multi(
+                &mut v,
+                &mut w,
+                &mut psi,
+                &mut e,
+                &z_pre,
+                &i_ext,
+                &weights,
+                n_pre,
+                0.5,   // dt
+                10.0,  // tau_m
+                100.0, // tau_w
+                -65.0, // v_rest
+                -50.0, // v_thresh
+                -65.0, // v_reset
+                2.0,   // delta_t
+                0.0,   // a
+                10.0,  // b
+                20.0,  // tau_e
+                2.0,   // tau_sg
+                &mut spikes,
+                None,
+            );
+        }
+        assert!(total > 0, "eprop AdEx n={n}: no spikes with I=25");
+        assert_no_nan(&v, "eprop adex v");
+        assert_no_nan(&w, "eprop adex w");
+        assert_no_nan(&psi, "eprop adex psi");
+        assert_no_nan(&e, "eprop adex e");
+    }
+}
+
 // ═══════════════════════════════════════════════════════
 //  15. GCO (Graph-Coupled Oscillator)
 // ═══════════════════════════════════════════════════════
@@ -990,7 +1032,7 @@ fn test_empty_inputs() {
     let mut empty3: Vec<f32> = vec![];
     let empty4: Vec<f32> = vec![];
     let mut empty5: Vec<f32> = vec![];
-    let _empty_spikes = vec![0i32; 0];
+    let _empty_spikes = [0i32; 0];
     // n=0 izhikevich isn't tested separately (handled by scalar tail logic)
 
     safety_clamp(&mut empty1, -1.0, 1.0);
@@ -1148,7 +1190,7 @@ fn test_morris_lecar_simd_step() {
     let mut spikes = vec![0; 8];
     let mut params = vec![0.0; 8 * 16];
     for c in 0..8 {
-        params[c * 16 + 0] = 20.0;  // C
+        params[c * 16] = 20.0;  // C
         params[c * 16 + 1] = 2.0;   // g_L
         params[c * 16 + 2] = -60.0; // E_L
         params[c * 16 + 3] = 4.0;   // g_Ca
@@ -1177,7 +1219,7 @@ fn test_nmda_mg_block_simd_step() {
     let mut i_out = vec![0.0; 8];
     let mut params = vec![0.0; 8 * 4];
     for c in 0..8 {
-        params[c * 4 + 0] = 1.0;  // g_nmda
+        params[c * 4] = 1.0;  // g_nmda
         params[c * 4 + 1] = 0.0;  // E_syn
         params[c * 4 + 2] = 1.0;  // mg_conc 1mM
     }
@@ -1196,7 +1238,7 @@ fn test_tsodyks_markram_stp_simd_step() {
     let mut w_eff = vec![0.0; 8];
     let mut params = vec![0.0; 8 * 4];
     for c in 0..8 {
-        params[c * 4 + 0] = 0.2;   // U
+        params[c * 4] = 0.2;   // U
         params[c * 4 + 1] = 200.0; // tau_d
         params[c * 4 + 2] = 50.0;  // tau_f
         params[c * 4 + 3] = 1.0;   // W_base
@@ -1215,7 +1257,7 @@ fn test_analytical_accuracy_nmda_mg_block() {
     let mut i_simd = vec![0.0; 8];
     let mut params = vec![0.0; 8 * 4];
     for c in 0..8 {
-        params[c * 4 + 0] = 1.0;  // g_nmda
+        params[c * 4] = 1.0;  // g_nmda
         params[c * 4 + 1] = 0.0;  // E_syn
         params[c * 4 + 2] = 1.0;  // mg_conc 1mM
     }
@@ -1249,14 +1291,14 @@ fn test_analytical_accuracy_tsodyks_markram_stp() {
     let dt = 0.5f32;
 
     for c in 0..8 {
-        params[c * 4 + 0] = U as f32;
+        params[c * 4] = U as f32;
         params[c * 4 + 1] = tau_d as f32;
         params[c * 4 + 2] = tau_f as f32;
         params[c * 4 + 3] = W_base as f32;
     }
 
-    let mut x64 = vec![1.0f64; 8];
-    let mut u64 = vec![0.1f64; 8];
+    let mut x64 = [1.0f64; 8];
+    let mut u64 = [0.1f64; 8];
 
     for step in 0..20 {
         taas_kernels::safe::tsodyks_markram_step(&mut x_simd, &mut u_simd, &spikes, &mut w_simd, &params, dt);

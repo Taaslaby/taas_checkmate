@@ -13,6 +13,14 @@ import os
 import tempfile
 import numpy as np
 
+# Windows-consoles default to cp1251 which cannot print box-drawing
+# characters used below — force UTF-8 so the test runs on Windows.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # ─── helpers ─────────────────────────────────────────────
 
 passed = 0
@@ -366,6 +374,15 @@ cos_buf = np.cos(phases).astype(np.float32)
 amps = np.ones(n_k, dtype=np.float32)
 tcm.phase_coherence(coh_out, sin_buf, cos_buf, amps)
 check(0.0 <= coh_out[0] <= 1.0, f"phase_coherence in [0,1], got {coh_out[0]:.4f}")
+
+# Regression: root phase_coherence must be the 4-arg kuramoto version
+# (cpe's 1-arg variant is exposed as cpe_phase_coherence — see cpe.rs).
+import inspect as _inspect
+_sig = _inspect.signature(tcm.phase_coherence)
+check(
+    len(_sig.parameters) == 4,
+    f"root phase_coherence must be 4-arg (kuramoto), got {_sig}",
+)
 
 # ─── 15. IO ──────────────────────────────────────────────
 

@@ -1,0 +1,166 @@
+//! # 🧰 Asm Microkernels — batch `f32x8` kernels
+//!
+//! The lowest SIMD layer of Pillars. Where `core/` gives you the typed
+//! `SimdLane` engine and `ops/` gives you per-lane primitives, this module
+//! gives you **batch kernels**: flat `&[f32]` slices in, SIMD loop + scalar
+//! tail out, nothing else.
+//!
+//! ## Philosophy
+//!
+//! - **Safe API, SIMD internals** — every function validates slice lengths,
+//!   then runs 8-wide `f32x8` lanes (AVX2/NEON) with a scalar tail.
+//! - **Zero overhead** — no allocation in the hot loop; pointers loaded via
+//!   [`crate::core::util::load8`] / [`store8`](crate::core::util::store8).
+//! - **Bit-identical SIMD/scalar on exp paths** — exponential-based kernels
+//!   use [`fast_exp_poly_simd`](crate::math::fast_exp::fast_exp_poly_simd) on
+//!   lanes and [`fast_exp`](crate::math::fast_exp::fast_exp) in tails: the
+//!   same polynomial, the same bits. Trig paths (`kuramoto_prepare`,
+//!   `interference_mean`) use the minimax [`fast_sincos_simd`] on lanes and
+//!   libm in tails — accurate to ~1e-4, not bit-identical.
+//!
+//! ## Module map
+//!
+//! | Module | Contents |
+//! |--------|----------|
+//! | [`signal`] | clamp, stochastic encoder, sigmoid/thalamic/phase gates, ReLU, add, SGD/Adam, Hebbian |
+//! | [`delay`] | circular + multi-tap delay buffers |
+//! | [`dopamine`] | dopamine-modulated STDP traces + weight update |
+//! | [`phase`] | Kuramoto + T3 phase/amplitude dynamics |
+//! | [`decode`] | LMS / NLMS / Kalman / Adam decoders, PST decode, ring synthesis |
+//! | [`measure`] | interference, coherence, band energy, winding, spike entropy |
+//! | [`dendrite`] | compartmentalized cable dendrites with 7 receptor types |
+//! | [`input`] | Poisson generator, BSA / TTFS / phase encoders |
+//! | [`learning`] | e-prop surrogate + weight update, STDP/BCM batch update, homeostatic scaling, SORN |
+//! | [`synapse`] | conductance-based synaptic kinetics — 7 receptor types (AMPA…mAChR) |
+//! | [`hh_channels`] | HH channel specs + rate functions — standard & pacemaking (CaV-T) |
+//! | [`stats`] | firing rates, ISI, CV, SpikeRaster |
+//! | [`vnc`] | VNC motor-neuron → actuator mapping |
+//!
+//! > **Not ported**: legacy `depth_wave` (CSR-GCO) — its only user was a Python
+//! > binding that is commented out and a script importing a *different* module
+//! > (`depth_wave_vnc`). It is dead code in the old crate; not carried over.
+
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+
+pub mod delay;
+pub mod dendrite;
+pub mod decode;
+pub mod dopamine;
+pub mod hh_channels;
+pub mod input;
+pub mod learning;
+pub mod measure;
+pub mod phase;
+pub mod signal;
+pub mod stats;
+pub mod synapse;
+pub mod vnc;
+
+/// 24-bit RNG scale — for Poisson spike generation (LCG state >> 8).
+pub(crate) const RNG_SCALE_24: f32 = 1.0 / 16_777_216.0;
+
+/// Wrap phase to [-π, π).
+#[inline(always)]
+pub fn wrap_phase(p: f32) -> f32 {
+    let tau = core::f32::consts::TAU;
+    p - tau * (p / tau).round()
+}
+
+/// Clamp amplitude to [0.001, 10.0] (matches Stuart-Landau amplitude bounds).
+#[inline]
+pub fn clamp_amp(a: f32) -> f32 {
+    a.clamp(0.001, 10.0)
+}
+
+/// Fast SIMD sin/cos via minimax polynomial (~1e-4 accuracy, ~4× faster than libm).
+///
+/// Range-reduces to [-π/2, π/2], evaluates sin/cos Taylor polynomials, then
+/// applies the correct quadrant per lane (0..3) to reconstruct full-range
+/// sin/cos. Returns `(sin(x), cos(x))`.
+#[inline(always)]
+pub fn fast_sincos_simd(x: wide::f32x8) -> (wide::f32x8, wide::f32x8) {
+    use core::f32::consts::{FRAC_2_PI, FRAC_PI_2};
+    use wide::f32x8;
+    let pi2 = f32x8::splat(FRAC_PI_2);
+    let rcp_pi2 = f32x8::splat(FRAC_2_PI);
+
+    let t = x * rcp_pi2;
+    let n = t.round();
+    let r = x - n * pi2;
+    let r2 = r * r;
+
+    let sin_poly = r2.mul_add(f32x8::splat(-0.000_198_409), f32x8::splat(0.008_333_332));
+    let sin_poly = r2.mul_add(sin_poly, f32x8::splat(-0.166_666_67));
+    let sin_poly = r2.mul_add(sin_poly, f32x8::splat(1.0));
+    let sin_val = r * sin_poly;
+
+    let cos_poly = r2.mul_add(f32x8::splat(-0.001_388_888_9), f32x8::splat(0.041_666_668));
+    let cos_poly = r2.mul_add(cos_poly, f32x8::splat(-0.5));
+    let cos_poly = r2.mul_add(cos_poly, f32x8::splat(1.0));
+    let cos_val = cos_poly;
+
+    let four = f32x8::splat(4.0);
+    let n_mod_4 = n - four * (n / four).floor();
+
+    let n_arr: [f32; 8] = n_mod_4.to_array();
+    let s_arr: [f32; 8] = sin_val.to_array();
+    let c_arr: [f32; 8] = cos_val.to_array();
+    let mut out_s = [0.0f32; 8];
+    let mut out_c = [0.0f32; 8];
+    for i in 0..8 {
+        let q = n_arr[i] as i32 & 3;
+        match q {
+            0 => {
+                out_s[i] = s_arr[i];
+                out_c[i] = c_arr[i];
+            }
+            1 => {
+                out_s[i] = c_arr[i];
+                out_c[i] = -s_arr[i];
+            }
+            2 => {
+                out_s[i] = -s_arr[i];
+                out_c[i] = -c_arr[i];
+            }
+            _ => {
+                out_s[i] = -c_arr[i];
+                out_c[i] = s_arr[i];
+            }
+        }
+    }
+
+    (f32x8::from(out_s), f32x8::from(out_c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_phase_basic() {
+        let pi = std::f32::consts::PI;
+        assert!((wrap_phase(pi * 3.0) - (-pi)).abs() < 1e-4, "wrap 3π → -π");
+        assert!((wrap_phase(-pi * 3.0) - pi).abs() < 1e-4, "wrap -3π → π");
+        assert!(wrap_phase(0.0).abs() < 1e-4, "wrap 0");
+        assert!((wrap_phase(pi * 0.5) - pi * 0.5).abs() < 1e-4, "wrap π/2");
+        assert!((wrap_phase(pi * 5.0) - (-pi)).abs() < 1e-4, "wrap 5π → -π");
+    }
+
+    #[test]
+    fn clamp_amp_basic() {
+        assert!((clamp_amp(5.0) - 5.0).abs() < 1e-6);
+        assert!((clamp_amp(0.0001) - 0.001).abs() < 1e-6);
+        assert!((clamp_amp(100.0) - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fast_sincos_simd_accuracy() {
+        use wide::f32x8;
+        for &x in &[0.0f32, 0.5, 1.0, 1.5, 2.0, -1.0, -3.0, 6.0, 100.0] {
+            let (s, c) = fast_sincos_simd(f32x8::splat(x));
+            assert!((s.to_array()[0] - x.sin()).abs() < 2e-3, "sin({x})");
+            assert!((c.to_array()[0] - x.cos()).abs() < 2e-3, "cos({x})");
+        }
+    }
+}

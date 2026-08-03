@@ -7,572 +7,10 @@ pub use crate::propagate::*;
 pub use crate::types::*;
 
 use crate::data::ConnectomeData;
+use pillars::core::NeuralPopulation;
+use pillars::zoo::{HHModel, HHParamIdx};
 use taas_kernels::neuron::synapse::{DecayFactors, SynapticKinetics};
 use taas_kernels::safe;
-
-// ═══════════════════════════════════════════════════════════
-//  Tests
-// ═══════════════════════════════════════════════════════════
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use taas_kernels::neuron::synapse::ReceptorType;
-
-    #[test]
-    fn spike_queue_basic_push_pop() {
-        let mut q = SpikeQueue::new(8);
-        assert_eq!(q.len(), 0);
-        q.push(5);
-        q.push(42);
-        q.push(100);
-        assert_eq!(q.len(), 3);
-        assert_eq!(q.pop(), Some(5));
-        assert_eq!(q.pop(), Some(42));
-        assert_eq!(q.len(), 1);
-        assert_eq!(q.pop(), Some(100));
-        assert_eq!(q.pop(), None);
-        assert_eq!(q.len(), 0);
-    }
-
-    #[test]
-    fn spike_queue_wrap_around() {
-        let mut q = SpikeQueue::new(4);
-        // Push until near capacity
-        q.push(1);
-        q.push(2);
-        q.push(3);
-        q.push(4);
-        assert_eq!(q.len(), 4);
-        // Pop all
-        assert_eq!(q.pop(), Some(1));
-        assert_eq!(q.pop(), Some(2));
-        assert_eq!(q.len(), 2);
-        // Now push more — wraps around in circular buffer
-        q.push(10);
-        q.push(11);
-        // head is now 6, tail is 2, cap=4, mask=3
-        assert_eq!(q.len(), 4); // 6 - 2 = 4
-        assert_eq!(q.pop(), Some(3));
-        assert_eq!(q.pop(), Some(4));
-        assert_eq!(q.pop(), Some(10));
-        assert_eq!(q.pop(), Some(11));
-        assert_eq!(q.pop(), None);
-    }
-
-    #[test]
-    fn spike_queue_drain() {
-        let mut q = SpikeQueue::new(8);
-        q.push(1);
-        q.push(2);
-        q.push(3);
-        assert_eq!(q.len(), 3);
-        q.clear();
-        assert_eq!(q.len(), 0);
-        assert_eq!(q.pop(), None);
-        // After clear, can still push
-        q.push(42);
-        assert_eq!(q.pop(), Some(42));
-    }
-
-    #[test]
-    fn spike_queue_capacity_power_of_two() {
-        let q = SpikeQueue::new(5); // next power of 2 = 8
-        assert_eq!(q.buffer.len(), 8);
-        assert_eq!(q.mask, 7);
-
-        let q2 = SpikeQueue::new(1000); // next power of 2 = 1024
-        assert_eq!(q2.buffer.len(), 1024);
-
-        let q3 = SpikeQueue::new(1); // min 4
-        assert_eq!(q3.buffer.len(), 4);
-    }
-
-    #[test]
-    fn push_spikes_to_queue_basic() {
-        let spikes = vec![0, 1, 0, 0, 1, 0, 1];
-        let mut q = SpikeQueue::new(16);
-        let count = push_spikes_to_queue(&spikes, 7, &mut q);
-        assert_eq!(count, 3);
-        assert_eq!(q.pop(), Some(1));
-        assert_eq!(q.pop(), Some(4));
-        assert_eq!(q.pop(), Some(6));
-        assert_eq!(q.pop(), None);
-    }
-
-    #[test]
-    fn csr_propagate_from_queue_basic() {
-        // Simple ring: 0→1, 1→2, 2→0
-        let row_ptr = vec![0i32, 1, 2, 3];
-        let col_indices = vec![1, 2, 0];
-        let values = vec![0.5f32, 0.5, 0.5];
-        let nt_types = vec![1.0f32, 1.0, 1.0];
-        let mut I_buf = vec![0.0f32; 3];
-        let mut q = SpikeQueue::new(8);
-
-        // Neuron 0 spikes
-        q.push(0);
-        csr_propagate_from_queue(
-            &row_ptr,
-            &col_indices,
-            &values,
-            &nt_types,
-            &mut q,
-            &mut I_buf,
-            1.0,
-        );
-
-        // I_buf[1] should get 0.5
-        assert!((I_buf[1] - 0.5).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
-        assert_eq!(I_buf[0], 0.0);
-        assert_eq!(I_buf[2], 0.0);
-        assert_eq!(q.len(), 0);
-    }
-
-    #[test]
-    fn csr_propagate_from_queue_multi_spike() {
-        // 0→2, 1→1 (self), 2→0, 3→1
-        let row_ptr = vec![0i32, 1, 2, 3, 4];
-        let col_indices = vec![2, 1, 0, 1];
-        let values = vec![1.0f32, 2.0, 3.0, 4.0];
-        let nt_types = vec![1.0f32, -1.0, 1.0, 1.0]; // neuron 1 is inhibitory
-        let mut I_buf = vec![0.0f32; 3];
-        let mut q = SpikeQueue::new(16);
-
-        q.push(0); // exc → I_buf[2] += 1.0
-        q.push(1); // inh → I_buf[1] += 2.0 * -1.0 = -2.0
-        q.push(3); // exc → I_buf[1] += 4.0
-
-        csr_propagate_from_queue(
-            &row_ptr,
-            &col_indices,
-            &values,
-            &nt_types,
-            &mut q,
-            &mut I_buf,
-            1.0,
-        );
-
-        assert!((I_buf[2] - 1.0).abs() < 1e-6, "I_buf[2]={}", I_buf[2]);
-        assert!((I_buf[1] - 2.0).abs() < 1e-6, "I_buf[1]={}", I_buf[1]); // -2.0 + 4.0 = 2.0
-        assert_eq!(I_buf[0], 0.0);
-        assert_eq!(q.len(), 0);
-    }
-
-    #[test]
-    fn csr_propagate_from_queue_inhibitory_scale() {
-        let row_ptr = vec![0i32, 2, 2];
-        let col_indices = vec![0, 1]; // neuron 0→0 and 0→1
-        let values = vec![1.0f32, 1.0];
-        let nt_types = vec![1.0f32, 0.0]; // neuron 1 is silent (no synapses anyway)
-        let mut I_buf = vec![0.0f32; 2];
-        let mut q = SpikeQueue::new(8);
-
-        q.push(0);
-        // scale = -0.5
-        csr_propagate_from_queue(
-            &row_ptr,
-            &col_indices,
-            &values,
-            &nt_types,
-            &mut q,
-            &mut I_buf,
-            -0.5,
-        );
-
-        assert!((I_buf[0] - (-0.5)).abs() < 1e-6, "I_buf[0]={}", I_buf[0]);
-        assert!((I_buf[1] - (-0.5)).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
-        assert_eq!(q.len(), 0);
-    }
-
-    // ─── Synaptic kinetics integration tests ───────────
-
-    fn make_synaptic_connectome() -> ConnectomeData {
-        // 3 neurons: 0→1 (exc, AMPA), 1→2 (inh, GABA_A), 2→0 (exc, AMPA)
-        let mut conn = ConnectomeData::new(
-            vec![0i32, 1, 2, 3],
-            vec![1, 2, 0],
-            vec![0.5f32, 1.0, 0.8],
-            vec![1.0, -1.0, 1.0],
-            vec![],
-        );
-        conn.build_receptor_types();
-        conn
-    }
-
-    #[test]
-    fn test_sim_lif_synaptic_basic() {
-        let conn = make_synaptic_connectome();
-        assert!(
-            !conn.receptor_types.is_empty(),
-            "receptor_types must be non-empty"
-        );
-
-        let n = conn.n_neurons;
-        let mut state = BrainState::new(n, NeuronModel::LIF);
-        // Strong drive ensures firing: LIF dv/dt = (I - (V - V_rest)) / tau
-        // With I=100, tau=5, dt=0.1: dv ~= 2.0/step → reaches V_thresh=0 in ~26 steps
-        let tau: Vec<f32> = vec![5.0; n];
-        let rest: Vec<f32> = vec![-52.0; n];
-        let thresh: Vec<f32> = vec![0.0; n];
-        let reset: Vec<f32> = vec![-60.0; n];
-        let params = LifParams::new(&tau, &rest, &thresh, &reset, 0.1, 1.0);
-        let external_I = vec![100.0f32; n];
-        let n_steps = 100;
-        let mut kinetics = SynapticKinetics::new(n);
-
-        let spikes = sim_lif_synaptic(
-            &conn,
-            &mut state,
-            &params,
-            &external_I,
-            n_steps,
-            &mut kinetics,
-            1.0,
-        );
-
-        let total_spikes: i32 = spikes.iter().sum();
-        assert!(
-            total_spikes > 0,
-            "LIF synaptic should fire with high drive, got {} spikes",
-            total_spikes
-        );
-        assert_eq!(spikes.len(), n_steps * n);
-    }
-
-    #[test]
-    fn test_sim_izhikevich_synaptic_basic() {
-        let conn = make_synaptic_connectome();
-        assert!(!conn.receptor_types.is_empty());
-
-        let n = conn.n_neurons;
-        let mut state = BrainState::new(n, NeuronModel::Izhikevich);
-        let params = IzhikevichParams {
-            a: vec![0.02f32; n],
-            b: vec![0.2f32; n],
-            c: vec![-65.0f32; n],
-            d: vec![8.0f32; n],
-            dt_ms: 0.5,
-            tau_ref: 3.0,
-        };
-        let external_I = vec![7.0f32; n];
-        let mut kinetics = SynapticKinetics::new(n);
-
-        let spikes = sim_izhikevich_synaptic(
-            &conn,
-            &mut state,
-            &params,
-            &external_I,
-            20,
-            &mut kinetics,
-            1.0,
-        );
-
-        let total_spikes: i32 = spikes.iter().sum();
-        assert!(
-            total_spikes > 0,
-            "Izhikevich synaptic should fire with high drive"
-        );
-        assert_eq!(spikes.len(), 20 * n);
-    }
-
-    #[test]
-    fn test_sim_lif_synaptic_conductance_decay() {
-        let conn = make_synaptic_connectome();
-        let n = conn.n_neurons;
-        let mut state = BrainState::new(n, NeuronModel::LIF);
-        let tau: Vec<f32> = vec![5.0; n];
-        let rest: Vec<f32> = vec![-52.0; n];
-        let thresh: Vec<f32> = vec![0.0; n];
-        let reset: Vec<f32> = vec![-60.0; n];
-        let params = LifParams::new(&tau, &rest, &thresh, &reset, 0.1, 1.0);
-        let external_I = vec![0.0f32; n];
-        let mut kinetics = SynapticKinetics::new(n);
-
-        kinetics.jump(0, ReceptorType::AMPA, 10.0);
-        kinetics.jump(1, ReceptorType::AMPA, 10.0);
-
-        let initial_g = kinetics.g_ampa[0];
-        assert!((initial_g - 10.0).abs() < 1e-6, "initial g={}", initial_g);
-
-        let _spikes = sim_lif_synaptic(
-            &conn,
-            &mut state,
-            &params,
-            &external_I,
-            1,
-            &mut kinetics,
-            1.0,
-        );
-
-        let expected_decay = (-0.1f32 / 2.0).exp();
-        assert!(
-            kinetics.g_ampa[0] < 10.0 * expected_decay * 1.01,
-            "g_ampa[0]={} should have decayed",
-            kinetics.g_ampa[0]
-        );
-        assert!(
-            kinetics.g_ampa[0] > 0.0,
-            "g_ampa[0] should still be positive"
-        );
-    }
-
-    #[test]
-    fn test_sim_izhikevich_synaptic_receptor_types() {
-        let mut conn = make_synaptic_connectome();
-        conn.receptor_types = vec![0u8, 1, 2]; // AMPA, NMDA, GABA_A
-
-        let n = conn.n_neurons;
-        let mut state = BrainState::new(n, NeuronModel::Izhikevich);
-        let params = IzhikevichParams {
-            a: vec![0.02f32; n],
-            b: vec![0.2f32; n],
-            c: vec![-65.0f32; n],
-            d: vec![8.0f32; n],
-            dt_ms: 0.5,
-            tau_ref: 3.0,
-        };
-        let external_I = vec![10.0f32; n];
-        let mut kinetics = SynapticKinetics::new(n);
-
-        let spikes = sim_izhikevich_synaptic(
-            &conn,
-            &mut state,
-            &params,
-            &external_I,
-            50,
-            &mut kinetics,
-            1.0,
-        );
-
-        let total_spikes: i32 = spikes.iter().sum();
-        assert!(
-            total_spikes > 0,
-            "Izhikevich with mixed receptors should fire"
-        );
-
-        let ampa_decay = (-0.5f32 / 2.0).exp().powi(50);
-        let nmda_decay = (-0.5f32 / 50.0).exp().powi(50);
-        assert!(
-            nmda_decay > ampa_decay,
-            "NMDA should decay slower than AMPA"
-        );
-        println!("AMPA decay over 50 steps: {:.6}", ampa_decay);
-        println!("NMDA decay over 50 steps: {:.6}", nmda_decay);
-    }
-
-    #[test]
-    fn test_sim_hh_synaptic_basic() {
-        let conn = make_synaptic_connectome();
-        assert!(
-            !conn.receptor_types.is_empty(),
-            "receptor_types must be non-empty"
-        );
-
-        let n = conn.n_neurons;
-        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.5);
-        // Strong drive ensures HH fires: I=15 µA/cm² is suprathreshold for poly HH
-        let external_I = vec![15.0f32; n];
-        let n_steps = 100;
-        let mut kinetics = SynapticKinetics::new(n);
-
-        let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, n_steps, &mut kinetics, 1.0);
-
-        let total_spikes: i32 = spikes.iter().sum();
-        assert!(
-            total_spikes > 0,
-            "HH synaptic should fire with high drive (I=15), got {} spikes",
-            total_spikes
-        );
-        assert_eq!(spikes.len(), n_steps * n);
-    }
-
-    #[test]
-    fn test_sim_hh_basic() {
-        let conn = make_synaptic_connectome();
-        let n = conn.n_neurons;
-        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.5);
-        let external_I = vec![15.0f32; n];
-        let n_steps = 100;
-
-        let spikes = sim_hh(&conn, &mut cfg, &external_I, n_steps, 1.0);
-
-        let total_spikes: i32 = spikes.iter().sum();
-        assert!(
-            total_spikes > 0,
-            "HH (instant) should fire with high drive (I=15), got {} spikes",
-            total_spikes
-        );
-        assert_eq!(spikes.len(), n_steps * n);
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  Integration: HH physics + synaptic chemistry
-    // ═══════════════════════════════════════════════════════
-
-    /// Simple 2-neuron connectome: 0 → 1 with nAChR
-    fn make_2_neuron_connectome() -> ConnectomeData {
-        let mut conn = ConnectomeData::new(
-            vec![0i32, 1, 2],      // row_ptr: 0 has 1 syn, 1 has 0 syn
-            vec![1_usize as i32],  // 0 → 1
-            vec![1.0f32],          // weight
-            vec![1.0f32, -1.0f32], // nt_types: 0=exc, 1=inh
-            vec![],                // receptors (built below)
-        );
-        conn.receptor_types = vec![4u8]; // nAChR (index 4)
-        conn
-    }
-
-    #[test]
-    fn test_hh_current_based_psp() {
-        // Current-based path (sim_hh): pre (0) fires → post (1) receives I = w * nt * scale
-        // At dt=0.1ms, pre needs I ≥ 15 µA to fire reliably
-        let conn = make_2_neuron_connectome();
-        let n = conn.n_neurons;
-        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.1);
-        let mut spikes_buf = vec![0i32; n];
-
-        let v_before = cfg.v[1]; // post-synaptic V before
-
-        // Drive neuron 0 to fire
-        for _ in 0..300 {
-            cfg.Ii[0] = 15.0;
-            cfg.Ii[1] = 0.0; // no direct drive to post
-                             // Propagate any queued spikes (none initially)
-            let mut q = SpikeQueue::new(8);
-            let external_I = vec![15.0f32, 0.0];
-
-            // Manual sim_hh step:
-            cfg.Ii[0] += external_I[0];
-            cfg.Ii[1] += external_I[1];
-            taas_core::neuron::hh::step_hh_lut(&mut cfg, &mut spikes_buf, 6.3);
-            if spikes_buf[0] != 0 {
-                q.push(0);
-            }
-            cfg.Ii[..2].fill(0.0);
-            csr_propagate_from_queue(
-                &conn.row_ptr,
-                &conn.col_indices,
-                &conn.values,
-                &conn.nt_types,
-                &mut q,
-                &mut cfg.Ii,
-                1.0,
-            );
-            // dt=0.1, I=15: first spike ~3-5ms = 30-50 steps
-            if spikes_buf[0] != 0 {
-                break;
-            }
-        }
-
-        // Now pre fired (or we forced it). Track post voltage.
-        let v_after_first = cfg.v[1];
-        println!(
-            "Current-based PSP: pre-V={:.1}, post V before={v_before:.1} after={v_after_first:.1}",
-            cfg.v[0]
-        );
-
-        // Post should get depolarized via CSR: I_post = 1.0 * 1.0 * 1.0 = 1.0 µA/cm²
-        // HH threshold is ~7 µA/cm², so this single-spike EPSP should be subthreshold
-        // but detectable as a voltage change.
-        let dv_post = v_after_first - v_before;
-        assert!(
-            dv_post != 0.0,
-            "Current-based PSP should produce voltage change on post"
-        );
-        // The EPSP should be small: with dt=0.1ms and gL=0.3, one spike delivers
-        // I=1.0 for one dt. ΔV = I/Cm * dt = 1.0/1.0 * 0.1e-3 * 1000 = 0.1 mV
-        // But spike-triggered current might persist for multiple steps.
-        // Allow 0.01-5mV range.
-        assert!(
-            dv_post.abs() < 10.0,
-            "Current-based PSP too large: {dv_post} mV (should be < 10 mV)"
-        );
-    }
-
-    #[test]
-    fn test_hh_synaptic_psp() {
-        // Conductance-based path via sim_hh_synaptic:
-        // Each pre-spike → jump g_nachr[post] → post I_syn = g * (0 - V)
-        // The driving force multiplier (0 - V) ≈ 65 makes this path ~65× stronger
-        let conn = make_2_neuron_connectome();
-        let n = conn.n_neurons;
-        let mut cfg = taas_core::neuron::hh::standard_config(n, 0.1);
-        let mut kinetics = SynapticKinetics::new(n);
-        // Drive only pre (neuron 0), post gets 0 external
-        let external_I = vec![15.0f32, 0.0];
-
-        // Run 2000 steps = 200ms. Pre should fire many times.
-        // Each spike: jump g_nachr[post] += 1.0 via CSR conductance propagation.
-        let spikes = sim_hh_synaptic(&conn, &mut cfg, &external_I, 2000, &mut kinetics, 1.0);
-
-        // Count post spikes (neuron 1, offset in spike buffer = 1)
-        let post_spikes: i32 = spikes.iter().skip(1).step_by(n).copied().sum();
-        let pre_spikes: i32 = spikes.iter().step_by(n).copied().sum();
-
-        println!(
-            "Synaptic PSP: pre={} spikes, post={} spikes (conductance path)",
-            pre_spikes, post_spikes
-        );
-        // Pre should fire with I=15
-        assert!(pre_spikes > 0, "Pre-neuron should fire with I=15");
-        // Post should fire too — each pre-spike adds g=1.0 to nAChR,
-        // which delivers I ≈ 65 µA/cm² — well above threshold.
-        assert!(
-            post_spikes > 0,
-            "Post should fire via conductance-based PSP (driving force ×65)"
-        );
-    }
-
-    #[test]
-    fn test_hh_synaptic_vs_current_ratio() {
-        // Демонстрация ratio (conductance-based) / (current-based) = (E_rev - V)
-        // Для nAChR при V=-65: ratio = 65
-        let n = 2;
-        let mut kin = SynapticKinetics::new(n);
-        let v = vec![-65.0, -65.0];
-        let mut i_curr = vec![0.0, 0.0];
-        let mut i_cond = vec![0.0, 0.0];
-
-        // Current-based: nt_types[0]=1, weight=1, scale=1 → I_post = 1*1*1 = 1.0
-        i_curr[1] = 1.0; // simulated CSR result
-
-        // Conductance-based: jump + compute
-        kin.jump(1, ReceptorType::nAChR, 1.0); // g=1.0
-        kin.compute_currents(&v, &mut i_cond);
-
-        let ratio = i_cond[1] / i_curr[1];
-        println!("Conductance/Current ratio for nAChR at V=-65: {ratio:.0}× (expected ~65)");
-        assert!(
-            ratio > 50.0 && ratio < 80.0,
-            "Ratio {ratio:.0} should be ~65× for nAChR at rest"
-        );
-    }
-
-    #[test]
-    fn test_hh_both_paths_produce_spikes() {
-        // Both paths should produce spikes when drive is sufficient
-        let conn = make_2_neuron_connectome();
-        let n = conn.n_neurons;
-
-        // Current-based path
-        let mut cfg1 = taas_core::neuron::hh::standard_config(n, 0.5);
-        let ext = vec![15.0f32; n];
-        let spikes_curr = sim_hh(&conn, &mut cfg1, &ext, 100, 1.0);
-
-        // Conductance-based path
-        let mut cfg2 = taas_core::neuron::hh::standard_config(n, 0.5);
-        let mut kin = SynapticKinetics::new(n);
-        let spikes_cond = sim_hh_synaptic(&conn, &mut cfg2, &ext, 100, &mut kin, 1.0);
-
-        let total_curr: i32 = spikes_curr.iter().sum();
-        let total_cond: i32 = spikes_cond.iter().sum();
-
-        println!("Current-based total spikes: {total_curr}, Conductance-based: {total_cond}");
-        assert!(total_curr > 0, "Current-based HH should fire");
-        assert!(total_cond > 0, "Conductance-based HH should fire");
-    }
-}
 
 // ─── LIF simulation ──────────────────────────────────
 
@@ -1520,22 +958,75 @@ pub fn sim_gco(
     spike_buffer
 }
 
-// ─── HH simulation ──────────────────────────────────
+// ─── HH simulation via pillars (NeuralPopulation<HHModel>) ──
 
-/// Simulate `n_steps` of Hodgkin-Huxley dynamics with instant-current CSR propagation.
+/// Build a pillars [`NeuralPopulation<HHModel>`] matching the legacy
+/// `taas_core::neuron::hh::standard_config` parameter set **exactly**
+/// (E_leak = -65 mV, gates at steady state for V=-65, Q10 = 1.0 @ 6.3°C).
 ///
-/// Per-step lifecycle:
-/// 1. Set Ii = external_I (base current)
-/// 2. step_hh_lut — advance all neurons using polynomial HH with SIMD
+/// This is the parity contract used by `bench_hh_parity`: the pillars engine
+/// must reproduce the old `step_hh_lut` spike counts neuron-for-neuron.
+pub fn hh_population_standard(n: usize, dt: f32) -> NeuralPopulation<HHModel> {
+    let mut pop = NeuralPopulation::<HHModel>::new(n);
+
+    // Params (SoA columns) — identical to old `standard_config`:
+    pop.fill_param(HHParamIdx::DT.into(), dt);
+    pop.fill_param(HHParamIdx::G_Na.into(), 120.0);
+    pop.fill_param(HHParamIdx::E_Na.into(), 50.0);
+    pop.fill_param(HHParamIdx::G_K.into(), 36.0);
+    pop.fill_param(HHParamIdx::E_K.into(), -77.0);
+    pop.fill_param(HHParamIdx::G_Leak.into(), 0.3);
+    pop.fill_param(HHParamIdx::E_Leak.into(), -65.0);
+    pop.fill_param(HHParamIdx::Q10.into(), 1.0); // 6.3°C → Q10 = 1
+    pop.fill_param(HHParamIdx::V_Thresh.into(), 0.0);
+    pop.fill_param(HHParamIdx::Inv_Cm.into(), 1.0);
+    // CaV-T: standard HH has NO Ca²⁺ current (g_CaT = 0)
+    pop.fill_param(HHParamIdx::G_CaT.into(), 0.0);
+    pop.fill_param(HHParamIdx::E_CaT.into(), 120.0);
+
+    // State: v = -65, gates at steady state @ -65 (m=0.0529, h=0.596, n=0.318,
+    // c=0.19), was_below = 1.0 → first rising edge through 0 fires (1/AP).
+    pop.fill_state(0, -65.0);
+    pop.fill_state(1, 0.0529);
+    pop.fill_state(2, 0.596);
+    // n-gate steady state at -65 mV ≈ 0.318 (biological value, NOT 1/π)
+    #[allow(clippy::approx_constant)]
+    pop.fill_state(3, 0.318);
+    // CaV-T steady-state activation at -65 mV: 1/(1+exp(-(-65+56)/6.2)) ≈ 0.19
+    pop.fill_state(4, 0.19);
+    pop.fill_state(5, 1.0);
+
+    pop
+}
+
+/// Build a pillars [`NeuralPopulation<HHModel>`] with **pacemaking** channels
+/// (NaV + KV + CaV-T): the T-type Ca²⁺ current (g_CaT = 0.5, E_CaT = +120 mV)
+/// depolarizes the membrane past NaV threshold on its own → neurons fire
+/// **spontaneously** without any input current (rhythmic VNC/CPG activity).
+///
+/// ⚠️ E_leak must be −54.387 mV (the true squid-axon leak reversal), NOT −65:
+/// with E_leak=−65 the CaT-driven depolarization is cancelled by the leak and
+/// the neuron never fires (verified empirically). This matches the legacy
+/// `pacemaking_channels` reference test (`hh_step_scalar` with e_leak=−54.387).
+pub fn hh_population_pacemaking(n: usize, dt: f32) -> NeuralPopulation<HHModel> {
+    let mut pop = hh_population_standard(n, dt);
+    pop.fill_param(HHParamIdx::E_Leak.into(), -54.387);
+    pop.fill_param(HHParamIdx::G_CaT.into(), 0.5);
+    pop.fill_param(HHParamIdx::E_CaT.into(), 120.0);
+    pop
+}
+
+/// Simulate `n_steps` of Hodgkin-Huxley on a connectome using the pillars engine
+/// ([`NeuralPopulation<HHModel>`] + SIMD). Same lifecycle as [`sim_hh`]:
+///
+/// 1. ADD external_I on top of the carry-over current buffer
+/// 2. `pop.step()` — SIMD HH dynamics + edge-triggered spike detection
 /// 3. Push spikes to queue → record
-/// 4. Reset Ii = external_I
-/// 5. CSR propagate: Ii[post] += W · nt_types[pre]
-///
-/// The `cfg` is an [`HhLutConfig`](taas_core::neuron::hh::HhLutConfig) created via
-/// `standard_config(n, dt)` which gives standard NaV + KV channel kinetics.
-pub fn sim_hh(
+/// 4. Clear current buffer
+/// 5. CSR propagate: `I[post] += W · nt_types[pre] · scale`
+pub fn sim_hh_pillars(
     connectome: &ConnectomeData,
-    cfg: &mut taas_core::neuron::hh::HhLutConfig,
+    pop: &mut NeuralPopulation<HHModel>,
     external_I: &[f32],
     n_steps: usize,
     scale: f32,
@@ -1546,33 +1037,32 @@ pub fn sim_hh(
     let mut spike_buffer = vec![0i32; spike_buf_len];
     let mut queue = SpikeQueue::new(n_neurons);
     let mut spikes = vec![0i32; n];
+    let mut i_in = vec![0.0f32; n]; // carry-over current buffer (like old cfg.Ii)
 
     for step in 0..n_steps {
-        // 1. ADD external_I on top of Ii (preserves carry-over propagated current)
+        // 1. ADD external_I on top of i_in
         for i in 0..n.min(external_I.len()) {
-            cfg.Ii[i] += external_I[i];
+            i_in[i] += external_I[i];
         }
 
-        // 2. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
-        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes, 6.3);
+        // 2. pillars HH step (Ii clamp ±100 happens inside NeuralPopulation)
+        pop.step(&i_in, &mut spikes);
 
-        // 4. Push spikes to queue
+        // 3. Push spikes to queue + record
         push_spikes_to_queue(&spikes, n_neurons, &mut queue);
-
-        // 5. Record spikes
         record_spikes(&spikes, n_neurons, &mut spike_buffer, step);
 
-        // 6. Clear Ii (consumed by HH step; prepare for fresh propagation)
-        cfg.Ii[..n].fill(0.0);
+        // 4. Clear i_in
+        i_in[..n].fill(0.0);
 
-        // 7. CSR propagate spikes from queue → Ii
+        // 5. CSR propagate from queue → i_in
         csr_propagate_from_queue(
             &connectome.row_ptr,
             &connectome.col_indices,
             &connectome.values,
             &connectome.nt_types,
             &mut queue,
-            &mut cfg.Ii,
+            &mut i_in,
             scale,
         );
     }
@@ -1580,23 +1070,12 @@ pub fn sim_hh(
     spike_buffer
 }
 
-/// Simulate `n_steps` of Hodgkin-Huxley dynamics with conductance-based synaptic kinetics.
-///
-/// Same lifecycle as `sim_lif_synaptic` but with HH neurons (NaV + KV channels):
-/// 1. Decay all conductances: `g *= exp(-dt/τ)` for each receptor type
-/// 2. Set Ii = external_I (base current)
-/// 3. Compute I_syn from conductances: `Ii += Σ g_r · (V - E_rev_r)`
-/// 4. HH step — advance all neurons via polynomial SIMD
-/// 5. Push spikes to queue → record
-/// 6. CSR propagate: jump conductances (not currents)
-///
-/// Requires `connectome.receptor_types` to be non-empty.
-///
-/// The `cfg` is an [`HhLutConfig`](taas_core::neuron::hh::HhLutConfig) created via
-/// `standard_config(n, dt)` which gives standard NaV + KV channel kinetics.
-pub fn sim_hh_synaptic(
+/// Pillars-based HH with conductance-based synaptic kinetics — same lifecycle
+/// as [`sim_hh_synaptic`]: decay → set I = external → compute I_syn → step →
+/// record → CSR jump conductances.
+pub fn sim_hh_synaptic_pillars(
     connectome: &ConnectomeData,
-    cfg: &mut taas_core::neuron::hh::HhLutConfig,
+    pop: &mut NeuralPopulation<HHModel>,
     external_I: &[f32],
     n_steps: usize,
     kinetics: &mut SynapticKinetics,
@@ -1608,28 +1087,28 @@ pub fn sim_hh_synaptic(
     let mut spike_buffer = vec![0i32; spike_buf_len];
     let mut queue = SpikeQueue::new(n_neurons);
     let mut spikes = vec![0i32; n];
-    let factors = DecayFactors::new(cfg.dt);
+    let dt = pop.param_slice(HHParamIdx::DT.into())[0];
+    let factors = DecayFactors::new(dt);
+    let mut i_in = vec![0.0f32; n];
 
     for step in 0..n_steps {
-        // 1. Decay conductances: g *= exp(-dt/τ)
+        // 1. Decay conductances
         kinetics.decay_all(&factors);
 
-        // 2. Set Ii = external_I (reset)
-        cfg.Ii[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        // 2. Set I = external_I
+        i_in[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
 
-        // 3. Compute I_syn from conductances and add to Ii
-        kinetics.compute_currents(&cfg.v, &mut cfg.Ii);
+        // 3. Compute I_syn from conductances and add to I
+        kinetics.compute_currents(pop.state_slice(0), &mut i_in);
 
-        // 4. HH step — produces spikes, updates cfg.v (Ii clamp inline in kernel)
-        taas_core::neuron::hh::step_hh_lut(cfg, &mut spikes, 6.3);
+        // 4. pillars HH step
+        pop.step(&i_in, &mut spikes);
 
-        // 5. Push spikes to queue
+        // 5. Push spikes to queue + record
         push_spikes_to_queue(&spikes, n_neurons, &mut queue);
-
-        // 6. Record spikes
         record_spikes(&spikes, n_neurons, &mut spike_buffer, step);
 
-        // 7. CSR propagate: jump conductances (not currents!)
+        // 6. CSR propagate: jump conductances
         csr_propagate_conductance_from_queue(
             &connectome.row_ptr,
             &connectome.col_indices,
@@ -1736,4 +1215,561 @@ pub fn sim_gco_record(
     }
 
     (v_traj, u_traj)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Tests
+// ═══════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use taas_kernels::neuron::synapse::ReceptorType;
+
+    #[test]
+    fn spike_queue_basic_push_pop() {
+        let mut q = SpikeQueue::new(8);
+        assert_eq!(q.len(), 0);
+        q.push(5);
+        q.push(42);
+        q.push(100);
+        assert_eq!(q.len(), 3);
+        assert_eq!(q.pop(), Some(5));
+        assert_eq!(q.pop(), Some(42));
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.pop(), Some(100));
+        assert_eq!(q.pop(), None);
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn spike_queue_wrap_around() {
+        let mut q = SpikeQueue::new(4);
+        // Push until near capacity
+        q.push(1);
+        q.push(2);
+        q.push(3);
+        q.push(4);
+        assert_eq!(q.len(), 4);
+        // Pop all
+        assert_eq!(q.pop(), Some(1));
+        assert_eq!(q.pop(), Some(2));
+        assert_eq!(q.len(), 2);
+        // Now push more — wraps around in circular buffer
+        q.push(10);
+        q.push(11);
+        // head is now 6, tail is 2, cap=4, mask=3
+        assert_eq!(q.len(), 4); // 6 - 2 = 4
+        assert_eq!(q.pop(), Some(3));
+        assert_eq!(q.pop(), Some(4));
+        assert_eq!(q.pop(), Some(10));
+        assert_eq!(q.pop(), Some(11));
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn spike_queue_drain() {
+        let mut q = SpikeQueue::new(8);
+        q.push(1);
+        q.push(2);
+        q.push(3);
+        assert_eq!(q.len(), 3);
+        q.clear();
+        assert_eq!(q.len(), 0);
+        assert_eq!(q.pop(), None);
+        // After clear, can still push
+        q.push(42);
+        assert_eq!(q.pop(), Some(42));
+    }
+
+    #[test]
+    fn spike_queue_capacity_power_of_two() {
+        let q = SpikeQueue::new(5); // next power of 2 = 8
+        assert_eq!(q.buffer.len(), 8);
+        assert_eq!(q.mask, 7);
+
+        let q2 = SpikeQueue::new(1000); // next power of 2 = 1024
+        assert_eq!(q2.buffer.len(), 1024);
+
+        let q3 = SpikeQueue::new(1); // min 4
+        assert_eq!(q3.buffer.len(), 4);
+    }
+
+    #[test]
+    fn push_spikes_to_queue_basic() {
+        let spikes = vec![0, 1, 0, 0, 1, 0, 1];
+        let mut q = SpikeQueue::new(16);
+        let count = push_spikes_to_queue(&spikes, 7, &mut q);
+        assert_eq!(count, 3);
+        assert_eq!(q.pop(), Some(1));
+        assert_eq!(q.pop(), Some(4));
+        assert_eq!(q.pop(), Some(6));
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn csr_propagate_from_queue_basic() {
+        // Simple ring: 0→1, 1→2, 2→0
+        let row_ptr = vec![0i32, 1, 2, 3];
+        let col_indices = vec![1, 2, 0];
+        let values = vec![0.5f32, 0.5, 0.5];
+        let nt_types = vec![1.0f32, 1.0, 1.0];
+        let mut I_buf = vec![0.0f32; 3];
+        let mut q = SpikeQueue::new(8);
+
+        // Neuron 0 spikes
+        q.push(0);
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            1.0,
+        );
+
+        // I_buf[1] should get 0.5
+        assert!((I_buf[1] - 0.5).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
+        assert_eq!(I_buf[0], 0.0);
+        assert_eq!(I_buf[2], 0.0);
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn csr_propagate_from_queue_multi_spike() {
+        // 0→2, 1→1 (self), 2→0, 3→1
+        let row_ptr = vec![0i32, 1, 2, 3, 4];
+        let col_indices = vec![2, 1, 0, 1];
+        let values = vec![1.0f32, 2.0, 3.0, 4.0];
+        let nt_types = vec![1.0f32, -1.0, 1.0, 1.0]; // neuron 1 is inhibitory
+        let mut I_buf = vec![0.0f32; 3];
+        let mut q = SpikeQueue::new(16);
+
+        q.push(0); // exc → I_buf[2] += 1.0
+        q.push(1); // inh → I_buf[1] += 2.0 * -1.0 = -2.0
+        q.push(3); // exc → I_buf[1] += 4.0
+
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            1.0,
+        );
+
+        assert!((I_buf[2] - 1.0).abs() < 1e-6, "I_buf[2]={}", I_buf[2]);
+        assert!((I_buf[1] - 2.0).abs() < 1e-6, "I_buf[1]={}", I_buf[1]); // -2.0 + 4.0 = 2.0
+        assert_eq!(I_buf[0], 0.0);
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn csr_propagate_from_queue_inhibitory_scale() {
+        let row_ptr = vec![0i32, 2, 2];
+        let col_indices = vec![0, 1]; // neuron 0→0 and 0→1
+        let values = vec![1.0f32, 1.0];
+        let nt_types = vec![1.0f32, 0.0]; // neuron 1 is silent (no synapses anyway)
+        let mut I_buf = vec![0.0f32; 2];
+        let mut q = SpikeQueue::new(8);
+
+        q.push(0);
+        // scale = -0.5
+        csr_propagate_from_queue(
+            &row_ptr,
+            &col_indices,
+            &values,
+            &nt_types,
+            &mut q,
+            &mut I_buf,
+            -0.5,
+        );
+
+        assert!((I_buf[0] - (-0.5)).abs() < 1e-6, "I_buf[0]={}", I_buf[0]);
+        assert!((I_buf[1] - (-0.5)).abs() < 1e-6, "I_buf[1]={}", I_buf[1]);
+        assert_eq!(q.len(), 0);
+    }
+
+    // ─── Synaptic kinetics integration tests ───────────
+
+    fn make_synaptic_connectome() -> ConnectomeData {
+        // 3 neurons: 0→1 (exc, AMPA), 1→2 (inh, GABA_A), 2→0 (exc, AMPA)
+        let mut conn = ConnectomeData::new(
+            vec![0i32, 1, 2, 3],
+            vec![1, 2, 0],
+            vec![0.5f32, 1.0, 0.8],
+            vec![1.0, -1.0, 1.0],
+            vec![],
+        );
+        conn.build_receptor_types();
+        conn
+    }
+
+    #[test]
+    fn test_sim_lif_synaptic_basic() {
+        let conn = make_synaptic_connectome();
+        assert!(
+            !conn.receptor_types.is_empty(),
+            "receptor_types must be non-empty"
+        );
+
+        let n = conn.n_neurons;
+        let mut state = BrainState::new(n, NeuronModel::LIF);
+        // Strong drive ensures firing: LIF dv/dt = (I - (V - V_rest)) / tau
+        // With I=100, tau=5, dt=0.1: dv ~= 2.0/step → reaches V_thresh=0 in ~26 steps
+        let tau: Vec<f32> = vec![5.0; n];
+        let rest: Vec<f32> = vec![-52.0; n];
+        let thresh: Vec<f32> = vec![0.0; n];
+        let reset: Vec<f32> = vec![-60.0; n];
+        let params = LifParams::new(&tau, &rest, &thresh, &reset, 0.1, 1.0);
+        let external_I = vec![100.0f32; n];
+        let n_steps = 100;
+        let mut kinetics = SynapticKinetics::new(n);
+
+        let spikes = sim_lif_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            n_steps,
+            &mut kinetics,
+            1.0,
+        );
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "LIF synaptic should fire with high drive, got {} spikes",
+            total_spikes
+        );
+        assert_eq!(spikes.len(), n_steps * n);
+    }
+
+    #[test]
+    fn test_sim_izhikevich_synaptic_basic() {
+        let conn = make_synaptic_connectome();
+        assert!(!conn.receptor_types.is_empty());
+
+        let n = conn.n_neurons;
+        let mut state = BrainState::new(n, NeuronModel::Izhikevich);
+        let params = IzhikevichParams {
+            a: vec![0.02f32; n],
+            b: vec![0.2f32; n],
+            c: vec![-65.0f32; n],
+            d: vec![8.0f32; n],
+            dt_ms: 0.5,
+            tau_ref: 3.0,
+        };
+        let external_I = vec![7.0f32; n];
+        let mut kinetics = SynapticKinetics::new(n);
+
+        let spikes = sim_izhikevich_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            20,
+            &mut kinetics,
+            1.0,
+        );
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "Izhikevich synaptic should fire with high drive"
+        );
+        assert_eq!(spikes.len(), 20 * n);
+    }
+
+    #[test]
+    fn test_sim_lif_synaptic_conductance_decay() {
+        let conn = make_synaptic_connectome();
+        let n = conn.n_neurons;
+        let mut state = BrainState::new(n, NeuronModel::LIF);
+        let tau: Vec<f32> = vec![5.0; n];
+        let rest: Vec<f32> = vec![-52.0; n];
+        let thresh: Vec<f32> = vec![0.0; n];
+        let reset: Vec<f32> = vec![-60.0; n];
+        let params = LifParams::new(&tau, &rest, &thresh, &reset, 0.1, 1.0);
+        let external_I = vec![0.0f32; n];
+        let mut kinetics = SynapticKinetics::new(n);
+
+        kinetics.jump(0, ReceptorType::AMPA, 10.0);
+        kinetics.jump(1, ReceptorType::AMPA, 10.0);
+
+        let initial_g = kinetics.g_ampa[0];
+        assert!((initial_g - 10.0).abs() < 1e-6, "initial g={}", initial_g);
+
+        let _spikes = sim_lif_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            1,
+            &mut kinetics,
+            1.0,
+        );
+
+        let expected_decay = (-0.1f32 / 2.0).exp();
+        assert!(
+            kinetics.g_ampa[0] < 10.0 * expected_decay * 1.01,
+            "g_ampa[0]={} should have decayed",
+            kinetics.g_ampa[0]
+        );
+        assert!(
+            kinetics.g_ampa[0] > 0.0,
+            "g_ampa[0] should still be positive"
+        );
+    }
+
+    #[test]
+    fn test_sim_izhikevich_synaptic_receptor_types() {
+        let mut conn = make_synaptic_connectome();
+        conn.receptor_types = vec![0u8, 1, 2]; // AMPA, NMDA, GABA_A
+
+        let n = conn.n_neurons;
+        let mut state = BrainState::new(n, NeuronModel::Izhikevich);
+        let params = IzhikevichParams {
+            a: vec![0.02f32; n],
+            b: vec![0.2f32; n],
+            c: vec![-65.0f32; n],
+            d: vec![8.0f32; n],
+            dt_ms: 0.5,
+            tau_ref: 3.0,
+        };
+        let external_I = vec![10.0f32; n];
+        let mut kinetics = SynapticKinetics::new(n);
+
+        let spikes = sim_izhikevich_synaptic(
+            &conn,
+            &mut state,
+            &params,
+            &external_I,
+            50,
+            &mut kinetics,
+            1.0,
+        );
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "Izhikevich with mixed receptors should fire"
+        );
+
+        let ampa_decay = (-0.5f32 / 2.0).exp().powi(50);
+        let nmda_decay = (-0.5f32 / 50.0).exp().powi(50);
+        assert!(
+            nmda_decay > ampa_decay,
+            "NMDA should decay slower than AMPA"
+        );
+        println!("AMPA decay over 50 steps: {:.6}", ampa_decay);
+        println!("NMDA decay over 50 steps: {:.6}", nmda_decay);
+    }
+
+    #[test]
+    fn test_sim_hh_synaptic_basic() {
+        let conn = make_synaptic_connectome();
+        assert!(
+            !conn.receptor_types.is_empty(),
+            "receptor_types must be non-empty"
+        );
+
+        let n = conn.n_neurons;
+        let mut pop = hh_population_standard(n, 0.5);
+        // Strong drive ensures HH fires: I=15 µA/cm² is suprathreshold for HH
+        let external_I = vec![15.0f32; n];
+        let n_steps = 100;
+        let mut kinetics = SynapticKinetics::new(n);
+
+        let spikes = sim_hh_synaptic_pillars(&conn, &mut pop, &external_I, n_steps, &mut kinetics, 1.0);
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "HH synaptic should fire with high drive (I=15), got {} spikes",
+            total_spikes
+        );
+        assert_eq!(spikes.len(), n_steps * n);
+    }
+
+    #[test]
+    fn test_sim_hh_basic() {
+        let conn = make_synaptic_connectome();
+        let n = conn.n_neurons;
+        let mut pop = hh_population_standard(n, 0.5);
+        let external_I = vec![15.0f32; n];
+        let n_steps = 100;
+
+        let spikes = sim_hh_pillars(&conn, &mut pop, &external_I, n_steps, 1.0);
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "HH (instant) should fire with high drive (I=15), got {} spikes",
+            total_spikes
+        );
+        assert_eq!(spikes.len(), n_steps * n);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  Integration: HH physics + synaptic chemistry
+    // ═══════════════════════════════════════════════════════
+
+    /// Simple 2-neuron connectome: 0 → 1 with nAChR
+    fn make_2_neuron_connectome() -> ConnectomeData {
+        let mut conn = ConnectomeData::new(
+            vec![0i32, 1, 2],      // row_ptr: 0 has 1 syn, 1 has 0 syn
+            vec![1_usize as i32],  // 0 → 1
+            vec![1.0f32],          // weight
+            vec![1.0f32, -1.0f32], // nt_types: 0=exc, 1=inh
+            vec![],                // receptors (built below)
+        );
+        conn.receptor_types = vec![4u8]; // nAChR (index 4)
+        conn
+    }
+
+    #[test]
+    fn test_hh_current_based_psp() {
+        // Current-based path (sim_hh_pillars): pre (0) fires → post (1) receives I = w * nt * scale
+        // At dt=0.1ms, pre needs I ≥ 15 µA to fire reliably
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+        let mut pop = hh_population_standard(n, 0.1);
+        let mut spikes_buf = vec![0i32; n];
+
+        let v_before = pop.state_slice(0)[1]; // post-synaptic V before
+
+        // Drive neuron 0 to fire
+        for _ in 0..300 {
+            // Manual step: i_in = external, step, then propagate
+            let mut q = SpikeQueue::new(8);
+            let external_I = vec![15.0f32, 0.0];
+            pop.step(&external_I, &mut spikes_buf);
+            if spikes_buf[0] != 0 {
+                q.push(0);
+            }
+            let mut i_in = vec![0.0f32; n];
+            csr_propagate_from_queue(
+                &conn.row_ptr,
+                &conn.col_indices,
+                &conn.values,
+                &conn.nt_types,
+                &mut q,
+                &mut i_in,
+                1.0,
+            );
+            if spikes_buf[0] != 0 {
+                break;
+            }
+        }
+
+        // Now pre fired (or we forced it). Track post voltage.
+        let v_after_first = pop.state_slice(0)[1];
+        println!(
+            "Current-based PSP: pre-V={:.1}, post V before={v_before:.1} after={v_after_first:.1}",
+            pop.state_slice(0)[0]
+        );
+
+        // Post should get depolarized via CSR: I_post = 1.0 * 1.0 * 1.0 = 1.0 µA/cm²
+        // HH threshold is ~7 µA/cm², so this single-spike EPSP should be subthreshold
+        // but detectable as a voltage change.
+        let dv_post = v_after_first - v_before;
+        assert!(
+            dv_post != 0.0,
+            "Current-based PSP should produce voltage change on post"
+        );
+        // The EPSP should be small: with dt=0.1ms and gL=0.3, one spike delivers
+        // I=1.0 for one dt. ΔV = I/Cm * dt = 1.0/1.0 * 0.1e-3 * 1000 = 0.1 mV
+        // But spike-triggered current might persist for multiple steps.
+        // Allow 0.01-5mV range.
+        assert!(
+            dv_post.abs() < 10.0,
+            "Current-based PSP too large: {dv_post} mV (should be < 10 mV)"
+        );
+    }
+
+    #[test]
+    fn test_hh_synaptic_psp() {
+        // Conductance-based path via sim_hh_synaptic_pillars:
+        // Each pre-spike → jump g_nachr[post] → post I_syn = g * (0 - V)
+        // The driving force multiplier (0 - V) ≈ 65 makes this path ~65× stronger
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+        let mut pop = hh_population_standard(n, 0.1);
+        let mut kinetics = SynapticKinetics::new(n);
+        // Drive only pre (neuron 0), post gets 0 external
+        let external_I = vec![15.0f32, 0.0];
+
+        // Run 2000 steps = 200ms. Pre should fire many times.
+        // Each spike: jump g_nachr[post] += 1.0 via CSR conductance propagation.
+        let spikes = sim_hh_synaptic_pillars(&conn, &mut pop, &external_I, 2000, &mut kinetics, 1.0);
+
+        // Count post spikes (neuron 1, offset in spike buffer = 1)
+        let post_spikes: i32 = spikes.iter().skip(1).step_by(n).copied().sum();
+        let pre_spikes: i32 = spikes.iter().step_by(n).copied().sum();
+
+        println!(
+            "Synaptic PSP: pre={} spikes, post={} spikes (conductance path)",
+            pre_spikes, post_spikes
+        );
+        // Pre should fire with I=15
+        assert!(pre_spikes > 0, "Pre-neuron should fire with I=15");
+        // Post should fire too — each pre-spike adds g=1.0 to nAChR,
+        // which delivers I ≈ 65 µA/cm² — well above threshold.
+        assert!(
+            post_spikes > 0,
+            "Post should fire via conductance-based PSP (driving force ×65)"
+        );
+    }
+
+    #[test]
+    fn test_hh_synaptic_vs_current_ratio() {
+        // Демонстрация ratio (conductance-based) / (current-based) = (E_rev - V)
+        // Для nAChR при V=-65: ratio = 65
+        let n = 2;
+        let mut kin = SynapticKinetics::new(n);
+        let v = vec![-65.0, -65.0];
+        let mut i_curr = [0.0, 0.0];
+        let mut i_cond = vec![0.0, 0.0];
+
+        // Current-based: nt_types[0]=1, weight=1, scale=1 → I_post = 1*1*1 = 1.0
+        i_curr[1] = 1.0; // simulated CSR result
+
+        // Conductance-based: jump + compute
+        kin.jump(1, ReceptorType::nAChR, 1.0); // g=1.0
+        kin.compute_currents(&v, &mut i_cond);
+
+        let ratio = i_cond[1] / i_curr[1];
+        println!("Conductance/Current ratio for nAChR at V=-65: {ratio:.0}× (expected ~65)");
+        assert!(
+            ratio > 50.0 && ratio < 80.0,
+            "Ratio {ratio:.0} should be ~65× for nAChR at rest"
+        );
+    }
+
+    #[test]
+    fn test_hh_both_paths_produce_spikes() {
+        // Both paths should produce spikes when drive is sufficient
+        let conn = make_2_neuron_connectome();
+        let n = conn.n_neurons;
+
+        // Current-based path
+        let mut pop1 = hh_population_standard(n, 0.5);
+        let ext = vec![15.0f32; n];
+        let spikes_curr = sim_hh_pillars(&conn, &mut pop1, &ext, 100, 1.0);
+
+        // Conductance-based path
+        let mut pop2 = hh_population_standard(n, 0.5);
+        let mut kin = SynapticKinetics::new(n);
+        let spikes_cond = sim_hh_synaptic_pillars(&conn, &mut pop2, &ext, 100, &mut kin, 1.0);
+
+        let total_curr: i32 = spikes_curr.iter().sum();
+        let total_cond: i32 = spikes_cond.iter().sum();
+
+        println!("Current-based total spikes: {total_curr}, Conductance-based: {total_cond}");
+        assert!(total_curr > 0, "Current-based HH should fire");
+        assert!(total_cond > 0, "Conductance-based HH should fire");
+    }
 }

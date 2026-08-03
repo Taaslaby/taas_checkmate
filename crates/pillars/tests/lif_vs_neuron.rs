@@ -4,8 +4,8 @@
 //! tau_m=10ms, tau_ref=2ms, v_rest=-70, v_thresh=-54, v_reset=-70.
 //! Expected: Forward Euler will slightly over-count vs analytical due to discrete steps.
 
-use pillars::model::models::LIFModel;
-use pillars::model::runner::run_neuron;
+use pillars::prelude::LIFModel;
+use pillars::prelude::run_neuron;
 
 struct LifCfg {
     label: &'static str,

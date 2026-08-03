@@ -6,8 +6,8 @@
 //!   IB (Intrinsically Burst): a=0.02, b=0.2,  c=-55, d=4,   I=10 → burst-pause
 //!   CH (Chattering):         a=0.02, b=0.2,  c=-50, d=2,   I=15 → bursts at ~40Hz
 
-use pillars::model::models::IzhikevichModel;
-use pillars::model::runner::run_neuron;
+use pillars::prelude::IzhikevichModel;
+use pillars::prelude::run_neuron;
 
 struct IzhCfg {
     label: &'static str,

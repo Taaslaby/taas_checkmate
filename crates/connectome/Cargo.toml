@@ -10,6 +10,7 @@ name = "taas_connectome"
 [dependencies]
 taas-kernels = { path = "../kernels" }
 taas-core = { path = "../core" }
+pillars = { path = "../pillars" }
 cuda-kernels = { path = "../cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 rand = "0.8"
@@ -20,6 +21,10 @@ rand = "0.8"
 
 [[bench]]
 name = "bench_rcm"
+harness = false
+
+[[bench]]
+name = "bench_hh_parity"
 harness = false
 
 [features]

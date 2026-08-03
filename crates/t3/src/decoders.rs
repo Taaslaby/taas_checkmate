@@ -908,9 +908,9 @@ mod tests {
     #[test]
     fn test_inverse_kuramoto_decoder() {
         let mut dec = InverseKuramotoDecoder::new(8, 1.0, 1.0);
-        let d1 = dec.decode(&vec![0.5; 8]);
+        let d1 = dec.decode(&[0.5; 8]);
         assert!((d1 - 0.0).abs() < 1e-6);
-        let d2 = dec.decode(&vec![0.6; 8]);
+        let d2 = dec.decode(&[0.6; 8]);
         assert!(d2 != 0.0);
     }
 

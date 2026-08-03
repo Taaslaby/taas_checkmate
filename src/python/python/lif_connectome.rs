@@ -16,7 +16,6 @@ use pyo3::prelude::*;
 #[cfg(feature = "cuda")]
 use crate::cuda::GpuContext;
 
-use std::sync::Mutex;
 
 use crate::core::neuron;
 
@@ -390,9 +389,9 @@ pub fn py_lif_sim_gpu_recording(
             external_I,
             spike_buffer,
         );
-        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             "CUDA not available — rebuild with --features cuda".to_string(),
-        ));
+        ))
     }
 
     #[cfg(feature = "cuda")]

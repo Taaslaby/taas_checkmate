@@ -9,6 +9,7 @@ pillars = { path = "../pillars" }
 taas-kernels = { path = "../kernels" }
 rand = "0.8"
 rayon = "1"
+serde = { version = "1", features = ["derive"] }
 
 [features]
 rayon = ["pillars/rayon"]

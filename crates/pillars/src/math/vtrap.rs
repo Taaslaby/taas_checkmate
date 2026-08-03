@@ -8,6 +8,7 @@
 //! See NEURON's `vtrap` in `hoc.cpp`. Maintains numerical stability at V ≈ 0.
 
 use wide::{f32x8, CmpGt};
+use crate::core::lane::SimdLane;
 
 const VTAP_EPS: f32 = 1e-6;
 
@@ -17,21 +18,26 @@ const VTAP_EPS: f32 = 1e-6;
 pub fn vtrap(x: f32x8, y: f32x8) -> f32x8 {
     let eps = f32x8::splat(VTAP_EPS);
     let ratio = x / y;
-    let small = eps.cmp_gt(ratio.abs());
+    // Полная квалификация: SimdLane::cmp_gt тоже в скоупе, метод стал неоднозначным
+    let small = CmpGt::cmp_gt(eps, ratio.abs());
 
     let taylor = y * (f32x8::splat(1.0) - ratio * f32x8::splat(0.5));
-    let exact = x / (ratio.exp() - f32x8::splat(1.0));
+    // exp через SimdLane — переключатель точности `fast-exp` покрывает и vtrap
+    let exact = x / (<f32x8 as SimdLane>::exp(ratio) - f32x8::splat(1.0));
 
     small.blend(taylor, exact)
 }
 
 /// Scalar vtrap: safe for all x, y ≠ 0.
+///
+/// `exp` через [`SimdLane::exp`] — чтобы под фичей `fast-exp` скалярный путь
+/// использовал ту же аппроксимацию, что и SIMD (иначе консистентность ломается).
 #[inline(always)]
 pub fn vtrap_s(x: f32, y: f32) -> f32 {
     if x.abs() / y.abs() < VTAP_EPS {
         y * (1.0 - x / (2.0 * y))
     } else {
-        x / ((x / y).exp() - 1.0)
+        x / (<f32 as SimdLane>::exp(x / y) - 1.0)
     }
 }
 

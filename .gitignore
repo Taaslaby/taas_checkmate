@@ -37,3 +37,6 @@ __pypackages__/
 # Data-file indices at repo root (regenerated from connectome .taas)
 /*_indices.txt
 /*_indices_*.txt
+
+# Editor/tool workspace databases (SQLite)
+.freebuff/

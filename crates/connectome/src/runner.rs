@@ -57,9 +57,11 @@ use crate::data::ConnectomeData;
 use crate::propagate::*;
 use crate::types::*;
 use rand::{Rng, SeedableRng};
-use taas_core::neuron::hh::{self, build_config_from_channels};
-use taas_kernels::neuron::hh as hh_kernels;
 use taas_kernels::neuron::synapse::{DecayFactors, SynapticKinetics};
+
+use crate::sim::{hh_population_pacemaking, hh_population_standard};
+use pillars::core::NeuralPopulation;
+use pillars::zoo::{HHModel, HHParamIdx};
 
 // ═══════════════════════════════════════════════════════════
 //  NeuronConfig — all supported neuron models
@@ -277,6 +279,76 @@ pub struct PoissonGroup {
     pub weight: f32,
 }
 
+/// Inject Poisson-group events into an arbitrary current buffer.
+///
+/// Shared by the HH runners (pillars `i_in` and legacy `cfg.Ii`) so the
+/// stochastic logic lives in exactly one place. `p = rate·dt/1000` is the
+/// per-step spike probability; if `p ≥ 1` every member fires every step.
+fn inject_poisson_into(
+    groups: &[PoissonGroup],
+    rng: &mut rand::rngs::StdRng,
+    buf: &mut [f32],
+    dt_ms: f32,
+) {
+    for pg in groups {
+        if pg.rate_hz <= 0.0 || pg.weight == 0.0 {
+            continue;
+        }
+        let p = pg.rate_hz * dt_ms / 1000.0;
+        if p <= 0.0 {
+            continue;
+        }
+        // Optimization: if p ≥ 1, inject all neurons every step
+        if p >= 1.0 {
+            for &idx in &pg.indices {
+                if idx < buf.len() {
+                    buf[idx] += pg.weight;
+                }
+            }
+        } else {
+            for &idx in &pg.indices {
+                if idx < buf.len() && rng.gen::<f32>() < p {
+                    buf[idx] += pg.weight;
+                }
+            }
+        }
+    }
+}
+
+/// CSR-propagate the spike queue after an HH step.
+///
+/// Conductance models route through `csr_propagate_conductance_from_queue`
+/// (jumps `g` on `kinetics`); current models add `W·nt_types` into `buf`.
+fn csr_propagate_after_hh(
+    connectome: &ConnectomeData,
+    queue: &mut SpikeQueue,
+    kinetics: &mut Option<SynapticKinetics>,
+    buf: &mut [f32],
+    synaptic: bool,
+) {
+    if synaptic {
+        csr_propagate_conductance_from_queue(
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.receptor_types,
+            queue,
+            kinetics.as_mut().unwrap(),
+            1.0,
+        );
+    } else {
+        csr_propagate_from_queue(
+            &connectome.row_ptr,
+            &connectome.col_indices,
+            &connectome.values,
+            &connectome.nt_types,
+            queue,
+            buf,
+            1.0,
+        );
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  Learning config
 // ═══════════════════════════════════════════════════════════
@@ -331,8 +403,9 @@ pub struct BrainRunner {
     n_neurons: usize,
     step_counter: usize,
 
-    // HH-specific config (created lazily)
-    hh_cfg: Option<hh::HhLutConfig>,
+    // HH population (pillars SIMD engine) — standard or pacemaking
+    // (NaV+KV+CaV-T) via NeuralPopulation<HHModel>.
+    hh_pop: Option<NeuralPopulation<HHModel>>,
 
     // Synaptic kinetics (for conductance-based models)
     kinetics: Option<SynapticKinetics>,
@@ -379,17 +452,16 @@ impl BrainRunner {
             _ => None,
         };
 
-        // Initialize HH config
-        let hh_cfg = match &config {
+        // Initialize HH engine: pillars NeuralPopulation for BOTH standard
+        // and pacemaking (NaV+KV+CaV-T — CaT channel is now in pillars HHModel).
+        let hh_pop = match &config {
             NeuronConfig::Hh { dt_ms, use_pacemaking }
             | NeuronConfig::HhSynaptic { dt_ms, use_pacemaking } => {
-                let cfg = if *use_pacemaking {
-                    let channels = hh_kernels::pacemaking_channels();
-                    build_config_from_channels(&channels, n, *dt_ms, -100.0, 60.0, 1024)
+                if *use_pacemaking {
+                    Some(hh_population_pacemaking(n, *dt_ms))
                 } else {
-                    hh::standard_config(n, *dt_ms)
-                };
-                Some(cfg)
+                    Some(hh_population_standard(n, *dt_ms))
+                }
             }
             _ => None,
         };
@@ -411,7 +483,7 @@ impl BrainRunner {
             spike_buffer: vec![0i32; spike_buf_len],
             n_neurons: n,
             step_counter: 0,
-            hh_cfg,
+            hh_pop,
             kinetics,
             eligibility,
             rng,
@@ -636,8 +708,8 @@ impl BrainRunner {
 
     /// Get current membrane potentials (v).
     pub fn get_v(&self) -> &[f32] {
-        if let Some(ref cfg) = self.hh_cfg {
-            &cfg.v[..self.n_neurons]
+        if let Some(ref pop) = self.hh_pop {
+            pop.state_slice(0)
         } else {
             &self.state.v[..self.n_neurons]
         }
@@ -646,8 +718,11 @@ impl BrainRunner {
     /// Set membrane potentials from a slice.
     pub fn set_v(&mut self, v: &[f32]) {
         let n = v.len().min(self.n_neurons);
-        if let Some(ref mut cfg) = self.hh_cfg {
-            cfg.v[..n].copy_from_slice(&v[..n]);
+        if let Some(ref mut pop) = self.hh_pop {
+            // pillars state column 0 = membrane potential
+            unsafe {
+                std::ptr::copy_nonoverlapping(v.as_ptr(), pop.state_slice_mut(0), n);
+            }
         } else {
             self.state.v[..n].copy_from_slice(&v[..n]);
         }
@@ -700,8 +775,8 @@ impl BrainRunner {
         if let Some(ref mut k) = self.kinetics {
             k.reset();
         }
-        // Re-init HH config
-        if let Some(ref mut cfg) = self.hh_cfg {
+        // Re-init HH engine: pillars population (standard or pacemaking)
+        if self.hh_pop.is_some() {
             let dt = match &self.config {
                 NeuronConfig::Hh { dt_ms, .. } | NeuronConfig::HhSynaptic { dt_ms, .. } => *dt_ms,
                 _ => 0.5,
@@ -711,12 +786,11 @@ impl BrainRunner {
                 | NeuronConfig::HhSynaptic { use_pacemaking, .. } => *use_pacemaking,
                 _ => false,
             };
-            if use_pm {
-                let channels = hh_kernels::pacemaking_channels();
-                *cfg = build_config_from_channels(&channels, self.n_neurons, dt, -100.0, 60.0, 1024);
+            self.hh_pop = if use_pm {
+                Some(hh_population_pacemaking(self.n_neurons, dt))
             } else {
-                *cfg = hh::standard_config(self.n_neurons, dt);
-            }
+                Some(hh_population_standard(self.n_neurons, dt))
+            };
         }
     }
 
@@ -725,29 +799,8 @@ impl BrainRunner {
     // ═══════════════════════════════════════════════════════
 
     fn inject_poisson(&mut self, dt_ms: f32) {
-        for pg in &self.poisson_groups {
-            if pg.rate_hz <= 0.0 || pg.weight == 0.0 {
-                continue;
-            }
-            let p = pg.rate_hz * dt_ms / 1000.0;
-            if p <= 0.0 {
-                continue;
-            }
-            // Optimization: if p ≥ 1, inject all neurons every step
-            if p >= 1.0 {
-                for &idx in &pg.indices {
-                    if idx < self.state.I_buf.len() {
-                        self.state.I_buf[idx] += pg.weight;
-                    }
-                }
-            } else {
-                for &idx in &pg.indices {
-                    if idx < self.state.I_buf.len() && self.rng.gen::<f32>() < p {
-                        self.state.I_buf[idx] += pg.weight;
-                    }
-                }
-            }
-        }
+        // Shared stochastic logic — single source of truth in `inject_poisson_into`.
+        inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut self.state.I_buf, dt_ms);
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1141,101 +1194,51 @@ impl BrainRunner {
     ) {
         let n = self.n_neurons;
         let n_neurons = self.connectome.row_ptr.len() - 1;
-        let cfg = self.hh_cfg.as_mut().unwrap();
+        // `record_spikes` strides the buffer by n_neurons — must equal n.
+        debug_assert_eq!(n, n_neurons, "spike buffer stride invariant");
 
-        // Recreate config if dt changed
-        if (cfg.dt - dt_ms).abs() > 1e-6 {
-            let use_pm = match &self.config {
-                NeuronConfig::Hh { use_pacemaking, .. }
-                | NeuronConfig::HhSynaptic { use_pacemaking, .. } => *use_pacemaking,
-                _ => false,
-            };
-            *cfg = if use_pm {
-                let channels = hh_kernels::pacemaking_channels();
-                build_config_from_channels(&channels, n, dt_ms, -100.0, 60.0, 1024)
-            } else {
-                hh::standard_config(n, dt_ms)
-            };
+        // ─── pillars engine: NeuralPopulation<HHModel> (SIMD) — standard AND pacemaking ───
+        let pop = self.hh_pop.as_mut().unwrap();
+
+        // Recreate params if dt changed (state preserved — better than legacy rebuild)
+        if (pop.param_slice(HHParamIdx::DT.into())[0] - dt_ms).abs() > 1e-6 {
+            pop.fill_param(HHParamIdx::DT.into(), dt_ms);
         }
 
         let mut spikes = vec![0i32; n];
+        let mut i_in = vec![0.0f32; n]; // carry-over current buffer (like old cfg.Ii)
 
         for step in 0..n_steps {
             // 1. Add external_I + Poisson
             for i in 0..n.min(external_I.len()) {
-                cfg.Ii[i] += external_I[i];
+                i_in[i] += external_I[i];
             }
-            // Inject Poisson into cfg.Ii (I_buf is managed differently for HH)
-            for pg in &self.poisson_groups {
-                if pg.rate_hz <= 0.0 || pg.weight == 0.0 {
-                    continue;
-                }
-                let p = pg.rate_hz * dt_ms / 1000.0;
-                if p <= 0.0 {
-                    continue;
-                }
-                if p >= 1.0 {
-                    for &idx in &pg.indices {
-                        if idx < cfg.Ii.len() {
-                            cfg.Ii[idx] += pg.weight;
-                        }
-                    }
-                } else {
-                    for &idx in &pg.indices {
-                        if idx < cfg.Ii.len() && self.rng.gen::<f32>() < p {
-                            cfg.Ii[idx] += pg.weight;
-                        }
-                    }
-                }
-            }
+            inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut i_in, dt_ms);
 
             if synaptic {
                 let kinetics = self.kinetics.as_mut().unwrap();
                 kinetics.decay_all(&DecayFactors::new(dt_ms));
-                kinetics.compute_currents(&cfg.v, &mut cfg.Ii);
+                kinetics.compute_currents(pop.state_slice(0), &mut i_in);
             }
 
-            // 2. HH step
-            hh::step_hh_lut(cfg, &mut spikes, 6.3);
+            // 2. pillars HH step (Ii clamp ±100 happens inside NeuralPopulation)
+            pop.step(&i_in, &mut spikes);
 
             // 3. Push spikes → record
             push_spikes_to_queue(&spikes, n_neurons, &mut self.state.queue);
+            record_spikes(&spikes, n_neurons, &mut self.spike_buffer, step);
 
-            // Record using spikes buffer directly
-            for i in 0..n_neurons.min(spikes.len()) {
-                if spikes[i] != 0 {
-                    let idx = step * n + i;
-                    if idx < self.spike_buffer.len() {
-                        self.spike_buffer[idx] = 1;
-                    }
-                }
-            }
-
-            // 4. Clear Ii
-            cfg.Ii[..n].fill(0.0);
+            // 4. Clear i_in
+            i_in[..n].fill(0.0);
 
             // 5. CSR propagate
-            if synaptic {
-                csr_propagate_conductance_from_queue(
-                    &self.connectome.row_ptr,
-                    &self.connectome.col_indices,
-                    &self.connectome.values,
-                    &self.connectome.receptor_types,
-                    &mut self.state.queue,
-                    self.kinetics.as_mut().unwrap(),
-                    1.0,
-                );
-            } else {
-                csr_propagate_from_queue(
-                    &self.connectome.row_ptr,
-                    &self.connectome.col_indices,
-                    &self.connectome.values,
-                    &self.connectome.nt_types,
-                    &mut self.state.queue,
-                    &mut cfg.Ii,
-                    1.0,
-                );
-            }
+            csr_propagate_after_hh(
+                &self.connectome,
+                &mut self.state.queue,
+                &mut self.kinetics,
+                &mut i_in,
+                synaptic,
+            );
         }
 
         self.step_counter += n_steps;
@@ -1491,7 +1494,7 @@ mod tests {
 
     #[test]
     fn test_brain_runner_izhikevich_dual() {
-        let mut conn = make_test_connectome();
+        let conn = make_test_connectome();
         let mut runner = BrainRunner::new(conn.clone(), BrainConfig::izh_dual(0.5)).unwrap();
         let ext = vec![10.0f32; runner.n_neurons()];
 

@@ -35,6 +35,7 @@ pub mod t3;
 pub mod taas_format;
 pub mod trainer;
 pub mod vnc;
+pub mod pillars;
 // pub mod depth_wave;
 pub mod karmac;
 // pub mod iit;
@@ -300,6 +301,9 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, hh, hh::PyHhLut);
     #[cfg(feature = "cuda")]
     export_class!(m, hh, hh_gpu::PyGpuHhLut);
+
+    // ─── pillars ─────────────────────────────────────────
+    pillars::register(m)?;
 
     // ─── hologram ─────────────────────────────────────────
     let hologram = make_sub(m.py(), m, "hologram")?;

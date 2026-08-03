@@ -10,10 +10,18 @@ description = "Pillars — reusable SIMD bio primitives for neural computation"
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 rayon = { version = "1.8", optional = true }
-pillars-macros = { path = "../pillars-macros", optional = true }
+pillars-macros = { path = "../pillars-macros" }
 
 [[bench]]
 name = "bench_lif"
+harness = false
+
+[[bench]]
+name = "bench_hh"
+harness = false
+
+[[bench]]
+name = "bench_glif4_haap"
 harness = false
 
 [[bench]]
@@ -21,15 +29,26 @@ name = "bench_lif_par"
 harness = false
 required-features = ["rayon"]
 
+[[bench]]
+name = "bench_formula"
+harness = false
+
 [features]
 default = ["rayon"]
 rayon = ["dep:rayon"]
-checker = ["pillars-macros"]
-vm = []  # TNMT bytecode VM (legacy, ~60 opcodes, mostly untested)
+# Переключатель точности: включает полиномиальную аппроксимацию exp()
+# в SimdLane (~1e-5 rel err вместо ~1 ULP). Модели не меняются —
+# exp() маршрутизируется на fast_exp() на этапе компиляции.
+fast-exp = []
 
 [dev-dependencies]
 pillars-macros = { path = "../pillars-macros" }
 rand = "0.8"
-taas-kernels = { path = "../kernels" }
 criterion = { version = "0.5", features = ["rayon"] }
 num_cpus = "1.0"
+
+# Экспериментальный нод-редактор нейронов (examples/viz_neuron_builder.rs)
+eframe = "0.27"
+egui_plot = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

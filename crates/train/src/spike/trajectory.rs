@@ -126,11 +126,6 @@ pub struct T3SpikeTrajectory {
 }
 
 impl T3SpikeTrajectory {
-    #[allow(dead_code)]
-    fn flat_offset(&self, base: usize, step: usize) -> usize {
-        base + step * self.n_osc
-    }
-
     /// Accessor helpers for backward pass
     pub fn th1_pre(&self) -> &[f32] {
         &self.flat[OFF_TH1..off_th2(self.n_steps, self.n_osc)]

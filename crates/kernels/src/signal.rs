@@ -4,34 +4,15 @@
 use crate::neuron::{load8, load8_mut, store8};
 use wide::{f32x8, CmpGt};
 
-// Sigmoid via fast_exp_simd from neuron module (~3× faster than scalar f32::exp).
-// f32x8 doesn't have exp() — use the crate's SIMD polynomial approximation.
-// fast_exp_simd уже клипсует внутри к [-10, 10], redundant clamp убран.
+// Sigmoid single-sourced from pillars: `sigmoid_poly_simd` / `sigmoid_poly_s`
+// (Formula lives in `pillars::math::sigmoid`, Фаза 1 консолидации).
 #[inline(always)]
 fn simd_sigmoid(x: f32x8) -> f32x8 {
-    let one = f32x8::splat(1.0);
-    one / (one + super::fast_exp_simd(-x))
+    pillars::math::sigmoid::sigmoid_poly_simd(x)
 }
 
-/// Safety-clamp values in [min, max]. Uses f32x8 SIMD.
-///
-/// # Safety
-/// `data` must be non-null, properly aligned, and valid for `n` elements.
-pub(crate) unsafe fn safety_clamp(data: *mut f32, n: usize, min: f32, max: f32) {
-    let min_s = f32x8::splat(min);
-    let max_s = f32x8::splat(max);
-    let n8 = n & !7;
-    for off in (0..n8).step_by(8) {
-        let v = load8(data, off).max(min_s).min(max_s);
-        store8(data, off, v);
-    }
-    if n8 < n {
-        let s = std::slice::from_raw_parts_mut(data, n);
-        for v in s[n8..].iter_mut() {
-            *v = v.clamp(min, max);
-        }
-    }
-}
+// NOTE: `safety_clamp` (unsafe, SIMD) удалён — единственный источник теперь
+// `pillars::kernels::signal::safety_clamp` (ре-экспорт через `crate::safe`).
 
 /// Stochastic spike encoder: compare input+noise against threshold.
 ///
@@ -134,7 +115,7 @@ pub(crate) unsafe fn thalamic_gate(
         let s = std::slice::from_raw_parts(source_v, n);
         let g = std::slice::from_raw_parts(gate_v, n);
         for i in n8..n {
-            let sig = 1.0 / (1.0 + super::fast_exp(-gain * (g[i] - threshold)));
+            let sig = pillars::math::sigmoid::sigmoid_poly_s(gain * (g[i] - threshold));
             t[i] = s[i] * sig;
         }
     }
@@ -162,7 +143,7 @@ pub(crate) unsafe fn sigmoid_gate(
         let out = std::slice::from_raw_parts_mut(output, n);
         let inp = std::slice::from_raw_parts(input, n);
         for i in n8..n {
-            out[i] = 1.0 / (1.0 + super::fast_exp(-gain * (inp[i] - threshold)));
+            out[i] = pillars::math::sigmoid::sigmoid_poly_s(gain * (inp[i] - threshold));
         }
     }
 }
@@ -192,7 +173,7 @@ pub(crate) unsafe fn phase_gate_apply(
         let inp = std::slice::from_raw_parts(input, n);
         let rr = std::slice::from_raw_parts(r, n);
         for i in n8..n {
-            let gate = 1.0 / (1.0 + super::fast_exp(-gain * (rr[i] - threshold)));
+            let gate = pillars::math::sigmoid::sigmoid_poly_s(gain * (rr[i] - threshold));
             out[i] = inp[i] * gate;
         }
     }

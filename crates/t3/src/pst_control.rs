@@ -784,6 +784,6 @@ mod tests {
         }
 
         let (d, _) = ctrl.find_drive(&mut tri, 0, 30);
-        assert!(d >= 0.0 && d <= 1.5, "drive out of range: {}", d);
+        assert!((0.0..=1.5).contains(&d), "drive out of range: {}", d);
     }
 }

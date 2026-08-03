@@ -1,7 +1,12 @@
 //! PyO3 bindings for ChaosPatternEngine (CPE).
 //!
-//! Exposes CPE's core functions: kuramoto_step, phase_coherence,
-//! dopamine_delta, stdp_update, eligibility_trace.
+//! Exposes CPE's core functions: kuramoto_step, cpe_phase_coherence,
+//! dopamine_delta, cpe_stdp_update, eligibility_trace.
+//!
+//! NOTE: `phase_coherence`/`stdp_update` are prefixed `cpe_` because
+//! `export_fn` adds every function to BOTH the submodule and the root
+//! module — the cpe variants (registered last) would otherwise clobber
+//! the kuramoto/neuron versions at root.
 
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
@@ -31,7 +36,7 @@ pub fn py_cpe_kuramoto_step(
     let col_indices = col_indices.readonly();
     let values = values.readonly();
 
-    taas_cpe::kuramoto_step(
+    crate::core::cpe::kuramoto_step(
         phases.as_slice_mut()?,
         omegas.as_slice()?,
         row_ptr.as_slice()?,
@@ -44,15 +49,19 @@ pub fn py_cpe_kuramoto_step(
 }
 
 /// Phase coherence R ∈ [0, 1].
+///
+/// NOTE: named `cpe_phase_coherence` to avoid clobbering the 4-arg
+/// `kuramoto.phase_coherence` in the root module (export_fn adds every
+/// function to both root and submodule).
 #[pyfunction]
-#[pyo3(name = "phase_coherence")]
+#[pyo3(name = "cpe_phase_coherence")]
 pub fn py_cpe_phase_coherence(phases: Bound<'_, PyArray1<f32>>) -> f32 {
     let phases = phases.readonly();
     let phases_slice = match phases.as_slice() {
         Ok(s) => s,
         Err(_) => return 0.0,
     };
-    taas_cpe::phase_coherence(phases_slice)
+    crate::core::cpe::phase_coherence(phases_slice)
 }
 
 /// Spike entropy H and its deviation from target.
@@ -68,7 +77,7 @@ pub fn py_cpe_spike_entropy(
         Ok(s) => s,
         Err(_) => return (0.0, 0.0),
     };
-    taas_cpe::spike_entropy(counts_slice, total_steps, h_target)
+    crate::core::cpe::spike_entropy(counts_slice, total_steps, h_target)
 }
 
 /// Detect spikes: rising edge through threshold.
@@ -90,7 +99,7 @@ pub fn py_cpe_detect_spikes(
         phases.as_slice(),
         phases_prev.as_slice(),
     ) {
-        let result = taas_cpe::detect_spikes(p, pp, threshold);
+        let result = crate::core::cpe::detect_spikes(p, pp, threshold);
         let n = sp.len().min(result.len());
         sp[..n].copy_from_slice(&result[..n]);
     }
@@ -109,12 +118,12 @@ pub fn py_cpe_dopamine_delta(
     alpha: f32,
     beta: f32,
 ) -> f32 {
-    let config = taas_cpe::CpeConfig {
+    let config = crate::core::cpe::CpeConfig {
         alpha,
         beta,
-        ..taas_cpe::CpeConfig::default()
+        ..crate::core::cpe::CpeConfig::default()
     };
-    taas_cpe::dopamine_delta(
+    crate::core::cpe::dopamine_delta(
         &config,
         reward,
         pattern_r,
@@ -128,7 +137,7 @@ pub fn py_cpe_dopamine_delta(
 #[pyfunction]
 #[pyo3(name = "dopamine_timing_gate")]
 pub fn py_cpe_dopamine_timing_gate(critical_steps: usize, total_steps: usize) -> f32 {
-    taas_cpe::dopamine_timing_gate(critical_steps, total_steps)
+    crate::core::cpe::dopamine_timing_gate(critical_steps, total_steps)
 }
 
 /// Eligibility trace update: decay + add on spike.
@@ -170,7 +179,9 @@ pub fn py_cpe_eligibility_update(
 
 /// Dopamine-STDP weight update with sign-preserving clip.
 #[pyfunction]
-#[pyo3(name = "stdp_update")]
+/// NOTE: named `cpe_stdp_update` — see `cpe_phase_coherence` for the
+/// root-module clobbering rationale (neuron.stdp_update wins at root).
+#[pyo3(name = "cpe_stdp_update")]
 pub fn py_cpe_stdp_update(
     w: Bound<'_, PyArray1<f32>>,
     delta: f32,

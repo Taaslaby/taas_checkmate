@@ -1,99 +1,94 @@
-//! # Pillars — Zero-Cost SIMD Primitives for Neural Dynamics
+//! # 🏛️ Pillars — Zero-Cost SIMD Engine for Neural Dynamics
 //!
-//! Pillars provides the foundational building blocks for high-performance
-//! neural simulation. Every primitive works in **two modes simultaneously**:
+//! Every primitive compiles to **both** 8-wide SIMD (AVX2/NEON) and scalar
+//! (any CPU) from the **same source code** — chosen at monomorphization time.
 //!
-//! | Mode | Width | Target | Hardware |
-//! |------|:-----:|--------|----------|
-//! | **SIMD** | 8 neurons | `f32x8` | AVX2 / NEON / WASM SIMD128 |
-//! | **Scalar** | 1 neuron | `f32` | Any CPU (scalar tail for non-aligned counts) |
+//! ## The Five Layers
+//!
+//! ```text
+//! 🚀  api/        Network orchestrator          Safe Rust, no raw pointers
+//! 🦁  zoo/        25+ ready-made models         impl Model + impl ComputeNeuron
+//! 🧬  ops/        Per-lane bio primitives       ohmic, gate, spike, plasticity (generic S)
+//! 🧰  kernels/    Batch f32x8 microkernels      flat &[f32] in, SIMD loop + tail out
+//! ⚙️  core/       SIMD engine                  SimdLane trait → f32x8 | f32
+//! 🖥️  Hardware                                 AVX2 | NEON | scalar
+//! ```
+//!
+//! ## Layer boundaries
+//!
+//! - **`api/`** — Safe Rust only. Orchestrates populations, sparse graphs, delays.
+//! - **`zoo/`** — Ready-made models. Builds models from `ops/` + `core/` only.
+//!   **Never** calls `kernels/` directly (batch kernels are a different
+//!   execution paradigm, not a model-building tool).
+//! - **`ops/`** — Per-lane generic primitives (`S: SimdLane`). The canonical
+//!   public math layer for model authors.
+//! - **`kernels/`** — Batch kernels: flat slices in, SIMD loop + scalar tail
+//!   out. Standalone microkernels; do not build zoo models on them.
+//! - **`core/`** — The engine: `SimdLane`, `SimdContext`, `NeuralPopulation`,
+//!   runners. Where Rust generics become hardware instructions.
+//!
+//! **Rule of thumb:** one-way dependency `api → zoo → ops → core`,
+//! with `kernels` as a sibling of `ops` (batch vs per-lane), never feeding `zoo`.
+//! Each layer has a single responsibility. Code NEVER crosses more than one
+//! layer boundary at a time.
+//!
+//! ## Compilation Pipeline
+//!
+//! ```text
+//! User model:  let spike = v.cmp_ge(v_thresh);
+//!                    ↓
+//! SimdLane trait (generic over S: SimdLane)
+//!                    ↓
+//! ┌─────────────────┼─────────────────┐
+//! │  S = f32x8      │  S = f32        │
+//! │  _mm256_cmp_ps  │  ucomiss + setae│
+//! │  (AVX2)         │  (scalar)       │
+//! └─────────────────┴─────────────────┘
+//! ```
+//!
+//! All 8-wide SIMD code is **emitted at compile time** by Rust's monomorphization.
+//! No interpreters. No JIT. No runtime dispatch.
 //!
 //! ## Quick Start
 //!
 //! ```rust
 //! use pillars::prelude::*;
-//!
-//! // 1. Pick a model and configure it
-//! let n = 8;
-//! let dt = 0.5;
-//! let mut v = vec![-70.0f32; n];
-//! let mut refr = vec![0.0f32; n];
-//! let mut dummy = vec![0.0f32; n];
-//! let i_syn = vec![30.0f32; n];
-//! let mut spikes = vec![0i32; n];
-//!
-//! let mut params = vec![0.0f32; n * LIFModel::N_PARAMS];
-//! for i in 0..n {
-//!     params[i]           = dt;        // dt (ms)
-//!     params[n + i]       = 1.0 / 10.0; // inv_tau_m
-//!     params[2*n + i]     = -70.0;     // v_rest
-//!     params[3*n + i]     = -54.0;     // v_thresh
-//!     params[4*n + i]     = -70.0;     // v_reset
-//!     params[5*n + i]     = 2.0;       // tau_ref
-//! }
-//!
-//! // 2. Step 8 neurons in one SIMD call
-//! unsafe {
-//!     run_neuron::<LIFModel>(
-//!         v.as_mut_ptr(), refr.as_mut_ptr(), dummy.as_mut_ptr(),
-//!         dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-//!         i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-//!     );
-//! }
-//!
-//! // 3. Results: SIMD path processes 8 neurons at once
-//! assert!(v[0] > -70.0, "Membrane depolarised: {:.1} mV", v[0]);
+//! let mut pop = NeuralPopulation::<LIFModel>::new(138_000);
+//! pop.fill_param(0, 0.5);   // dt
+//! pop.fill_param(3, -54.0); // v_thresh
+//! pop.fill_state(0, -70.0); // v
+//! pop.step(&vec![30.0; 138_000], &mut vec![0i32; 138_000]);
 //! ```
 //!
-//! ## Available Models
+//! ## When to bypass the API
 //!
-//! | Model | Type | States | Description |
-//! |-------|------|:------:|-------------|
-//! | `LIFModel` | Point neuron | 2 | Leaky Integrate-and-Fire |
-//! | `HHModel` | Conductance | 5 | Hodgkin-Huxley (NaV+KV) |
-//! | `IzhikevichModel` | Point neuron | 3 | Izhikevich (RS/FS/IB) |
-//! | `AdExModel` | Point neuron | 3 | Adaptive Exponential |
-//! | `FHNModel` | Point neuron | 3 | FitzHugh-Nagumo |
-//! | `HAAPModel` | Conductance | 3 | VNC M-current + HCN |
-//! | `HRModel` | Point neuron | 3 | Hindmarsh-Rose bursting |
-//! | `WCModel` | Rate model | 2 | Wilson-Cowan (E/I) |
-//! | `MorrisLecarModel` | Conductance | 2 | Ca²⁺ + K⁺ |
-//! | `GLIF3Model` | GLIF | 3 | LIF + after-spike current |
-//! | `GLIF4Model` | GLIF | 4 | GLIF3 + threshold adapt |
-//! | `SAWModel` | Point neuron | 4 | ψ-wave (Izhikevich-like) |
-//! | `VSNModel` | Point neuron | 2 | Variable Spiking (trainable Θ+β) |
-//! | `AstrocyteModel` | Glia | 4 | Hidden-state EAAT+K⁺+volume TX |
-//! | `CaPlasticityModel` | Synapse | 3 | Calcium-based triplet STDP |
-//! | `AtlasovNeuromotorModel` | Muscle | 5 | Ca²⁺-tension dynamics |
-//! | `Exp2SynModel` | Synapse | 2 | Dual-exponential synapse |
+//! For **absolute throughput** (realtime Drosophila), call
+//! [`core::runner::run_neuron`] directly.
+//! This skips the NeuralPopulation wrapper but still uses SIMD.
+//! For **development** (correctness, debugging), use [`NeuralPopulation`].
 //!
-//! ## SimdLane — Full Math Toolbox
+//! ## Three execution paradigms (all intentional)
 //!
-//! The [`SimdLane`](model/lane/trait.SimdLane.html) trait provides 35+ operations,
-//! each a single instruction on AVX2 and a scalar operation on f32:
-//!
-//! - **Trig**: sin, cos, tan, asin, acos, atan, atan2
-//! - **Exp/Log**: exp, ln, log2, log10, powf, sqrt, cbrt, hypot
-//! - **Arith**: abs, signum, mul_add (FMA), recip
-//! - **Round**: round, floor, ceil, trunc, fract
-//! - **Bio**: sigmoid, gate_integrate, vtrap, ohmic
+//! 1. **Compiled SIMD** — `core/` + `ops/` + `zoo/`: models monomorphize
+//!    `S: SimdLane` into `f32x8`/`f32` at compile time. The main engine.
+//! 2. **Program interpreter** — [`api::formula`]: OpNode graphs executed by
+//!    `run_program` (used by the node editor UI).
+//! 3. **Table lookup** — [`zoo::neurons::TriangulatedModel`]: LUT-inference
+//!    instead of ODE integration (calibrated from a reference model).
+
+#![deny(rustdoc::broken_intra_doc_links)]
+
+pub mod core;
+pub mod math;
+pub mod ops;
+pub mod zoo;
+pub mod api;
+pub mod kernels;
+pub mod prelude;
+
+pub use api::NeuralPopulation;
 
 use wide::f32x8;
-
-pub mod arch;
-pub mod buf;
-pub mod math;
-pub mod model;
-pub mod prelude;
-#[cfg(feature = "vm")]
-pub mod vm;
-
-/// Legacy TNMT bytecode VM — gated behind `vm` feature.
-/// Contains ~60 opcodes for ion channels, plasticity, learning.
-/// Most files are untested — use `cargo test -p pillars --features vm` to include them.
-#[cfg(not(feature = "vm"))]
-#[doc(hidden)]
-pub mod vm {}
 
 // All public API is re-exported through `prelude`.
 // Use `use pillars::prelude::*;` in your code.
@@ -151,11 +146,11 @@ mod tests {
     #[test]
     fn test_sigmoid_simd() {
         let v = f32x8::from([-65.0, -50.0, -35.0, -20.0, 0.0, 20.0, 40.0, 60.0]);
-        let s = sigmoid(v, -35.0, 5.0);
+        let s = crate::math::sigmoid::sigmoid(v, -35.0, 5.0);
         let a = s.to_array();
         assert!((a[2] - 0.5).abs() < 0.01, "sigmoid at Vh={}", a[2]);
-        assert!(a[0] < 0.01, "sigmoid at -65 ≈ 0: {}", a[0]);
-        assert!((a[7] - 1.0).abs() < 0.01, "sigmoid at 60 ≈ 1: {}", a[7]);
+        assert!(a[0] < 0.01, "sigmoid at -65 ≈ 0: {0}", a[0]);
+        assert!((a[7] - 1.0).abs() < 0.01, "sigmoid at 60 ≈ 1: {0}", a[7]);
     }
 
     #[test]
@@ -166,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_erev_invariants() {
-        assert!(E_CL < 0.0, "Cl⁻ must be hyperpolarising");
+        const _: () = assert!(E_CL < 0.0, "Cl⁻ must be hyperpolarising");
         assert!((E_CL - (-70.0)).abs() < 1.0);
     }
 }

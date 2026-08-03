@@ -202,17 +202,6 @@ unsafe fn bptt_step_gpu_raw(
             is_last_step: c_int,
         ) -> c_int;
 
-        #[allow(dead_code)]
-        fn cuda_pst_jacobian_add(
-            d_state: *const f32,
-            d_grad_pst: *const f32,
-            d_sums: *mut f32,
-            d_v: *mut f32,
-            n: c_int,
-        ) -> c_int;
-
-        #[allow(dead_code)]
-        fn cuda_vel_correction(d_v: *mut f32, d_vel_grad: *const f32, n: c_int) -> c_int;
     }
 
     let err = cuda_bptt_step(
@@ -236,29 +225,6 @@ unsafe fn bptt_step_gpu_raw(
         Ok(())
     } else {
         Err(format!("bptt_step_gpu error: {err}"))
-    }
-}
-
-/// Apply per-step velocity correction on GPU: d_v -= d_vel_grad.
-///
-/// d_vel_grad: [3n] containing per_step[t][vel_start..vel_start+3n].
-/// Corrects for d(vel_t)/d(pre_state_t) = -1.
-#[allow(dead_code)]
-unsafe fn vel_correction_gpu(
-    d_v: *mut f32,
-    d_vel_grad: *const f32,
-    n: usize,
-) -> Result<(), String> {
-    use std::ffi::c_int;
-    extern "C" {
-        #[allow(dead_code)]
-        fn cuda_vel_correction(d_v: *mut f32, d_vel_grad: *const f32, n: c_int) -> c_int;
-    }
-    let err = cuda_vel_correction(d_v, d_vel_grad, n as c_int);
-    if err == 0 {
-        Ok(())
-    } else {
-        Err(format!("vel_correction_gpu error: {err}"))
     }
 }
 

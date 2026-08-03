@@ -11,14 +11,70 @@ use super::neuron::{
 use super::{decode, measure, phase, signal};
 
 // ═══════════════════════════════════════════════════════════
+//  Pillars bridge (Фаза 2 консолидации)
+// ═══════════════════════════════════════════════════════════
+//
+// `safe::*_step` — теперь ТОНКИЕ ОБЁРТКИ над `pillars::run_neuron`.
+// Pillars — единственный источник SIMD-нейронов (см. docs/DUPLICATION_MAP.md).
+// Legacy SoA-лейауты переупаковываются на границе вызова; thread-local
+// scratch исключает аллокации в hot path.
+
+use pillars::core::runner::run_neuron;
+use pillars::zoo::Model;
+use pillars::zoo::neurons::{AdExModel, HHModel, IzhikevichModel, LIFModel, SAWModel};
+use std::cell::RefCell;
+
+// Thread-local scratch для переупаковки параметров и вспомогательных буферов.
+// Растёт по требованию — steady-state вызовы не аллоцируют.
+thread_local! {
+    static PILLARS_PARAMS: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static PILLARS_AUX: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static PILLARS_SPIKES: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Выполнить `f` с параметр-буфером `n_cols × n` (растёт по требованию).
+/// Closure-паттерн: `RefMut` не покидает `.with()` — нет lifetime-проблем.
+fn with_params_scratch<T>(n_cols: usize, n: usize, f: impl FnOnce(&mut [f32]) -> T) -> T {
+    PILLARS_PARAMS.with(|c| {
+        let mut v = c.borrow_mut();
+        let need = n_cols * n;
+        if v.len() < need {
+            v.resize(need, 0.0);
+        }
+        f(&mut v[..need])
+    })
+}
+
+/// Выполнить `f` со вспомогательным f32-буфером (растёт по требованию).
+fn with_aux_scratch<T>(need: usize, f: impl FnOnce(&mut [f32]) -> T) -> T {
+    PILLARS_AUX.with(|c| {
+        let mut v = c.borrow_mut();
+        if v.len() < need {
+            v.resize(need, 0.0);
+        }
+        f(&mut v[..need])
+    })
+}
+
+/// Выполнить `f` со вспомогательным i32-буфером (растёт по требованию).
+fn with_spikes_scratch<T>(need: usize, f: impl FnOnce(&mut [i32]) -> T) -> T {
+    PILLARS_SPIKES.with(|c| {
+        let mut v = c.borrow_mut();
+        if v.len() < need {
+            v.resize(need, 0);
+        }
+        f(&mut v[..need])
+    })
+}
+
+// ═══════════════════════════════════════════════════════════
 //  signal
 // ═══════════════════════════════════════════════════════════
 
-/// Clamp all values in `data` to `[min, max]` using SIMD `f32x8`.
-pub fn safety_clamp(data: &mut [f32], min: f32, max: f32) {
-    let n = data.len();
-    unsafe { signal::safety_clamp(data.as_mut_ptr(), n, min, max) }
-}
+/// Clamp all values in `data` to `[min, max]` — single-sourced from pillars.
+///
+/// Канон: `pillars::kernels::signal::safety_clamp` (Фаза 1 консолидации).
+pub use pillars::kernels::signal::safety_clamp;
 
 /// Stochastic spike encoder: compare `inputs + noise` against `threshold`.
 pub fn stochastic_encoder(
@@ -949,23 +1005,47 @@ pub fn izhikevich_step(
         "izhikevich_step: refractory length mismatch"
     );
     add_dendritic_current(ii, I_dend);
-    unsafe {
-        izhikevich::izhikevich_step(
-            v.as_mut_ptr(),
-            u.as_mut_ptr(),
-            trace.as_mut_ptr(),
-            a.as_ptr(),
-            b.as_ptr(),
-            ii.as_ptr(),
-            dt,
-            trace_decay,
-            spikes.as_mut_ptr(),
-            c.as_ptr(),
-            d.as_ptr(),
-            refractory.as_mut_ptr(),
-            tau_ref,
-            n,
-        )
+
+    // ── Pillars bridge (Фаза 2): IzhikevichModel 7-col
+    // ── [dt, a, b, c, d, tau_ref, v_thresh=30]; state [v, u, refractory].
+    // ── v_thresh=30 — legacy hardcoded (calibration v2 threshold).
+    with_params_scratch(7, n, |p| {
+        for i in 0..n {
+            p[i] = dt;
+            p[n + i] = a[i];
+            p[2 * n + i] = b[i];
+            p[3 * n + i] = c[i];
+            p[4 * n + i] = d[i];
+            p[5 * n + i] = tau_ref;
+            p[6 * n + i] = 30.0; // legacy v_th (hardcoded)
+        }
+        unsafe {
+            run_neuron::<IzhikevichModel>(
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                refractory.as_mut_ptr(), // state 2
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                ii.as_ptr(),
+                spikes.as_mut_ptr(),
+                p.as_ptr(),
+                n,
+            );
+        }
+    });
+    // ── Legacy STDP side-output: trace (НЕ состояние pillars-модели).
+    // ── SIMD semantics: frozen while refractory; on spike tr = tr·td + (1−tr);
+    // ── else tr·(1−td). (connectome STDP считает собственный pre_trace из спайков.)
+    for i in 0..n {
+        if refractory[i] > 0.0 {
+            continue; // frozen during refractory
+        }
+        if spikes[i] != 0 {
+            trace[i] = trace[i] * trace_decay + (1.0 - trace[i]);
+        } else {
+            trace[i] *= 1.0 - trace_decay;
+        }
     }
 }
 
@@ -1211,17 +1291,34 @@ pub fn lif_step(
     );
     assert_eq!(refractory.len(), n, "lif_step: refractory length mismatch");
     add_dendritic_current(ii, I_dend);
-    unsafe {
-        lif::lif_step(
-            v.as_mut_ptr(),
-            ii.as_mut_ptr(),
-            spikes.as_mut_ptr(),
-            params.as_ptr(),
-            refractory.as_mut_ptr(),
-            tau_ref,
-            n,
-        )
-    }
+
+    // ── Pillars bridge (Фаза 2): legacy 5-col [dt, tau_m, v_rest, v_thresh, v_reset]
+    // ── → LIFModel 6-col [dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref].
+    // ── State: v → slot 0, refractory → slot 1.
+    with_params_scratch(6, n, |p| {
+        for i in 0..n {
+            p[i] = params[i];                          // dt
+            p[n + i] = 1.0 / params[n + i].max(1e-6);  // inv_tau_m = 1/τ_m
+            p[2 * n + i] = params[2 * n + i];          // v_rest
+            p[3 * n + i] = params[3 * n + i];          // v_thresh
+            p[4 * n + i] = params[4 * n + i];          // v_reset
+            p[5 * n + i] = tau_ref;                    // tau_ref (uniform)
+        }
+        unsafe {
+            run_neuron::<LIFModel>(
+                v.as_mut_ptr(),
+                refractory.as_mut_ptr(), // state 1 (refractory)
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                ii.as_ptr(),
+                spikes.as_mut_ptr(),
+                p.as_ptr(),
+                n,
+            );
+        }
+    });
 }
 
 /// LIF with adaptive threshold: `τ_m·dv/dt = −(v−v_rest) + I; τ_θ·dθ/dt = −(θ−θ_rest) + b·spike`.
@@ -1357,23 +1454,60 @@ pub fn saw_step(
     assert_eq!(spikes.len(), n, "saw_step: spikes length mismatch");
     assert_eq!(refractory.len(), n, "saw_step: refractory length mismatch");
     let ii = with_dendritic_current(ii, I_dend, "saw_step");
-    unsafe {
-        saw::saw_step(
-            v.as_mut_ptr(),
-            u.as_mut_ptr(),
-            trace.as_mut_ptr(),
-            a.as_ptr(),
-            b.as_ptr(),
-            ii.as_ptr(),
-            dt,
-            trace_decay,
-            noise_amp,
-            spikes.as_mut_ptr(),
-            refractory.as_mut_ptr(),
-            tau_ref,
-            n,
-        )
+
+    // ── Pillars bridge (Фаза 2): SAWModel 8-col
+    // ── [dt, a, b, trace_decay, noise_amp, tau_ref, v_thresh=30, v_reset=-65].
+    // ── Legacy hardcodes v_th=30, v_reset=-65 (kernel saw.rs).
+    // ── NOTE: pillars SAWModel is DETERMINISTIC (no RNG noise). Legacy saw
+    // ── injects noise_amp·(rand−0.5) on non-spike steps → fall back to the
+    // ── legacy kernel for noisy configs so behavior is preserved exactly.
+    if noise_amp != 0.0 {
+        unsafe {
+            saw::saw_step(
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                trace.as_mut_ptr(),
+                a.as_ptr(),
+                b.as_ptr(),
+                ii.as_ptr(),
+                dt,
+                trace_decay,
+                noise_amp,
+                spikes.as_mut_ptr(),
+                refractory.as_mut_ptr(),
+                tau_ref,
+                n,
+            )
+        }
+        return;
     }
+
+    with_params_scratch(8, n, |p| {
+        for i in 0..n {
+            p[i] = dt;
+            p[n + i] = a[i];
+            p[2 * n + i] = b[i];
+            p[3 * n + i] = trace_decay;
+            p[4 * n + i] = 0.0; // noise_amp (deterministic path)
+            p[5 * n + i] = tau_ref;
+            p[6 * n + i] = 30.0;   // legacy v_th
+            p[7 * n + i] = -65.0;  // legacy v_reset
+        }
+        unsafe {
+            run_neuron::<SAWModel>(
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                trace.as_mut_ptr(),  // state 2 = ψ-wave trace
+                refractory.as_mut_ptr(), // state 3
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                ii.as_ptr(),
+                spikes.as_mut_ptr(),
+                p.as_ptr(),
+                n,
+            );
+        }
+    });
 }
 
 /// Eligibility-propagation sawtooth step: online learning gradient computation.
@@ -1485,18 +1619,42 @@ pub fn adex_step(
     );
     assert_eq!(refractory.len(), n, "adex_step: refractory length mismatch");
     add_dendritic_current(ii, I_dend);
-    unsafe {
-        adex::adex_step(
-            v.as_mut_ptr(),
-            u.as_mut_ptr(),
-            ii.as_mut_ptr(),
-            spikes.as_mut_ptr(),
-            params.as_ptr(),
-            refractory.as_mut_ptr(),
-            tau_ref,
-            n,
-        )
-    }
+
+    // ── Pillars bridge (Фаза 2): legacy 9-col
+    // ── [dt, tau_m, tau_w, v_rest, v_thresh, v_reset, delta_t, a, b]
+    // ── → AdExModel 12-col [dt, inv_tau_m, inv_tau_w, v_rest, v_thresh, v_reset,
+    // ──    delta_t, inv_delta_t, a, b, tau_ref, v_peak].
+    // ── Legacy spikes at v ≥ v_thresh → v_peak := v_thresh (parity).
+    with_params_scratch(12, n, |p| {
+        for i in 0..n {
+            p[i] = params[i];                          // dt
+            p[n + i] = 1.0 / params[n + i].max(1e-6);  // inv_tau_m
+            p[2 * n + i] = 1.0 / params[2 * n + i].max(1e-6); // inv_tau_w
+            p[3 * n + i] = params[3 * n + i];          // v_rest
+            p[4 * n + i] = params[4 * n + i];          // v_thresh
+            p[5 * n + i] = params[5 * n + i];          // v_reset
+            p[6 * n + i] = params[6 * n + i];          // delta_t
+            p[7 * n + i] = 1.0 / params[6 * n + i].max(1e-6); // inv_delta_t
+            p[8 * n + i] = params[7 * n + i];          // a
+            p[9 * n + i] = params[8 * n + i];          // b
+            p[10 * n + i] = tau_ref;
+            p[11 * n + i] = params[4 * n + i];         // v_peak := v_thresh
+        }
+        unsafe {
+            run_neuron::<AdExModel>(
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                refractory.as_mut_ptr(), // state 2
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                ii.as_ptr(),
+                spikes.as_mut_ptr(),
+                p.as_ptr(),
+                n,
+            );
+        }
+    });
 }
 
 /// Multi-input eprop AdEx: eligibility propagation with weighted pre-synaptic input.
@@ -1605,13 +1763,14 @@ pub fn hh_poly_step(
 ) {
     let n = v.len();
     let n_channels = channel_meta.len();
+    let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
     assert_eq!(
         gates.len(),
-        {
-            let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
-            n_gates * n
-        },
-        "hh_poly_step: gates length mismatch"
+        n_gates * n,
+        "hh_poly_step: gates length mismatch (expected {}*{}={})",
+        n_gates,
+        n,
+        n_gates * n
     );
     assert_eq!(ii.len(), n, "hh_poly_step: Ii length mismatch");
     assert_eq!(g_leak.len(), n, "hh_poly_step: g_leak length mismatch");
@@ -1623,20 +1782,107 @@ pub fn hh_poly_step(
         "hh_poly_step: g_max_per_neuron length mismatch"
     );
     let ii = with_dendritic_current(ii, I_dend, "hh_poly_step");
-    unsafe {
-        hh::hh_poly_step(
-            v.as_mut_ptr(),
-            gates.as_mut_ptr(),
-            ii.as_ptr(),
-            g_leak.as_ptr(),
-            e_leak.as_ptr(),
-            c_m.as_ptr(),
-            n,
-            channel_meta,
-            g_max_per_neuron.as_ptr(),
-            dt,
-            celsius,
-        )
+
+    // ── Pillars bridge (Фаза 2): standard/pacemaking лейаут → HHModel.
+    // ── Legacy hh_poly_step НЕ детектит спайки → спайк-буфер — scratch.
+    if is_standard_hh_layout(channel_meta) {
+        with_params_scratch(HHModel::N_PARAMS, n, |p| {
+            with_aux_scratch(2 * n, |aux| {
+                with_spikes_scratch(n, |spikes_scratch| {
+                    let (c_state, was_below) = aux.split_at_mut(n);
+                    fill_hh_params(p, n, g_leak, e_leak, c_m, channel_meta,
+                        g_max_per_neuron, dt, celsius);
+                    unsafe {
+                        run_neuron::<HHModel>(
+                            v.as_mut_ptr(),
+                            gates.as_mut_ptr(),
+                            gates.as_mut_ptr().add(n),
+                            gates.as_mut_ptr().add(2 * n),
+                            c_state.as_mut_ptr(),
+                            was_below.as_mut_ptr(),
+                            ii.as_ptr(),
+                            spikes_scratch.as_mut_ptr(),
+                            p.as_ptr(),
+                            n,
+                        );
+                    }
+                })
+            })
+        });
+    } else {
+        unsafe {
+            hh::hh_poly_step(
+                v.as_mut_ptr(),
+                gates.as_mut_ptr(),
+                ii.as_ptr(),
+                g_leak.as_ptr(),
+                e_leak.as_ptr(),
+                c_m.as_ptr(),
+                n,
+                channel_meta,
+                g_max_per_neuron.as_ptr(),
+                dt,
+                celsius,
+            )
+        }
+    }
+}
+
+/// True для standard (Na m³h + K n⁴) и pacemaking (+CaV-T c) лейаутов,
+/// которые pillars HHModel воспроизводит 1:1 (gate order m,h,n[,c]).
+/// Произвольный лейаут каналов → fallback на legacy-ядро.
+fn is_standard_hh_layout(meta: &[hh::ChannelMeta]) -> bool {
+    use hh::GateType;
+    match meta {
+        [na, k] =>
+            na.n_gates == 2 && k.n_gates == 1
+                && na.gate_type == [GateType::NaM, GateType::NaH]
+                && na.powers == [3, 1]
+                && k.gate_type == [GateType::Kn]
+                && k.powers == [4],
+        [na, k, cat] =>
+            na.n_gates == 2 && k.n_gates == 1 && cat.n_gates == 1
+                && na.gate_type == [GateType::NaM, GateType::NaH]
+                && na.powers == [3, 1]
+                && k.gate_type == [GateType::Kn]
+                && k.powers == [4]
+                && cat.gate_type == [GateType::CatC]
+                && cat.powers == [1],
+        _ => false,
+    }
+}
+
+/// Заполнить HHModel-параметры из legacy-лейаута (standard/pacemaking).
+///
+/// `g_max_per_neuron` даёт per-neuron g_max по каналам; q10 — Q10-фактор
+/// температуры (3^(ΔT/10), референс 6.3°C); v_thresh=0 — legacy crossing.
+#[inline]
+fn fill_hh_params(
+    p: &mut [f32],
+    n: usize,
+    g_leak: &[f32],
+    e_leak: &[f32],
+    c_m: &[f32],
+    channel_meta: &[hh::ChannelMeta],
+    g_max_per_neuron: &[f32],
+    dt: f32,
+    celsius: f32,
+) {
+    let q10 = 3.0f32.powf((celsius - 6.3) / 10.0);
+    let has_cat = channel_meta.len() == 3;
+    for i in 0..n {
+        p[i] = dt;
+        p[n + i] = g_max_per_neuron[i];              // g_Na
+        p[2 * n + i] = channel_meta[0].e_rev;        // E_Na
+        p[3 * n + i] = g_max_per_neuron[n + i];      // g_K
+        p[4 * n + i] = channel_meta[1].e_rev;        // E_K
+        p[5 * n + i] = g_leak[i];                    // g_Leak
+        p[6 * n + i] = e_leak[i];                    // E_Leak
+        p[7 * n + i] = q10;
+        p[8 * n + i] = 0.0;                          // v_thresh (legacy @ 0)
+        p[9 * n + i] = 1.0 / c_m[i].max(1e-6);       // inv_cm
+        p[10 * n + i] = if has_cat { g_max_per_neuron[2 * n + i] } else { 0.0 };
+        p[11 * n + i] = if has_cat { channel_meta[2].e_rev } else { 120.0 };
     }
 }
 
@@ -1661,17 +1907,15 @@ pub fn fused_hh_poly_step(
 ) {
     let n = v.len();
     let n_channels = channel_meta.len();
-    {
-        let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
-        assert_eq!(
-            gates.len(),
-            n_gates * n,
-            "fused_hh_poly_step: gates length mismatch (expected {}*{}={})",
-            n_gates,
-            n,
-            n_gates * n
-        );
-    }
+    let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
+    assert_eq!(
+        gates.len(),
+        n_gates * n,
+        "fused_hh_poly_step: gates length mismatch (expected {}*{}={})",
+        n_gates,
+        n,
+        n_gates * n
+    );
     assert_eq!(
         spikes.len(),
         n,
@@ -1695,21 +1939,55 @@ pub fn fused_hh_poly_step(
         "fused_hh_poly_step: g_max_per_neuron length mismatch"
     );
     let ii = with_dendritic_current(ii, I_dend, "fused_hh_poly_step");
-    unsafe {
-        hh::fused_hh_poly_step(
-            v.as_mut_ptr(),
-            gates.as_mut_ptr(),
-            ii.as_ptr(),
-            g_leak.as_ptr(),
-            e_leak.as_ptr(),
-            c_m.as_ptr(),
-            n,
-            channel_meta,
-            g_max_per_neuron.as_ptr(),
-            dt,
-            celsius,
-            spikes.as_mut_ptr(),
-        )
+
+    // ── Pillars bridge (Фаза 2): HHModel для standard/pacemaking лейаута.
+    // ── Legacy spike detection — REVERSE zero-crossing (v_old ≥ 0 && v_new < 0);
+    // ── HHModel детектит rising-edge → перезаписываем спайки вручную.
+    if is_standard_hh_layout(channel_meta) {
+        with_params_scratch(HHModel::N_PARAMS, n, |p| {
+            with_aux_scratch(3 * n, |aux| {
+                let (v_old, rest) = aux.split_at_mut(n);
+                let (c_state, was_below) = rest.split_at_mut(n);
+                fill_hh_params(p, n, g_leak, e_leak, c_m, channel_meta,
+                    g_max_per_neuron, dt, celsius);
+                v_old.copy_from_slice(v);
+                unsafe {
+                    run_neuron::<HHModel>(
+                        v.as_mut_ptr(),
+                        gates.as_mut_ptr(),
+                        gates.as_mut_ptr().add(n),
+                        gates.as_mut_ptr().add(2 * n),
+                        c_state.as_mut_ptr(),
+                        was_below.as_mut_ptr(),
+                        ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        p.as_ptr(),
+                        n,
+                    );
+                }
+                // Legacy convention: falling edge through 0
+                for i in 0..n {
+                    spikes[i] = if v_old[i] >= 0.0 && v[i] < 0.0 { 1 } else { 0 };
+                }
+            })
+        });
+    } else {
+        unsafe {
+            hh::fused_hh_poly_step(
+                v.as_mut_ptr(),
+                gates.as_mut_ptr(),
+                ii.as_ptr(),
+                g_leak.as_ptr(),
+                e_leak.as_ptr(),
+                c_m.as_ptr(),
+                n,
+                channel_meta,
+                g_max_per_neuron.as_ptr(),
+                dt,
+                celsius,
+                spikes.as_mut_ptr(),
+            )
+        }
     }
 }
 

@@ -26,11 +26,13 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods};
 use pyo3::prelude::*;
 
 use crate::connectome::{
-    self as conn, ConnectomeData, GcoParams, IzhikevichParams, LifParams, NeuronModel, RateParams,
-    SynapticKinetics,
+    self as conn, hh_population_pacemaking, hh_population_standard, sim_hh_pillars,
+    sim_hh_synaptic_pillars, ConnectomeData, GcoParams, IzhikevichParams, LifParams, NeuronModel,
+    RateParams, SynapticKinetics,
 };
-use crate::core::neuron::hh::{build_config_from_channels, standard_config, HhLutConfig};
-use crate::kernels::neuron::hh::pacemaking_channels;
+use crate::pillars::NeuralPopulation;
+use crate::pillars::zoo::HHModel;
+use crate::pillars::zoo::HHParamIdx;
 
 // ─── ConnectomeData ──────────────────────────────────
 
@@ -176,27 +178,33 @@ pub struct PyBrainSimulator {
     model: conn::NeuronModel,
     n_neurons: usize,
     kinetics: Option<SynapticKinetics>,
-    hh_config: Option<(f32, HhLutConfig)>, // (dt, config) — lazily created for "hh" model
-    hh_use_pacemaking: bool,               // if true, use 3-channel HH (NaV+KV+CaT)
+    hh_pop: Option<(f32, NeuralPopulation<HHModel>)>, // (dt, pop) — lazily created for "hh" model
+    hh_use_pacemaking: bool,                          // if true, use 3-channel HH (NaV+KV+CaT)
+    hh_i_in: Vec<f32>,                                // last external input (Ii getter snapshot)
 }
 
-impl PyBrainSimulator {
-    /// Ensure HH config exists for the given dt. Recreates if dt changed.
-    fn ensure_hh_config(&mut self, dt: f32) -> &mut HhLutConfig {
-        match &mut self.hh_config {
-            Some((stored_dt, _)) if *stored_dt == dt => {}
-            _ => {
-                let cfg = if self.hh_use_pacemaking {
-                    let channels = pacemaking_channels();
-                    build_config_from_channels(&channels, self.n_neurons, dt, -100.0, 60.0, 1024)
-                } else {
-                    standard_config(self.n_neurons, dt)
-                };
-                self.hh_config = Some((dt, cfg));
-            }
+/// Ensure HH population exists for the given dt. Recreates if dt changed.
+///
+/// Free function over disjoint fields so callers can borrow `self.kinetics`
+/// (or other fields) simultaneously with the returned population.
+fn ensure_hh_pop(
+    hh_pop: &mut Option<(f32, NeuralPopulation<HHModel>)>,
+    hh_use_pacemaking: bool,
+    n_neurons: usize,
+    dt: f32,
+) -> &mut NeuralPopulation<HHModel> {
+    match hh_pop {
+        Some((stored_dt, _)) if *stored_dt == dt => {}
+        _ => {
+            let pop = if hh_use_pacemaking {
+                hh_population_pacemaking(n_neurons, dt)
+            } else {
+                hh_population_standard(n_neurons, dt)
+            };
+            *hh_pop = Some((dt, pop));
         }
-        &mut self.hh_config.as_mut().unwrap().1
     }
+    &mut hh_pop.as_mut().unwrap().1
 }
 
 #[pymethods]
@@ -211,16 +219,11 @@ impl PyBrainSimulator {
             "psi" => (NeuronModel::LIF, false, None), // Psi removed
             "hh" => {
                 if pacemaking {
-                    let channels = pacemaking_channels();
-                    let cfg =
-                        build_config_from_channels(&channels, n_neurons, 0.5, -100.0, 60.0, 1024);
-                    (NeuronModel::LIF, true, Some((0.0, cfg)))
+                    let pop = hh_population_pacemaking(n_neurons, 0.5);
+                    (NeuronModel::LIF, true, Some((0.0, pop)))
                 } else {
-                    (
-                        NeuronModel::LIF,
-                        false,
-                        Some((0.0, standard_config(n_neurons, 0.5))),
-                    )
+                    let pop = hh_population_standard(n_neurons, 0.5);
+                    (NeuronModel::LIF, false, Some((0.0, pop)))
                 }
             }
             other => {
@@ -235,8 +238,9 @@ impl PyBrainSimulator {
             model: nm,
             n_neurons,
             kinetics: None,
-            hh_config,
+            hh_pop: hh_config,
             hh_use_pacemaking,
+            hh_i_in: vec![0.0; n_neurons],
         })
     }
 
@@ -280,9 +284,10 @@ impl PyBrainSimulator {
             None => vec![0.0f32; n],
         };
 
-        let spike_buf = if self.hh_config.is_some() {
-            let cfg = self.ensure_hh_config(dt_ms);
-            conn::sim_hh(conn_data, cfg, &ext_I, n_steps, scale)
+        let spike_buf = if self.hh_pop.is_some() {
+            self.hh_i_in[..n].copy_from_slice(&ext_I[..n]);
+            let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
+            sim_hh_pillars(conn_data, pop, &ext_I, n_steps, scale)
         } else {
             match self.model {
                 NeuronModel::LIF => {
@@ -369,24 +374,11 @@ impl PyBrainSimulator {
             self.kinetics = Some(SynapticKinetics::new(n));
         }
 
-        let spike_buf = if self.hh_config.is_some() {
-            // Ensure HH config matches requested dt
-            let recreate = match &self.hh_config {
-                Some((dt, _)) => *dt != dt_ms,
-                None => true,
-            };
-            if recreate {
-                let cfg = if self.hh_use_pacemaking {
-                    let channels = pacemaking_channels();
-                    build_config_from_channels(&channels, self.n_neurons, dt_ms, -100.0, 60.0, 1024)
-                } else {
-                    standard_config(self.n_neurons, dt_ms)
-                };
-                self.hh_config = Some((dt_ms, cfg));
-            }
-            let cfg = &mut self.hh_config.as_mut().unwrap().1;
+        let spike_buf = if self.hh_pop.is_some() {
+            self.hh_i_in[..n].copy_from_slice(&ext_I[..n]);
+            let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
             let kinetics = self.kinetics.as_mut().unwrap();
-            conn::sim_hh_synaptic(conn_data, cfg, &ext_I, n_steps, kinetics, scale)
+            sim_hh_synaptic_pillars(conn_data, pop, &ext_I, n_steps, kinetics, scale)
         } else {
             let kinetics = self.kinetics.as_mut().unwrap();
             match self.model {
@@ -521,14 +513,13 @@ impl PyBrainSimulator {
 
     /// Reset brain state with small noise. Also resets synaptic conductances.
     pub fn reset(&mut self) {
-        if let Some((dt, _)) = &self.hh_config {
-            let cfg = if self.hh_use_pacemaking {
-                let channels = pacemaking_channels();
-                build_config_from_channels(&channels, self.n_neurons, *dt, -100.0, 60.0, 1024)
+        if let Some((dt, _)) = &self.hh_pop {
+            let pop = if self.hh_use_pacemaking {
+                hh_population_pacemaking(self.n_neurons, *dt)
             } else {
-                standard_config(self.n_neurons, *dt)
+                hh_population_standard(self.n_neurons, *dt)
             };
-            self.hh_config = Some((*dt, cfg));
+            self.hh_pop = Some((*dt, pop));
         }
         self.state = conn::BrainState::new(self.n_neurons, self.model);
         self.state.reset_with_noise(self.n_neurons);
@@ -542,9 +533,14 @@ impl PyBrainSimulator {
     pub fn set_v(&mut self, v_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = v_arr.readonly();
         let sl = ro.as_slice()?;
-        if let Some((_, cfg)) = &mut self.hh_config {
-            let n = sl.len().min(cfg.v.len());
-            cfg.v[..n].copy_from_slice(&sl[..n]);
+        if let Some((_, pop)) = &mut self.hh_pop {
+            let n = sl.len().min(pop.len());
+            unsafe {
+                let p = pop.state_slice_mut(0);
+                for i in 0..n {
+                    *p.add(i) = sl[i];
+                }
+            }
         } else {
             let n = sl.len().min(self.state.v.len());
             self.state.v[..n].copy_from_slice(&sl[..n]);
@@ -564,8 +560,8 @@ impl PyBrainSimulator {
 
     /// Current membrane potentials (v) — read-only snapshot.
     pub fn v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if let Some((_, cfg)) = &self.hh_config {
-            cfg.v[..self.n_neurons].to_vec().into_pyarray(py)
+        if let Some((_, pop)) = &self.hh_pop {
+            pop.state_slice(0)[..self.n_neurons].to_vec().into_pyarray(py)
         } else {
             self.state.v[..self.n_neurons].to_vec().into_pyarray(py)
         }
@@ -597,13 +593,13 @@ impl PyBrainSimulator {
         E_leak: Bound<'_, PyArray1<f32>>,
         dt_ms: Option<f32>,
     ) -> PyResult<()> {
-        let hh_cfg = match &mut self.hh_config {
-            Some((dt, cfg)) => {
-                // Lock the dt if provided — prevents ensure_hh_config from recreating
+        let hh_pop = match &mut self.hh_pop {
+            Some((dt, pop)) => {
+                // Lock the dt if provided — prevents ensure_hh_pop from recreating
                 if let Some(dt_val) = dt_ms {
                     *dt = dt_val;
                 }
-                cfg
+                pop
             }
             None => {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -611,28 +607,38 @@ impl PyBrainSimulator {
                 ))
             }
         };
+        let n = self.n_neurons;
+        let n_channels = if self.hh_use_pacemaking { 3 } else { 2 };          let chans: &[HHParamIdx] = if self.hh_use_pacemaking {
+            &[HHParamIdx::G_Na, HHParamIdx::G_K, HHParamIdx::G_CaT]
+        } else {
+            &[HHParamIdx::G_Na, HHParamIdx::G_K]
+        };
 
         // g_max_arr: [n_channels] (broadcast) or [n_channels * n_neurons] (per-neuron)
         {
             let ro = g_max_arr.readonly();
             let sl = ro.as_slice()?;
-            if sl.len() == hh_cfg.n_channels {
+            if sl.len() == n_channels {
                 // Broadcast scalar per-channel g_max to all neurons
-                let n = self.n_neurons;
                 for (ch_i, &val) in sl.iter().enumerate() {
-                    for ni in 0..n {
-                        hh_cfg.g_max_arr[ch_i * n + ni] = val;
+                    hh_pop.fill_param(chans[ch_i].into(), val);
+                }
+            } else if sl.len() == n_channels * n {
+                // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
+                for (ch_i, ch) in chans.iter().enumerate() {
+                    unsafe {
+                        let p = hh_pop.param_slice_mut((*ch).into());
+                        for ni in 0..n {
+                            *p.add(ni) = sl[ch_i * n + ni];
+                        }
                     }
                 }
-            } else if sl.len() == hh_cfg.n_channels * self.n_neurons {
-                // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
-                hh_cfg.g_max_arr.copy_from_slice(sl);
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
                     sl.len(),
-                    hh_cfg.n_channels,
-                    hh_cfg.n_channels * self.n_neurons
+                    n_channels,
+                    n_channels * n
                 )));
             }
         }
@@ -641,44 +647,75 @@ impl PyBrainSimulator {
         {
             let ro = E_rev_arr.readonly();
             let sl = ro.as_slice()?;
-            if sl.len() != hh_cfg.n_channels {
+            if sl.len() != n_channels {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "E_rev_arr length {} != n_channels {}",
                     sl.len(),
-                    hh_cfg.n_channels
+                    n_channels
                 )));
             }
-            hh_cfg.E_rev_arr.copy_from_slice(sl);
+            let rev_chans: &[HHParamIdx] = if self.hh_use_pacemaking {
+                &[HHParamIdx::E_Na, HHParamIdx::E_K, HHParamIdx::E_CaT]
+            } else {
+                &[HHParamIdx::E_Na, HHParamIdx::E_K]
+            };
+            for (ch_i, &val) in sl.iter().enumerate() {
+                hh_pop.fill_param(rev_chans[ch_i].into(), val);
+            }
         }
 
         // g_leak: per-neuron, length must match n_neurons
         {
             let ro = g_leak.readonly();
             let sl = ro.as_slice()?;
-            let n = sl.len().min(self.n_neurons);
-            hh_cfg.g_leak[..n].copy_from_slice(&sl[..n]);
+            let m = sl.len().min(n);
+            unsafe {
+                let p = hh_pop.param_slice_mut(HHParamIdx::G_Leak.into());
+                for i in 0..m {
+                    *p.add(i) = sl[i];
+                }
+            }
         }
 
         // E_leak: per-neuron, length must match n_neurons
         {
             let ro = E_leak.readonly();
             let sl = ro.as_slice()?;
-            let n = sl.len().min(self.n_neurons);
-            hh_cfg.E_leak[..n].copy_from_slice(&sl[..n]);
+            let m = sl.len().min(n);
+            unsafe {
+                let p = hh_pop.param_slice_mut(HHParamIdx::E_Leak.into());
+                for i in 0..m {
+                    *p.add(i) = sl[i];
+                }
+            }
         }
 
-        // Also update v_prev to avoid spike detection glitch after param change
-        hh_cfg.v_prev.copy_from_slice(&hh_cfg.v);
+        // Update edge-detection flag to match new v → avoid spike glitch after param change
+        {
+            let v: Vec<f32> = hh_pop.state_slice(0)[..n].to_vec();
+            let thresh: Vec<f32> = hh_pop.param_slice(HHParamIdx::V_Thresh.into())[..n].to_vec();
+            unsafe {
+                let p = hh_pop.state_slice_mut(5); // was_below
+                for i in 0..n {
+                    *p.add(i) = if v[i] < thresh[i] { 1.0 } else { 0.0 };
+                }
+            }
+        }
 
         Ok(())
     }
 
     /// Get membrane capacitances — read-only snapshot.
-    /// For HH: returns cfg.C_m (per-neuron).
+    /// For HH: returns C_m = 1/inv_cm (per-neuron, derived from pillars param).
     /// For LIF/Izhikevich: returns state's internal C_m (default 1.0).
     pub fn C_m<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if let Some((_, cfg)) = &self.hh_config {
-            cfg.C_m[..self.n_neurons].to_vec().into_pyarray(py)
+        if let Some((_, pop)) = &self.hh_pop {
+            let inv = pop.param_slice(HHParamIdx::Inv_Cm.into());
+            inv[..self.n_neurons]
+                .iter()
+                .map(|&v| 1.0 / v)
+                .collect::<Vec<f32>>()
+                .into_pyarray(py)
         } else {
             // Non-HH: C_m is not stored per-neuron, return defaults
             vec![1.0; self.n_neurons].into_pyarray(py)
@@ -686,25 +723,30 @@ impl PyBrainSimulator {
     }
 
     /// Set membrane capacitances (per-neuron).
-    /// For HH: sets cfg.C_m per-neuron. Affects dv/dt = (I - I_ion) / C_m.
+    /// For HH: stores inv_cm = 1/C_m per-neuron. Affects dv/dt = (I - I_ion) / C_m.
     /// For non-HH: no effect (LIF/Izhikevich use params, not per-neuron C_m).
     pub fn set_C_m(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = values.readonly();
         let sl = ro.as_slice()?;
-        if let Some((_, cfg)) = &mut self.hh_config {
+        if let Some((_, pop)) = &mut self.hh_pop {
             let n = sl.len().min(self.n_neurons);
-            cfg.C_m[..n].copy_from_slice(&sl[..n]);
+            unsafe {
+                let p = pop.param_slice_mut(HHParamIdx::Inv_Cm.into());
+                for i in 0..n {
+                    *p.add(i) = 1.0 / sl[i];
+                }
+            }
         }
         // Non-HH: silently ignored (LIF/Izhikevich have fixed params, not per-neuron C_m)
         Ok(())
     }
 
     /// Current input currents (Ii) — read-only snapshot.
-    /// For HH: returns cfg.Ii (membrane input including synaptic).
+    /// For HH: returns last external input buffer (pillars keeps no persistent Ii).
     /// For others: returns state.I_buf (accumulated synaptic + external).
     pub fn Ii<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if let Some((_, cfg)) = &self.hh_config {
-            cfg.Ii[..self.n_neurons].to_vec().into_pyarray(py)
+        if self.hh_pop.is_some() {
+            self.hh_i_in[..self.n_neurons].to_vec().into_pyarray(py)
         } else {
             self.state.I_buf[..self.n_neurons].to_vec().into_pyarray(py)
         }
@@ -904,6 +946,7 @@ pub struct PyBrainRunner {
 impl PyBrainRunner {
     #[new]
     #[pyo3(signature = (connectome, model="lif".to_string(), dt_ms=0.5, tau_ref=2.0, tau_m=20.0, v_rest=-70.0, v_thresh=-58.0, v_reset=-70.0, pacemaking=false))]
+    #[allow(unused_variables)] // tau_ref/v_rest/v_thresh/v_reset reserved for future configs
     pub fn new(
         connectome: &PyConnectomeData,
         model: String,
@@ -940,7 +983,7 @@ impl PyBrainRunner {
         };
 
         let inner = conn::BrainRunner::new(connectome.inner.clone(), config)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))?;
+            .map_err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>)?;
 
         Ok(Self { inner })
     }
@@ -969,6 +1012,7 @@ impl PyBrainRunner {
     ///
     /// Returns:
     ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    #[pyo3(signature = (n_steps, external_I=None))]
     pub fn run<'py>(
         &mut self,
         py: Python<'py>,
@@ -1051,7 +1095,7 @@ impl PyBrainRunner {
     }
 
     /// Get eligibility traces from E-Prop.
-    pub fn eligibility_traces<'py>(&self, py: Python<'py>) -> Vec<f32> {
+    pub fn eligibility_traces(&self) -> Vec<f32> {
         self.inner.eligibility_traces().to_vec()
     }
 

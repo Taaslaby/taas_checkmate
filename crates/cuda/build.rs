@@ -36,8 +36,21 @@ fn main() {
         "topk_select.cu",
         "biophys.cu",
     ];
+
+    // Graceful fallback: if nvcc is not available (no CUDA toolkit), skip GPU
+    // kernels entirely instead of panicking. The crate still compiles — the
+    // FFI stubs simply never get linked, and every GPU call returns an error
+    // at runtime. This keeps `cargo check --workspace` green on dev machines
+    // without CUDA.
+    let Some(nvcc) = which_nvcc() else {
+        eprintln!(
+            "cargo:warning=cuda-kernels: nvcc not found — SKIPPING GPU kernel compilation. \
+             Install the CUDA toolkit (or set CUDA_HOME/CUDA_PATH) to enable GPU acceleration."
+        );
+        return;
+    };
+
     let mut obj_files = Vec::new();
-    let nvcc = which_nvcc();
 
     // Auto-detect GPU compute capability
     let arch = detect_arch();
@@ -86,7 +99,7 @@ fn main() {
 
     if let Some(cuda_home) = get_cuda_home() {
         println!("cargo:rustc-link-search={}/lib64", cuda_home);
-        println!("cargo:rustc-link-search={}/lib", &cuda_home);
+        println!("cargo:rustc-link-search={}/lib", cuda_home);
     }
 }
 
@@ -116,7 +129,7 @@ fn detect_arch() -> String {
     "-arch=sm_75".to_string()
 }
 
-fn which_nvcc() -> String {
+fn which_nvcc() -> Option<String> {
     let candidates = [
         "nvcc",
         "/opt/cuda/bin/nvcc",
@@ -125,16 +138,16 @@ fn which_nvcc() -> String {
     ];
     for &cmd in &candidates {
         if Command::new(cmd).arg("--version").output().is_ok() {
-            return cmd.to_string();
+            return Some(cmd.to_string());
         }
     }
     if let Some(home) = get_cuda_home() {
         let path = format!("{}/bin/nvcc", home);
         if std::path::Path::new(&path).exists() {
-            return path;
+            return Some(path);
         }
     }
-    panic!("nvcc not found. Install CUDA toolkit or set CUDA_HOME");
+    None
 }
 
 fn get_cuda_home() -> Option<String> {

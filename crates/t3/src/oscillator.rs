@@ -650,9 +650,9 @@ mod tests {
     #[test]
     fn test_order_parameter() {
         let tri = TriOscillator::new(8, 0.5, 1.5, Avx2Backend);
-        let r = tri.order_parameter(&vec![0.0; 8]);
+        let r = tri.order_parameter(&[0.0; 8]);
         assert!((r - 1.0).abs() < 0.01, "all 0 → R=1: {}", r);
-        let r2 = tri.order_parameter(&vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+        let r2 = tri.order_parameter(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
         assert!(r2 < 0.5, "uniform → R<0.5: {}", r2);
     }
 

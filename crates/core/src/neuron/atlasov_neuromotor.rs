@@ -800,7 +800,7 @@ mod tests {
         // Build and test state
         let state = config.build_state();
         assert_eq!(state.n_muscles, channels);
-        assert!(state.t_max.iter().any(|&t| t == 2e-4), "TDT tension must exist");
+        assert!(state.t_max.contains(&2e-4), "TDT tension must exist");
 
         // Full simulation test
         let mut state_sim = config.build_state();

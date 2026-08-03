@@ -1,6 +1,7 @@
 //! Hologram Bridge — full pipeline for Python.
 //!
 //! Wires encoding → T3 → HH → STDP → decoding as one Python class.
+//! HH dynamics run on the pillars SIMD engine ([`NeuralPopulation<HHModel>`]).
 //!
 //! Usage:
 //! ```python
@@ -16,14 +17,20 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::f32::consts::TAU;
 
-use crate::core::neuron::hh::{build_config_from_channels, step_hh_lut, HhLutConfig};
+use crate::connectome::hh_population_standard;
+use crate::pillars::NeuralPopulation;
+use crate::pillars::zoo::HHModel;
 
 /// Full hologram pipeline: phase encoding → HH → STDP → decode.
 #[allow(dead_code)]
 #[pyclass(name = "HologramBridge", module = "taas_checkmate.hologram")]
 pub struct PyHologramBridge {
-    // HH simulator
-    cfg: HhLutConfig,
+    // HH simulator (pillars SIMD engine)
+    pop: NeuralPopulation<HHModel>,
+    i_in: Vec<f32>, // persistent input-current buffer (like legacy cfg.Ii)
+    spike_buf: Vec<i32>,
+    n: usize,
+    dt: f32,
 
     // Phase parameters
     omega: f32,  // rad/ms
@@ -46,10 +53,6 @@ pub struct PyHologramBridge {
     decode_b: Vec<f32>, // [n_motor]
     motor: Vec<f32>,
 
-    // Spike history (for decode)
-    spike_buf: Vec<i32>,
-    prev_v: Vec<f32>,
-
     // Time
     t: f32,
 }
@@ -70,14 +73,17 @@ impl PyHologramBridge {
             return Err(PyValueError::new_err("n must be ≥ 2"));
         }
 
-        let channels = crate::kernels::neuron::hh::standard_channels();
-        let cfg = build_config_from_channels(&channels, n, dt, -100.0, 60.0, 1024);
+        let pop = hh_population_standard(n, dt);
 
         let tau_trace = 10.0;
         let decay_trace = (-dt / tau_trace).exp();
 
         Ok(Self {
-            cfg,
+            pop,
+            i_in: vec![0.0; n],
+            spike_buf: vec![0; n],
+            n,
+            dt,
             omega,
             i_base: 10.0,
             i_amp: 8.0,
@@ -96,9 +102,6 @@ impl PyHologramBridge {
             decode_b: vec![0.0; n_motor],
             motor: vec![0.0; n_motor],
 
-            spike_buf: vec![0; n],
-            prev_v: vec![-65.0; n],
-
             t: 0.0,
         })
     }
@@ -112,58 +115,57 @@ impl PyHologramBridge {
     ///
     /// Returns: spike count
     pub fn step(&mut self, phases: Vec<f32>) -> PyResult<usize> {
-        if phases.len() != self.cfg.n {
+        if phases.len() != self.n {
             return Err(PyValueError::new_err(format!(
                 "phases length {} != n {}",
                 phases.len(),
-                self.cfg.n
+                self.n
             )));
         }
 
         // 1. Phase → current (T3 carrier)
-        for i in 0..self.cfg.n {
-            self.cfg.Ii[i] = self.i_base + self.i_amp * (self.omega * self.t + phases[i]).sin();
+        for i in 0..self.n {
+            self.i_in[i] = self.i_base + self.i_amp * (self.omega * self.t + phases[i]).sin();
         }
 
-        // 2+3+4. HH step with built-in spike detection
-        step_hh_lut(&mut self.cfg, &mut self.spike_buf, 6.3);
+        // 2. HH step (pillars SIMD, edge-triggered spike detection)
+        self.pop.step(&self.i_in, &mut self.spike_buf);
 
-        // 4b. EPSC: all-to-all pre→post (note: spike_buf uses reverse zero-crossing)
         let n_spikes: usize = self.spike_buf.iter().map(|&s| s as usize).sum();
 
-        // 5. EPSC: all-to-all pre→post
-        for pre in 0..self.cfg.n {
+        // 3. EPSC: all-to-all pre→post (accumulates into i_in for next step)
+        for pre in 0..self.n {
             if self.spike_buf[pre] == 1 {
-                for post in 0..self.cfg.n {
+                for post in 0..self.n {
                     if pre != post {
-                        self.cfg.Ii[post] += self.weights[pre][post] * 5.0;
+                        self.i_in[post] += self.weights[pre][post] * 5.0;
                     }
                 }
             }
         }
 
-        // 6. STDP traces
-        for i in 0..self.cfg.n {
+        // 4. STDP traces
+        for i in 0..self.n {
             self.trace_pre[i] = self.trace_pre[i] * self.decay_trace + self.spike_buf[i] as f32;
             self.trace_post[i] = self.trace_post[i] * self.decay_trace + self.spike_buf[i] as f32;
         }
 
-        // 7. Motor decode (integrate spikes)
+        // 5. Motor decode (integrate spikes)
         for m in 0..self.motor.len() {
-            for i in 0..self.cfg.n {
+            for i in 0..self.n {
                 self.motor[m] += self.spike_buf[i] as f32 * self.decode_w[i * self.motor.len() + m];
             }
         }
 
-        self.t += self.cfg.dt;
+        self.t += self.dt;
         Ok(n_spikes)
     }
 
     /// Apply STDP to all synapses.
     /// Call after step() when you detect a spike.
     pub fn hebb(&mut self) {
-        for pre in 0..self.cfg.n {
-            for post in 0..self.cfg.n {
+        for pre in 0..self.n {
+            for post in 0..self.n {
                 if pre == post {
                     continue;
                 }
@@ -180,7 +182,7 @@ impl PyHologramBridge {
 
     /// STDP for a specific pre→post pair.
     pub fn hebb_pair(&mut self, pre: usize, post: usize) {
-        if pre == post || pre >= self.cfg.n || post >= self.cfg.n {
+        if pre == post || pre >= self.n || post >= self.n {
             return;
         }
         if self.spike_buf[pre] == 1 {
@@ -206,12 +208,12 @@ impl PyHologramBridge {
 
     /// Get membrane potentials.
     pub fn get_v(&self) -> Vec<f32> {
-        self.cfg.v.clone()
+        self.pop.state_slice(0).to_vec()
     }
 
     /// Get input currents.
     pub fn get_Ii(&self) -> Vec<f32> {
-        self.cfg.Ii.clone()
+        self.i_in.clone()
     }
 
     /// Get spikes from last step.
@@ -226,7 +228,7 @@ impl PyHologramBridge {
 
     /// Get a specific weight.
     pub fn get_weight(&self, pre: usize, post: usize) -> f32 {
-        if pre < self.cfg.n && post < self.cfg.n {
+        if pre < self.n && post < self.n {
             self.weights[pre][post]
         } else {
             0.0
@@ -241,12 +243,12 @@ impl PyHologramBridge {
 
     /// Set decode weights: [n_neurons * n_motor] flat array.
     pub fn set_decode_weights(&mut self, w: Vec<f32>) -> PyResult<()> {
-        let expected = self.cfg.n * self.motor.len();
+        let expected = self.n * self.motor.len();
         if w.len() != expected {
             return Err(PyValueError::new_err(format!(
                 "decode_w len {} != n*motor {}*{}",
                 w.len(),
-                self.cfg.n,
+                self.n,
                 self.motor.len()
             )));
         }
@@ -256,20 +258,12 @@ impl PyHologramBridge {
 
     /// Reset all state (voltages, traces, motor).
     pub fn reset(&mut self) {
-        self.cfg.v.fill(-65.0);
-        for i in 0..self.cfg.n {
-            let s = i * self.cfg.n_gates;
-            let g = &self.cfg.init_gates;
-            for j in 0..self.cfg.n_gates {
-                self.cfg.gates[s + j] = g[j];
-            }
-        }
-        self.cfg.Ii.fill(0.0);
+        self.pop = hh_population_standard(self.n, self.dt);
+        self.i_in.fill(0.0);
         self.trace_pre.fill(0.0);
         self.trace_post.fill(0.0);
         self.motor.fill(0.0);
         self.spike_buf.fill(0);
-        self.prev_v.fill(-65.0);
         self.t = 0.0;
     }
 
@@ -282,16 +276,16 @@ impl PyHologramBridge {
     /// Get number of neurons.
     #[getter]
     pub fn n(&self) -> usize {
-        self.cfg.n
+        self.n
     }
 
     /// Get timestep.
     #[getter]
     pub fn dt(&self) -> f32 {
-        self.cfg.dt
+        self.dt
     }
 
     fn __repr__(&self) -> String {
-        format!("HologramBridge(n={}, t={:.2}ms)", self.cfg.n, self.t)
+        format!("HologramBridge(n={}, t={:.2}ms)", self.n, self.t)
     }
 }
