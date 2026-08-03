@@ -12,13 +12,13 @@
 //!
 //! With 1–5% activity and avg_degree ~100, push is 20–100× cheaper.
 
+use crate::api::delay::DelayBuffer;
 use crate::api::graph::{SparseGraph, MAX_DELAY_SLOTS};
-use crate::core::buf::AlignedVec;
 
-/// Push active spike indices through the graph into ring buffer slots.
+/// Push active spike indices through the graph into delay buffer slots.
 ///
 /// Each active neuron scatters its weight into
-/// `ring_buf[(step + delay.max(1)) % 32]` for each outgoing synapse — the
+/// `delay[(step + delay.max(1)) % 32]` for each outgoing synapse — the
 /// current arrives at the post-synaptic neuron `max(delay, 1)` simulation
 /// steps later (delay 0 = delivered on the very next step, since a spike
 /// cannot reach the post neuron in the same step it fires).
@@ -26,13 +26,13 @@ use crate::core::buf::AlignedVec;
 /// # Arguments
 /// * `active` — indices of neurons that spiked this step
 /// * `graph` — CSR adjacency (outgoing synapses per neuron)
-/// * `ring_buf` — ring buffer of currents, `[MAX_DELAY_SLOTS][N]`
+/// * `delay` — ring buffer of currents, `[MAX_DELAY_SLOTS][N]`
 /// * `step_counter` — current simulation step (for delay computation)
 #[inline]
 pub fn push_spikes(
     active: &[u32],
     graph: &SparseGraph,
-    ring_buf: &mut [AlignedVec],
+    delay: &mut DelayBuffer,
     step_counter: usize,
 ) {
     for &pre_idx in active {
@@ -44,16 +44,64 @@ pub fn push_spikes(
         for syn_i in 0..row.len() {
             let post = row.col[syn_i] as usize;
             let weight = row.weights[syn_i];
-            let delay = row.delays[syn_i] as usize;
+            let d = row.delays[syn_i] as usize;
 
             // delay 0 = next step: a spike fired at step `s` is delivered at
             // step `s + max(delay, 1)`. It cannot land in slot `s % 32` — that
             // slot was already read and cleared at the start of step `s`
             // (read-before-write ring-buffer ordering).
-            let target_slot = (step_counter + delay.max(1)) % MAX_DELAY_SLOTS;
-            ring_buf[target_slot].as_mut_slice()[post] += weight;
+            let target_slot = (step_counter + d.max(1)) % MAX_DELAY_SLOTS;
+            delay.add(target_slot, post, weight);
         }
     }
+}
+
+/// Parallel push — thread-local accumulation with a race-free scatter.
+///
+/// Each worker thread collects `(post, slot, weight)` triples for its chunk
+/// of active neurons; the caller scatters them into the delay buffer after
+/// join. Delays ARE respected: `slot = (step + delay) % MAX_DELAY_SLOTS`.
+///
+/// Falls back to the sequential [`push_spikes`] when there is no parallelism
+/// to exploit (`active` too small or single-threaded machine).
+#[cfg(feature = "rayon")]
+pub fn push_spikes_par(
+    active: &[u32],
+    graph: &SparseGraph,
+    delay: &mut DelayBuffer,
+    step_counter: usize,
+) {
+    let num_threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    if num_threads <= 1 || active.len() <= 64 {
+        push_spikes(active, graph, delay, step_counter);
+        return;
+    }
+
+    let active_len = active.len();
+    let chunk_size = active_len.div_ceil(num_threads).max(8);
+
+    // Scoped threads borrow `graph` directly — no raw-pointer round-trip.
+    // SparseGraph is Sync, so &SparseGraph is Send across the scope.
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..num_threads)
+            .filter(|tid| tid * chunk_size < active_len)
+            .map(|tid| {
+                let chunk_start = tid * chunk_size;
+                let chunk_end = (chunk_start + chunk_size).min(active_len);
+                // Copy the chunk (small — only active indices, 1-5% of neurons)
+                let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
+                s.spawn(move || collect_push_triples(&chunk, graph, step_counter))
+            })
+            .collect();
+
+        // Scatter: each triple is (post, slot, weight) → delay[slot][post] += w
+        for handle in handles {
+            let triples = handle.join().expect("push thread panicked");
+            for (post, slot, w) in triples {
+                delay.add(slot, post as usize, w);
+            }
+        }
+    });
 }
 
 /// Collect `(post, slot, weight)` triples for active spikes — race-free
@@ -78,9 +126,9 @@ pub(crate) fn collect_push_triples(
         for syn_i in 0..row.len() {
             let post = row.col[syn_i];
             let w = row.weights[syn_i];
-            let delay = row.delays[syn_i] as usize;
+            let d = row.delays[syn_i] as usize;
             // Same minimum-1-step rule as push_spikes (delay 0 = next step).
-            let slot = (step_counter + delay.max(1)) % MAX_DELAY_SLOTS;
+            let slot = (step_counter + d.max(1)) % MAX_DELAY_SLOTS;
             triples.push((post, slot, w));
         }
     }

@@ -21,6 +21,7 @@
 // ═══ Layer 1: api/ — network orchestration (safe) ═══════════
 pub use crate::api::{Network, Population, PopulationId, SparseGraph};
 pub use crate::api::formula::{OpKind, OpNode, run_program, FormulaModel, MAX_FORMULA_MODELS, N_REGS, S0, S1, S2, S3, P0, I_SYN, TEMP0};
+pub use crate::api::builder::{IzhikevichBuilder, LIFBuilder, AdExBuilder, IzhPattern};
 
 // ═══ Layer 2: zoo/ — ready-made models ══════════════════════
 pub use crate::zoo::{

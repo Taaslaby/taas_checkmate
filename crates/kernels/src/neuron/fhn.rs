@@ -60,8 +60,9 @@ pub(crate) unsafe fn fhn_step(
 
         // FHN dynamics:
         // dv/dt = v - v³/3 - w + I
-        let v3 = vv * vv * vv;
-        let dv = vv - v3 * one_third - ww + ii;
+        // Horner's method: v - v³/3 = v·(1 - v²/3)
+        let v_sq = vv * vv;  // 1 multiply
+        let dv = vv * (f32x8::splat(1.0) - v_sq * one_third) - ww + ii;  // 2 multiplies total
 
         // dw/dt = (v + a - b·w) / τ
         // Use mask to avoid division by zero
@@ -102,8 +103,9 @@ pub(crate) unsafe fn fhn_step(
             let a = p[2 * n + i];
             let b = p[3 * n + i];
             let i_clamped = ii[i].clamp(-100.0, 100.0);
-            let v3 = v[i] * v[i] * v[i];
-            let dv = v[i] - v3 / 3.0 - w[i] + i_clamped;
+            // Horner's method: v - v³/3 = v·(1 - v²/3)
+            let v_sq = v[i] * v[i];
+            let dv = v[i] * (1.0 - v_sq / 3.0) - w[i] + i_clamped;
             let dw = if tau_w > 0.0 {
                 (v[i] + a - b * w[i]) / tau_w
             } else {

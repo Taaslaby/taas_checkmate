@@ -389,6 +389,75 @@ fn bench_hh_triang_lut(c: &mut Criterion) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  LEVEL 5: Multithreaded — run_neuron (seq) vs run_neuron_par (Rayon)
+// ═══════════════════════════════════════════════════════════════
+//
+// HHModel has exactly 6 states (v, m, h, n, c, was_below) → it fits the
+// legacy `run_neuron_par` 6-pointer contract. This group shows real
+// core-scaling on the same 138k workload.
+// ═══════════════════════════════════════════════════════════════
+
+#[cfg(feature = "rayon")]
+fn bench_hh_par(c: &mut Criterion) {
+    let n = N_NEURONS;
+    let Ii = make_current(n);
+    let params = make_params(n);
+    let mut spikes = vec![0i32; n];
+
+    let mut group = c.benchmark_group("hh_par_138k");
+    group.throughput(Throughput::Elements(n as u64));
+
+    group.bench_function("sequential", |b| {
+        let mut v = vec![-65.0; n];
+        let mut m = vec![0.05; n];
+        let mut h = vec![0.6; n];
+        let mut k_g = vec![0.32; n];
+        let mut cat = vec![0.19; n];
+        let mut flag = vec![1.0; n];
+        b.iter(|| {
+            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32);
+            cat.fill(0.19); flag.fill(1.0);
+            for _ in 0..N_STEPS {
+                unsafe {
+                    run_neuron::<pillars::zoo::HHModel>(
+                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
+                        cat.as_mut_ptr(), flag.as_mut_ptr(),
+                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                    );
+                }
+            }
+            black_box(&spikes);
+        });
+    });
+
+    group.bench_function("parallel", |b| {
+        let mut v = vec![-65.0; n];
+        let mut m = vec![0.05; n];
+        let mut h = vec![0.6; n];
+        let mut k_g = vec![0.32; n];
+        let mut cat = vec![0.19; n];
+        let mut flag = vec![1.0; n];
+        b.iter(|| {
+            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32);
+            cat.fill(0.19); flag.fill(1.0);
+            for _ in 0..N_STEPS {
+                unsafe {
+                    run_neuron_par::<pillars::zoo::HHModel>(
+                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
+                        cat.as_mut_ptr(), flag.as_mut_ptr(),
+                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        4096,
+                    );
+                }
+            }
+            black_box(&spikes);
+        });
+    });
+
+    group.finish();
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Harness
 // ═══════════════════════════════════════════════════════════════
 
@@ -457,6 +526,7 @@ criterion_group!(
     bench_hh_new_run_neuron,
     bench_hh_new_population,
     bench_hh_triang_lut,
+    bench_hh_par,
     bench_hh_n8,
 );
 criterion_main!(benches);

@@ -55,9 +55,11 @@ pub mod compact;
 pub mod push;
 pub mod network;
 pub mod formula;
+pub mod builder;
 
 pub use crate::core::population::NeuralPopulation;
 pub use graph::{SparseGraph, SynapseRow, MAX_DELAY_SLOTS};
 pub use network::{Network, Population, PopulationId};
 pub use compact::{compact_spikes, compact_spikes_into};
 pub use formula::{OpKind, OpNode, run_program, validate_program, FormulaModel, MAX_FORMULA_MODELS, N_REGS, S0, S1, S2, S3, P0, I_SYN, TEMP0};
+pub use builder::{IzhikevichBuilder, LIFBuilder, AdExBuilder, IzhPattern};

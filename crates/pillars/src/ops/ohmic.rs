@@ -13,17 +13,57 @@
 
 use crate::core::lane::SimdLane;
 
-/// Ohmic current: `I = g · (V - E_rev)`
+/// Ohmic (conductance-based) current: `I = g · (V - E_rev)`
 ///
-/// Pure FMA: `g.mul_add(v, -g * e_rev)`
+/// Computes ionic current using Ohm's law. Sign convention (NEURON):
+/// - `I > 0` → **depolarizing** (inward cations or outward anions)
+/// - `I < 0` → **hyperpolarizing** (outward cations or inward anions)
+///
+/// # Arguments
+/// - `g`: conductance (mS/cm² or nS)
+/// - `v`: membrane potential (mV)
+/// - `e_rev`: reversal potential (mV)
+///
+/// # Examples
+/// ```ignore
+/// // Na⁺ leak: E_Na = 0 mV, V = -65 mV
+/// let i_na = ohmic_current(g_na, v, E_NA);  // → negative (depolarizing)
+///
+/// // K⁺ leak: E_K = -80 mV, V = -65 mV
+/// let i_k = ohmic_current(g_k, v, E_K);     // → positive (hyperpolarizing)
+/// ```
+///
+/// # Performance
+/// Single FMA instruction on AVX2: `g·V - g·E_rev` → `vfmadd231ps`
 #[inline(always)]
 pub fn ohmic_current<S: SimdLane>(g: S, v: S, e_rev: S) -> S {
     g.mul_add(v, -g * e_rev)
 }
 
-/// Ohmic current with gating factor: `I = g · gating · (V - E_rev)`
+/// Gated ohmic current: `I = g_max · gating · (V - E_rev)`
 ///
-/// Used for voltage-gated channels (e.g., Na⁺ m³h, K⁺ n⁴).
+/// Used for voltage-gated ion channels where conductance depends on
+/// gate activation/inactivation states.
+///
+/// # Arguments
+/// - `g_max`: maximum conductance (mS/cm²)
+/// - `v`: membrane potential (mV)
+/// - `e_rev`: reversal potential (mV)
+/// - `gating`: combined gate factor (e.g., `m³·h` for Na⁺, `n⁴` for K⁺)
+///
+/// # Examples
+/// ```ignore
+/// // Hodgkin-Huxley Na⁺ channel: I_Na = g_Na · m³·h · (V - E_Na)
+/// let gating_na = m.powi::<3>() * h;
+/// let i_na = ohmic_gated(g_na_max, v, E_NA, gating_na);
+///
+/// // Hodgkin-Huxley K⁺ channel: I_K = g_K · n⁴ · (V - E_K)
+/// let gating_k = n.powi::<4>();
+/// let i_k = ohmic_gated(g_k_max, v, E_K, gating_k);
+/// ```
+///
+/// # Performance
+/// 2 FMA instructions: `g_eff = g_max·gating`, then `g_eff·V - g_eff·E_rev`
 #[inline(always)]
 pub fn ohmic_gated<S: SimdLane>(g_max: S, v: S, e_rev: S, gating: S) -> S {
     (g_max * gating).mul_add(v, -(g_max * gating) * e_rev)

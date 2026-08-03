@@ -63,11 +63,44 @@ pub trait SimdLane: Copy + Sized + Add<Output = Self> + Sub<Output = Self>
 
     // ─── Neural Primitives ─────────────────────────────────────────
 
-    /// Sigmoid: 1 / (1 + exp(-k·(V - V_half)))
+    /// Sigmoid activation: `1 / (1 + exp(-k·(V - V_half)))`
+    ///
+    /// Standard Boltzmann sigmoid for voltage-dependent gating.
+    /// - `v_half`: half-activation voltage (mV)
+    /// - `k`: slope factor (mV⁻¹)
     fn sigmoid(v: Self, v_half: f32, k: f32) -> Self;
-    /// HH vtrap: avoid singularity at x=0 by clamping to y.
+
+    /// Hodgkin-Huxley voltage trap: `x / (exp(x) - 1)`, avoiding singularity at x=0.
+    ///
+    /// Used in HH α/β rate functions to handle the `vtrap(-(V+V₀)/k, k)` form.
+    /// When `|x| < ε`, returns `y` (the limit value) to avoid `0/0`.
+    ///
+    /// # Example (m-gate α)
+    /// ```ignore
+    /// let x = -(v + 40.0) / 10.0;
+    /// let alpha = 0.1 * vtrap(x, 10.0);  // → 0.1·x/(exp(x)-1)
+    /// ```
+    ///
+    /// # Performance
+    /// - SIMD: uses `blend()` for branchless singularity handling
+    /// - Scalar: `if |x| < 1e-6 then y else x/(exp(x)-1)`
     fn vtrap(x: Self, y: Self) -> Self;
-    /// Ohmic current (NEURON convention): I = g · (V - E_rev).
+
+    /// Ohmic (conductance-based) current: `I = g · (V - E_rev)`
+    ///
+    /// NEURON convention for ionic currents. Positive current = depolarizing.
+    /// - `g`: conductance (mS/cm² or nS)
+    /// - `e`: reversal potential (mV)
+    /// - `v`: membrane potential (mV)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let i_na = ohmic(g_na, E_NA, v);  // Na⁺ current
+    /// let i_k  = ohmic(g_k,  E_K,  v);  // K⁺ current
+    /// ```
+    ///
+    /// # Performance
+    /// Single FMA on AVX2: `g * (v - e)` → `vfmadd213ps`
     fn ohmic(g: Self, e: f32, v: Self) -> Self;
 
     // ─── Trigonometry ──────────────────────────────────────────────

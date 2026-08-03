@@ -3410,10 +3410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "taas-rule"
-version = "0.1.0"
-
-[[package]]
 name = "taas-t3"
 version = "0.1.0"
 dependencies = [
