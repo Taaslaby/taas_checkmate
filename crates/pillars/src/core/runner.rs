@@ -231,7 +231,13 @@ pub unsafe fn run_neuron_ext<M: Model>(
     let ptrs = [v, u, h, r, s, t];
 
     for off in (0..n8).step_by(8) {
+        if off + 64 < n8 {
+            crate::core::util::prefetch_read(params, off + 64);
+            if !v.is_null() { crate::core::util::prefetch_read(v, off + 64); }
+        }
+
         // Load first M::N_STATE channels from the six pointers (rest stay zero).
+
         let mut state = [f32x8::zero(); MAX_STATES];
         for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
             state[k] = (p.add(off) as *const f32x8).read_unaligned();

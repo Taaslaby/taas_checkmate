@@ -27,10 +27,9 @@ use wide::f32x8;
 /// `ptr.add(off)` must be valid for 8 readable elements.
 #[inline(always)]
 pub unsafe fn load8(ptr: *const f32, off: usize) -> f32x8 {
-    let p = ptr.add(off);
-    f32x8::from([*p, *p.add(1), *p.add(2), *p.add(3),
-                 *p.add(4), *p.add(5), *p.add(6), *p.add(7)])
+    (ptr.add(off) as *const f32x8).read_unaligned()
 }
+
 
 /// Store a `f32x8` vector to 8 locations at `ptr + off`.
 ///
@@ -60,3 +59,20 @@ pub unsafe fn load8_i32(ptr: *const i32, off: usize) -> f32x8 {
         *p.add(4) as f32, *p.add(5) as f32, *p.add(6) as f32, *p.add(7) as f32,
     ])
 }
+
+/// Prefetch memory at `ptr + off` into L1 cache for subsequent SIMD iterations.
+///
+/// Reduces L3 cache miss latency during steps over large populations.
+#[inline(always)]
+pub unsafe fn prefetch_read(ptr: *const f32, off: usize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        core::arch::x86_64::_mm_prefetch(ptr.add(off) as *const i8, core::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = ptr;
+        let _ = off;
+    }
+}
+

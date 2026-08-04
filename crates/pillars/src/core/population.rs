@@ -229,8 +229,14 @@ impl<M: Model> NeuralPopulation<M> {
         let cap = self.capacity;
 
         for off in (0..n8).step_by(8) {
+            if off + 64 < n8 {
+                crate::core::util::prefetch_read(self.state.as_ptr(), off + 64);
+                crate::core::util::prefetch_read(self.params.as_ptr(), off + 64);
+            }
+
             let sp = self.state.as_ptr();
             let state = load_state_simd!(sp, cap, off, SimdType);
+
 
             let i_syn = (i_in.as_ptr().add(off) as *const SimdType).read_unaligned()
                 .max(SimdType::splat(I_SYN_CLAMP_RANGE.0))
