@@ -1,12 +1,25 @@
-//! # Phase Dynamics Microkernels — Kuramoto & T3
+//! # 🔄 Phase Dynamics — Kuramoto & T3 Oscillators
 //!
-//! `f32x8` kernels for Kuramoto phase dynamics and T3 (Triple-Threshold
-//! Theorem) phase/amplitude oscillators.
+//! `f32x8` kernels for coupled phase oscillators. Both standard Kuramoto
+//! and Stuart-Landau amplitude dynamics (T3 Triple-Threshold Theorem).
 //!
-//! ## Kuramoto models
-//! - `kuramoto_update` — standard: φ += dt·(ω + coupling)
-//! - `kuramoto_update_viscous` — with viscous damping: φ += dt·(ω + coupling + η·∇²φ)
-//! - `kuramoto_prepare` — wrap phases + compute sin/cos in one pass
+//! ## Models
+//!
+//! | Kernel | Equation | Type |
+//! |--------|----------|------|
+//! | [`kuramoto_prepare`] | `φ ← wrap(φ)` + sin/cos | Phase wrap + trig in one pass |
+//! | [`kuramoto_update`] | `φ ← φ + dt·(ω + C)` | Standard Kuramoto |
+//! | [`kuramoto_update_viscous`] | `φ ← φ + dt·(ω + C + η·(⟨φ⟩−φ))` | Viscous damping |
+//! | [`t3_update`] | `r ← r + dt·((α−r²)r + G·D − δ·r)` | Stuart-Landau amplitude |
+//! | | `θ ← θ + dt·(ω + C + G·D/(r+ε))` | Kuramoto phase (with drive) |
+//!
+//! ## Kuramoto vs T3
+//!
+//! ```text
+//! Standard Kuramoto:    φ̇ = ω + Σ W·sin(φⱼ − φᵢ)
+//! T3 (Stuart-Landau):  ṙ = (α − r²)r + G·D − δ·r   (amplitude envelope)
+//!                      θ̇ = ω + C + G·D/(r+ε)       (phase with gain)
+//! ```
 
 use wide::f32x8;
 

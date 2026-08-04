@@ -535,11 +535,9 @@ impl PyBrainSimulator {
         let sl = ro.as_slice()?;
         if let Some((_, pop)) = &mut self.hh_pop {
             let n = sl.len().min(pop.len());
-            unsafe {
-                let p = pop.state_slice_mut(0);
-                for i in 0..n {
-                    *p.add(i) = sl[i];
-                }
+            let p = pop.state_slice_mut(0);
+            for i in 0..n {
+                p[i] = sl[i];
             }
         } else {
             let n = sl.len().min(self.state.v.len());
@@ -626,11 +624,9 @@ impl PyBrainSimulator {
             } else if sl.len() == n_channels * n {
                 // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
                 for (ch_i, ch) in chans.iter().enumerate() {
-                    unsafe {
-                        let p = hh_pop.param_slice_mut((*ch).into());
-                        for ni in 0..n {
-                            *p.add(ni) = sl[ch_i * n + ni];
-                        }
+                    let p = hh_pop.param_slice_mut((*ch).into());
+                    for ni in 0..n {
+                        p[ni] = sl[ch_i * n + ni];
                     }
                 }
             } else {
@@ -669,11 +665,9 @@ impl PyBrainSimulator {
             let ro = g_leak.readonly();
             let sl = ro.as_slice()?;
             let m = sl.len().min(n);
-            unsafe {
-                let p = hh_pop.param_slice_mut(HHParamIdx::G_Leak.into());
-                for i in 0..m {
-                    *p.add(i) = sl[i];
-                }
+            let p = hh_pop.param_slice_mut(HHParamIdx::G_Leak.into());
+            for i in 0..m {
+                p[i] = sl[i];
             }
         }
 
@@ -682,11 +676,9 @@ impl PyBrainSimulator {
             let ro = E_leak.readonly();
             let sl = ro.as_slice()?;
             let m = sl.len().min(n);
-            unsafe {
-                let p = hh_pop.param_slice_mut(HHParamIdx::E_Leak.into());
-                for i in 0..m {
-                    *p.add(i) = sl[i];
-                }
+            let p = hh_pop.param_slice_mut(HHParamIdx::E_Leak.into());
+            for i in 0..m {
+                p[i] = sl[i];
             }
         }
 
@@ -694,11 +686,9 @@ impl PyBrainSimulator {
         {
             let v: Vec<f32> = hh_pop.state_slice(0)[..n].to_vec();
             let thresh: Vec<f32> = hh_pop.param_slice(HHParamIdx::V_Thresh.into())[..n].to_vec();
-            unsafe {
-                let p = hh_pop.state_slice_mut(5); // was_below
-                for i in 0..n {
-                    *p.add(i) = if v[i] < thresh[i] { 1.0 } else { 0.0 };
-                }
+            let p = hh_pop.state_slice_mut(5); // was_below
+            for i in 0..n {
+                p[i] = if v[i] < thresh[i] { 1.0 } else { 0.0 };
             }
         }
 
@@ -730,11 +720,9 @@ impl PyBrainSimulator {
         let sl = ro.as_slice()?;
         if let Some((_, pop)) = &mut self.hh_pop {
             let n = sl.len().min(self.n_neurons);
-            unsafe {
-                let p = pop.param_slice_mut(HHParamIdx::Inv_Cm.into());
-                for i in 0..n {
-                    *p.add(i) = 1.0 / sl[i];
-                }
+            let p = pop.param_slice_mut(HHParamIdx::Inv_Cm.into());
+            for i in 0..n {
+                p[i] = 1.0 / sl[i];
             }
         }
         // Non-HH: silently ignored (LIF/Izhikevich have fixed params, not per-neuron C_m)

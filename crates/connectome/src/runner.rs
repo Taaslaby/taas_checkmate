@@ -721,7 +721,7 @@ impl BrainRunner {
         if let Some(ref mut pop) = self.hh_pop {
             // pillars state column 0 = membrane potential
             unsafe {
-                std::ptr::copy_nonoverlapping(v.as_ptr(), pop.state_slice_mut(0), n);
+                std::ptr::copy_nonoverlapping(v.as_ptr(), pop.state_slice_mut(0).as_mut_ptr(), n);
             }
         } else {
             self.state.v[..n].copy_from_slice(&v[..n]);

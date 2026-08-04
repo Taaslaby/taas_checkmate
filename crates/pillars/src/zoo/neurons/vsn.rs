@@ -1,4 +1,4 @@
-//! ⚡ VSN — Variable Spiking Neuron (arxiv 2026)
+//! VSN — Variable Spiking Neuron 
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 //!

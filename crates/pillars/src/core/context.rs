@@ -1,4 +1,6 @@
 use super::lane::SimdLane;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 // ═══════════════════════════════════════════════════════════════
 //  MAX_STATES — the one place that caps model state count
@@ -60,15 +62,27 @@ pub const MAX_STATES: usize = 16;
 ///  .pf(idx) → scalar *(params_ptr + idx * n + off)
 /// ```
 ///
+/// # Lifetime Safety
+///
+/// The `'a` lifetime ensures that `params_ptr` cannot outlive the parameter
+/// buffer it points to. This prevents use-after-free bugs when the underlying
+/// `NeuralPopulation` SoA buffer is reallocated (e.g., via `.reserve()`).
+///
+/// ```rust,ignore
+/// let mut pop = NeuralPopulation::new(...);
+/// let ctx = pop.make_context();  // ctx borrows pop for lifetime 'a
+/// pop.reserve(1000);             // ❌ Compile error: pop is borrowed
+/// ```
+///
 /// # Safety
 /// All pointer-based access is **unsafe free** — it's the runner's
 /// responsibility to provide valid `params_ptr` and correct `n`/`off`.
 ///
 /// **Note**: All fields are `pub(crate)` — only the runner (population.rs)
 /// and zoo models may access them. External users interact through methods.
-pub struct SimdContext<S: SimdLane> {
+pub struct SimdContext<'a, S: SimdLane> {
     pub(crate) state: [S; MAX_STATES],
-    pub(crate) params_ptr: *const f32,
+    pub(crate) params_ptr: NonNull<f32>,
     pub(crate) n: usize,
     pub(crate) off: usize,
     pub(crate) i_syn: S,
@@ -76,35 +90,36 @@ pub struct SimdContext<S: SimdLane> {
     pub(crate) i_post: S,
     pub(crate) dt_val: f32,
     pub(crate) spike_mask: S,
+    pub(crate) _marker: PhantomData<&'a [f32]>,
 }
 
-impl<S: SimdLane> SimdContext<S> {
+impl<'a, S: SimdLane> SimdContext<'a, S> {
     #[inline(always)] pub fn s(&self, i: usize) -> S { self.state[i] }
     #[inline(always)] pub fn set_s(&mut self, i: usize, v: S) { self.state[i] = v; }
 
     /// Parameters: SIMD (SoA vector load) / scalar
     #[inline(always)]
     pub fn p(&self, i: usize) -> S {
-        unsafe { S::load_param(self.params_ptr, i, self.n, self.off) }
+        unsafe { S::load_param(self.params_ptr.as_ptr(), i, self.n, self.off) }
     }
 
     /// Type-safe parameter access via usize-convertible enum.
     /// Removes the `as usize` cast noise.
     #[inline(always)]
     pub fn p_enum<E: Into<usize> + Copy>(&self, e: E) -> S {
-        unsafe { S::load_param(self.params_ptr, e.into(), self.n, self.off) }
+        unsafe { S::load_param(self.params_ptr.as_ptr(), e.into(), self.n, self.off) }
     }
 
     /// Scalar parameter access via raw index.
     #[inline(always)]
     pub fn pf(&self, i: usize) -> f32 {
-        unsafe { *self.params_ptr.add(i * self.n + self.off) }
+        unsafe { *self.params_ptr.as_ptr().add(i * self.n + self.off) }
     }
 
     /// Type-safe scalar parameter access via `Into<usize>` enum.
     #[inline(always)]
     pub fn pf_enum<E: Into<usize> + Copy>(&self, e: E) -> f32 {
-        unsafe { *self.params_ptr.add(e.into() * self.n + self.off) }
+        unsafe { *self.params_ptr.as_ptr().add(e.into() * self.n + self.off) }
     }
 
     #[inline(always)] pub fn i(&self) -> S { self.i_syn }
@@ -114,7 +129,7 @@ impl<S: SimdLane> SimdContext<S> {
     #[inline(always)] pub fn dt(&self) -> S {
         // 🛡️ Load dt from SoA params[0] — supports heterogeneous timesteps per lane.
         // Each SIMD lane reads its own dt[off+n*0] instead of broadcasting a scalar.
-        unsafe { S::load_param(self.params_ptr, 0, self.n, self.off) }
+        unsafe { S::load_param(self.params_ptr.as_ptr(), 0, self.n, self.off) }
     }
     #[inline(always)] pub fn dtf(&self) -> f32 {
         // Fallback: first neuron's dt. For heterogeneous dt use dt() which returns S.
@@ -122,11 +137,15 @@ impl<S: SimdLane> SimdContext<S> {
     }
 
     /// Create a raw context for StorageBuffer-based execution (no load_i needed).
+    ///
+    /// # Safety
+    /// `params_ptr` must point to a valid parameter buffer that outlives the returned context.
+    /// The caller must ensure the pointer remains valid for the lifetime `'a`.
     #[inline(always)]
     pub fn new_raw(params_ptr: *const f32, capacity: usize, offset: usize, dt: f32) -> Self {
         Self {
             state: [S::zero(); MAX_STATES],
-            params_ptr,
+            params_ptr: NonNull::new(params_ptr as *mut f32).expect("params_ptr must be non-null"),
             n: capacity,
             off: offset,
             i_syn: S::zero(),
@@ -134,6 +153,7 @@ impl<S: SimdLane> SimdContext<S> {
             i_post: S::zero(),
             dt_val: dt,
             spike_mask: S::zero(),
+            _marker: PhantomData,
         }
     }
 
@@ -190,10 +210,11 @@ mod tests {
     use wide::f32x8;
 
     /// Create a minimal SimdContext with 8 neurons, 6 params (dt, inv_tau, v_rest, v_thresh, v_reset, tau_ref)
-    fn make_context<S: SimdLane>(off: usize, params: &[f32], n: usize) -> SimdContext<S> {
+    fn make_context<S: SimdLane>(off: usize, params: &[f32], n: usize) -> SimdContext<'_, S> {
+
         SimdContext {
             state: [S::zero(); MAX_STATES],
-            params_ptr: params.as_ptr(),
+            params_ptr: NonNull::new(params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
             n,
             off,
             i_syn: S::zero(),
@@ -201,6 +222,7 @@ mod tests {
             i_post: S::zero(),
             dt_val: params[0],
             spike_mask: S::zero(),
+            _marker: PhantomData,
         }
     }
 

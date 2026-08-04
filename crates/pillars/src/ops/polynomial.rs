@@ -1,17 +1,16 @@
-//! # Polynomial — Horner and Cubic Neuron Polynomials
+//! # 📐 Polynomial — Neuron-Specific Horner/Cubic Forms
 //!
-//! ## `horner_izhi`
-//! ```text
-//! f(v) = v · (0.04 · v + 5.0) + 140
-//! ```
-//! Izhikevich quadratic membrane polynomial (Horner's form).
-//! Single FMA chain — no power operations.
+//! Per-lane (SIMD-safe) polynomial evaluations used by specific neuron
+//! models. All expressed in Horner's form — minimum operations, no power
+//! calls.
 //!
-//! ## `cubic_fhn`
-//! ```text
-//! g(v) = v · (1 - v² / 3)
-//! ```
-//! FitzHugh-Nagumo cubic polynomial (Horner's form).
+//! ## Functions
+//!
+//! | Function | Formula | Model |
+//! |----------|---------|-------|
+//! | [`horner_izhi`] | `v·(0.04·v + 5) + 140` | Izhikevich quadratic membrane |
+//! | [`cubic_fhn`] | `v·(1 − v·v/3)` | FitzHugh-Nagumo cubic |
+//! | [`substep_euler_izhi`] | Two half-dt steps | Stable Izhikevich at large dt |
 
 use crate::core::lane::SimdLane;
 

@@ -1,3 +1,26 @@
+//! # 🧪 Lane Consistency Tests — SIMD vs Scalar Parity
+//!
+//! The **contract of the engine**: whatever `SimdLane` does to 8 floats at
+//! once, it must do identically to 1 float at a time.
+//!
+//! Every test here runs the same operation through both lanes and asserts
+//! that all 8 SIMD lanes match the scalar result within `1e-5` (with NaN and
+//! Inf treated as equal). Coverage:
+//!
+//! - **Neural primitives** — `sigmoid`, `vtrap`, `ohmic` (the biological core)
+//! - **Trigonometry** — `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`
+//! - **Exponentials & logs** — `exp`, `ln`, `log2`, `log10`
+//! - **Integer powers** — `square`, `cube`, `powi::<0..=8>` (HH: `m³h`, `n⁴`)
+//! - **Arithmetic** — `abs`, `signum`, `sqrt`, `hypot`, `mul_add`, `cbrt`, `recip`
+//! - **Rounding** — `round`, `floor`, `ceil`, `trunc`, `fract`
+//! - **Comparison & logic** — `cmp_ge`, `cmp_gt`, `max`, `min`, `and`, `not`, `blend`
+//! - **Model consistency** — every zoo model run on a pure-SIMD batch (n=8)
+//!   must match a mixed batch (n=9: 8 SIMD + 1 scalar tail) bit-for-bit.
+//!
+//! This is the safety net that lets `core` stay **zero-cost**: if a hardware
+//! instruction ever diverges from IEEE scalar semantics, these tests catch it
+//! before it silently corrupts a 138k-neuron fly brain.
+
 #[cfg(test)]
 mod consistency_tests {
     use wide::f32x8;

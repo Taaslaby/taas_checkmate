@@ -80,28 +80,49 @@ pub fn push_spikes_par(
     let active_len = active.len();
     let chunk_size = active_len.div_ceil(num_threads).max(8);
 
-    // Scoped threads borrow `graph` directly — no raw-pointer round-trip.
+    // Use rayon::scope to reuse thread pool instead of spawning OS threads.
     // SparseGraph is Sync, so &SparseGraph is Send across the scope.
-    std::thread::scope(|s| {
-        let handles: Vec<_> = (0..num_threads)
+    #[cfg(feature = "rayon")]
+    {
+        use rayon::prelude::*;
+        let triples: Vec<_> = (0..num_threads)
+            .into_par_iter()
             .filter(|tid| tid * chunk_size < active_len)
-            .map(|tid| {
+            .flat_map(|tid| {
                 let chunk_start = tid * chunk_size;
                 let chunk_end = (chunk_start + chunk_size).min(active_len);
-                // Copy the chunk (small — only active indices, 1-5% of neurons)
                 let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
-                s.spawn(move || collect_push_triples(&chunk, graph, step_counter))
+                collect_push_triples(&chunk, graph, step_counter)
             })
             .collect();
 
         // Scatter: each triple is (post, slot, weight) → delay[slot][post] += w
-        for handle in handles {
-            let triples = handle.join().expect("push thread panicked");
-            for (post, slot, w) in triples {
-                delay.add(slot, post as usize, w);
-            }
+        for (post, slot, w) in triples {
+            delay.add(slot, post as usize, w);
         }
-    });
+    }
+    #[cfg(not(feature = "rayon"))]
+    {
+        // Fallback: std::thread::scope when rayon is disabled
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..num_threads)
+                .filter(|tid| tid * chunk_size < active_len)
+                .map(|tid| {
+                    let chunk_start = tid * chunk_size;
+                    let chunk_end = (chunk_start + chunk_size).min(active_len);
+                    let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
+                    s.spawn(move || collect_push_triples(&chunk, graph, step_counter))
+                })
+                .collect();
+
+            for handle in handles {
+                let triples = handle.join().expect("push thread panicked");
+                for (post, slot, w) in triples {
+                    delay.add(slot, post as usize, w);
+                }
+            }
+        });
+    }
 }
 
 /// Collect `(post, slot, weight)` triples for active spikes — race-free
@@ -156,11 +177,11 @@ mod tests {
     #[test]
     fn test_push_spikes_empty() {
         let graph = make_chain_graph(8);
-        let mut ring = vec![AlignedVec::new(8, 0.0); MAX_DELAY_SLOTS];
-        push_spikes(&[], &graph, &mut ring, 0);
-        for slot in &ring {
+        let mut delay = DelayBuffer::new(8);
+        push_spikes(&[], &graph, &mut delay, 0);
+        for slot in 0..MAX_DELAY_SLOTS {
             for i in 0..8 {
-                assert_eq!(slot.as_slice()[i], 0.0);
+                assert_eq!(delay.slot(slot)[i], 0.0);
             }
         }
     }
@@ -173,31 +194,30 @@ mod tests {
         let weights = vec![1.0f32, 1.0f32];
         let delays = vec![0u8, 0u8];
         let graph = SparseGraph::from_triplets(3, &from, &to, &weights, &delays);
-        let mut ring = vec![AlignedVec::new(3, 0.0); MAX_DELAY_SLOTS];
-        push_spikes(&[2], &graph, &mut ring, 0);
-        // Ring should remain zero since neuron 2 has no outgoing edges
-        for slot in &ring {
-            assert_eq!(slot.as_slice()[2], 0.0);
+        let mut delay = DelayBuffer::new(3);
+        push_spikes(&[2], &graph, &mut delay, 0);
+        // Delay buffer should remain zero since neuron 2 has no outgoing edges
+        for slot in 0..MAX_DELAY_SLOTS {
+            assert_eq!(delay.slot(slot)[2], 0.0);
         }
     }
 
     #[test]
     fn test_push_spikes_basic() {
         let graph = make_chain_graph(8);
-        let mut ring = vec![AlignedVec::new(8, 0.0); MAX_DELAY_SLOTS];
-        push_spikes(&[0, 3, 7], &graph, &mut ring, 0);
+        let mut delay = DelayBuffer::new(8);
+        push_spikes(&[0, 3, 7], &graph, &mut delay, 0);
         // Delay 0 → delivered at the NEXT step (slot 1).
-        let slot1 = &ring[1];
-        assert_eq!(slot1.as_slice()[0], 1.0);
-        assert_eq!(slot1.as_slice()[3], 1.0);
-        assert_eq!(slot1.as_slice()[7], 1.0);
+        assert_eq!(delay.slot(1)[0], 1.0);
+        assert_eq!(delay.slot(1)[3], 1.0);
+        assert_eq!(delay.slot(1)[7], 1.0);
         // Other slots should be zero
-        for (i, s) in ring.iter().enumerate().take(MAX_DELAY_SLOTS) {
-            if i == 1 {
+        for slot in 0..MAX_DELAY_SLOTS {
+            if slot == 1 {
                 continue;
             }
             for j in 0..8 {
-                assert_eq!(s.as_slice()[j], 0.0, "slot {i}[{j}] should be 0");
+                assert_eq!(delay.slot(slot)[j], 0.0, "slot {slot}[{j}] should be 0");
             }
         }
     }
@@ -210,20 +230,20 @@ mod tests {
         let w = vec![1.0f32, 2.0f32, 0.5f32];
         let d = vec![0u8, 1u8, 5u8];
         let graph = SparseGraph::from_triplets(6, &from, &to, &w, &d);
-        let mut ring = vec![AlignedVec::new(6, 0.0); MAX_DELAY_SLOTS];
+        let mut delay = DelayBuffer::new(6);
 
         // Push at step 0
-        push_spikes(&[0, 1, 2], &graph, &mut ring, 0);
+        push_spikes(&[0, 1, 2], &graph, &mut delay, 0);
 
         // Neuron 0 → 3 with delay 0: delivered next step → slot (0+1)%32 = 1
-        assert_eq!(ring[1].as_slice()[3], 1.0);
+        assert_eq!(delay.slot(1)[3], 1.0);
         // Neuron 1 → 4 with delay 1: also next step → slot 1
-        assert_eq!(ring[1].as_slice()[4], 2.0);
+        assert_eq!(delay.slot(1)[4], 2.0);
         // Neuron 2 → 5 with delay 5: in slot (0+5)%32 = 5
-        assert_eq!(ring[5].as_slice()[5], 0.5);
+        assert_eq!(delay.slot(5)[5], 0.5);
         // Slot 0 stays empty — zero-delay current goes to slot 1, not 0
-        assert_eq!(ring[0].as_slice()[3], 0.0);
-        assert_eq!(ring[0].as_slice()[4], 0.0);
+        assert_eq!(delay.slot(0)[3], 0.0);
+        assert_eq!(delay.slot(0)[4], 0.0);
     }
 
     #[test]
@@ -233,10 +253,10 @@ mod tests {
         let w = vec![1.0f32];
         let d = vec![(MAX_DELAY_SLOTS - 1) as u8]; // max valid delay = 31
         let graph = SparseGraph::from_triplets(2, &from, &to, &w, &d);
-        let mut ring = vec![AlignedVec::new(2, 0.0); MAX_DELAY_SLOTS];
+        let mut delay = DelayBuffer::new(2);
 
-        push_spikes(&[0], &graph, &mut ring, 1); // step=1, target = (1+31)%32 = 0
-        assert_eq!(ring[0].as_slice()[1], 1.0);
+        push_spikes(&[0], &graph, &mut delay, 1); // step=1, target = (1+31)%32 = 0
+        assert_eq!(delay.slot(0)[1], 1.0);
     }
 
     #[test]
@@ -246,13 +266,13 @@ mod tests {
         let w = vec![1.0f32];
         let d = vec![2u8];
         let graph = SparseGraph::from_triplets(2, &from, &to, &w, &d);
-        let mut ring = vec![AlignedVec::new(2, 0.0); MAX_DELAY_SLOTS];
+        let mut delay = DelayBuffer::new(2);
 
         // Push at step 5: target = (5+2)%32 = 7
-        push_spikes(&[0], &graph, &mut ring, 5);
-        assert_eq!(ring[7].as_slice()[1], 1.0);
+        push_spikes(&[0], &graph, &mut delay, 5);
+        assert_eq!(delay.slot(7)[1], 1.0);
         // Slot 0 should be zero
-        assert_eq!(ring[0].as_slice()[1], 0.0);
+        assert_eq!(delay.slot(0)[1], 0.0);
     }
 
     #[test]
@@ -262,11 +282,38 @@ mod tests {
         let w = vec![3.0f32, 4.0f32];
         let d = vec![0u8, 0u8];
         let graph = SparseGraph::from_triplets(3, &from, &to, &w, &d);
-        let mut ring = vec![AlignedVec::new(3, 0.0); MAX_DELAY_SLOTS];
+        let mut delay = DelayBuffer::new(3);
 
-        push_spikes(&[0, 1], &graph, &mut ring, 0);
+        push_spikes(&[0, 1], &graph, &mut delay, 0);
         // Both weights accumulate in slot 1 (delay 0 = next step): 3.0 + 4.0 = 7.0
-        assert!((ring[1].as_slice()[2] - 7.0).abs() < 1e-6);
+        assert!((delay.slot(1)[2] - 7.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_push_spikes_par_matches_sequential() {
+        // The parallel dispatcher must produce byte-identical ring buffers.
+        let from = vec![0u32, 1u32, 2u32];
+        let to = vec![3u32, 4u32, 5u32];
+        let w = vec![1.0f32, 2.0f32, 0.5f32];
+        let d = vec![0u8, 3u8, 7u8];
+        let graph = SparseGraph::from_triplets(6, &from, &to, &w, &d);
+
+        let mut seq = DelayBuffer::new(6);
+        push_spikes(&[0, 1, 2], &graph, &mut seq, 7);
+
+        let mut par = DelayBuffer::new(6);
+        push_spikes_par(&[0, 1, 2], &graph, &mut par, 7);
+
+        for slot in 0..MAX_DELAY_SLOTS {
+            for i in 0..6 {
+                assert_eq!(
+                    par.slot(slot)[i],
+                    seq.slot(slot)[i],
+                    "slot {slot}[{i}] mismatch"
+                );
+            }
+        }
     }
 
     #[cfg(feature = "rayon")]
@@ -287,17 +334,17 @@ mod tests {
         assert!(triples.contains(&(3, 10, 2.0)), "delay 3 → slot 10: {triples:?}");
 
         // Same result as the sequential push_spikes: scatter triples → compare.
-        let mut ring_par = vec![AlignedVec::new(4, 0.0); MAX_DELAY_SLOTS];
+        let mut par = DelayBuffer::new(4);
         for (post, slot, weight) in triples {
-            ring_par[slot].as_mut_slice()[post as usize] += weight;
+            par.add(slot, post as usize, weight);
         }
-        let mut ring_seq = vec![AlignedVec::new(4, 0.0); MAX_DELAY_SLOTS];
-        push_spikes(&[0, 1], &graph, &mut ring_seq, 7);
+        let mut seq = DelayBuffer::new(4);
+        push_spikes(&[0, 1], &graph, &mut seq, 7);
         for slot in 0..MAX_DELAY_SLOTS {
             for i in 0..4 {
                 assert_eq!(
-                    ring_par[slot].as_slice()[i],
-                    ring_seq[slot].as_slice()[i],
+                    par.slot(slot)[i],
+                    seq.slot(slot)[i],
                     "slot {slot}[{i}] mismatch"
                 );
             }

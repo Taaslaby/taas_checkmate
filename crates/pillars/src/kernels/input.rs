@@ -1,10 +1,15 @@
-//! # Input Encoding Microkernels — Poisson, BSA, TTFS
+//! # 📥 Input Encoding — Poisson, BSA, TTFS, Phase
 //!
-//! Converts analog signals into spike trains for SNN input encoding:
-//! - [`PoissonGenerator`] — rate-coded Poisson spike trains
-//! - [`bsa_encode`] — Bens Spiker Algorithm
-//! - [`phase_encode`] — encode value into T3 oscillator phase
-//! - [`TtfsEncoder`] — Time-To-First-Spike encoding
+//! Converts analog signals into spike trains for SNN input encoding.
+//!
+//! ## Encoder types
+//!
+//! | Encoder | Mechanism | Output | Use |
+//! |---------|----------|--------|-----|
+//! | [`PoissonGenerator`] | P(spike) = rate·dt, LCG RNG | Poisson spike train | Rate-coded input |
+//! | [`bsa_encode`] | `|signal − recon| > θ → emit + add kernel·sign(err)` | Spike train + reconstruction | Bens Spiker Algorithm |
+//! | [`phase_encode`] | `phase += signal·gain, spike if cos(phase) > θ` | Phase-dependent spikes | Temporal encoding |
+//! | [`TtfsEncoder`] | `delay = (1−value)·max_delay` | Single spike at t = delay | Time-to-First-Spike |
 
 use core::f32::consts::PI;
 

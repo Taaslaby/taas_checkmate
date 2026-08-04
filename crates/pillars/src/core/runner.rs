@@ -22,6 +22,81 @@ use wide::f32x8;
 use crate::zoo::Model;
 use crate::core::lane::SimdLane;
 use crate::core::context::{SimdContext, MAX_STATES};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+
+// Import I_SYN_CLAMP_RANGE from population module
+use super::population::I_SYN_CLAMP_RANGE;
+
+// ═══════════════════════════════════════════════════════════════
+//  SendablePtrs — Type-Safe Pointer Wrapper for Rayon
+// ═══════════════════════════════════════════════════════════════
+
+/// Wrapper for raw pointers encoded as usize to enable Send across rayon threads.
+///
+/// # Safety Contract
+/// The caller (run_neuron_par) guarantees that:
+/// 1. All pointers are valid for the entire parallel execution
+/// 2. No aliasing occurs (each thread accesses disjoint memory ranges)
+/// 3. The pointed-to memory outlives all parallel tasks
+///
+/// # Why usize?
+/// Raw pointers (*mut T, *const T) are !Send by default. Encoding as usize
+/// allows the closure to be Send, with the safety contract enforced by the
+/// caller (run_neuron_par ensures disjoint memory access per thread).
+#[derive(Copy, Clone)]
+struct SendablePtrs {
+    state: [usize; 6],
+    i_in: usize,
+    spikes: usize,
+    params: usize,
+}
+
+unsafe impl Send for SendablePtrs {}
+unsafe impl Sync for SendablePtrs {}
+
+impl SendablePtrs {
+    #[inline(always)]
+    unsafe fn new(
+        v: *mut f32, u: *mut f32, h: *mut f32,
+        r: *mut f32, s: *mut f32, t: *mut f32,
+        i_in: *const f32, spikes: *mut i32, params: *const f32,
+    ) -> Self {
+        Self {
+            state: [v as usize, u as usize, h as usize, r as usize, s as usize, t as usize],
+            i_in: i_in as usize,
+            spikes: spikes as usize,
+            params: params as usize,
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn state_ptrs(&self) -> [*mut f32; 6] {
+        [
+            self.state[0] as *mut f32,
+            self.state[1] as *mut f32,
+            self.state[2] as *mut f32,
+            self.state[3] as *mut f32,
+            self.state[4] as *mut f32,
+            self.state[5] as *mut f32,
+        ]
+    }
+
+    #[inline(always)]
+    unsafe fn i_in_ptr(&self) -> *const f32 {
+        self.i_in as *const f32
+    }
+
+    #[inline(always)]
+    unsafe fn spikes_ptr(&self) -> *mut i32 {
+        self.spikes as *mut i32
+    }
+
+    #[inline(always)]
+    unsafe fn params_ptr(&self) -> *const f32 {
+        self.params as *const f32
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  State load/save macros — loop up to M::N_STATE (no hardcoded 6)
@@ -164,8 +239,8 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
         let i_syn = (i_in.add(off) as *const f32x8)
             .read_unaligned()
-            .max(f32x8::splat(-100.0))
-            .min(f32x8::splat(100.0));
+            .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
+            .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
 
         let i_pre_val = if i_pre_in.is_null() { f32x8::zero() }
             else { (i_pre_in.add(off) as *const f32x8).read_unaligned() };
@@ -174,9 +249,15 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
         let mut ctx = SimdContext::<f32x8> {
             state,
-            params_ptr: params, n, off,
-            i_syn, i_pre: i_pre_val, i_post: i_post_val,
-            dt_val: dt, spike_mask: f32x8::zero(),
+            params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+            n,
+            off,
+            i_syn,
+            i_pre: i_pre_val,
+            i_post: i_post_val,
+            dt_val: dt,
+            spike_mask: f32x8::zero(),
+            _marker: PhantomData,
         };
 
         M::step(&mut ctx);
@@ -197,7 +278,7 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
     if n8 < n {
         for i in n8..n {
-            let ii = (*i_in.add(i)).clamp(-100.0, 100.0);
+            let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
             let i_pre = if i_pre_in.is_null() { 0.0 } else { *i_pre_in.add(i) };
             let i_post = if i_post_in.is_null() { 0.0 } else { *i_post_in.add(i) };
 
@@ -208,9 +289,15 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
             let mut ctx = SimdContext::<f32> {
                 state,
-                params_ptr: params, n, off: i,
-                i_syn: ii, i_pre, i_post,
-                dt_val: dt, spike_mask: 0.0,
+                params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+                n,
+                off: i,
+                i_syn: ii,
+                i_pre,
+                i_post,
+                dt_val: dt,
+                spike_mask: 0.0,
+                _marker: PhantomData,
             };
 
             M::step(&mut ctx);
@@ -245,17 +332,15 @@ pub unsafe fn run_neuron_par<M: Model>(
     let cs = chunk_size.max(64) & !7;
     let nc = n.div_ceil(cs);
 
-    let ptrs = [v as usize, u as usize, h as usize, r as usize,
-                s as usize, t as usize, i_in as usize, spikes as usize, params as usize];
+    let ptrs = SendablePtrs::new(v, u, h, r, s, t, i_in, spikes, params);
 
     (0..nc).into_par_iter().for_each(move |ci| {
         let off = ci * cs;
         let len = (n - off).min(cs);
-        let state_ptrs = [ptrs[0] as *mut f32, ptrs[1] as *mut f32, ptrs[2] as *mut f32,
-                          ptrs[3] as *mut f32, ptrs[4] as *mut f32, ptrs[5] as *mut f32];
-        let i_in_ptr   = ptrs[6] as *const f32;
-        let spikes_ptr = ptrs[7] as *mut i32;
-        let params_ptr = ptrs[8] as *const f32;
+        let state_ptrs = unsafe { ptrs.state_ptrs() };
+        let i_in_ptr = unsafe { ptrs.i_in_ptr() };
+        let spikes_ptr = unsafe { ptrs.spikes_ptr() };
+        let params_ptr = unsafe { ptrs.params_ptr() };
 
         let n8 = len & !7;
         let dt = *params_ptr;
@@ -268,13 +353,20 @@ pub unsafe fn run_neuron_par<M: Model>(
             }
 
             let i_syn = (i_in_ptr.add(total_off) as *const f32x8).read_unaligned()
-                .max(f32x8::splat(-100.0)).min(f32x8::splat(100.0));
+                .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
+                .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
 
             let mut ctx = SimdContext::<f32x8> {
                 state,
-                params_ptr, n, off: total_off,
-                i_syn, i_pre: f32x8::zero(), i_post: f32x8::zero(),
-                dt_val: dt, spike_mask: f32x8::zero(),
+                params_ptr: NonNull::new(params_ptr as *mut f32).expect("params_ptr must be non-null"),
+                n,
+                off: total_off,
+                i_syn,
+                i_pre: f32x8::zero(),
+                i_post: f32x8::zero(),
+                dt_val: dt,
+                spike_mask: f32x8::zero(),
+                _marker: PhantomData,
             };
 
             M::step(&mut ctx);
@@ -296,16 +388,22 @@ pub unsafe fn run_neuron_par<M: Model>(
         if n8 < len {
             for j in n8..len {
                 let idx = off + j;
-                let ii = (*i_in_ptr.add(idx)).clamp(-100.0, 100.0);
+                let ii = (*i_in_ptr.add(idx)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
                 let mut state = [0.0f32; MAX_STATES];
                 for k in 0..M::N_STATE {
                     state[k] = *state_ptrs[k].add(idx);
                 }
                 let mut ctx = SimdContext::<f32> {
                     state,
-                    params_ptr, n, off: idx,
-                    i_syn: ii, i_pre: 0.0, i_post: 0.0,
-                    dt_val: dt, spike_mask: 0.0,
+                    params_ptr: NonNull::new(params_ptr as *mut f32).expect("params_ptr must be non-null"),
+                    n,
+                    off: idx,
+                    i_syn: ii,
+                    i_pre: 0.0,
+                    i_post: 0.0,
+                    dt_val: dt,
+                    spike_mask: 0.0,
+                    _marker: PhantomData,
                 };
                 M::step(&mut ctx);
                 for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {

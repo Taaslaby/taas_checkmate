@@ -1,8 +1,23 @@
-//! Shared SIMD load/store utilities for neuron models.
+//! # 🔧 SIMD Plumbing — load8 / store8 Raw Access
 //!
-//! Provides `load8`/`store8` helpers used by standalone SIMD functions
-//! (sensors, synapses) that need raw `f32x8` pointer access without
-//! going through the `Model` trait.
+//! Low-level `f32x8` load/store helpers. Used by standalone SIMD kernels
+//! (sensors, synapses) that need raw pointer access without going through
+//! the `Model` trait or `NeuralPopulation`.
+//!
+//! ## Functions
+//!
+//! | Helper | Signature | Notes |
+//! |--------|----------|-------|
+//! | [`load8`] | `(ptr, off) → f32x8` | ЗD развёрнутый load — безопасен для unaligned (scalar штучно) |
+//! | [`store8`] | `(ptr, off, val) → ()` | `write_unaligned` — одна инструкция store, без spilling в стек |
+//! | [`load8_i32`] | `(ptr, off) → f32x8` | i32→f32 конверсия на лету (STDP, dopamine) |
+//!
+//! ## Why write_unaligned?
+//!
+//! Старая версия `store8` вызывала `to_array()` → спиливала AVX2-регистр в
+//! стек → затем писала 8 float по одному — полностью убивая SIMD-пропускную
+//! способность. Исправлено в версии с `write_unaligned`: одна инструкция
+//! `vmovups` на AVX2, даже для невыровненных адресов (пенальти ~10%).
 
 use wide::f32x8;
 

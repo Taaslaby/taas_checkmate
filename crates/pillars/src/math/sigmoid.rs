@@ -1,18 +1,21 @@
-//! Sigmoid — voltage-dependent gating variable.
+//! # 📈 Sigmoid — Voltage-Dependent Gating Variable
 //!
-//! `1 / (1 + exp(-(V - V_half) / k))`
+//! ```text
+//!          1
+//!  s(V) = ────────────────────   (m_∞, h_∞, n_∞, w_∞ in conductance models)
+//!         1 + exp(-(V - V_half) / k)
+//! ```
 //!
-//! Standard form for m_∞, h_∞, n_∞ in conductance-based models.
-//!
-//! ## Two canonical flavours (single source of truth for the formula)
+//! The **single source of truth** for the sigmoid formula, served in two
+//! canonical flavours:
 //!
 //! | Variant | Input | exp engine | Used by |
 //! |---------|-------|-----------|---------|
-//! | [`sigmoid`] / [`sigmoid_s`] | lane (`S: SimdLane`) | [`SimdLane::exp`] (точный; под фичей `fast-exp` — полином) | `ops::gate::sigmoid_gate`, zoo-модели |
+//! | [`sigmoid`] / [`sigmoid_s`] | lane (`S: SimdLane`) | [`SimdLane::exp`] (exact; polynomial under the `fast-exp` feature) | `ops::gate::sigmoid_gate`, zoo-модели |
 //! | [`sigmoid_poly_simd`] / [`sigmoid_poly_s`] | flat `f32x8` / `f32` | [`fast_exp_poly_simd`] / [`fast_exp`] — **bit-identical** | batch-микроядра (`kernels::signal`) |
 //!
-//! Полиномиальная пара нужна для batch-кернелей, где SIMD-лейн и скалярный
-//! хвост обязаны давать побитово идентичный результат.
+//! The polynomial pair exists for batch microkernels, where the SIMD lane
+//! and the scalar tail must produce **bit-identical** results.
 
 use wide::f32x8;
 use crate::core::lane::SimdLane;

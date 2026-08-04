@@ -1,28 +1,18 @@
-//! # Adaptation — Spike-Frequency Adaptation (M-type, AHP)
+//! # 🔧 Adaptation — Spike-Frequency Adaptation Primitives
 //!
-//! ## `integrate_u`
-//! ```text
-//! u' = u + dt · (a · (b · v - u)) · inv_tau
-//! ```
-//! Forward Euler for adaptation variable. Used in Izhikevich, HAAP, SAW.
+//! Per-lane (SIMD-safe) adaptation functions for spike-frequency
+//! adaptation (SFA), after-hyperpolarization (AHP), threshold
+//! adaptation, and AdEx exponential.
 //!
-//! ## `integrate_ahp`
-//! ```text
-//! g' = g + dt · (-g) · inv_tau    (unbounded — no .min(1.0)!)
-//! ```
-//! Used in GLIF3, GLIF4 AHP conductance.
+//! ## Operations
 //!
-//! ## `adex_exp`
-//! ```text
-//! exp_term = delta_t · exp((v - v_thresh) · inv_delta_t)
-//! ```
-//! AdEx exponential activation. Clamps exp arg to [-10, 10] for numerical safety.
-//!
-//! ## `ahp_current`
-//! ```text
-//! I_AHP = g · (V - E_AHP)
-//! ```
-//! Combined AHP current from conductance and voltage.
+//! | Function | Equation | Use |
+//! |----------|---------|-----|
+//! | [`integrate_u`] | `u ← u + dt·a·(b·v − u)` | Izhikevich adaptation variable |
+//! | [`integrate_ahp`] | `g ← g + dt·(−g)·τ⁻¹` | AHP conductance decay (GLIF3/4) |
+//! | [`integrate_theta`] | `θ ← θ + dt·(−θ)·τ⁻¹` | Threshold adaptation (GLIF4) |
+//! | [`adex_exp`] | `δ·exp(clamp((v−vₜ)·δ⁻¹, [−10,10]))` | AdEx exponential term |
+//! | [`ahp_current`] | `I = g·(V − E_ahp)` | AHP current from conductance |
 
 use crate::core::lane::SimdLane;
 

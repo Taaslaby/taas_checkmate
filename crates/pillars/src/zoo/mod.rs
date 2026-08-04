@@ -60,7 +60,7 @@ pub trait Model {
     /// [`NeuralPopulation::step`](crate::core::NeuralPopulation::step).
     /// Without forced inlining LLVM's heuristics frequently emit `step` as a
     /// shared out-of-line function once a model has several call sites, which
-    /// materializes the ~672-byte [`SimdContext`](crate::core::SimdContext) on
+    /// materializes the ~672-byte [`SimdContext`] on
     /// the stack every chunk and costs **~2.5-3x throughput** (measured:
     /// LIF 356 ms → 125 ms for 138k×1000).
     ///

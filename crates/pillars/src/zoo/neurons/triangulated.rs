@@ -33,10 +33,15 @@
 //!   coarse approximation, spike count error 2-100×
 //! - **Morris-Lecar** (2nd-order: V, w): unknown, needs calibration
 
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 use pillars_macros::NeuronModel;
+
+
 use crate::core::lane::SimdLane;
 use crate::core::compute::{StepContext, ComputeNeuron};
 use crate::ops::triangulated::TriangLUT;
+#[cfg(not(test))]
 use std::sync::OnceLock;
 
 // The LUT is a process-wide singleton in production: `set_lut` once, then step
@@ -312,9 +317,15 @@ mod tests {
             state[1] = h;
             let ctx = SimdContext::<f32> {
                 state,
-                params_ptr: p.as_ptr(), n: 8, off: 0,
-                i_syn: 30.0, i_pre: 0.0, i_post: 0.0,
-                dt_val: 0.5, spike_mask: 0.0,
+                params_ptr: NonNull::new(p.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                n: 8,
+                off: 0,
+                i_syn: 30.0,
+                i_pre: 0.0,
+                i_post: 0.0,
+                dt_val: 0.5,
+                spike_mask: 0.0,
+                _marker: PhantomData,
             };
             unsafe {
                 let mut state = <TriangulatedModel as ComputeNeuron>::State::<f32>::from_ctx(&ctx);

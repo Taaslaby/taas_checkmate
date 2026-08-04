@@ -14,8 +14,12 @@
 
 use super::context::SimdContext;
 use super::lane::SimdLane;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-impl<S: SimdLane> SimdContext<S> {
+
+
+impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// Forward Euler: `v += (v_rest - v + I_syn) · inv_tau · dt`
     ///
     /// # Params
@@ -164,10 +168,11 @@ mod tests {
     use wide::f32x8;
 
     /// Create a minimal SimdContext with 8 neurons, 6 params (dt, inv_tau, v_rest, v_thresh, v_reset, tau_ref)
-    fn make_context<S: SimdLane>(off: usize, params: &[f32], n: usize) -> SimdContext<S> {
+    fn make_context<S: SimdLane>(off: usize, params: &[f32], n: usize) -> SimdContext<'_, S> {
+
         SimdContext {
             state: [S::zero(); MAX_STATES],
-            params_ptr: params.as_ptr(),
+            params_ptr: NonNull::new(params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
             n,
             off,
             i_syn: S::zero(),
@@ -175,6 +180,7 @@ mod tests {
             i_post: S::zero(),
             dt_val: params[0],
             spike_mask: S::zero(),
+            _marker: PhantomData,
         }
     }
 

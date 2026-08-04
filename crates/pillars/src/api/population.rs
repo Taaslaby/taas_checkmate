@@ -2,7 +2,7 @@
 //!
 //! === BOUNDARY: Safe Rust ===
 //! The [`Population`] trait hides the concrete model type (`LIF`, `HH`, …)
-//! behind an object-safe interface so a single [`Network`] can drive
+//! behind an object-safe interface so a single [`Network`](crate::api::Network) can drive
 //! heterogeneous populations through one `Vec<Box<dyn Population>>`.
 //!
 //! [`PopulationId`] is the opaque handle the network hands out when a
@@ -11,7 +11,7 @@
 //! ## Why separate from `Network`?
 //!
 //! Keeps the type-erasure contract (this file) independent of the
-//! orchestration concerns (routing, delays, threads — see [`Network`]):
+//! orchestration concerns (routing, delays, threads — see [`Network`](crate::api::Network)):
 //! both sides evolve without touching each other.
 
 use std::any::Any;
@@ -19,13 +19,13 @@ use std::any::Any;
 use crate::api::NeuralPopulation;
 use crate::zoo::Model;
 
-/// Opaque handle returned by [`Network::add_population`].
+/// Opaque handle returned by [`Network::add_population`](crate::api::Network::add_population).
 pub type PopulationId = usize;
 
 /// Abstract interface for a neuron population.
 ///
 /// Enables heterogeneous populations (LIF + HH + Izhikevich) in one
-/// [`Network`].
+/// [`Network`](crate::api::Network).
 pub trait Population: 'static {
     /// Advance one time step.
     ///
@@ -42,11 +42,21 @@ pub trait Population: 'static {
     /// Read-only access to a state column.
     fn state_slice(&self, col: usize) -> &[f32];
 
-    /// Erase to `dyn Any` for safe typed downcasting.
-    ///
-    /// Required (not defaulted) so the trait stays object-safe and callable
-    /// through `&mut dyn Population`. Implementors must erase `self`; without
-    /// it, [`Network::pop_typed_mut`] silently returns `None`.
+    /// Read-only access to a parameter column.
+    fn param_slice(&self, col: usize) -> &[f32];
+
+    /// Mutable access to a parameter column.
+    fn param_slice_mut(&mut self, col: usize) -> &mut [f32];
+
+    /// Fill a parameter column with a value (all neurons).
+    fn fill_param(&mut self, col: usize, value: f32);
+
+    /// Fill a state column with a value (all neurons).
+    fn fill_state(&mut self, col: usize, value: f32);/// Erase to `dyn Any` for safe typed downcasting.
+///
+/// Required (not defaulted) so the trait stays object-safe and callable
+/// through `&mut dyn Population`. Implementors must erase `self`; without
+/// it, [`Network::pop_typed_mut`](crate::api::Network::pop_typed_mut) silently returns `None`.
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -64,6 +74,26 @@ impl<M: Model + 'static> Population for NeuralPopulation<M> {
     #[inline(always)]
     fn state_slice(&self, col: usize) -> &[f32] {
         self.state_slice(col)
+    }
+
+    #[inline(always)]
+    fn param_slice(&self, col: usize) -> &[f32] {
+        self.param_slice(col)
+    }
+
+    #[inline(always)]
+    fn param_slice_mut(&mut self, col: usize) -> &mut [f32] {
+        self.param_slice_mut(col)
+    }
+
+    #[inline(always)]
+    fn fill_param(&mut self, col: usize, value: f32) {
+        self.fill_param(col, value)
+    }
+
+    #[inline(always)]
+    fn fill_state(&mut self, col: usize, value: f32) {
+        self.fill_state(col, value)
     }
 
     #[inline(always)]

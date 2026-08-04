@@ -1,11 +1,19 @@
-//! Fast exponential — scalar via polynomial, SIMD via hardware `vexp` instruction.
+//! # ⚡ Fast Exponential — exp() Without the Library Cost
 //!
-//! Scalar uses the same algorithm as NEURON's `exp(x)` approximation
-//! (range reduction + polynomial, relative error < 0.001).
+//! The single most-called transcendental in neural simulation (gate
+//! kinetics: `m_∞`, `h_∞`, `n_∞`, `w_∞`). Two engines, one contract:
 //!
-//! SIMD delegates to `wide::f32x8::exp()` which compiles to a single
-//! `vexp2ps` (AVX-512) or polynomial fallback (AVX2). This is more
-//! accurate (≈ 1 ULP) and often faster than a hand-rolled polynomial.
+//! | Engine | Function | Implementation | Accuracy |
+//! |--------|----------|----------------|----------|
+//! | Scalar | [`fast_exp`] | range reduction + polynomial (same algorithm as NEURON's `exp` approximation) | rel. error < 0.001 |
+//! | SIMD | [`fast_exp_poly_simd`] | **bit-identical** scalar/SIMD polynomial pair | rel. error < 0.001 |
+//! | SIMD (exact) | [`SimdLane::exp`](crate::core::lane::SimdLane::exp) | `wide::f32x8::exp()` → single `vexp2ps` (AVX-512) or fallback (AVX2) | ≈ 1 ULP |
+//!
+//! The exact SIMD path is often **faster** than a hand-rolled polynomial
+//! (one instruction, no branches); the polynomial pair exists for batch
+//! microkernels that require scalar and SIMD tails to agree **bit-for-bit**.
+//!
+//! Toggle accuracy vs speed globally with the `fast-exp` feature.
 
 use wide::f32x8;
 

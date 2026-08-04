@@ -53,6 +53,12 @@ impl DelayBuffer {
         self.n_neurons
     }
 
+    /// Returns `true` if the buffer holds no neurons.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.n_neurons == 0
+    }
+
     /// Read the current arriving at each neuron from slot `slot`.
     ///
     /// Copies into `out` (length must be >= [`DelayBuffer::len`]).

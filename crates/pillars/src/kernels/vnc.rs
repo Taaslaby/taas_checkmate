@@ -1,9 +1,25 @@
-//! # VNC Motor-Neuron → Actuator Mapping
+//! # 🦾 VNC Motor Pipeline — MN Firing → Actuator Torque
 //!
-//! Rust-accelerated port of the main VNC bottleneck (was ~55% of simulation
-//! time in Python): maps motor-neuron firing rates to actuator drives using
-//! flat arrays instead of dict lookups, with balance gain, contact boost,
-//! L/R symmetrization and clamping.
+//! The final stage of the motor control pipeline: maps motor-neuron (MN)
+//! firing rates to actuator drive signals. Was ~55% of Python simulation
+//! time for the VNC walker — ported to Rust with flat arrays.
+//!
+//! ## Pipeline
+//!
+//! ```text
+//! MN rates → scale·clamp(rate·bg + cb) → accumulate → normalize → L/R symmetrize → apply gain
+//!                                    ↑                        ↑
+//!                              balance_gain  per-leg     mirror_left/right
+//!                              contact_boost              actuator pairs
+//! ```
+//!
+//! ## Key design
+//!
+//! - **Flat arrays** — no dict lookups, no dynamic dispatch
+//! - **Balance gain per leg** — `bg[leg]` scales rate before clamp
+//! - **Contact boost per leg** — `cb[leg]` added pre-clamp (ground contact reflex)
+//! - **L/R symmetrization** — averages mirrored actuator pairs to prevent steering drift
+//! - **Output clamp [-1, 1]** — safe PWM range for servo controllers
 
 /// VNC MN→actuator step: computes actuator drive from MN rates.
 ///

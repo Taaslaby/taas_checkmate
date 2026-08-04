@@ -1,8 +1,20 @@
-//! # Measurement Microkernels
+//! # 📏 Measurement Microkernels — Coherence, Interference, Entropy
 //!
-//! `f32x8` kernels for network-level measurement: pairwise interference,
-//! phase coherence, band energy, winding numbers, lazy sin/cos and spike
-//! entropy.
+//! `f32x8` kernels for network-level measurement. All kernels operate on
+//! flat `&[f32]` slices with SIMD inner loops + scalar tails.
+//!
+//! ## Functions
+//!
+//! | Kernel | Formula | Use |
+//! |--------|---------|-----|
+//! | [`interference`] | `(1+cos(φₐ−φᵦ))/2` | Pairwise phase similarity |
+//! | [`interference_mean`] | `(1+mean(cos(φₐ−φᵦ)))/2` | Global phase coherence |
+//! | [`phase_coherence`] | `|Σ a·e^{iφ}| / Σ a` | Kuramoto order parameter R |
+//! | [`band_energy`] | `Σ a·[|ω| ∈ band]` | Spectral decomposition |
+//! | [`winding_matrix`] | `atan2(sinΔφ, cosΔφ)/π` | Normalized phase winding |
+//! | [`lazy_sincos_update`] | sin/cos recompute on change > ε | Cheap envelope tracking |
+//! | [`spike_entropy`] | `−Σ p·log₂(p)` | Firing pattern diversity |
+//! | [`batch_coherence_sweep`] | Cosine similarity of complex mean-field | Pairwise area coherence |
 
 use wide::f32x8;
 use wide::CmpGt;

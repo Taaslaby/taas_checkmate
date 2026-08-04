@@ -11,6 +11,10 @@ use pillars_macros::NeuronModel;
 use crate::core::lane::SimdLane;
 use crate::core::compute::{StepContext, ComputeNeuron};
 use crate::core::context::SimdContext;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+
+
 
 // ═══════════════════════════════════════════════════════════════
 //  ParamIdx Enum (for manual fill_param / slice access)
@@ -189,10 +193,15 @@ mod tests {
         type S = wide::f32x8;
         let mut ctx = SimdContext::<S> {
             state: [S::splat(0.0); MAX_STATES],
-            params_ptr: std::ptr::null(),
-            n: 8, off: 0,
-            i_syn: S::splat(0.0), i_pre: S::splat(0.0), i_post: S::splat(0.0),
-            dt_val: 1.0, spike_mask: S::splat(0.0),
+            params_ptr: NonNull::dangling(),
+            n: 8,
+            off: 0,
+            i_syn: S::splat(0.0),
+            i_pre: S::splat(0.0),
+            i_post: S::splat(0.0),
+            dt_val: 1.0,
+            spike_mask: S::splat(0.0),
+            _marker: PhantomData,
         };
         // s(2)=K+ ext, s(3)=Ca²⁺ — остальные каналы нулевые.
         ctx.state[2] = S::splat(2.0);

@@ -141,12 +141,7 @@ impl PyLIFPopulation {
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.param_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.param_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())
@@ -160,12 +155,7 @@ impl PyLIFPopulation {
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.state_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.state_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())
@@ -275,12 +265,7 @@ impl PyIzhikevichPopulation {
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.param_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.param_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())
@@ -289,12 +274,7 @@ impl PyIzhikevichPopulation {
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.state_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.state_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())
@@ -417,12 +397,7 @@ impl PyHHPopulation {
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.param_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.param_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())
@@ -431,12 +406,7 @@ impl PyHHPopulation {
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let ro = array.readonly();
         let src = ro.as_slice()?;
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.inner.state_slice_mut(col),
-                self.inner.len(),
-            )
-        };
+        let dest = self.inner.state_slice_mut(col);
         let n = dest.len().min(src.len());
         dest[..n].copy_from_slice(&src[..n]);
         Ok(())

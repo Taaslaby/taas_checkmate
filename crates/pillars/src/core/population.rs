@@ -28,6 +28,9 @@
 //! - `i_in` → ctx.i_syn (post-synaptic current, clamped to ±100)
 //! - `i_pre` / `i_post` → ctx.i_pre / ctx.i_post (for STDP, optional)
 
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+
 use crate::core::buf::AlignedVec;
 use crate::zoo::Model;
 use crate::core::lane::SimdLane;
@@ -36,6 +39,25 @@ use crate::core::arch::SimdType;
 
 // Import SIMD state load/save macros from runner
 use crate::{load_state_scalar, save_state_scalar, load_state_simd, save_state_simd};
+
+// ═══════════════════════════════════════════════════════════════
+//  Input Current Clamping
+// ═══════════════════════════════════════════════════════════════
+
+/// Default range for input current clamping (nA or pA depending on model).
+///
+/// **Why clamp?**
+/// - Prevents numerical instability from extreme input values
+/// - Protects against integration errors in stiff ODEs
+/// - Typical biological range: -100 to +100 pA for cortical neurons
+///
+/// **Override:** To disable clamping or use custom range, modify the
+/// `.clamp()` calls in `step_scalar()` and `step_simd()` methods.
+///
+/// **Note:** This is a **silent operation** — values outside this range
+/// are clamped without warning. For models requiring larger currents
+/// (e.g., HH with 500 pA), consider removing the clamp or adjusting the range.
+pub const I_SYN_CLAMP_RANGE: (f32, f32) = (-100.0, 100.0);
 
 // ═══════════════════════════════════════════════════════════════
 //  NeuralPopulation — High-Level Safe API
@@ -118,21 +140,33 @@ impl<M: Model> NeuralPopulation<M> {
         &self.state.as_slice()[start..start + self.n]
     }
 
-    /// Mutable pointer to a state column.
+    /// Mutable access to a state column (safe slice).
+    pub fn state_slice_mut(&mut self, col: usize) -> &mut [f32] {
+        let start = col * self.capacity;
+        &mut self.state.as_mut_slice()[start..start + self.n]
+    }
+
+    /// Mutable access to a param column (safe slice).
+    pub fn param_slice_mut(&mut self, col: usize) -> &mut [f32] {
+        let start = col * self.capacity;
+        &mut self.params.as_mut_slice()[start..start + self.n]
+    }
+
+    /// Unsafe mutable pointer to a state column (for internal use).
     ///
     /// # Safety
     /// `col` must be < `M::N_STATE`. Caller must ensure proper alignment
     /// and that writes don't overflow into adjacent columns (stride = capacity).
-    pub unsafe fn state_slice_mut(&mut self, col: usize) -> *mut f32 {
+    pub unsafe fn state_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.state.as_mut_ptr().add(col * self.capacity)
     }
 
-    /// Mutable pointer to a param column.
+    /// Unsafe mutable pointer to a param column (for internal use).
     ///
     /// # Safety
     /// `col` must be < `M::N_PARAMS`. Caller must ensure proper alignment
     /// and that writes don't overflow into adjacent columns (stride = capacity).
-    pub unsafe fn param_slice_mut(&mut self, col: usize) -> *mut f32 {
+    pub unsafe fn param_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.params.as_mut_ptr().add(col * self.capacity)
     }
 
@@ -161,7 +195,7 @@ impl<M: Model> NeuralPopulation<M> {
         let dt = unsafe { *self.params.as_ptr() };
 
         for i in 0..self.n {
-            let ii = i_in[i].clamp(-100.0, 100.0);
+            let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
             let sp = self.state.as_ptr();
             let state = load_state_scalar!(sp, cap, i);
 
@@ -170,10 +204,15 @@ impl<M: Model> NeuralPopulation<M> {
 
             let mut ctx = SimdContext::<f32> {
                 state,
-                params_ptr: self.params.as_ptr(),
-                n: cap, off: i,
-                i_syn: ii, i_pre: pre, i_post: post,
-                dt_val: dt, spike_mask: 0.0,
+                params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                n: cap,
+                off: i,
+                i_syn: ii,
+                i_pre: pre,
+                i_post: post,
+                dt_val: dt,
+                spike_mask: 0.0,
+                _marker: PhantomData,
             };
 
             M::step(&mut ctx);
@@ -194,7 +233,8 @@ impl<M: Model> NeuralPopulation<M> {
             let state = load_state_simd!(sp, cap, off, SimdType);
 
             let i_syn = (i_in.as_ptr().add(off) as *const SimdType).read_unaligned()
-                .max(SimdType::splat(-100.0)).min(SimdType::splat(100.0));
+                .max(SimdType::splat(I_SYN_CLAMP_RANGE.0))
+                .min(SimdType::splat(I_SYN_CLAMP_RANGE.1));
 
             let i_pre = self.pre_bus.as_ref().map_or(SimdType::splat(0.0), |b|
                 (b.as_ptr().add(off) as *const SimdType).read_unaligned());
@@ -203,10 +243,15 @@ impl<M: Model> NeuralPopulation<M> {
 
             let mut ctx = SimdContext::<SimdType> {
                 state,
-                params_ptr: self.params.as_ptr(),
-                n: cap, off,
-                i_syn, i_pre, i_post,
-                dt_val: dt, spike_mask: SimdType::splat(0.0),
+                params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                n: cap,
+                off,
+                i_syn,
+                i_pre,
+                i_post,
+                dt_val: dt,
+                spike_mask: SimdType::splat(0.0),
+                _marker: PhantomData,
             };
 
             M::step(&mut ctx);
@@ -221,7 +266,7 @@ impl<M: Model> NeuralPopulation<M> {
         // Scalar tail (unpadded neurons, n8 < self.n)
         if n8 < self.n {
             for i in n8..self.n {
-                let ii = i_in[i].clamp(-100.0, 100.0);
+                let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
                 let sp = self.state.as_ptr();
                 let state = load_state_scalar!(sp, cap, i);
 
@@ -230,10 +275,15 @@ impl<M: Model> NeuralPopulation<M> {
 
                 let mut ctx = SimdContext::<f32> {
                     state,
-                    params_ptr: self.params.as_ptr(),
-                    n: cap, off: i,
-                    i_syn: ii, i_pre: pre, i_post: post,
-                    dt_val: dt, spike_mask: 0.0,
+                    params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                    n: cap,
+                    off: i,
+                    i_syn: ii,
+                    i_pre: pre,
+                    i_post: post,
+                    dt_val: dt,
+                    spike_mask: 0.0,
+                    _marker: PhantomData,
                 };
 
                 M::step(&mut ctx);

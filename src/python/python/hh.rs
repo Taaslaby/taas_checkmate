@@ -132,11 +132,9 @@ impl PyHhLut {
                 slice.len()
             )));
         }
-        unsafe {
-            let p = self.pop.param_slice_mut(HHParamIdx::G_Leak.into());
-            for i in 0..self.n {
-                *p.add(i) = slice[i];
-            }
+        let p = self.pop.param_slice_mut(HHParamIdx::G_Leak.into());
+        for i in 0..self.n {
+            p[i] = slice[i];
         }
         Ok(())
     }
@@ -160,11 +158,9 @@ impl PyHhLut {
                 slice.len()
             )));
         }
-        unsafe {
-            let p = self.pop.param_slice_mut(HHParamIdx::E_Leak.into());
-            for i in 0..self.n {
-                *p.add(i) = slice[i];
-            }
+        let p = self.pop.param_slice_mut(HHParamIdx::E_Leak.into());
+        for i in 0..self.n {
+            p[i] = slice[i];
         }
         Ok(())
     }
@@ -206,11 +202,9 @@ impl PyHhLut {
             }
         } else if slice.len() == self.n_channels * self.n {
             for (ch_i, ch) in chans.iter().enumerate().take(self.n_channels) {
-                unsafe {
-                    let p = self.pop.param_slice_mut((*ch).into());
-                    for ni in 0..self.n {
-                        *p.add(ni) = slice[ch_i * self.n + ni];
-                    }
+                let p = self.pop.param_slice_mut((*ch).into());
+                for ni in 0..self.n {
+                    p[ni] = slice[ch_i * self.n + ni];
                 }
             }
         } else {
@@ -335,11 +329,9 @@ impl PyHhLut {
                 slice.len()
             )));
         }
-        unsafe {
-            let p = self.pop.state_slice_mut(0);
-            for i in 0..self.n {
-                *p.add(i) = slice[i];
-            }
+        let p = self.pop.state_slice_mut(0);
+        for i in 0..self.n {
+            p[i] = slice[i];
         }
         Ok(())
     }
