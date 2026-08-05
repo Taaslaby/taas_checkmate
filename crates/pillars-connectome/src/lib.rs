@@ -179,6 +179,85 @@ mod tests {
         );
     }
 
+    /// Parity vs the legacy `taas_connectome::sim::sim_lif` on the same chain
+    /// 0→1→2. Both run the SAME pillars LIFModel (the legacy `safe::lif_step`
+    /// is already a pillars bridge), so the spike counts must agree closely;
+    /// the only difference is propagation (legacy queue vs Network ring buffer).
+    #[test]
+    fn parity_with_legacy_sim_lif() {
+        use pillars::zoo::{LIFModelParamIdx as P, LIFModelStateIdx as S};
+
+        // ── Legacy side: i32 CSR + nt_types (+1 excitatory per neuron). ──
+        let conn = taas_connectome::ConnectomeData::new(
+            vec![0i32, 1, 2, 2],
+            vec![1i32, 2],
+            vec![50.0, 50.0],
+            vec![1.0, 1.0, 1.0],
+            vec![],
+        );
+        // Legacy params (LifParams::new builds the padded 5-col SoA packet).
+        let params = taas_connectome::sim::LifParams::new(
+            &[1.0, 1.0, 1.0],       // tau_m
+            &[-70.0, -70.0, -70.0], // v_rest
+            &[-54.0, -54.0, -54.0], // v_thresh
+            &[-70.0, -70.0, -70.0], // v_reset
+            0.5,                    // dt_ms
+            2.0,                    // tau_ref
+        );
+        let mut state =
+            taas_connectome::sim::BrainState::new(3, taas_connectome::sim::NeuronModel::LIF);
+        state.v = vec![-70.0; state.v.len()];
+
+        let n_steps = 200;
+        let legacy_spikes =
+            taas_connectome::sim::sim_lif(&conn, &mut state, &params, &[50.0, 0.0, 0.0], n_steps, 1.0);
+        let mut legacy_counts = [0i32; 3];
+        for step in 0..n_steps {
+            for i in 0..3 {
+                legacy_counts[i] += legacy_spikes[step * 3 + i];
+            }
+        }
+
+        // ── New pillars-native Brain, same graph + same LIF params. ──
+        let new_conn = ConnectomeData::from_csr(
+            vec![0u32, 1, 2, 2],
+            vec![1u32, 2],
+            vec![50.0, 50.0],
+            vec![0u8, 0],
+            vec![0u8, 0],
+        );
+        let mut brain = Brain::<LIFModel>::from_connectome(&new_conn);
+        brain.configure(|p| {
+            p.fill_param(P::dt.into(), 0.5);
+            p.fill_param(P::inv_tau_m.into(), 1.0); // 1/tau_m
+            p.fill_param(P::v_rest.into(), -70.0);
+            p.fill_param(P::v_thresh.into(), -54.0);
+            p.fill_param(P::v_reset.into(), -70.0);
+            p.fill_param(P::tau_ref.into(), 2.0);
+            p.fill_state(S::v.into(), -70.0);
+        });
+        let mut new_counts = [0i32; 3];
+        for _ in 0..n_steps {
+            brain.inject(&[0], &[50.0]);
+            brain.step();
+            let s = brain.spikes();
+            for i in 0..3 {
+                new_counts[i] += s[i];
+            }
+        }
+
+        eprintln!("legacy={legacy_counts:?} new={new_counts:?}");
+        for i in 0..3 {
+            let diff = (new_counts[i] - legacy_counts[i]).abs();
+            assert!(
+                diff <= 3,
+                "neuron {i}: new={} legacy={}",
+                new_counts[i],
+                legacy_counts[i]
+            );
+        }
+    }
+
     /// Empty connectome (no synapses) — Brain must still build and step.
     #[test]
     fn empty_connectome_steps() {

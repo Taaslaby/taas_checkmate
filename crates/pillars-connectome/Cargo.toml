@@ -11,3 +11,4 @@ pillars = { path = "../pillars" }
 
 [dev-dependencies]
 rand = "0.8"
+taas-connectome = { path = "../connectome" }
