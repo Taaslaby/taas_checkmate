@@ -1,19 +1,37 @@
-//! PyO3 bindings for `taas-checkmate` — zero-copy numpy bindings.
+//! # PyO3 bindings for `taas-checkmate` — zero-copy numpy.
 //!
-//! Python sub-modules:
-//! - `taas_checkmate.neurons` — neuron step functions
-//! - `taas_checkmate.t3` — T3 classes + spigrad
-//! - `taas_checkmate.io` — IO gates
-//! - `taas_checkmate.sparse` — CSR/sparse ops
-//! - `taas_checkmate.kuramoto` — Kuramoto functions
-//! - `taas_checkmate.snn` — SNN classes
-//! - `taas_checkmate.eprop` — E-Prop
-//! - `taas_checkmate.connectome` — connectome benchmarks
-//! - `taas_checkmate.stp` — Poisson + STP + LFP
-//! - `taas_checkmate.rl` — RL agent
-//! - `taas_checkmate.format` — .taas save/load
+//! ## Recommended modern API — `taas_checkmate.pillars`
 //!
-//! Root-level aliases (backward compat) maintained for all public functions + classes.
+//! The pillars-native SIMD engine (the architecture everything is moving to):
+//! ```python
+//! from taas_checkmate.pillars import LIFPopulation, IzhikevichPopulation, \
+//!     HHPopulation, VSNPopulation, RatePopulation
+//! pop = LIFPopulation(1000)
+//! pop.dt = 0.5; pop.v_thresh = -54.0
+//! pop.step(i_in, spikes)   # zero-copy numpy
+//! ```
+//! These are the **point-neuron populations** — prefer them for new code.
+//!
+//! ## Namespaced sub-modules (kept for specific use)
+//! | Sub-module | Contents |
+//! |------------|----------|
+//! | `pillars` | SIMD neuron populations (LIF/Izh/HH/VSN/Rate) |
+//! | `neurons` | raw per-model step functions (legacy low-level) |
+//! | `connectome` / `connectome_brain` / `lif_connectome` | connectome data + brain sim |
+//! | `t3` | T3 oscillators + decoders + spigrad |
+//! | `kuramoto` | Kuramoto / phase / interference functions |
+//! | `snn` / `neuron` / `eprop` / `poisson_stp` | legacy SNN classes + learning |
+//! | `karmac` | cognitive architecture (GNW, BasalGanglia, MinBrain) |
+//! | `spaun` / `spaun_gpu` | SPAUN pipeline |
+//! | `trainer` / `autotune` / `rl_agent` | training + RL |
+//! | `taas_format` | .taas save/load |
+//! | `hh` / `hh_gpu` | HH bindings |
+//! | `io` / `sparse` / `hologram` / `gpu_refiner` / `vnc` / `cpe` | utilities |
+//!
+//! ## Backward compatibility
+//! Every public function/class is also aliased at the root
+//! (`taas_checkmate.py_step_lif`, `taas_checkmate.LIFPopulation`, …) so old
+//! scripts keep working. New code should import from the sub-modules.
 
 pub mod autotune;
 pub mod connectome;
@@ -123,6 +141,8 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let karmac_sub = make_sub(m.py(), m, "karmac")?;
     export_class!(m, karmac_sub, karmac::PyCarmackBsp);
     export_class!(m, karmac_sub, karmac::PyMinBrain);
+    export_class!(m, karmac_sub, karmac::PyBasalGanglia);
+    export_class!(m, karmac_sub, karmac::PyGlobalWorkspace);
 
     // ─── kuramoto ──────────────────────────────────────
     let kuramoto = make_sub(m.py(), m, "kuramoto")?;
