@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/pillars", "crates/pillars-macros",
+    "crates/pillars", "crates/pillars-macros", "crates/pillars-cuda",
     "crates/kernels", "crates/t3", "crates/cuda", "crates/connectome",
     "crates/core",     "crates/train",
     "crates/taas-format",
@@ -78,10 +78,6 @@ required-features = ["connectome"]
 name = "bench_lod_gnw"
 harness = false
 required-features = ["karmac"]
-
-[[example]]
-name = "spaun_pipeline"
-required-features = ["karmac", "connectome"]
 
 [features]
 default = ["t3"]

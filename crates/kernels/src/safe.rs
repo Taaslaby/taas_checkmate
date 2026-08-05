@@ -1029,7 +1029,7 @@ fn with_dendritic_current<'a>(
 ///
 /// # Integration Method
 /// Forward Euler with 2 half-steps for numerical stability:
-/// ```rust
+/// ```text
 /// // Half-step 1
 /// v_mid = v + 0.5·dt·(0.04·v² + 5·v + 140 − u + I)
 /// // Half-step 2

@@ -1,0 +1,14 @@
+[package]
+name = "pillars-cuda"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Dual-source neuron models — one pillars source file compiles to CPU SIMD AND a CUDA kernel (NVRTC)"
+
+[lib]
+name = "pillars_cuda"
+
+[dependencies]
+pillars = { path = "../pillars" }
+pillars-macros = { path = "../pillars-macros" }

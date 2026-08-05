@@ -9,34 +9,42 @@
 //! Params: [0]dt, [1]inv_tau_m, [2]v_rest, [3]v_thresh, [4]v_reset, [5]tau_ref
 //! State: [0]v, [1]refractory_counter
 
-use pillars_macros::NeuronModel;
-use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
+use pillars_macros::dual_neuron;
 
-/// LIF neuron: membrane potential with leak + spike + refractory.
-#[derive(NeuronModel)]
-pub struct LIFModel {
-    #[state] pub v: f32,
-    #[state] pub refr: f32,
+#[dual_neuron]
+pub mod lif {
+    use crate::core::compute::{ComputeNeuron, StepContext};
+    use crate::core::lane::SimdLane;
+    use pillars_macros::NeuronModel;
 
-    #[param] pub dt: f32,
-    #[param] pub inv_tau_m: f32,
-    #[param] pub v_rest: f32,
-    #[param] pub v_thresh: f32,
-    #[param] pub v_reset: f32,
-    #[param] pub tau_ref: f32,
-}
+    /// LIF neuron: membrane potential with leak + spike + refractory.
+    #[derive(NeuronModel)]
+    pub struct LIFModel {
+        #[state]
+        pub v: f32,
+        #[state]
+        pub refr: f32,
+
+        #[param]
+        pub dt: f32,
+        #[param]
+        pub inv_tau_m: f32,
+        #[param]
+        pub v_rest: f32,
+        #[param]
+        pub v_thresh: f32,
+        #[param]
+        pub v_reset: f32,
+        #[param]
+        pub tau_ref: f32,
+    }
 
 impl ComputeNeuron for LIFModel {
     type State<S: SimdLane> = LIFState<S>;
     type Params<S: SimdLane> = LIFParams<S>;
 
     #[inline(always)]
-    fn step<S: SimdLane>(
-        state: &mut LIFState<S>,
-        params: &LIFParams<S>,
-        ctx: &mut StepContext<S>,
-    ) {
+    fn step<S: SimdLane>(state: &mut LIFState<S>, params: &LIFParams<S>, ctx: &mut StepContext<S>) {
         let zero = S::zero();
         let is_refr = state.refr.cmp_gt(zero);
 
@@ -64,7 +72,10 @@ impl ComputeNeuron for LIFModel {
         let refr_set = spike.cond().then(params.tau_ref).else_(refr_dec);
         state.refr = refr_set.max(zero);
     }
+    }
 }
+
+pub use lif::*;
 
 // ===== Tests =====
 
@@ -101,11 +112,20 @@ mod tests {
 
         let mut total = 0i32;
         for _ in 0..100 {
-            unsafe { run_neuron::<LIFModel>(
-                v.as_mut_ptr(), refr.as_mut_ptr(), dummy.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<LIFModel>(
+                    v.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "LIF should spike with I=30, got {total}");
@@ -130,7 +150,10 @@ mod tests {
             pop.step(&i_in, &mut spikes);
             total += spikes.iter().sum::<i32>();
         }
-        assert!(total > 0, "LIF population should spike with I=30, got {total}");
+        assert!(
+            total > 0,
+            "LIF population should spike with I=30, got {total}"
+        );
     }
 
     #[test]
@@ -153,7 +176,11 @@ mod tests {
 
         let v8 = pop.state_slice(0)[8];
         let v0 = pop.state_slice(0)[0];
-        assert!((v8 - v0).abs() < 0.001,
-            "Tail v[8]={:.3} != SIMD v[0]={:.3}", v8, v0);
+        assert!(
+            (v8 - v0).abs() < 0.001,
+            "Tail v[8]={:.3} != SIMD v[0]={:.3}",
+            v8,
+            v0
+        );
     }
 }

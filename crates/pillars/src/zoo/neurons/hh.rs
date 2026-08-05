@@ -40,10 +40,7 @@
 
 #![allow(non_snake_case)]
 
-use pillars_macros::NeuronModel;
-use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
-use crate::ops::{ohmic_current, ohmic_gated, membrane_depolarize, edge_spike};
+use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
 //  ParamIdx Enum (for manual fill_param / slice access)
@@ -55,23 +52,40 @@ use crate::ops::{ohmic_current, ohmic_gated, membrane_depolarize, edge_spike};
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub enum HHParamIdx {
-    DT = 0,         // ms — time step
-    G_Na = 1,       // mS/cm² — Na⁺ max conductance
-    E_Na = 2,       // mV — Na⁺ reversal potential
-    G_K = 3,        // mS/cm² — K⁺ max conductance
-    E_K = 4,        // mV — K⁺ reversal potential
-    G_Leak = 5,     // mS/cm² — leak conductance
-    E_Leak = 6,     // mV — leak reversal potential
-    Q10 = 7,        // (scalar) — precomputed Q10 temperature factor
-    V_Thresh = 8,   // mV — spike detection threshold
-    Inv_Cm = 9,     // 1/µF — inverse membrane capacitance
-    G_CaT = 10,     // mS/cm² — CaV-T (T-type Ca²⁺) max conductance (0 for standard HH)
-    E_CaT = 11,     // mV — CaV-T reversal potential (≈ +120 for pacemaking)
+    DT = 0,       // ms — time step
+    G_Na = 1,     // mS/cm² — Na⁺ max conductance
+    E_Na = 2,     // mV — Na⁺ reversal potential
+    G_K = 3,      // mS/cm² — K⁺ max conductance
+    E_K = 4,      // mV — K⁺ reversal potential
+    G_Leak = 5,   // mS/cm² — leak conductance
+    E_Leak = 6,   // mV — leak reversal potential
+    Q10 = 7,      // (scalar) — precomputed Q10 temperature factor
+    V_Thresh = 8, // mV — spike detection threshold
+    Inv_Cm = 9,   // 1/µF — inverse membrane capacitance
+    G_CaT = 10,   // mS/cm² — CaV-T (T-type Ca²⁺) max conductance (0 for standard HH)
+    E_CaT = 11,   // mV — CaV-T reversal potential (≈ +120 for pacemaking)
 }
 
 impl From<HHParamIdx> for usize {
-    #[inline(always)] fn from(idx: HHParamIdx) -> Self { idx as usize }
+    #[inline(always)]
+    fn from(idx: HHParamIdx) -> Self {
+        idx as usize
+    }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  Dual-source HH — one source → CPU SIMD + CUDA.
+//  `#[dual_neuron]` transpiles the SAME `ComputeNeuron::step` body into a
+//  CUDA C++ kernel string (`HH_CUDA_SOURCE`). The transpiler inlines the
+//  helper fns / consts / const-`if` below, so the equations live ONLY here.
+// ═══════════════════════════════════════════════════════════════
+
+#[dual_neuron]
+pub mod hh {
+    use crate::core::compute::{ComputeNeuron, StepContext};
+    use crate::core::lane::SimdLane;
+    use crate::ops::{edge_spike, membrane_depolarize, ohmic_current, ohmic_gated};
+    use pillars_macros::NeuronModel;
 
 // ═══════════════════════════════════════════════════════════════
 //  Gate Definition (α/β rate functions)
@@ -103,26 +117,41 @@ pub struct GateParams {
 /// m-gate: Na⁺ activation — fast, voltage-dependent opening
 /// α = 0.1·vtrap(-(V+40), 10)   β = 4·exp(-(V+65)/18)
 pub const GATE_M: GateParams = GateParams {
-    v_off: -40.0, scale: 10.0, alpha_c: 0.1,
-    beta_c: 4.0, beta_volt: 65.0, beta_div: 18.0,
-    alpha_exp: false, beta_sigmoid: false,
+    v_off: -40.0,
+    scale: 10.0,
+    alpha_c: 0.1,
+    beta_c: 4.0,
+    beta_volt: 65.0,
+    beta_div: 18.0,
+    alpha_exp: false,
+    beta_sigmoid: false,
 };
 
 /// h-gate: Na⁺ inactivation — slower, closes Na channels during spike
 /// α = 0.07·exp(-(V+65)/20)     β = 1/(1+exp(-(V+35)/10))
 ///  α is EXPONENTIAL, NOT vtrap (unlike m/n)!
 pub const GATE_H: GateParams = GateParams {
-    v_off: -65.0, scale: 20.0, alpha_c: 0.07,
-    beta_c: 1.0, beta_volt: 35.0, beta_div: 10.0,
-    alpha_exp: true, beta_sigmoid: true,
+    v_off: -65.0,
+    scale: 20.0,
+    alpha_c: 0.07,
+    beta_c: 1.0,
+    beta_volt: 35.0,
+    beta_div: 10.0,
+    alpha_exp: true,
+    beta_sigmoid: true,
 };
 
 /// n-gate: K⁺ activation — slow, opens KV channels for repolarization
 /// α = 0.01·vtrap(-(V+55), 10)  β = 0.125·exp(-(V+65)/80)
 pub const GATE_N: GateParams = GateParams {
-    v_off: -55.0, scale: 10.0, alpha_c: 0.01,
-    beta_c: 0.125, beta_volt: 65.0, beta_div: 80.0,
-    alpha_exp: false, beta_sigmoid: false,
+    v_off: -55.0,
+    scale: 10.0,
+    alpha_c: 0.01,
+    beta_c: 0.125,
+    beta_volt: 65.0,
+    beta_div: 80.0,
+    alpha_exp: false,
+    beta_sigmoid: false,
 };
 
 /// CaV-T (T-type calcium) gate — single low-threshold activation gate `c` for
@@ -146,14 +175,24 @@ pub const GATE_CAT_INV_K: f32 = 1.0 / GATE_CAT_K; // precomputed — NO vector d
 ///
 /// Exactly mirrors `hh_channels::cat_c_alpha`/`cat_c_beta` with
 /// `α+β = 1/τ_c` folded into a voltage-independent decay.
+///
+/// # Precision
+/// Uses `fast_exp()` by default (~1e-5 error). Enable feature `hh-precise-gates`
+/// for exact `exp()` (~1 ULP) at ~3x performance cost.
 #[inline(always)]
 fn compute_cat_gate_state<S: SimdLane>(v: S, c: S, dt_q10: S) -> S {
     // m_inf = 1/(1+exp(-(v+56)/6.2)) — arg division folded into precomputed inv_k
     // (the 1/(1+e) reciprocal stays: it is a single divps, the sigmoid itself)
     let arg = -(v + S::splat(GATE_CAT_V_HALF)) * S::splat(GATE_CAT_INV_K);
     let m_inf = S::one() / (S::one() + arg.fast_exp());
+
     // decay = exp(-dt·Q10/τ_c) — voltage-independent, τ folded into inv_tau
+    #[cfg(feature = "hh-precise-gates")]
+    let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).exp();
+
+    #[cfg(not(feature = "hh-precise-gates"))]
     let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).fast_exp();
+
     decay.mul_add(c - m_inf, m_inf)
 }
 
@@ -190,7 +229,14 @@ fn compute_gate_state<S: SimdLane>(v: S, gate: S, params: GateParams, dt_q10: S)
 
     let sum = alpha + beta;
     let g_inf = alpha / sum;
-    let decay = (-dt_q10 * sum).fast_exp();
+
+    // Выбор точности exp в зависимости от feature flag
+    #[cfg(feature = "hh-precise-gates")]
+    let decay = (-dt_q10 * sum).exp(); // Точный exp (~1 ULP)
+
+    #[cfg(not(feature = "hh-precise-gates"))]
+    let decay = (-dt_q10 * sum).fast_exp(); // Быстрый exp (~1e-5)
+
     // FMA: g_inf + (gate - g_inf)·decay
     decay.mul_add(gate - g_inf, g_inf)
 }
@@ -217,25 +263,43 @@ fn compute_gate_state<S: SimdLane>(v: S, gate: S, params: GateParams, dt_q10: S)
 /// `g_CaT = 0.5, E_CaT = +120` for **pacemaking** (spontaneous oscillation).
 #[derive(NeuronModel)]
 pub struct HHModel {
-    #[state] pub v: f32,
-    #[state] pub m: f32,
-    #[state] pub h: f32,
-    #[state] pub n: f32,
-    #[state] pub c: f32,
-    #[state] pub was_below: f32,
+    #[state]
+    pub v: f32,
+    #[state]
+    pub m: f32,
+    #[state]
+    pub h: f32,
+    #[state]
+    pub n: f32,
+    #[state]
+    pub c: f32,
+    #[state]
+    pub was_below: f32,
 
-    #[param] pub dt: f32,
-    #[param] pub g_Na: f32,
-    #[param] pub E_Na: f32,
-    #[param] pub g_K: f32,
-    #[param] pub E_K: f32,
-    #[param] pub g_Leak: f32,
-    #[param] pub E_Leak: f32,
-    #[param] pub q10: f32,
-    #[param] pub v_thresh: f32,
-    #[param] pub inv_cm: f32,
-    #[param] pub g_CaT: f32,
-    #[param] pub E_CaT: f32,
+    #[param]
+    pub dt: f32,
+    #[param]
+    pub g_Na: f32,
+    #[param]
+    pub E_Na: f32,
+    #[param]
+    pub g_K: f32,
+    #[param]
+    pub E_K: f32,
+    #[param]
+    pub g_Leak: f32,
+    #[param]
+    pub E_Leak: f32,
+    #[param]
+    pub q10: f32,
+    #[param]
+    pub v_thresh: f32,
+    #[param]
+    pub inv_cm: f32,
+    #[param]
+    pub g_CaT: f32,
+    #[param]
+    pub E_CaT: f32,
 }
 
 impl ComputeNeuron for HHModel {
@@ -264,12 +328,12 @@ impl ComputeNeuron for HHModel {
         // K⁺:  g_K·n⁴·(V-E_K)      — powi::<4>() = 2× vmulps
         // CaT: g_CaT·c·(V-E_CaT)    — 0 for standard HH, 0.5 for pacemaking
         // Leak: g_L·(V-E_L)          — 1× vmulps
-        let gating_na = m_new.cube() * h_new;   // m³h
-        let gating_k  = n_new.powi::<4>();       // n⁴
+        let gating_na = m_new.cube() * h_new; // m³h
+        let gating_k = n_new.powi::<4>(); // n⁴
 
-        let i_na   = ohmic_gated(params.g_Na, state.v, params.E_Na, gating_na);
-        let i_k    = ohmic_gated(params.g_K, state.v, params.E_K, gating_k);
-        let i_cat  = ohmic_gated(params.g_CaT, state.v, params.E_CaT, c_new);
+        let i_na = ohmic_gated(params.g_Na, state.v, params.E_Na, gating_na);
+        let i_k = ohmic_gated(params.g_K, state.v, params.E_K, gating_k);
+        let i_cat = ohmic_gated(params.g_CaT, state.v, params.E_CaT, c_new);
         let i_leak = ohmic_current(params.g_Leak, state.v, params.E_Leak);
 
         // ─── Membrane Integration (ops::membrane) ─────────────────
@@ -297,7 +361,10 @@ impl ComputeNeuron for HHModel {
         state.c = c_new;
         state.was_below = was_below_next;
     }
+    }
 }
+
+pub use hh::*;
 
 // ═══════════════════════════════════════════════════════════════
 //  Tests
@@ -346,11 +413,20 @@ mod tests {
 
         let mut total = 0i32;
         for _ in 0..5000 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "HH should spike with I=50, got {total}");
@@ -371,14 +447,26 @@ mod tests {
         let mut spikes = vec![0i32; num];
 
         for _ in 0..500 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0,
-            "HH should not spike with I=0");
+        assert_eq!(
+            spikes.iter().sum::<i32>(),
+            0,
+            "HH should not spike with I=0"
+        );
     }
 
     /// Non-aligned count (13 ≠ multiple of 8).
@@ -397,11 +485,20 @@ mod tests {
 
         let mut total = 0i32;
         for _ in 0..5000 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "HH non-aligned should spike, got {total}");
@@ -422,14 +519,26 @@ mod tests {
         let mut spikes = vec![0i32; num];
 
         for _ in 0..500 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0,
-            "HH should not spike with I=-10");
+        assert_eq!(
+            spikes.iter().sum::<i32>(),
+            0,
+            "HH should not spike with I=-10"
+        );
     }
 
     /// Stress: 10k steps at I=0 — no NaN, v relaxes to rest.
@@ -447,18 +556,26 @@ mod tests {
         let mut spikes = vec![0i32; num];
 
         for step in 0..10000 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
             for (i, &v_i) in v.iter().enumerate() {
                 assert!(!v_i.is_nan(), "v[{i}] NaN at step {step}");
                 assert!(v_i.is_finite(), "v[{i}] non-finite");
             }
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0,
-            "HH should be silent at I=0");
+        assert_eq!(spikes.iter().sum::<i32>(), 0, "HH should be silent at I=0");
     }
 
     /// Stress: 10k steps at I=1000 — no NaN, finite, within bounds.
@@ -477,11 +594,20 @@ mod tests {
         let mut total_spikes = 0i64;
 
         for step in 0..10000 {
-            unsafe { run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
-            ); }
+            unsafe {
+                run_neuron::<HHModel>(
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_gate.as_mut_ptr(),
+                    cat.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    i_syn.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    num,
+                );
+            }
             total_spikes += spikes.iter().map(|&s| s as i64).sum::<i64>();
             for (i, &v_i) in v.iter().enumerate() {
                 assert!(!v_i.is_nan(), "v[{i}] NaN at step {step}");
@@ -490,19 +616,22 @@ mod tests {
                 assert!(v_i > -200.0, "v[{i}] below -200 mV at {step}: {}", v_i);
             }
         }
-        assert!(total_spikes > 0, "HH should spike at I=1000, got {total_spikes}");
+        assert!(
+            total_spikes > 0,
+            "HH should spike at I=1000, got {total_spikes}"
+        );
     }
 
     /// NeuralPopulation integration test.
     #[test]
     fn test_hh_population_spiking() {
         let mut pop = NeuralPopulation::<HHModel>::new(8);
-        pop.fill_state(0, -65.0);  // v
-        pop.fill_state(1, 0.05);   // m
-        pop.fill_state(2, 0.6);    // h
-        pop.fill_state(3, 0.32);   // n
-        pop.fill_state(4, 0.19);   // c (CaV-T, steady-state at -65)
-        pop.fill_state(5, 1.0);    // was_below
+        pop.fill_state(0, -65.0); // v
+        pop.fill_state(1, 0.05); // m
+        pop.fill_state(2, 0.6); // h
+        pop.fill_state(3, 0.32); // n
+        pop.fill_state(4, 0.19); // c (CaV-T, steady-state at -65)
+        pop.fill_state(5, 1.0); // was_below
         for idx in 0..HHModel::N_PARAMS {
             pop.fill_param(idx, make_params(1, 6.3)[idx]);
         }
@@ -565,7 +694,11 @@ mod tests {
         for _ in 0..10_000 {
             pop.step(&i_in, &mut spikes);
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0, "standard HH must be silent at rest");
+        assert_eq!(
+            spikes.iter().sum::<i32>(),
+            0,
+            "standard HH must be silent at rest"
+        );
     }
 
     // ─── NEURON-validated rate function tests ─────────────────
@@ -592,7 +725,10 @@ mod tests {
 
         assert!((minf - 0.0529).abs() < 0.01, "minf={minf}");
         assert!((hinf - 0.596).abs() < 0.05, "hinf={hinf}");
-        assert!((ninf - std::f32::consts::FRAC_1_PI).abs() < 0.03, "ninf={ninf}");
+        assert!(
+            (ninf - std::f32::consts::FRAC_1_PI).abs() < 0.03,
+            "ninf={ninf}"
+        );
     }
 
     #[test]
@@ -610,10 +746,11 @@ mod tests {
         let beta_h = one / (one + (-(v + f32x8::splat(35.0)) / f32x8::splat(10.0)).exp());
         let hinf = (alpha_h / (alpha_h + beta_h)).to_array()[0];
 
-        assert!((minf - 0.974).abs() < 0.02,
-            "minf at 0mV should be ≈0.974, got {minf}");
-        assert!(hinf < 0.01,
-            "hinf at 0mV should be ≈0.0, got {hinf}");
+        assert!(
+            (minf - 0.974).abs() < 0.02,
+            "minf at 0mV should be ≈0.974, got {minf}"
+        );
+        assert!(hinf < 0.01, "hinf at 0mV should be ≈0.0, got {hinf}");
     }
 
     #[test]

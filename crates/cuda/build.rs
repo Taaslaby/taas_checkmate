@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -50,6 +51,18 @@ fn main() {
         return;
     };
 
+    // On Windows nvcc needs the MSVC toolchain (cl.exe + INCLUDE/LIB) even
+    // though cl.exe is not on PATH. Source vcvars64.bat once and re-apply its
+    // environment to every nvcc/lib invocation.
+    let msvc_env = msvc_env();
+    if cfg!(windows) && msvc_env.is_none() {
+        eprintln!(
+            "cargo:warning=cuda-kernels: MSVC toolchain (vcvars64.bat) not found — SKIPPING GPU kernel compilation. \
+             Install Visual Studio with the C++ workload to enable GPU acceleration."
+        );
+        return;
+    }
+
     let mut obj_files = Vec::new();
 
     // Auto-detect GPU compute capability
@@ -57,7 +70,7 @@ fn main() {
 
     for &kernel in &kernels {
         let src = kernels_dir.join(kernel);
-        let obj = out_dir.join(kernel.replace(".cu", ".o"));
+        let obj = out_dir.join(kernel.replace(".cu", obj_ext()));
 
         println!("cargo:rerun-if-changed={}", src.display());
 
@@ -69,7 +82,13 @@ fn main() {
             .arg(&arch)
             .arg("-O3")
             .arg("--use_fast_math")
-            .arg("-Xcompiler=-fPIC");
+            // M_PI is a POSIX constant: MSVC's math.h only defines it when
+            // _USE_MATH_DEFINES is set (harmless no-op on Linux/glibc).
+            .arg("-D_USE_MATH_DEFINES");
+        if !cfg!(windows) {
+            cmd.arg("-Xcompiler=-fPIC");
+        }
+        apply_msvc_env(&mut cmd, &msvc_env);
 
         let status = cmd.status().expect("nvcc failed");
         if !status.success() {
@@ -78,29 +97,134 @@ fn main() {
         obj_files.push(obj);
     }
 
-    // Bundle into static library
-    let lib_path = out_dir.join("libcuda_kernels.a");
-    let mut ar_cmd = Command::new("ar");
-    ar_cmd.arg("rcs").arg(&lib_path);
-    for obj in &obj_files {
-        ar_cmd.arg(obj);
-    }
-    let status = ar_cmd.status().expect("ar failed");
-    if !status.success() {
-        panic!("ar failed to create static library");
+    // Bundle into a static library: ar on Unix, lib.exe on Windows.
+    let lib_name = if cfg!(windows) {
+        "cuda_kernels.lib"
+    } else {
+        "libcuda_kernels.a"
+    };
+    let lib_path = out_dir.join(lib_name);
+    if cfg!(windows) {
+        let mut lib_cmd = Command::new("lib");
+        lib_cmd.arg(format!("/OUT:{}", lib_path.display()));
+        for obj in &obj_files {
+            lib_cmd.arg(obj);
+        }
+        apply_msvc_env(&mut lib_cmd, &msvc_env);
+        let status = lib_cmd.status().expect("lib failed");
+        if !status.success() {
+            panic!("lib.exe failed to create static library");
+        }
+    } else {
+        let mut ar_cmd = Command::new("ar");
+        ar_cmd.arg("rcs").arg(&lib_path);
+        for obj in &obj_files {
+            ar_cmd.arg(obj);
+        }
+        let status = ar_cmd.status().expect("ar failed");
+        if !status.success() {
+            panic!("ar failed to create static library");
+        }
     }
 
-    // Link CUDA runtime + C++ stdlib
+    // Link CUDA runtime + C++ stdlib (stdc++ is a GCC/Clang lib; MSVC uses
+    // the CRT that rust links automatically).
     println!("cargo:rustc-link-lib=static=cuda_kernels");
     println!("cargo:rustc-link-search={}", out_dir.display());
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=cuda");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+    if !cfg!(windows) {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
 
     if let Some(cuda_home) = get_cuda_home() {
-        println!("cargo:rustc-link-search={}/lib64", cuda_home);
-        println!("cargo:rustc-link-search={}/lib", cuda_home);
+        if cfg!(windows) {
+            println!("cargo:rustc-link-search={}\\lib\\x64", cuda_home);
+        } else {
+            println!("cargo:rustc-link-search={}/lib64", cuda_home);
+            println!("cargo:rustc-link-search={}/lib", cuda_home);
+        }
     }
+}
+
+fn obj_ext() -> &'static str {
+    if cfg!(windows) {
+        ".obj"
+    } else {
+        ".o"
+    }
+}
+
+fn apply_msvc_env(cmd: &mut Command, env_map: &Option<HashMap<String, String>>) {
+    if let Some(map) = env_map {
+        for (k, v) in map {
+            cmd.env(k, v);
+        }
+    }
+}
+
+/// Locate the MSVC dev environment by sourcing vcvars64.bat (via vswhere) and
+/// capturing the resulting environment variables (PATH/INCLUDE/LIB/…). Returns
+/// `None` when VS with the C++ workload isn't installed.
+#[cfg(windows)]
+fn msvc_env() -> Option<HashMap<String, String>> {
+    let vswhere = PathBuf::from(
+        r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+    );
+    let vs_path = if vswhere.exists() {
+        let out = Command::new(&vswhere)
+            .args([
+                "-latest",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ])
+            .output()
+            .ok()?;
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if p.is_empty() {
+            return None;
+        }
+        PathBuf::from(p)
+    } else {
+        PathBuf::from(r"C:\Program Files\Microsoft Visual Studio\2022\Community")
+    };
+
+    let vcvars = vs_path.join("VC\\Auxiliary\\Build\\vcvars64.bat");
+    if !vcvars.exists() {
+        return None;
+    }
+
+    // Source vcvars via a temp .bat — inline `cmd /c "call … && set"` gets
+    // mangled by cmd's quote handling, so a file is more robust.
+    let bat = env::temp_dir().join("pillars_cuda_vcvars_env.bat");
+    std::fs::write(
+        &bat,
+        format!(
+            "@echo off\ncall \"{}\" >nul 2>&1\nset\n",
+            vcvars.display()
+        ),
+    )
+    .ok()?;
+    let out = Command::new("cmd").arg("/c").arg(&bat).output().ok()?;
+    let _ = std::fs::remove_file(&bat);
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut map = HashMap::new();
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            map.insert(k.to_string(), v.to_string());
+        }
+    }
+    Some(map)
+}
+
+#[cfg(not(windows))]
+fn msvc_env() -> Option<HashMap<String, String>> {
+    None
 }
 
 fn detect_arch() -> String {
