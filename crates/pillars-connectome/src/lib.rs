@@ -47,14 +47,16 @@ mod tests {
         let mut brain = Brain::<LIFModel>::from_connectome(&conn);
         // Fast neurons (tau = 1 ms) so a single 50-weight pulse crosses the
         // threshold before the leak decays it — makes routing observable.
+        // Uses the derive-generated index enums instead of magic columns.
+        use pillars::zoo::{LIFModelParamIdx as P, LIFModelStateIdx as S};
         brain.configure(|pop| {
-            pop.fill_param(0, 0.5); // dt
-            pop.fill_param(1, 1.0); // inv_tau_m
-            pop.fill_param(2, -70.0); // v_rest
-            pop.fill_param(3, -54.0); // v_thresh
-            pop.fill_param(4, -70.0); // v_reset
-            pop.fill_param(5, 2.0); // tau_ref
-            pop.fill_state(0, -70.0); // v
+            pop.fill_param(P::dt.into(), 0.5); // dt
+            pop.fill_param(P::inv_tau_m.into(), 1.0); // inv_tau_m
+            pop.fill_param(P::v_rest.into(), -70.0); // v_rest
+            pop.fill_param(P::v_thresh.into(), -54.0); // v_thresh
+            pop.fill_param(P::v_reset.into(), -70.0); // v_reset
+            pop.fill_param(P::tau_ref.into(), 2.0); // tau_ref
+            pop.fill_state(S::v.into(), -70.0); // v
         });
 
         let mut neuron2_spikes = 0;

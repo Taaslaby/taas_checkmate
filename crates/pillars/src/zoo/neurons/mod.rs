@@ -31,34 +31,54 @@ mod wc;
 
 /// CUDA C++ sources transpiled by `#[dual_neuron]` — NVRTC-ready.
 /// Generated in `pillars` itself; no CUDA runtime needed to build it.
+///
+/// Every `#[derive(NeuronModel)]` model also generates `{Model}ParamIdx` /
+/// `{Model}StateIdx` index enums (kill magic column numbers):
+/// `pop.fill_param(LIFModelParamIdx::Dt.into(), 0.5)`.
 pub use adex::ADEX_CUDA_SOURCE;
-pub use adex::{AdExModel, AdExParamIdx, AdExParams, AdExState};
+pub use adex::{
+    AdExModel, AdExModelParamIdx, AdExModelStateIdx, AdExParamIdx, AdExParams, AdExState,
+};
 pub use atlasov_neuromotor::ATLASOV_NEUROMOTOR_CUDA_SOURCE;
 pub use atlasov_neuromotor::{
-    AtlasParamIdx, AtlasovNeuromotorModel, AtlasovNeuromotorParams, AtlasovNeuromotorState,
+    AtlasParamIdx, AtlasovNeuromotorModel, AtlasovNeuromotorModelParamIdx,
+    AtlasovNeuromotorModelStateIdx, AtlasovNeuromotorParams, AtlasovNeuromotorState,
 };
 pub use fhn::FHNModel;
+pub use fhn::{FHNModelParamIdx, FHNModelStateIdx};
 pub use fhn::FHN_CUDA_SOURCE;
 pub use glif3::GLIF3_CUDA_SOURCE;
-pub use glif3::{GLIF3Model, GLIF3ParamIdx, GLIF3Params, GLIF3State};
+pub use glif3::{GLIF3Model, GLIF3ModelParamIdx, GLIF3ModelStateIdx, GLIF3ParamIdx, GLIF3Params, GLIF3State};
 pub use glif4::GLIF4_CUDA_SOURCE;
-pub use glif4::{GLIF4Model, GLIF4ParamIdx, GLIF4Params, GLIF4State};
+pub use glif4::{GLIF4Model, GLIF4ModelParamIdx, GLIF4ModelStateIdx, GLIF4ParamIdx, GLIF4Params, GLIF4State};
 pub use haap::HAAP_CUDA_SOURCE;
-pub use haap::{HAAPModel, HAAPParams, HAAPState, HAAParamIdx};
+pub use haap::{HAAPModel, HAAPModelParamIdx, HAAPModelStateIdx, HAAPParams, HAAPState, HAAParamIdx};
 pub use hh::HH_CUDA_SOURCE;
-pub use hh::{GateParams, HHModel, HHParamIdx, HHParams, HHState, GATE_H, GATE_M, GATE_N};
+pub use hh::{
+    GateParams, HHModel, HHModelParamIdx, HHModelStateIdx, HHParamIdx, HHParams, HHState, GATE_H,
+    GATE_M, GATE_N,
+};
 pub use hr::HRModel;
+pub use hr::{HRModelParamIdx, HRModelStateIdx};
 pub use hr::HR_CUDA_SOURCE;
 pub use izhikevich::IZHIKEVICH_CUDA_SOURCE;
-pub use izhikevich::{IzhParamIdx, IzhikevichModel, IzhikevichParams, IzhikevichState};
+pub use izhikevich::{
+    IzhParamIdx, IzhikevichModel, IzhikevichModelParamIdx, IzhikevichModelStateIdx,
+    IzhikevichParams, IzhikevichState,
+};
 pub use lif::LIF_CUDA_SOURCE;
-pub use lif::{LIFModel, LIFParams, LIFState};
+pub use lif::{LIFModel, LIFModelParamIdx, LIFModelStateIdx, LIFParams, LIFState};
 pub use morris_lecar::MORRIS_LECAR_CUDA_SOURCE;
-pub use morris_lecar::{MLParamIdx, MorrisLecarModel, MorrisLecarParams, MorrisLecarState};
+pub use morris_lecar::{
+    MLParamIdx, MorrisLecarModel, MorrisLecarModelParamIdx, MorrisLecarModelStateIdx,
+    MorrisLecarParams, MorrisLecarState,
+};
 pub use saw::SAWModel;
+pub use saw::{SAWModelParamIdx, SAWModelStateIdx};
 pub use saw::SAW_CUDA_SOURCE;
 pub use triangulated::TriangulatedModel;
 pub use vsn::VSN_CUDA_SOURCE;
-pub use vsn::{VSNModel, VSNParamIdx, VSNParams, VSNState};
+pub use vsn::{VSNModel, VSNModelParamIdx, VSNModelStateIdx, VSNParamIdx, VSNParams, VSNState};
 pub use wc::WCModel;
+pub use wc::{WCModelParamIdx, WCModelStateIdx};
 pub use wc::WC_CUDA_SOURCE;

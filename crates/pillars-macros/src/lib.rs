@@ -80,6 +80,10 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
     // Type names: LIF → LIFState, LIFParams (not LIFModelState)
     let sn = Ident::new(&format!("{}State", base), name.span());
     let pn = Ident::new(&format!("{}Params", base), name.span());
+    // Index enums: use the FULL model name (LIFModelParamIdx) so they never
+    // collide with the hand-written short enums (IzhParamIdx, HHParamIdx, …).
+    let param_enum = Ident::new(&format!("{}ParamIdx", name), name.span());
+    let state_enum = Ident::new(&format!("{}StateIdx", name), name.span());
 
     // Field definitions
     let s_def: TS2 = sf.iter().map(|id| quote! { pub #id: S, }).collect();
@@ -153,6 +157,11 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
         .map(|(i, id)| quote! { #id: *ptr.add(#i * stride + off), })
         .collect();
 
+    // Variant order = column order, so implicit discriminants (0, 1, 2, …)
+    // equal the column indices — no explicit `= isize` needed.
+    let p_variants: TS2 = pf.iter().map(|id| quote! { #id, }).collect();
+    let s_variants: TS2 = sf.iter().map(|id| quote! { #id, }).collect();
+
     // ─── Generate code ─────────────────────────────────────
     let expanded = quote! {
 
@@ -223,6 +232,33 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
             #[inline(always)]
             pub(crate) unsafe fn from_raw_simd(ptr: *const f32, off: usize, stride: usize) -> Self {
                 Self { #p_from_raw_simd }
+            }
+        }
+
+        // ─── Param/State index enums — kill magic column numbers ───
+        // `pop.fill_param(LIFModelParamIdx::Dt.into(), 0.5)` instead of
+        // `pop.fill_param(0, 0.5)`.
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug)]
+        pub enum #param_enum {
+            #p_variants
+        }
+        impl From<#param_enum> for usize {
+            #[inline(always)]
+            fn from(v: #param_enum) -> Self {
+                v as usize
+            }
+        }
+
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug)]
+        pub enum #state_enum {
+            #s_variants
+        }
+        impl From<#state_enum> for usize {
+            #[inline(always)]
+            fn from(v: #state_enum) -> Self {
+                v as usize
             }
         }
 
