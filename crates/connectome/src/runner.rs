@@ -1456,16 +1456,18 @@ mod tests {
     #[test]
     fn test_brain_runner_hh_basic() {
         let conn = make_test_connectome();
-        let mut runner = BrainRunner::new(conn, BrainConfig::hh(0.5)).unwrap();
+        // dt=0.01 ms — HH exponential-Euler is numerically unstable at dt=0.5
+        // (the NaN safety check in ohmic_gated catches it). 5000 steps = 50 ms.
+        let mut runner = BrainRunner::new(conn, BrainConfig::hh(0.01)).unwrap();
         // Use `use_pacemaking` mode which has CaT channel for oscillation
         // Standard HH needs higher current
         let ext = vec![15.0f32; runner.n_neurons()];
 
-        let spikes = runner.run(100, &ext).to_vec();
+        let spikes = runner.run(5000, &ext).to_vec();
 
         let total: i32 = spikes.iter().sum();
         assert!(total > 0, "HH should fire with I=15");
-        assert_eq!(spikes.len(), 100 * 4);
+        assert_eq!(spikes.len(), 5000 * 4);
     }
 
     #[test]

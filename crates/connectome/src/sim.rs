@@ -1646,10 +1646,11 @@ mod tests {
         );
 
         let n = conn.n_neurons;
-        let mut pop = hh_population_standard(n, 0.5);
+        // dt=0.01 ms — HH is numerically unstable at dt=0.5 (see test_sim_hh_basic).
+        let mut pop = hh_population_standard(n, 0.01);
         // Strong drive ensures HH fires: I=15 µA/cm² is suprathreshold for HH
         let external_I = vec![15.0f32; n];
-        let n_steps = 100;
+        let n_steps = 5000;
         let mut kinetics = SynapticKinetics::new(n);
 
         let spikes = sim_hh_synaptic_pillars(&conn, &mut pop, &external_I, n_steps, &mut kinetics, 1.0);
@@ -1667,9 +1668,11 @@ mod tests {
     fn test_sim_hh_basic() {
         let conn = make_synaptic_connectome();
         let n = conn.n_neurons;
-        let mut pop = hh_population_standard(n, 0.5);
+        // dt=0.01 ms — HH exponential-Euler is numerically unstable at dt=0.5
+        // (the NaN safety check in ohmic_gated catches it). 5000 steps = 50 ms.
+        let mut pop = hh_population_standard(n, 0.01);
         let external_I = vec![15.0f32; n];
-        let n_steps = 100;
+        let n_steps = 5000;
 
         let spikes = sim_hh_pillars(&conn, &mut pop, &external_I, n_steps, 1.0);
 
@@ -1766,14 +1769,14 @@ mod tests {
         // The driving force multiplier (0 - V) ≈ 65 makes this path ~65× stronger
         let conn = make_2_neuron_connectome();
         let n = conn.n_neurons;
-        let mut pop = hh_population_standard(n, 0.1);
+        let mut pop = hh_population_standard(n, 0.01);
         let mut kinetics = SynapticKinetics::new(n);
         // Drive only pre (neuron 0), post gets 0 external
         let external_I = vec![15.0f32, 0.0];
 
-        // Run 2000 steps = 200ms. Pre should fire many times.
-        // Each spike: jump g_nachr[post] += 1.0 via CSR conductance propagation.
-        let spikes = sim_hh_synaptic_pillars(&conn, &mut pop, &external_I, 2000, &mut kinetics, 1.0);
+        // Run 20000 steps = 200ms (dt=0.01 — HH is unstable at larger dt).
+        // Pre should fire many times; each spike jumps g_nachr[post] += 1.0.
+        let spikes = sim_hh_synaptic_pillars(&conn, &mut pop, &external_I, 20000, &mut kinetics, 1.0);
 
         // Count post spikes (neuron 1, offset in spike buffer = 1)
         let post_spikes: i32 = spikes.iter().skip(1).step_by(n).copied().sum();
@@ -1824,15 +1827,15 @@ mod tests {
         let conn = make_2_neuron_connectome();
         let n = conn.n_neurons;
 
-        // Current-based path
-        let mut pop1 = hh_population_standard(n, 0.5);
+        // Current-based path (dt=0.01 — HH is unstable at larger dt).
+        let mut pop1 = hh_population_standard(n, 0.01);
         let ext = vec![15.0f32; n];
-        let spikes_curr = sim_hh_pillars(&conn, &mut pop1, &ext, 100, 1.0);
+        let spikes_curr = sim_hh_pillars(&conn, &mut pop1, &ext, 5000, 1.0);
 
         // Conductance-based path
-        let mut pop2 = hh_population_standard(n, 0.5);
+        let mut pop2 = hh_population_standard(n, 0.01);
         let mut kin = SynapticKinetics::new(n);
-        let spikes_cond = sim_hh_synaptic_pillars(&conn, &mut pop2, &ext, 100, &mut kin, 1.0);
+        let spikes_cond = sim_hh_synaptic_pillars(&conn, &mut pop2, &ext, 5000, &mut kin, 1.0);
 
         let total_curr: i32 = spikes_curr.iter().sum();
         let total_cond: i32 = spikes_cond.iter().sum();
