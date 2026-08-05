@@ -209,8 +209,16 @@ mod tests {
         state.v = vec![-70.0; state.v.len()];
 
         let n_steps = 200;
-        let legacy_spikes =
-            taas_connectome::sim::sim_lif(&conn, &mut state, &params, &[50.0, 0.0, 0.0], n_steps, 1.0);
+        // `sim_lif` now delegates to Brain, so compare against the kept
+        // legacy reference (`sim_lif_legacy`) to keep this a real oracle.
+        let legacy_spikes = taas_connectome::sim::sim_lif_legacy(
+            &conn,
+            &mut state,
+            &params,
+            &[50.0, 0.0, 0.0],
+            n_steps,
+            1.0,
+        );
         let mut legacy_counts = [0i32; 3];
         for step in 0..n_steps {
             for i in 0..3 {

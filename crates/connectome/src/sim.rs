@@ -20,7 +20,12 @@ use taas_kernels::safe;
 /// `lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32],
 ///           params: &[f32], refractory: &mut [f32], tau_ref: f32)`
 /// where params = [tau_m, v_rest, v_thresh, v_reset, _] interleaved per neuron (n * 5).
-pub fn sim_lif(
+/// The ORIGINAL hand-rolled `sim_lif` (safe::lif_step + queue + CSR loop),
+/// kept as the parity reference for the pillars-native
+/// [`pillars_connectome::Brain`]. [`sim_lif`] now delegates to Brain; this
+/// function is what Brain is validated against.
+#[doc(hidden)]
+pub fn sim_lif_legacy(
     connectome: &ConnectomeData,
     state: &mut BrainState,
     params: &LifParams,
@@ -43,7 +48,6 @@ pub fn sim_lif(
         }
 
         // 2. LIF step (SIMD) — reads I_buf as input, does NOT modify it
-        //    Note: safety_clamp is now INSIDE safe::lif_step
         safe::lif_step(
             &mut state.v,
             &mut state.I_buf,
@@ -78,6 +82,71 @@ pub fn sim_lif(
         );
     }
 
+    spike_buffer
+}
+
+pub fn sim_lif(
+    connectome: &ConnectomeData,
+    state: &mut BrainState,
+    params: &LifParams,
+    external_I: &[f32],
+    n_steps: usize,
+    scale: f32,
+) -> Vec<i32> {
+    let n = connectome.n_neurons;
+    let n_neurons = connectome.row_ptr.len() - 1;
+    let mut spike_buffer = vec![0i32; n_steps * n];
+    if n_neurons == 0 || n_steps == 0 {
+        return spike_buffer;
+    }
+
+    // Delegate to the pillars-native orchestrator (`pillars-connectome::Brain`).
+    // Same public signature; the engine underneath is 100% pillars — the
+    // "translator into legacy" (safe::lif_step + queue/CSR loop) disappears.
+    // `scale` is folded into the edge weights (it scales the propagated
+    // current in the legacy `csr_propagate_from_queue`).
+    let new_conn = pillars_connectome::ConnectomeData::from_csr(
+        connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+        connectome.col_indices.iter().map(|&v| v as u32).collect(),
+        connectome.values.iter().map(|&w| w * scale).collect(),
+        vec![0u8; connectome.n_synapses],
+        vec![0u8; connectome.n_synapses],
+    );
+    let mut brain =
+        pillars_connectome::Brain::<pillars::zoo::LIFModel>::from_connectome(&new_conn);
+    brain.configure(|p| {
+        let np = params.packed.len() / 5;
+        for i in 0..n_neurons {
+            p.param_slice_mut(0)[i] = params.packed[0]; // dt (broadcast from slot 0)
+            p.param_slice_mut(1)[i] = 1.0 / params.packed[np + i].max(1e-6); // inv_tau_m
+            p.param_slice_mut(2)[i] = params.packed[2 * np + i]; // v_rest
+            p.param_slice_mut(3)[i] = params.packed[3 * np + i]; // v_thresh
+            p.param_slice_mut(4)[i] = params.packed[4 * np + i]; // v_reset
+            p.param_slice_mut(5)[i] = params.tau_ref;
+            p.state_slice_mut(0)[i] = state.v[i]; // v
+            p.state_slice_mut(1)[i] = state.refractory[i]; // refr
+        }
+    });
+
+    let idx: Vec<u32> = (0..n_neurons as u32).collect();
+    for step in 0..n_steps {
+        let ext: Vec<f32> = (0..n_neurons)
+            .map(|i| external_I.get(i).copied().unwrap_or(0.0))
+            .collect();
+        brain.inject(&idx, &ext);
+        brain.step();
+        for i in 0..n_neurons {
+            spike_buffer[step * n + i] = brain.spikes()[i];
+        }
+    }
+
+    // Sync back the final membrane state so callers see it.
+    let v = brain.state(0);
+    let refr = brain.state(1);
+    for i in 0..n_neurons {
+        state.v[i] = v[i];
+        state.refractory[i] = refr[i];
+    }
     spike_buffer
 }
 
