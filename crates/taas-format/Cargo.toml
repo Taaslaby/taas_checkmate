@@ -5,11 +5,10 @@ edition.workspace = true
 description = ".taas format — universal snapshot for SNN models and oscillators"
 
 [dependencies]
-taas-core = { path = "../core" }
+pillars = { path = "../pillars" }
 taas-connectome = { path = "../connectome" }
 taas-t3 = { path = "../t3" }
 taas-train = { path = "../train", optional = true }
-cuda-kernels = { path = "../cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
@@ -19,5 +18,4 @@ zstd = { version = "0.13", features = ["zstdmt"] }
 
 [features]
 default = ["train"]
-cuda = ["cuda-kernels"]
 train = ["dep:taas-train"]

@@ -9,23 +9,17 @@ use pyo3::IntoPyObjectExt;
 use crate::taas_format;
 
 use super::connectome_brain::PyConnectomeData;
-use super::eprop::PyEPropLIF;
-use super::poisson_stp::PyShortTermPlasticity;
 use super::rl_agent::PyActorCriticAgent;
-use super::snn::PySornNetwork;
 use super::t3::{PyKalmanDecoder, PyNlmsDecoder, PyTriOscillator};
 
 /// Save simulation state to .taas file.
 #[pyfunction]
-#[pyo3(name = "save_taas", signature = (path, tri=None, nlms=None, kalman=None, sorn=None, eprop=None, stp=None, rl_agent=None, metadata=None))]
+#[pyo3(name = "save_taas", signature = (path, tri=None, nlms=None, kalman=None, rl_agent=None, metadata=None))]
 pub fn py_save_taas(
     path: &str,
     tri: Option<&PyTriOscillator>,
     nlms: Option<&PyNlmsDecoder>,
     kalman: Option<&PyKalmanDecoder>,
-    sorn: Option<&PySornNetwork>,
-    eprop: Option<&PyEPropLIF>,
-    stp: Option<&PyShortTermPlasticity>,
     rl_agent: Option<&PyActorCriticAgent>,
     metadata: Option<Vec<(String, String)>>,
 ) -> PyResult<()> {
@@ -39,15 +33,6 @@ pub fn py_save_taas(
     }
     if let Some(d) = kalman {
         taas_format::save_kalman_decoder(&d.inner, &mut writer);
-    }
-    if let Some(s) = sorn {
-        taas_format::save_sorn_network(&s.inner, &mut writer);
-    }
-    if let Some(e) = eprop {
-        taas_format::save_eprop_lif(&e.inner, &mut writer);
-    }
-    if let Some(s) = stp {
-        taas_format::save_stp(&s.inner, &mut writer);
     }
     if let Some(agent) = rl_agent {
         taas_format::save_actor_critic_agent(&agent.inner, &mut writer);
@@ -102,35 +87,6 @@ pub fn py_load_taas(path: &str, py: Python<'_>) -> PyResult<PyObject> {
         if n > 0 {
             if let Ok(dec) = taas_format::load_kalman_decoder(&reader, n) {
                 dict.set_item("kalman", PyKalmanDecoder { inner: dec })?;
-            }
-        }
-    }
-
-    if reader.find_component("sorn_weights").is_ok() {
-        if let Ok(theta) = reader.get_f32("sorn_theta") {
-            let n = theta.len();
-            if n > 0 {
-                if let Ok(sorn) = taas_format::load_sorn_network(&reader, n) {
-                    dict.set_item("sorn", PySornNetwork { inner: sorn })?;
-                }
-            }
-        }
-    }
-
-    if let Ok(data) = reader.get_f32("eprop_v") {
-        let n = data.len();
-        if n > 0 {
-            if let Ok(eprop) = taas_format::load_eprop_lif(&reader, n) {
-                dict.set_item("eprop", PyEPropLIF { inner: eprop })?;
-            }
-        }
-    }
-
-    if let Ok(data) = reader.get_f32("stp_x") {
-        let n = data.len();
-        if n > 0 {
-            if let Ok(stp) = taas_format::load_stp(&reader, n) {
-                dict.set_item("stp", PyShortTermPlasticity { inner: stp })?;
             }
         }
     }

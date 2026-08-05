@@ -60,7 +60,6 @@ pub(crate) fn chrono_or_fallback() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use taas_core::neuron::SornNetwork;
     use taas_t3::{Avx2Backend, KalmanDecoder, NlmsDecoder, TriOscillator};
 
     #[test]
@@ -147,17 +146,61 @@ mod tests {
     }
 
     #[test]
-    fn test_sorn_network_roundtrip() {
-        let sorn = SornNetwork::new(8, 0.1, 5.0);
+    fn test_population_roundtrip() {
+        use pillars::zoo::Model;
+        use pillars::NeuralPopulation;
+        use pillars::zoo::LIFModel;
+        let mut pop = NeuralPopulation::<LIFModel>::new(13);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
+        pop.fill_state(0, -70.0);
+        pop.fill_state(1, 0.0);
+        for i in 0..13 {
+            pop.state_slice_mut(0)[i] = -70.0 + i as f32;
+        }
 
         let mut writer = TaasWriter::new();
-        save_sorn_network(&sorn, &mut writer);
+        save_population(&pop, &mut writer);
         let bytes = writer.to_bytes().unwrap();
 
         let reader = TaasReader::from_bytes(&bytes).unwrap();
-        let loaded = load_sorn_network(&reader, 8).unwrap();
-        assert_eq!(loaded.weights, sorn.weights);
-        assert!((loaded.w_target_sum - 5.0).abs() < 1e-6);
+        let loaded = load_population::<LIFModel>(&reader).unwrap();
+        assert_eq!(loaded.len(), pop.len());
+        for c in 0..LIFModel::N_PARAMS {
+            assert_eq!(loaded.param_slice(c), pop.param_slice(c));
+        }
+        for c in 0..LIFModel::N_STATE {
+            assert_eq!(loaded.state_slice(c), pop.state_slice(c));
+        }
+    }
+
+    #[test]
+    fn test_sparse_graph_roundtrip() {
+        use pillars::api::SparseGraph;
+        let g = SparseGraph::from_triplets(
+            4,
+            &[0, 1, 2, 3, 0],
+            &[1, 2, 3, 0, 3],
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[1, 2, 3, 4, 5],
+        );
+
+        let mut writer = TaasWriter::new();
+        save_sparse_graph(&g, &mut writer);
+        let bytes = writer.to_bytes().unwrap();
+
+        let reader = TaasReader::from_bytes(&bytes).unwrap();
+        let loaded = load_sparse_graph(&reader).unwrap();
+        assert_eq!(loaded.num_neurons(), g.num_neurons());
+        assert_eq!(loaded.num_synapses(), g.num_synapses());
+        assert_eq!(loaded.row_ptr, g.row_ptr);
+        assert_eq!(loaded.col_idx, g.col_idx);
+        assert_eq!(loaded.delays, g.delays);
+        assert_eq!(loaded.weights.as_slice(), g.weights.as_slice());
     }
 
     #[test]
@@ -245,20 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn test_brain_state_roundtrip() {
-        use taas_connectome::sim::{BrainState, NeuronModel};
-        let state = BrainState::new(10, NeuronModel::Izhikevich);
-        let mut writer = TaasWriter::new();
-        save_brain_state(&state, &mut writer);
-        let bytes = writer.to_bytes().unwrap();
-        let reader = TaasReader::from_bytes(&bytes).unwrap();
-        let loaded = load_brain_state(&reader).unwrap();
-        assert_eq!(loaded.v, state.v);
-        assert_eq!(loaded.u, state.u);
-        assert_eq!(loaded.n_padded, state.n_padded);
-    }
-
-    #[test]
     fn test_zstd_compression_roundtrip() {
         let mut writer = TaasWriter::new();
         writer.set_compression(3); // zstd level 3
@@ -312,24 +341,4 @@ mod tests {
         assert_eq!(reader2.get_f32("raw2").unwrap(), &[3.0; 16]);
     }
 
-    #[test]
-    fn test_izhikevich_params_roundtrip() {
-        use taas_connectome::sim::IzhikevichParams;
-        let params = IzhikevichParams {
-            a: vec![0.02; 8],
-            b: vec![0.2; 8],
-            c: vec![-65.0; 8],
-            d: vec![2.0; 8],
-            dt_ms: 0.5,
-            tau_ref: 2.0,
-        };
-        let mut writer = TaasWriter::new();
-        save_izhikevich_params(&params, &mut writer);
-        let bytes = writer.to_bytes().unwrap();
-        let reader = TaasReader::from_bytes(&bytes).unwrap();
-        let loaded = load_izhikevich_params(&reader).unwrap();
-        assert_eq!(loaded.a, params.a);
-        assert_eq!(loaded.dt_ms, params.dt_ms);
-        assert_eq!(loaded.tau_ref, params.tau_ref);
-    }
 }

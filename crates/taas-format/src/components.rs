@@ -7,118 +7,6 @@
 use crate::reader::TaasReader;
 use crate::writer::TaasWriter;
 
-// ─── BrainState ─────────────────────────────────────────
-
-/// Save CPU brain simulation state to a .taas archive.
-pub fn save_brain_state(state: &taas_connectome::sim::BrainState, writer: &mut TaasWriter) {
-    writer.add_metadata("type", "BrainState");
-    writer.add_metadata("n_neurons_padded", &state.n_padded.to_string());
-    writer.add_f32("brain_v", "BrainState", &state.v);
-    writer.add_f32("brain_u", "BrainState", &state.u);
-    writer.add_f32("brain_trace", "BrainState", &state.trace);
-    writer.add_f32("brain_Ibuf", "BrainState", &state.I_buf);
-    writer.add_i32("brain_spikes", "BrainState", &state.spikes);
-    writer.add_f32("brain_refractory", "BrainState", &state.refractory);
-    writer.add_f32("brain_slow_state", "BrainState", &state.slow_state);
-}
-
-/// Load CPU brain state from a .taas reader.
-pub fn load_brain_state(reader: &TaasReader) -> Result<taas_connectome::sim::BrainState, String> {
-    let n_padded = reader
-        .metadata()
-        .get("n_neurons_padded")
-        .and_then(|s| s.parse::<usize>().ok())
-        .ok_or_else(|| "n_neurons_padded not found".to_string())?;
-    // slow_state: backwards-compatible — old archives (pre slow_state) lack this
-    // component; reconstruct it from n_padded as 0.5 (neutral baseline, matches
-    // BrainState::new()). See BrainState::slow_state doc.
-    let slow_state = reader
-        .get_f32("brain_slow_state")
-        .unwrap_or_else(|_| vec![0.5; n_padded]);
-    let state = taas_connectome::sim::BrainState {
-        v: reader.get_f32("brain_v")?,
-        u: reader.get_f32("brain_u")?,
-        trace: reader.get_f32("brain_trace")?,
-        I_buf: reader.get_f32("brain_Ibuf")?,
-        spikes: reader.get_i32("brain_spikes")?,
-        refractory: reader.get_f32("brain_refractory")?,
-        slow_state,
-        n_padded,
-        n_neurons: 0,
-        queue: Default::default(),
-    };
-    Ok(state)
-}
-
-/// Save Izhikevich parameters.
-pub fn save_izhikevich_params(
-    params: &taas_connectome::sim::IzhikevichParams,
-    writer: &mut TaasWriter,
-) {
-    writer.add_metadata("type", "IzhikevichParams");
-    writer.add_metadata("n", &params.a.len().to_string());
-    writer.add_f32("iz_a", "IzhikevichParams", &params.a);
-    writer.add_f32("iz_b", "IzhikevichParams", &params.b);
-    writer.add_f32("iz_c", "IzhikevichParams", &params.c);
-    writer.add_f32("iz_d", "IzhikevichParams", &params.d);
-    writer.add_scalar_f32("iz_dt_ms", "IzhikevichParams", params.dt_ms);
-    writer.add_scalar_f32("iz_tau_ref", "IzhikevichParams", params.tau_ref);
-}
-
-/// Load Izhikevich parameters.
-pub fn load_izhikevich_params(
-    reader: &TaasReader,
-) -> Result<taas_connectome::sim::IzhikevichParams, String> {
-    Ok(taas_connectome::sim::IzhikevichParams {
-        a: reader.get_f32("iz_a")?,
-        b: reader.get_f32("iz_b")?,
-        c: reader.get_f32("iz_c")?,
-        d: reader.get_f32("iz_d")?,
-        dt_ms: reader.get_scalar_f32("iz_dt_ms")?,
-        tau_ref: reader.get_scalar_f32("iz_tau_ref")?,
-    })
-}
-
-/// Save GPU brain state: downloads v, u from GPU, serialises as tensors.
-///
-/// Requires the `cuda-kernels` feature (the `gpu` module provides the wrapper).
-#[cfg(feature = "cuda")]
-pub fn save_gpu_state(
-    gpu: &cuda_kernels::GpuContext,
-    n_neurons: usize,
-    writer: &mut TaasWriter,
-) -> Result<(), String> {
-    let mut v = vec![0.0f32; n_neurons];
-    let mut u = vec![0.0f32; n_neurons];
-    gpu.download_v(&mut v)?;
-    gpu.download_u(&mut u)?;
-    writer.add_metadata("type", "GpuState");
-    writer.add_metadata("n_neurons", &n_neurons.to_string());
-    writer.add_f32("gpu_v", "GpuState", &v);
-    writer.add_f32("gpu_u", "GpuState", &u);
-    Ok(())
-}
-
-/// Load GPU brain state: creates GpuContext, uploads v, u.
-#[cfg(feature = "cuda")]
-pub fn load_gpu_state(
-    reader: &TaasReader,
-    n_synapses: usize,
-) -> Result<cuda_kernels::GpuContext, String> {
-    let n_neurons = reader
-        .metadata()
-        .get("n_neurons")
-        .and_then(|s| s.parse::<usize>().ok())
-        .ok_or_else(|| "n_neurons not found".to_string())?;
-    let v = reader.get_f32("gpu_v")?;
-    let u = reader.get_f32("gpu_u")?;
-    let gpu = cuda_kernels::GpuContext::new(n_neurons, n_synapses)?;
-    // Upload v, u; use default for a,b,c,d
-    let default = vec![0.0f32; n_neurons];
-    gpu.upload_neurons(&v, &u, &default, &default, &default, &default)?;
-    Ok(gpu)
-}
-
 // ─── Brain IO ────────────────────────────────────────────
 
 /// Save BrainIO as JSON metadata.
@@ -383,136 +271,6 @@ pub fn load_kalman_decoder(
     Ok(dec)
 }
 
-// ─── SornNetwork ────────────────────────────────────────
-
-pub fn save_sorn_network(sorn: &taas_core::neuron::SornNetwork, writer: &mut TaasWriter) {
-    writer.add_metadata("type", "SornNetwork");
-    writer.add_metadata("n", &sorn.n.to_string());
-    let n = sorn.n;
-    writer.add_f32_shape("sorn_weights", "SornNetwork", &sorn.weights, vec![n, n]);
-    writer.add_f32("sorn_theta", "SornNetwork", &sorn.theta);
-    writer.add_f32("sorn_rates", "SornNetwork", &sorn.rates);
-    writer.add_scalar_f32("sorn_lr_stdp_ltd", "SornNetwork", sorn.lr_stdp_ltd);
-    writer.add_scalar_f32("sorn_lr_stdp_ltp", "SornNetwork", sorn.lr_stdp_ltp);
-    writer.add_scalar_f32("sorn_w_min", "SornNetwork", sorn.w_min);
-    writer.add_scalar_f32("sorn_w_max", "SornNetwork", sorn.w_max);
-    writer.add_scalar_f32("sorn_w_target_sum", "SornNetwork", sorn.w_target_sum);
-    writer.add_scalar_f32("sorn_lr_ip", "SornNetwork", sorn.lr_ip);
-    writer.add_scalar_f32("sorn_target_rate", "SornNetwork", sorn.target_rate);
-    writer.add_scalar_f32("sorn_ip_decay", "SornNetwork", sorn.ip_decay);
-}
-
-pub fn load_sorn_network(
-    reader: &TaasReader,
-    n: usize,
-) -> Result<taas_core::neuron::SornNetwork, String> {
-    let mut sorn = taas_core::neuron::SornNetwork::new(n, 0.1, 10.0);
-    macro_rules! restore {
-        ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) {
-                let n = v.len().min(sorn.$field.len());
-                sorn.$field[..n].copy_from_slice(&v[..n]);
-            }
-        };
-    }
-    restore!(weights, "sorn_weights");
-    restore!(theta, "sorn_theta");
-    restore!(rates, "sorn_rates");
-    sorn.lr_stdp_ltd = reader.get_scalar_f32("sorn_lr_stdp_ltd").unwrap_or(0.01);
-    sorn.lr_stdp_ltp = reader.get_scalar_f32("sorn_lr_stdp_ltp").unwrap_or(0.005);
-    sorn.w_min = reader.get_scalar_f32("sorn_w_min").unwrap_or(0.0);
-    sorn.w_max = reader.get_scalar_f32("sorn_w_max").unwrap_or(2.0);
-    sorn.w_target_sum = reader.get_scalar_f32("sorn_w_target_sum").unwrap_or(10.0);
-    sorn.lr_ip = reader.get_scalar_f32("sorn_lr_ip").unwrap_or(0.001);
-    sorn.target_rate = reader.get_scalar_f32("sorn_target_rate").unwrap_or(0.01);
-    sorn.ip_decay = reader.get_scalar_f32("sorn_ip_decay").unwrap_or(0.999);
-    Ok(sorn)
-}
-
-// ─── EPropLIF ────────────────────────────────────────────
-
-pub fn save_eprop_lif(eprop: &taas_core::neuron::EPropLIF, writer: &mut TaasWriter) {
-    writer.add_metadata("type", "EPropLIF");
-    writer.add_metadata("n", &eprop.n.to_string());
-    writer.add_f32("eprop_v", "EPropLIF", &eprop.v);
-    writer.add_f32("eprop_eligibility", "EPropLIF", &eprop.eligibility);
-    writer.add_f32("eprop_psi", "EPropLIF", &eprop.psi);
-    writer.add_f32("eprop_refractory", "EPropLIF", &eprop.refractory);
-    writer.add_scalar_f32("eprop_dt", "EPropLIF", eprop.dt);
-    writer.add_scalar_f32("eprop_tau_m", "EPropLIF", eprop.tau_m);
-    writer.add_scalar_f32("eprop_tau_e", "EPropLIF", eprop.tau_e);
-    writer.add_scalar_f32("eprop_tau_ref", "EPropLIF", eprop.tau_ref);
-    writer.add_scalar_f32("eprop_v_rest", "EPropLIF", eprop.v_rest);
-    writer.add_scalar_f32("eprop_v_thresh", "EPropLIF", eprop.v_thresh);
-    writer.add_scalar_f32("eprop_v_reset", "EPropLIF", eprop.v_reset);
-    writer.add_scalar_f32("eprop_tau_surrogate", "EPropLIF", eprop.tau_surrogate);
-}
-
-pub fn load_eprop_lif(
-    reader: &TaasReader,
-    n: usize,
-) -> Result<taas_core::neuron::EPropLIF, String> {
-    let mut eprop = taas_core::neuron::EPropLIF::new(n, 1.0, 10.0, 20.0);
-    macro_rules! restore {
-        ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) {
-                let n = v.len().min(eprop.$field.len());
-                eprop.$field[..n].copy_from_slice(&v[..n]);
-            }
-        };
-    }
-    restore!(v, "eprop_v");
-    restore!(eligibility, "eprop_eligibility");
-    restore!(psi, "eprop_psi");
-    restore!(refractory, "eprop_refractory");
-    eprop.dt = reader.get_scalar_f32("eprop_dt").unwrap_or(1.0);
-    eprop.tau_m = reader.get_scalar_f32("eprop_tau_m").unwrap_or(10.0);
-    eprop.tau_e = reader.get_scalar_f32("eprop_tau_e").unwrap_or(20.0);
-    eprop.tau_ref = reader.get_scalar_f32("eprop_tau_ref").unwrap_or(3.0);
-    eprop.v_rest = reader.get_scalar_f32("eprop_v_rest").unwrap_or(-65.0);
-    eprop.v_thresh = reader.get_scalar_f32("eprop_v_thresh").unwrap_or(-50.0);
-    eprop.v_reset = reader.get_scalar_f32("eprop_v_reset").unwrap_or(-70.0);
-    eprop.tau_surrogate = reader.get_scalar_f32("eprop_tau_surrogate").unwrap_or(2.0);
-    Ok(eprop)
-}
-
-// ─── ShortTermPlasticity ─────────────────────────────────
-
-pub fn save_stp(stp: &taas_core::neuron::ShortTermPlasticity, writer: &mut TaasWriter) {
-    writer.add_metadata("type", "ShortTermPlasticity");
-    writer.add_metadata("n", &stp.n.to_string());
-    writer.add_f32("stp_x", "ShortTermPlasticity", &stp.x);
-    writer.add_f32("stp_u", "ShortTermPlasticity", &stp.u);
-    writer.add_f32("stp_tau_d", "ShortTermPlasticity", &stp.tau_d);
-    writer.add_f32("stp_tau_f", "ShortTermPlasticity", &stp.tau_f);
-    writer.add_f32("stp_u0", "ShortTermPlasticity", &stp.u0);
-    writer.add_f32("stp_a", "ShortTermPlasticity", &stp.a);
-    writer.add_scalar_f32("stp_dt", "ShortTermPlasticity", stp.dt);
-}
-
-pub fn load_stp(
-    reader: &TaasReader,
-    n: usize,
-) -> Result<taas_core::neuron::ShortTermPlasticity, String> {
-    let mut stp = taas_core::neuron::ShortTermPlasticity::new(n, 1.0);
-    macro_rules! restore {
-        ($field:ident, $name:expr) => {
-            if let Ok(v) = reader.get_f32($name) {
-                let n = v.len().min(stp.$field.len());
-                stp.$field[..n].copy_from_slice(&v[..n]);
-            }
-        };
-    }
-    restore!(x, "stp_x");
-    restore!(u, "stp_u");
-    restore!(tau_d, "stp_tau_d");
-    restore!(tau_f, "stp_tau_f");
-    restore!(u0, "stp_u0");
-    restore!(a, "stp_a");
-    stp.dt = reader.get_scalar_f32("stp_dt").unwrap_or(1.0);
-    Ok(stp)
-}
-
 // ─── ActorCriticAgent ────────────────────────────────────
 
 #[cfg(feature = "train")]
@@ -607,31 +365,6 @@ pub fn load_actor_critic_agent(
     agent.tau_ref = reader.get_scalar_f32("rl_tau_ref").unwrap_or(3.0);
     agent.last_value = reader.get_scalar_f32("rl_last_value").unwrap_or(0.0);
     Ok(agent)
-}
-
-// ─── PoissonGenerator ────────────────────────────────────
-
-pub fn save_poisson(poisson: &taas_core::neuron::PoissonGenerator, writer: &mut TaasWriter) {
-    writer.add_metadata("type", "PoissonGenerator");
-    writer.add_metadata("n", &poisson.n_neurons().to_string());
-    writer.add_f32("poisson_rates", "PoissonGenerator", poisson.rates());
-    writer.add_scalar_f32("poisson_dt", "PoissonGenerator", poisson.dt());
-}
-
-// ─── TTFS encoder ────────────────────────────────────────
-
-pub fn save_ttfs(ttfs: &taas_core::neuron::TtfsEncoder, writer: &mut TaasWriter, _n: usize) {
-    writer.add_metadata("type", "TtfsEncoder");
-    let fire_times: Vec<u64> = ttfs.fire_times.iter().map(|&x| x as u64).collect();
-    let fired: Vec<i32> = ttfs.fired.iter().map(|&x| if x { 1 } else { 0 }).collect();
-    writer.add_u64("ttfs_fire_times", "TtfsEncoder", &fire_times);
-    writer.add_i32("ttfs_fired", "TtfsEncoder", &fired);
-    writer.add_u64(
-        "ttfs_current_step",
-        "TtfsEncoder",
-        &[ttfs.current_step as u64],
-    );
-    writer.add_u64("ttfs_max_delay", "TtfsEncoder", &[ttfs.max_delay as u64]);
 }
 
 // ─── LIF-AT state ────────────────────────────────────────
@@ -778,4 +511,109 @@ pub fn load_pst_decoder(
     dec.bias = reader.get_scalar_f32("pst_bias").unwrap_or(0.0);
     dec.alpha = reader.get_scalar_f32("pst_alpha").unwrap_or(0.01);
     Ok(dec)
+}
+
+// ─── Pillars-native snapshot: NeuralPopulation<M> ─────────
+
+/// Save a pillars `NeuralPopulation<M>` to a `.taas` archive.
+///
+/// Components: `model` (type name), `n`, `capacity`, `N_PARAMS`, `N_STATE`
+/// as metadata; one f32 tensor per param column (`p_{c}`) and state column
+/// (`s_{c}`) — the SoA layout pillars uses, so `load_population` restores it
+/// exactly.
+pub fn save_population<M: pillars::zoo::Model + 'static>(
+    pop: &pillars::NeuralPopulation<M>,
+    writer: &mut TaasWriter,
+) {
+    writer.add_metadata("type", "Population");
+    writer.add_metadata("model", std::any::type_name::<M>());
+    writer.add_metadata("n", &pop.len().to_string());
+    writer.add_metadata("capacity", &pop.capacity().to_string());
+    writer.add_metadata("n_params", &M::N_PARAMS.to_string());
+    writer.add_metadata("n_state", &M::N_STATE.to_string());
+    for c in 0..M::N_PARAMS {
+        writer.add_f32(&format!("p_{c}"), "Population", pop.param_slice(c));
+    }
+    for c in 0..M::N_STATE {
+        writer.add_f32(&format!("s_{c}"), "Population", pop.state_slice(c));
+    }
+}
+
+/// Load a pillars `NeuralPopulation<M>` from a `.taas` archive.
+///
+/// `M` must match what was saved (`n_params`/`n_state` metadata are checked).
+pub fn load_population<M: pillars::zoo::Model + 'static>(
+    reader: &TaasReader,
+) -> Result<pillars::NeuralPopulation<M>, String> {
+    let n: usize = reader
+        .metadata()
+        .get("n")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "n not found".to_string())?;
+    let np: usize = reader
+        .metadata()
+        .get("n_params")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "n_params not found".to_string())?;
+    let ns: usize = reader
+        .metadata()
+        .get("n_state")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "n_state not found".to_string())?;
+    if np != M::N_PARAMS {
+        return Err(format!(
+            "n_params mismatch: archive={np}, model={}",
+            M::N_PARAMS
+        ));
+    }
+    if ns != M::N_STATE {
+        return Err(format!(
+            "n_state mismatch: archive={ns}, model={}",
+            M::N_STATE
+        ));
+    }
+    let mut pop = pillars::NeuralPopulation::<M>::new(n);
+    for c in 0..M::N_PARAMS {
+        let v = reader.get_f32(&format!("p_{c}"))?;
+        pop.param_slice_mut(c).copy_from_slice(&v);
+    }
+    for c in 0..M::N_STATE {
+        let v = reader.get_f32(&format!("s_{c}"))?;
+        pop.state_slice_mut(c).copy_from_slice(&v);
+    }
+    Ok(pop)
+}
+
+// ─── Pillars-native snapshot: SparseGraph ────────────────
+
+/// Save a pillars `SparseGraph` (CSR) to a `.taas` archive.
+pub fn save_sparse_graph(graph: &pillars::api::SparseGraph, writer: &mut TaasWriter) {
+    writer.add_metadata("type", "SparseGraph");
+    writer.add_metadata("n_neurons", &graph.num_neurons().to_string());
+    writer.add_metadata("n_synapses", &graph.num_synapses().to_string());
+    let row_ptr: Vec<i64> = graph.row_ptr.iter().map(|&v| v as i64).collect();
+    let col_idx: Vec<i64> = graph.col_idx.iter().map(|&v| v as i64).collect();
+    writer.add_i64("sg_row_ptr", "SparseGraph", &row_ptr);
+    writer.add_i64("sg_col_idx", "SparseGraph", &col_idx);
+    writer.add_f32("sg_weights", "SparseGraph", graph.weights.as_slice());
+    writer.add_u8("sg_delays", "SparseGraph", &graph.delays);
+}
+
+/// Load a pillars `SparseGraph` (CSR) from a `.taas` archive.
+pub fn load_sparse_graph(reader: &TaasReader) -> Result<pillars::api::SparseGraph, String> {
+    let row_ptr: Vec<u32> = reader
+        .get_i64("sg_row_ptr")?
+        .iter()
+        .map(|&v| v as u32)
+        .collect();
+    let col_idx: Vec<u32> = reader
+        .get_i64("sg_col_idx")?
+        .iter()
+        .map(|&v| v as u32)
+        .collect();
+    let weights = reader.get_f32("sg_weights")?;
+    let delays = reader.get_u8("sg_delays")?;
+    Ok(pillars::api::SparseGraph::from_csr(
+        row_ptr, col_idx, &weights, &delays,
+    ))
 }

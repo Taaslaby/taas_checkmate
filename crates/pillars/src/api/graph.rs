@@ -38,9 +38,13 @@ pub struct SynapseRow<'a> {
 
 impl<'a> SynapseRow<'a> {
     #[inline(always)]
-    pub fn len(&self) -> usize { self.col.len() }
+    pub fn len(&self) -> usize {
+        self.col.len()
+    }
     #[inline(always)]
-    pub fn is_empty(&self) -> bool { self.col.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.col.is_empty()
+    }
 }
 
 /// Sparse directed graph in Compressed Sparse Row (CSR) format.
@@ -93,8 +97,7 @@ impl SparseGraph {
         }
 
         // Build (from, to, weight, delay) and sort by from
-        let mut triplets: Vec<(u32, u32, f32, u8)> =
-            Vec::with_capacity(n_syn);
+        let mut triplets: Vec<(u32, u32, f32, u8)> = Vec::with_capacity(n_syn);
         for i in 0..n_syn {
             triplets.push((from[i], to[i], weights[i], delays[i]));
         }
@@ -135,6 +138,42 @@ impl SparseGraph {
             col_idx,
             weights: AlignedVec::from_slice(&weights_vec),
             delays: delays_vec,
+            n_neurons,
+        }
+    }
+
+    /// Build a CSR graph directly from precomputed CSR arrays (e.g. loaded
+    /// from a `.taas` snapshot). `row_ptr` must be length `n_neurons + 1`
+    /// and end at `col_idx.len()`. `weights` / `delays` must match `col_idx`.
+    ///
+    /// # Panics
+    /// - If lengths mismatch
+    /// - If any `col_idx` index >= `n_neurons`
+    /// - If `delays` contains values >= `MAX_DELAY_SLOTS`
+    pub fn from_csr(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: &[f32], delays: &[u8]) -> Self {
+        assert!(row_ptr.len() >= 1, "row_ptr must have at least one entry");
+        let n_neurons = row_ptr.len() - 1;
+        assert_eq!(
+            row_ptr[n_neurons] as usize,
+            col_idx.len(),
+            "CSR row_ptr must end at col_idx.len()"
+        );
+        assert_eq!(col_idx.len(), weights.len(), "col_idx/weights length mismatch");
+        assert_eq!(col_idx.len(), delays.len(), "col_idx/delays length mismatch");
+        for &t in &col_idx {
+            assert!((t as usize) < n_neurons, "col index {t} >= {n_neurons}");
+        }
+        for &d in delays.iter() {
+            assert!(
+                (d as usize) < MAX_DELAY_SLOTS,
+                "delay {d} >= MAX_DELAY_SLOTS ({MAX_DELAY_SLOTS})"
+            );
+        }
+        Self {
+            row_ptr,
+            col_idx,
+            weights: AlignedVec::from_slice(weights),
+            delays: delays.to_vec(),
             n_neurons,
         }
     }
