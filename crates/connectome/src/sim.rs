@@ -690,6 +690,9 @@ pub mod gpu {
 /// 6. CSR propagate: jump conductances (not currents)
 ///
 /// Requires `connectome.receptor_types` to be non-empty.
+/// Izhikevich with conductance-based receptor kinetics via the pillars-native
+/// `pillars-connectome::SynapticBrain`. Same signature as the legacy version;
+/// conductance carry-over (the caller's `kinetics`) is preserved.
 pub fn sim_izhikevich_synaptic(
     connectome: &ConnectomeData,
     state: &mut BrainState,
@@ -701,66 +704,60 @@ pub fn sim_izhikevich_synaptic(
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
-    let n_padded = state.n_padded;
-    let spike_buf_len = n_steps * n;
-    let mut spike_buffer = vec![0i32; spike_buf_len];
-    let dt = params.dt_ms;
-    let factors = DecayFactors::new(dt);
-
-    let padded_a = pad_to(&params.a, n_padded);
-    let padded_b = pad_to(&params.b, n_padded);
-    let padded_c = pad_to(&params.c, n_padded);
-    let padded_d = pad_to(&params.d, n_padded);
-
-    for step in 0..n_steps {
-        // 1. Decay conductances: g *= exp(-dt/tau)
-        kinetics.decay_all(&factors);
-
-        // 2. Set I_buf = external_I (reset)
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 3. Compute I_syn from conductances and add to I_buf
-        kinetics.compute_currents(&state.v, &mut state.I_buf);
-
-        // 4. Izhikevich step (SIMD) — clamp is INSIDE safe::izhikevich_step
-        safe::izhikevich_step(
-            &mut state.v,
-            &mut state.u,
-            &mut state.trace,
-            &padded_a,
-            &padded_b,
-            &mut state.I_buf,
-            dt,
-            0.99,
-            &mut state.spikes,
-            &padded_c,
-            &padded_d,
-            &mut state.refractory,
-            params.tau_ref,
-            None,
-        );
-
-        // 6. Push spikes to queue
-        push_spikes_to_queue(&state.spikes, n_neurons, &mut state.queue);
-
-        // 7. Record spikes
-        record_spikes(&state.spikes, n_neurons, &mut spike_buffer, step);
-
-        // 8. CSR propagate: jump conductances (not currents!)
-        csr_propagate_conductance_from_queue(
-            &connectome.row_ptr,
-            &connectome.col_indices,
-            &connectome.values,
-            &connectome.receptor_types,
-            &mut state.queue,
-            kinetics,
-            scale,
-        );
+    let mut spike_buffer = vec![0i32; n_steps * n];
+    if n_neurons == 0 || n_steps == 0 {
+        return spike_buffer;
     }
 
+    let new_conn = pillars_connectome::ConnectomeData::from_csr(
+        connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+        connectome.col_indices.iter().map(|&v| v as u32).collect(),
+        connectome.values.iter().map(|&w| w * scale).collect(),
+        vec![0u8; connectome.n_synapses],
+        connectome.receptor_types.clone(),
+    );
+    let mut brain =
+        pillars_connectome::SynapticBrain::<pillars::zoo::IzhikevichModel>::from_connectome(
+            &new_conn,
+            params.dt_ms,
+        );
+    brain.set_kinetics(&kinetics_legacy_to_pillars(kinetics)); // carry-over
+
+    brain.configure(|p| {
+        for i in 0..n_neurons {
+            p.param_slice_mut(0)[i] = params.dt_ms; // dt
+            p.param_slice_mut(1)[i] = params.a[i]; // a
+            p.param_slice_mut(2)[i] = params.b[i]; // b
+            p.param_slice_mut(3)[i] = params.c[i]; // c
+            p.param_slice_mut(4)[i] = params.d[i]; // d
+            p.param_slice_mut(5)[i] = params.tau_ref;
+            p.param_slice_mut(6)[i] = 30.0; // v_thresh (legacy hardcoded)
+            p.state_slice_mut(0)[i] = state.v[i]; // v
+            p.state_slice_mut(1)[i] = state.u[i]; // u
+            p.state_slice_mut(2)[i] = state.refractory[i]; // refr
+        }
+    });
+
+    for step in 0..n_steps {
+        let ext: Vec<f32> = (0..n_neurons)
+            .map(|i| external_I.get(i).copied().unwrap_or(0.0))
+            .collect();
+        let s = brain.step(&ext);
+        for i in 0..n_neurons {
+            spike_buffer[step * n + i] = s[i];
+        }
+    }
+
+    // Carry-over back + sync membrane state.
+    *kinetics = kinetics_pillars_to_legacy(brain.kinetics());
+    let v = brain.state(0);
+    let u = brain.state(1);
+    let refr = brain.state(2);
+    for i in 0..n_neurons {
+        state.v[i] = v[i];
+        state.u[i] = u[i];
+        state.refractory[i] = refr[i];
+    }
     spike_buffer
 }
 
