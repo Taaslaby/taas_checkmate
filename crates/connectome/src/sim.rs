@@ -408,64 +408,43 @@ pub fn sim_rate(
 ) -> Vec<i32> {
     let n = connectome.n_neurons;
     let n_neurons = connectome.row_ptr.len() - 1;
-    let spike_buf_len = n_steps * n;
-    let mut spike_buffer = vec![0i32; spike_buf_len];
-    let dt = params.dt_ms / 1000.0;
-    let decay = (-dt / params.tau).exp();
-    let inv_decay = 1.0 - decay;
-
-    let r = &mut state.v; // reuse v as rate buffer
-    let I = &mut state.I_buf;
-
-    for step in 0..n_steps {
-        // 1. Set I = external_r
-        I[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-
-        // 2. Scatter SpMV: I[post] += W[pre,post] * r[pre] * nt_types[pre]
-        // Need state.spikes for csr_propagate—set it from r > 0.5
-        state.queue.drain(); // clear any stale spikes from queue
-        for i in 0..n_neurons {
-            if i < r.len() && r[i] > 0.5 {
-                state.spikes[i] = 1;
-                state.queue.push(i as u32);
-            } else {
-                state.spikes[i] = 0;
-            }
-        }
-
-        // 3. Propagate spikes from queue (rate-weighted)
-        csr_propagate_from_queue(
-            &connectome.row_ptr,
-            &connectome.col_indices,
-            &connectome.values,
-            &connectome.nt_types,
-            &mut state.queue,
-            I,
-            1.0,
-        );
-
-        // 4. Exponential Euler: r = r * decay + clamp(I + I_ext, 0, 1) * (1 - decay)
-        for i in 0..n {
-            let ext = if i < external_I.len() {
-                external_I[i]
-            } else {
-                0.0
-            };
-            let input = (I[i] + ext).clamp(0.0, 1.0);
-            r[i] = r[i] * decay + input * inv_decay;
-        }
-
-        // 5. Record "spikes" (rate threshold crossing)
-        for i in 0..n_neurons {
-            if i < r.len() && r[i] > 0.5 {
-                let idx = step * n_neurons + i;
-                if idx < spike_buffer.len() {
-                    spike_buffer[idx] = 1;
-                }
-            }
-        }
+    let mut spike_buffer = vec![0i32; n_steps * n];
+    if n_neurons == 0 || n_steps == 0 {
+        return spike_buffer;
     }
 
+    // Delegate to pillars-connectome Brain with the new pillars RateModel.
+    // `dt` is in seconds (dt_ms/1000); the model emits a spike when r > 0.5.
+    let new_conn = pillars_connectome::ConnectomeData::from_csr(
+        connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+        connectome.col_indices.iter().map(|&v| v as u32).collect(),
+        connectome.values.clone(),
+        vec![0u8; connectome.n_synapses],
+        vec![0u8; connectome.n_synapses],
+    );
+    let mut brain = pillars_connectome::Brain::<pillars::zoo::RateModel>::from_connectome(&new_conn);
+    brain.configure(|p| {
+        for i in 0..n_neurons {
+            p.param_slice_mut(0)[i] = params.dt_ms / 1000.0; // dt (seconds)
+            p.param_slice_mut(1)[i] = 1.0 / params.tau.max(1e-6); // inv_tau
+            p.state_slice_mut(0)[i] = state.v[i]; // r
+        }
+    });
+
+    let idx: Vec<u32> = (0..n_neurons as u32).collect();
+    for step in 0..n_steps {
+        let ext: Vec<f32> = (0..n_neurons)
+            .map(|i| external_I.get(i).copied().unwrap_or(0.0))
+            .collect();
+        brain.inject(&idx, &ext);
+        brain.step();
+        record_spikes(brain.spikes(), n_neurons, &mut spike_buffer, step);
+    }
+
+    let r = brain.state(0);
+    for i in 0..n_neurons {
+        state.v[i] = r[i];
+    }
     spike_buffer
 }
 

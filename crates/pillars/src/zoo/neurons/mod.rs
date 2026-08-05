@@ -24,6 +24,7 @@ mod hr;
 mod izhikevich;
 mod lif;
 mod morris_lecar;
+mod rate;
 mod saw;
 mod triangulated;
 mod vsn;
@@ -73,6 +74,8 @@ pub use morris_lecar::{
     MLParamIdx, MorrisLecarModel, MorrisLecarModelParamIdx, MorrisLecarModelStateIdx,
     MorrisLecarParams, MorrisLecarState,
 };
+pub use rate::RATE_CUDA_SOURCE;
+pub use rate::{RateModel, RateModelParamIdx, RateModelStateIdx, RateParams, RateState};
 pub use saw::SAWModel;
 pub use saw::{SAWModelParamIdx, SAWModelStateIdx};
 pub use saw::SAW_CUDA_SOURCE;
