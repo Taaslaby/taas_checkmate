@@ -1051,7 +1051,7 @@ pub fn hh_population_pacemaking(n: usize, dt: f32) -> NeuralPopulation<HHModel> 
 }
 
 /// Simulate `n_steps` of Hodgkin-Huxley on a connectome using the pillars engine
-/// ([`NeuralPopulation<HHModel>`] + SIMD). Same lifecycle as [`sim_hh`]:
+/// ([`NeuralPopulation<HHModel>`] + SIMD).
 ///
 /// 1. ADD external_I on top of the carry-over current buffer
 /// 2. `pop.step()` — SIMD HH dynamics + edge-triggered spike detection
