@@ -430,8 +430,238 @@ impl PyHHPopulation {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  VSNPopulation (Variable Spiking Neuron — Surrogate Gradient)
+// ═══════════════════════════════════════════════════════════════
+
+/// Variable Spiking Neuron (VSN) population — SIMD-accelerated with surrogate gradient.
+///
+/// This is the core neuron model used in Spiking-GPT and all modern SNN architectures.
+///
+/// Params table:
+/// | idx | Name           | Default | Description |
+/// |:---:|----------------|:-------:|-------------|
+/// | 0   | dt             | 0.5     | Timestep (ms) |
+/// | 1   | inv_tau_m      | 0.1     | 1/τ_m — inverse membrane time constant |
+/// | 2   | v_rest         | -70.0   | Resting potential (mV) |
+/// | 3   | v_thresh       | -54.0   | Spike threshold (mV) |
+/// | 4   | v_reset        | -70.0   | Reset potential (mV) |
+/// | 5   | tau_ref        | 2.0     | Refractory period (ms) |
+/// | 6   | beta           | 0.9     | Leakage mixing factor (0..1) |
+/// | 7   | surrogate_gain | 10.0    | Surrogate gradient gain |
+///
+/// States:
+/// | idx | Name      | Description |
+/// |:---:|-----------|-------------|
+/// | 0   | v         | Membrane potential (mV) |
+/// | 1   | refr      | Refractory counter (ms) |
+/// | 2   | surrogate | Surrogate gradient value |
+#[pyclass(name = "VSNPopulation", module = "taas_checkmate.pillars")]
+pub struct PyVSNPopulation {
+    inner: NeuralPopulation<VSNModel>,
+}
+
+#[pymethods]
+impl PyVSNPopulation {
+    /// Create VSN population with `n` neurons.
+    ///
+    /// Args:
+    ///     n: number of neurons
+    ///     dt: timestep in ms (default 0.5)
+    ///     tau_m: membrane time constant in ms (default 10.0, stored as 1/tau_m)
+    ///     v_rest: resting potential in mV (default -70.0)
+    ///     v_thresh: spike threshold in mV (default -54.0)
+    ///     v_reset: reset potential in mV (default -70.0)
+    ///     beta: leakage mixing factor 0..1 (default 0.9)
+    ///     surrogate_gain: surrogate gradient gain (default 10.0)
+    #[new]
+    #[pyo3(signature = (n, dt=0.5, tau_m=10.0, v_rest=-70.0, v_thresh=-54.0, v_reset=-70.0, beta=0.9, surrogate_gain=10.0))]
+    fn new(
+        n: usize,
+        dt: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        beta: f32,
+        surrogate_gain: f32,
+    ) -> Self {
+        let mut pop = NeuralPopulation::<VSNModel>::new(n);
+        pop.fill_param(0, dt);
+        pop.fill_param(1, 1.0 / tau_m);  // Pre-inverted: store 1/τ_m
+        pop.fill_param(2, v_rest);
+        pop.fill_param(3, v_thresh);
+        pop.fill_param(4, v_reset);
+        pop.fill_param(5, 2.0);          // tau_ref
+        pop.fill_param(6, beta);
+        pop.fill_param(7, surrogate_gain);
+        pop.fill_state(0, v_rest);       // v = v_rest
+        pop.fill_state(1, 0.0);          // refr
+        pop.fill_state(2, 0.0);          // surrogate
+        Self { inner: pop }
+    }
+
+    // ─── Params ─────────────────────────────────────────────
+
+    #[setter] fn set_dt(&mut self, val: f32) { self.inner.fill_param(0, val); }
+    #[setter] fn set_inv_tau_m(&mut self, val: f32) { self.inner.fill_param(1, val); }
+    /// Set tau_m in ms — automatically stores as 1/tau_m (pre-inverted).
+    #[setter] fn set_tau_m(&mut self, val: f32) { self.inner.fill_param(1, 1.0 / val); }
+    #[setter] fn set_v_rest(&mut self, val: f32) { self.inner.fill_param(2, val); }
+    #[setter] fn set_v_thresh(&mut self, val: f32) { self.inner.fill_param(3, val); }
+    #[setter] fn set_v_reset(&mut self, val: f32) { self.inner.fill_param(4, val); }
+    #[setter] fn set_tau_ref(&mut self, val: f32) { self.inner.fill_param(5, val); }
+    #[setter] fn set_beta(&mut self, val: f32) { self.inner.fill_param(6, val); }
+    #[setter] fn set_surrogate_gain(&mut self, val: f32) { self.inner.fill_param(7, val); }
+
+    // ─── State getters ──────────────────────────────────────
+
+    /// Membrane potential as numpy array (copy-on-read).
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let slice = self.inner.state_slice(0);
+        Ok(PyArray1::from_slice(py, slice))
+    }
+
+    /// Refractory counter as numpy array.
+    #[getter]
+    fn refr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let slice = self.inner.state_slice(1);
+        Ok(PyArray1::from_slice(py, slice))
+    }
+
+    /// Surrogate gradient as numpy array.
+    #[getter]
+    fn surrogate<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let slice = self.inner.state_slice(2);
+        Ok(PyArray1::from_slice(py, slice))
+    }
+
+    // ─── State setters ──────────────────────────────────────
+
+    #[setter] fn set_v(&mut self, val: f32) { self.inner.fill_state(0, val); }
+    #[setter] fn set_refr(&mut self, val: f32) { self.inner.fill_state(1, val); }
+    #[setter] fn set_surrogate(&mut self, val: f32) { self.inner.fill_state(2, val); }
+
+    // ─── Per-neuron arrays ──────────────────────────────────
+
+    /// Set a param column from a numpy array (per-neuron values).
+    fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = array.readonly();
+        let src = ro.as_slice()?;
+        let dest = self.inner.param_slice_mut(col);
+        let n = dest.len().min(src.len());
+        dest[..n].copy_from_slice(&src[..n]);
+        Ok(())
+    }
+
+    /// Set a state column from a numpy array (per-neuron values).
+    fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let ro = array.readonly();
+        let src = ro.as_slice()?;
+        let dest = self.inner.state_slice_mut(col);
+        let n = dest.len().min(src.len());
+        dest[..n].copy_from_slice(&src[..n]);
+        Ok(())
+    }
+
+    // ─── Step ───────────────────────────────────────────────
+
+    /// Run one simulation step.
+    ///
+    /// Args:
+    ///     i_in: input current (float32 numpy array, length n)
+    ///     spikes_out: output spikes (int32 numpy array, length n, modified in-place)
+    fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    /// Number of neurons.
+    #[getter]
+    fn n(&self) -> usize { self.inner.len() }
+
+    fn __repr__(&self) -> String {
+        format!("VSNPopulation(n={})", self.inner.len())
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Module registration
 // ═══════════════════════════════════════════════════════════════
+
+/// Firing-rate neuron population (exponential Euler toward clamped input).
+///
+/// Params:
+/// | idx | Name     | Default | Description |
+/// |:---:|----------|:-------:|-------------|
+/// | 0   | dt       | 0.001   | Timestep (seconds) |
+/// | 1   | inv_tau  | 1.0     | 1/τ — inverse rate time constant (s⁻¹) |
+///
+/// States:
+/// | idx | Name | Description |
+/// |:---:|------|-------------|
+/// | 0   | r    | Firing rate (0..1) |
+#[pyclass(name = "RatePopulation", module = "taas_checkmate.pillars")]
+pub struct PyRatePopulation {
+    inner: NeuralPopulation<pillars::zoo::RateModel>,
+}
+
+#[pymethods]
+impl PyRatePopulation {
+    /// Create rate population with `n` neurons.
+    #[new]
+    fn new(n: usize) -> Self {
+        let mut pop = NeuralPopulation::<pillars::zoo::RateModel>::new(n);
+        pop.fill_param(0, 0.001); // dt (seconds)
+        pop.fill_param(1, 1.0); // inv_tau
+        pop.fill_state(0, 0.0); // r
+        Self { inner: pop }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, val: f32) {
+        self.inner.fill_param(0, val);
+    }
+    #[setter]
+    fn set_inv_tau(&mut self, val: f32) {
+        self.inner.fill_param(1, val);
+    }
+    /// Convenience: `tau` in seconds (stores `inv_tau = 1/tau`).
+    #[setter]
+    fn set_tau(&mut self, val: f32) {
+        self.inner.fill_param(1, 1.0 / val.max(1e-6));
+    }
+
+    /// Firing rate as numpy array (copy-on-read).
+    #[getter]
+    fn r<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let slice = self.inner.state_slice(0);
+        Ok(PyArray1::from_slice(py, slice))
+    }
+
+    /// Run one simulation step (i_in = input rate, spikes = r > 0.5).
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("RatePopulation(n={})", self.inner.len())
+    }
+}
 
 /// Register the pillars sub-module in the Python module tree.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -439,10 +669,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyLIFPopulation>()?;
     sub.add_class::<PyIzhikevichPopulation>()?;
     sub.add_class::<PyHHPopulation>()?;
+    sub.add_class::<PyVSNPopulation>()?;
+    sub.add_class::<PyRatePopulation>()?;
     m.add_submodule(&sub)?;
     // Also register at root for convenience
     m.add_class::<PyLIFPopulation>()?;
     m.add_class::<PyIzhikevichPopulation>()?;
     m.add_class::<PyHHPopulation>()?;
+    m.add_class::<PyVSNPopulation>()?;
+    m.add_class::<PyRatePopulation>()?;
     Ok(())
 }

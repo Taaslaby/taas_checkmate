@@ -50,3 +50,39 @@ pub mod rate {
 }
 
 pub use rate::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NeuralPopulation;
+
+    #[test]
+    fn test_rate_integrates_toward_input() {
+        let mut pop = NeuralPopulation::<RateModel>::new(8);
+        pop.fill_param(RateModelParamIdx::dt.into(), 0.001); // seconds
+        pop.fill_param(RateModelParamIdx::inv_tau.into(), 1.0);
+        pop.fill_state(RateModelStateIdx::r.into(), 0.0);
+
+        let i_in = vec![1.0f32; 8]; // saturating input rate
+        let mut spikes = vec![0i32; 8];
+
+        // One step: r = 0·exp(−dt·inv_tau) + 1·(1 − exp(−dt·inv_tau)) ≈ dt.
+        pop.step(&i_in, &mut spikes);
+        let r1 = pop.state_slice(0)[0];
+        assert!(r1 > 0.0009 && r1 < 0.0011, "r after 1 step = {r1}");
+
+        // Saturate toward 1 (exponential Euler fixed point at input), spiking
+        // once r crosses 0.5.
+        let mut total = 0i32;
+        for _ in 0..5000 {
+            pop.step(&i_in, &mut spikes);
+            total += spikes[0];
+        }
+        assert!(
+            pop.state_slice(0)[0] > 0.99,
+            "r should saturate near 1, got {}",
+            pop.state_slice(0)[0]
+        );
+        assert!(total > 0, "rate neuron must spike after crossing r=0.5");
+    }
+}
