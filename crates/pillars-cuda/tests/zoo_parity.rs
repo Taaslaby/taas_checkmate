@@ -11,7 +11,7 @@ use pillars::zoo::Model;
 use pillars_cuda::{
     CompiledModel, ADEX_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, FHN_CUDA_SOURCE,
     GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HR_CUDA_SOURCE,
-    MORRIS_LECAR_CUDA_SOURCE, SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
+    MORRIS_LECAR_CUDA_SOURCE, RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };
 
 const N: usize = 64; // multiple of 8 → capacity == n, stride == n
@@ -338,6 +338,7 @@ fn zoo_sources_are_self_contained() {
             "atlasovneuromotor_step",
             ATLASOV_NEUROMOTOR_CUDA_SOURCE,
         ),
+        ("rate_kernel", "rate_step", RATE_CUDA_SOURCE),
     ];
     for (kernel, step, source) in sources {
         assert!(
