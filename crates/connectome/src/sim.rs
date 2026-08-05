@@ -165,7 +165,11 @@ pub fn sim_lif(
 /// 4. LIF step
 /// 5. Push spikes to queue
 /// 6. CSR propagate: jump conductances instead of currents
-pub fn sim_lif_synaptic(
+/// The ORIGINAL hand-rolled `sim_lif_synaptic` (safe::lif_step bridge +
+/// SynapticKinetics loop), kept as the parity reference. [`sim_lif_synaptic`]
+/// now delegates to `pillars-connectome::SynapticBrain`.
+#[doc(hidden)]
+pub fn sim_lif_synaptic_legacy(
     connectome: &ConnectomeData,
     state: &mut BrainState,
     params: &LifParams,
@@ -222,6 +226,106 @@ pub fn sim_lif_synaptic(
         );
     }
 
+    spike_buffer
+}
+
+/// Bridge the two duplicate `SynapticKinetics` implementations: the legacy
+/// `taas_kernels::neuron::synapse` copy and the canonical
+/// `pillars::kernels::synapse` one. Same conductance buffers, two copies.
+fn kinetics_legacy_to_pillars(
+    l: &taas_kernels::neuron::synapse::SynapticKinetics,
+) -> pillars::kernels::synapse::SynapticKinetics {
+    let mut k = pillars::kernels::synapse::SynapticKinetics::new(l.n);
+    k.g_ampa = l.g_ampa.clone();
+    k.g_nmda = l.g_nmda.clone();
+    k.g_gaba_a = l.g_gaba_a.clone();
+    k.g_gaba_b = l.g_gaba_b.clone();
+    k.g_nachr = l.g_nachr.clone();
+    k.g_glucl = l.g_glucl.clone();
+    k.g_machr = l.g_machr.clone();
+    k
+}
+
+fn kinetics_pillars_to_legacy(
+    p: &pillars::kernels::synapse::SynapticKinetics,
+) -> taas_kernels::neuron::synapse::SynapticKinetics {
+    let mut k = taas_kernels::neuron::synapse::SynapticKinetics::new(p.n);
+    k.g_ampa = p.g_ampa.clone();
+    k.g_nmda = p.g_nmda.clone();
+    k.g_gaba_a = p.g_gaba_a.clone();
+    k.g_gaba_b = p.g_gaba_b.clone();
+    k.g_nachr = p.g_nachr.clone();
+    k.g_glucl = p.g_glucl.clone();
+    k.g_machr = p.g_machr.clone();
+    k
+}
+
+/// Simulate LIF with conductance-based receptor kinetics (AMPA/NMDA/GABA) via
+/// the pillars-native `pillars-connectome::SynapticBrain`. Same signature as
+/// [`sim_lif_synaptic_legacy`]; conductance carry-over (the caller's
+/// `kinetics`) is preserved across calls.
+pub fn sim_lif_synaptic(
+    connectome: &ConnectomeData,
+    state: &mut BrainState,
+    params: &LifParams,
+    external_I: &[f32],
+    n_steps: usize,
+    kinetics: &mut SynapticKinetics,
+    scale: f32,
+) -> Vec<i32> {
+    let n = connectome.n_neurons;
+    let n_neurons = connectome.row_ptr.len() - 1;
+    let mut spike_buffer = vec![0i32; n_steps * n];
+    if n_neurons == 0 || n_steps == 0 {
+        return spike_buffer;
+    }
+
+    let new_conn = pillars_connectome::ConnectomeData::from_csr(
+        connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+        connectome.col_indices.iter().map(|&v| v as u32).collect(),
+        connectome.values.iter().map(|&w| w * scale).collect(),
+        vec![0u8; connectome.n_synapses],
+        connectome.receptor_types.clone(),
+    );
+    let mut brain =
+        pillars_connectome::SynapticBrain::<pillars::zoo::LIFModel>::from_connectome(
+            &new_conn,
+            params.dt_ms,
+        );
+    brain.set_kinetics(&kinetics_legacy_to_pillars(kinetics)); // carry-over
+
+    brain.configure(|p| {
+        let np = params.packed.len() / 5;
+        for i in 0..n_neurons {
+            p.param_slice_mut(0)[i] = params.packed[0]; // dt (broadcast)
+            p.param_slice_mut(1)[i] = 1.0 / params.packed[np + i].max(1e-6); // inv_tau_m
+            p.param_slice_mut(2)[i] = params.packed[2 * np + i]; // v_rest
+            p.param_slice_mut(3)[i] = params.packed[3 * np + i]; // v_thresh
+            p.param_slice_mut(4)[i] = params.packed[4 * np + i]; // v_reset
+            p.param_slice_mut(5)[i] = params.tau_ref;
+            p.state_slice_mut(0)[i] = state.v[i]; // v
+            p.state_slice_mut(1)[i] = state.refractory[i]; // refr
+        }
+    });
+
+    for step in 0..n_steps {
+        let ext: Vec<f32> = (0..n_neurons)
+            .map(|i| external_I.get(i).copied().unwrap_or(0.0))
+            .collect();
+        let s = brain.step(&ext);
+        for i in 0..n_neurons {
+            spike_buffer[step * n + i] = s[i];
+        }
+    }
+
+    // Carry-over back + sync membrane state.
+    *kinetics = kinetics_pillars_to_legacy(brain.kinetics());
+    let v = brain.state(0);
+    let refr = brain.state(1);
+    for i in 0..n_neurons {
+        state.v[i] = v[i];
+        state.refractory[i] = refr[i];
+    }
     spike_buffer
 }
 

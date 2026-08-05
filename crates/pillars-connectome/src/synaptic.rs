@@ -53,6 +53,16 @@ impl<M: Model + 'static> SynapticBrain<M> {
         f(&mut self.pop);
     }
 
+    /// Restore the conductance state (e.g. carry-over from a previous run).
+    pub fn set_kinetics(&mut self, k: &SynapticKinetics) {
+        self.kinetics = k.clone();
+    }
+
+    /// The current conductance state (e.g. to persist across runs).
+    pub fn kinetics(&self) -> &SynapticKinetics {
+        &self.kinetics
+    }
+
     /// Advance one step with `external_i` (per-neuron input current).
     ///
     /// Returns the spike mask (0/1 per neuron) for this step.
