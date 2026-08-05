@@ -1,0 +1,13 @@
+[package]
+name = "pillars-connectome"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pillars-native connectome orchestrator — NeuralPopulation + SparseGraph + Network"
+
+[dependencies]
+pillars = { path = "../pillars" }
+
+[dev-dependencies]
+rand = "0.8"

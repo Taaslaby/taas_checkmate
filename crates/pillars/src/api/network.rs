@@ -90,6 +90,32 @@ use crate::zoo::Model;
 /// 4. **Compact** spikes → active indices
 /// 5. **Push** active spikes through graph into future delay slots
 /// 6. **Advance** `step_counter`
+
+/// A single directed edge: `pre` (index in the source population), `post`
+/// (index in the target population), `weight` and axonal `delay` (steps,
+/// `0` = delivered on the next step).
+///
+/// See [`Network::connect_edges`] for ergonomic connection.
+#[derive(Debug, Clone, Copy)]
+pub struct Edge {
+    pub pre: u32,
+    pub post: u32,
+    pub weight: f32,
+    pub delay: u8,
+}
+
+impl Edge {
+    #[inline]
+    pub fn new(pre: u32, post: u32, weight: f32, delay: u8) -> Self {
+        Self {
+            pre,
+            post,
+            weight,
+            delay,
+        }
+    }
+}
+
 pub struct Network {
     /// Populations (heterogeneous via trait object)
     pops: Vec<Box<dyn Population>>,
@@ -140,10 +166,7 @@ impl Network {
     /// # Panics
     /// Panics if `build()` has already been called.
     pub fn add_population<M: Model + 'static>(&mut self, count: usize) -> PopulationId {
-        assert!(
-            self.graph.is_none(),
-            "Cannot add populations after build()"
-        );
+        assert!(self.graph.is_none(), "Cannot add populations after build()");
         let id = self.pops.len();
         let pop = crate::api::NeuralPopulation::<M>::new(count);
         self.pops.push(Box::new(pop));
@@ -170,10 +193,7 @@ impl Network {
         weights: &[f32],
         delays: &[u8],
     ) {
-        assert!(
-            self.graph.is_none(),
-            "Cannot connect after build()"
-        );
+        assert!(self.graph.is_none(), "Cannot connect after build()");
         assert_eq!(from_indices.len(), to_indices.len());
         assert_eq!(from_indices.len(), weights.len());
         assert_eq!(from_indices.len(), delays.len());
@@ -206,6 +226,23 @@ impl Network {
                 delays[i],
             ));
         }
+    }
+
+    /// Connect `from` → `to` with a slice of edges — avoids juggling four
+    /// parallel arrays. Each edge's `pre`/`post` are indices **within the
+    /// respective populations**. Must be called before [`Network::build`].
+    pub fn connect_edges(&mut self, from: PopulationId, to: PopulationId, edges: &[Edge]) {
+        let mut from_indices = Vec::with_capacity(edges.len());
+        let mut to_indices = Vec::with_capacity(edges.len());
+        let mut weights = Vec::with_capacity(edges.len());
+        let mut delays = Vec::with_capacity(edges.len());
+        for e in edges {
+            from_indices.push(e.pre);
+            to_indices.push(e.post);
+            weights.push(e.weight);
+            delays.push(e.delay);
+        }
+        self.connect(from, &from_indices, to, &to_indices, &weights, &delays);
     }
 
     /// Build the sparse graph from accumulated edges.
@@ -293,11 +330,35 @@ impl Network {
     /// Typed mutable access to a population (safe downcast).
     ///
     /// Returns `None` if `pop` is invalid or the population is not of type `M`.
-    pub fn pop_typed_mut<M: Model + 'static>(&mut self, pop: PopulationId) -> Option<&mut crate::api::NeuralPopulation<M>> {
+    pub fn pop_typed_mut<M: Model + 'static>(
+        &mut self,
+        pop: PopulationId,
+    ) -> Option<&mut crate::api::NeuralPopulation<M>> {
         self.pops
             .get_mut(pop)?
             .as_any_mut()
             .downcast_mut::<crate::api::NeuralPopulation<M>>()
+    }
+
+    /// Configure a population's model parameters / state via its typed model.
+    ///
+    /// The ergonomic replacement for `pop_typed_mut` — the closure gets the
+    /// typed [`NeuralPopulation<M>`] directly, so you can `fill_param`/
+    /// `fill_state` by the model's column indices.
+    ///
+    /// # Panics
+    /// - If `pop` is out of range
+    /// - If the population is **not** of model type `M` (create it with
+    ///   [`Network::add_population`] using the same `M`)
+    pub fn configure<M: Model + 'static>(
+        &mut self,
+        pop: PopulationId,
+        f: impl FnOnce(&mut crate::api::NeuralPopulation<M>),
+    ) {
+        let p = self
+            .pop_typed_mut::<M>(pop)
+            .expect("Network::configure: population is not of the requested model type M");
+        f(p);
     }
 
     /// Inject external current into specific neurons of a population.
@@ -389,10 +450,20 @@ impl Network {
         // the caller scatters them into the delay buffer after join.
         // Delays ARE respected — each triple carries the target slot.
         #[cfg(feature = "rayon")]
-        push_spikes_par(&self.active_scratch, graph, &mut self.delay, self.step_counter);
+        push_spikes_par(
+            &self.active_scratch,
+            graph,
+            &mut self.delay,
+            self.step_counter,
+        );
 
         #[cfg(not(feature = "rayon"))]
-        push_spikes(&self.active_scratch, graph, &mut self.delay, self.step_counter);
+        push_spikes(
+            &self.active_scratch,
+            graph,
+            &mut self.delay,
+            self.step_counter,
+        );
 
         // ── 6. Advance counter ──
         self.step_counter += 1;
@@ -489,8 +560,11 @@ mod tests {
 
         // Spikes should be empty (no external drive)
         let spikes_b = net.spikes(b);
-        assert_eq!(spikes_b.iter().sum::<i32>(), 0,
-            "No spikes without external drive");
+        assert_eq!(
+            spikes_b.iter().sum::<i32>(),
+            0,
+            "No spikes without external drive"
+        );
     }
 
     #[test]
@@ -522,8 +596,10 @@ mod tests {
         // Manually verify: slot 3 should be all zeros (no spike happened)
         let slot3 = net.delay.slot(3 % MAX_DELAY_SLOTS);
         for (i, &val) in slot3.iter().enumerate() {
-            assert!(val.abs() < 1e-10,
-                "delay slot 3 [{i}] should be 0, got {val}");
+            assert!(
+                val.abs() < 1e-10,
+                "delay slot 3 [{i}] should be 0, got {val}"
+            );
         }
     }
 
@@ -547,7 +623,10 @@ mod tests {
         }
 
         // LIF with I=30 must spike — the drive reached the neurons.
-        assert!(total_spikes > 0, "LIF with I=30 must spike, got {total_spikes}");
+        assert!(
+            total_spikes > 0,
+            "LIF with I=30 must spike, got {total_spikes}"
+        );
         assert_eq!(net.step_counter(), 200);
     }
 
