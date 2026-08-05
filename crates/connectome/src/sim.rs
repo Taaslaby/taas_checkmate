@@ -20,71 +20,6 @@ use taas_kernels::safe;
 /// `lif_step(v: &mut [f32], ii: &mut [f32], spikes: &mut [i32],
 ///           params: &[f32], refractory: &mut [f32], tau_ref: f32)`
 /// where params = [tau_m, v_rest, v_thresh, v_reset, _] interleaved per neuron (n * 5).
-/// The ORIGINAL hand-rolled `sim_lif` (safe::lif_step + queue + CSR loop),
-/// kept as the parity reference for the pillars-native
-/// [`pillars_connectome::Brain`]. [`sim_lif`] now delegates to Brain; this
-/// function is what Brain is validated against.
-#[doc(hidden)]
-pub fn sim_lif_legacy(
-    connectome: &ConnectomeData,
-    state: &mut BrainState,
-    params: &LifParams,
-    external_I: &[f32],
-    n_steps: usize,
-    scale: f32,
-) -> Vec<i32> {
-    let n = connectome.n_neurons;
-    let n_neurons = connectome.row_ptr.len() - 1;
-    let spike_buf_len = n_steps * n;
-    let mut spike_buffer = vec![0i32; spike_buf_len];
-
-    for step in 0..n_steps {
-        // 1. ADD external_I on top of I_buf (preserves carry-over propagated current)
-        for i in 0..n.min(external_I.len()) {
-            state.I_buf[i] += external_I[i];
-        }
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 2. LIF step (SIMD) — reads I_buf as input, does NOT modify it
-        safe::lif_step(
-            &mut state.v,
-            &mut state.I_buf,
-            &mut state.spikes,
-            &params.packed,
-            &mut state.refractory,
-            params.tau_ref,
-            None,
-        );
-
-        // 4. Push spikes to queue (decouple SIMD → scatter)
-        push_spikes_to_queue(&state.spikes, n_neurons, &mut state.queue);
-
-        // 5. Record spikes
-        record_spikes(&state.spikes, n_neurons, &mut spike_buffer, step);
-
-        // 6. Clear I_buf (current was consumed by LIF; prepare for fresh propagation)
-        state.I_buf[..n].fill(0.0);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 7. CSR propagate spikes from queue → I_buf (adds, does NOT overwrite)
-        csr_propagate_from_queue(
-            &connectome.row_ptr,
-            &connectome.col_indices,
-            &connectome.values,
-            &connectome.nt_types,
-            &mut state.queue,
-            &mut state.I_buf,
-            scale,
-        );
-    }
-
-    spike_buffer
-}
-
 pub fn sim_lif(
     connectome: &ConnectomeData,
     state: &mut BrainState,
@@ -165,70 +100,6 @@ pub fn sim_lif(
 /// 4. LIF step
 /// 5. Push spikes to queue
 /// 6. CSR propagate: jump conductances instead of currents
-/// The ORIGINAL hand-rolled `sim_lif_synaptic` (safe::lif_step bridge +
-/// SynapticKinetics loop), kept as the parity reference. [`sim_lif_synaptic`]
-/// now delegates to `pillars-connectome::SynapticBrain`.
-#[doc(hidden)]
-pub fn sim_lif_synaptic_legacy(
-    connectome: &ConnectomeData,
-    state: &mut BrainState,
-    params: &LifParams,
-    external_I: &[f32],
-    n_steps: usize,
-    kinetics: &mut SynapticKinetics,
-    scale: f32,
-) -> Vec<i32> {
-    let n = connectome.n_neurons;
-    let n_neurons = connectome.row_ptr.len() - 1;
-    let spike_buf_len = n_steps * n;
-    let mut spike_buffer = vec![0i32; spike_buf_len];
-    let factors = DecayFactors::new(params.dt_ms);
-
-    for step in 0..n_steps {
-        // 1. Decay conductances: g *= exp(-dt/τ)
-        kinetics.decay_all(&factors);
-
-        // 2. Set I_buf = external_I (reset)
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 3. Compute I_syn from conductances and add to I_buf
-        kinetics.compute_currents(&state.v, &mut state.I_buf);
-
-        // 4. LIF step (SIMD) — clamp is INSIDE safe::lif_step
-        safe::lif_step(
-            &mut state.v,
-            &mut state.I_buf,
-            &mut state.spikes,
-            &params.packed,
-            &mut state.refractory,
-            params.tau_ref,
-            None,
-        );
-
-        // 6. Push spikes to queue
-        push_spikes_to_queue(&state.spikes, n_neurons, &mut state.queue);
-
-        // 7. Record spikes
-        record_spikes(&state.spikes, n_neurons, &mut spike_buffer, step);
-
-        // 7. CSR propagate: jump conductances (not currents!)
-        csr_propagate_conductance_from_queue(
-            &connectome.row_ptr,
-            &connectome.col_indices,
-            &connectome.values,
-            &connectome.receptor_types,
-            &mut state.queue,
-            kinetics,
-            scale,
-        );
-    }
-
-    spike_buffer
-}
-
 /// Bridge the two duplicate `SynapticKinetics` implementations: the legacy
 /// `taas_kernels::neuron::synapse` copy and the canonical
 /// `pillars::kernels::synapse` one. Same conductance buffers, two copies.
@@ -262,8 +133,7 @@ fn kinetics_pillars_to_legacy(
 
 /// Simulate LIF with conductance-based receptor kinetics (AMPA/NMDA/GABA) via
 /// the pillars-native `pillars-connectome::SynapticBrain`. Same signature as
-/// [`sim_lif_synaptic_legacy`]; conductance carry-over (the caller's
-/// `kinetics`) is preserved across calls.
+/// conductance carry-over (the caller's `kinetics`) is preserved across calls.
 pub fn sim_lif_synaptic(
     connectome: &ConnectomeData,
     state: &mut BrainState,
@@ -338,93 +208,12 @@ pub fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {
     padded
 }
 
-/// The ORIGINAL hand-rolled `sim_izhikevich`, kept as the parity reference.
-///
-/// NOTE: the legacy CSR propagation is a **no-op** — the propagated current is
-/// overwritten by `external_I` at the start of the next step, so neurons only
-/// ever see the external drive. [`sim_izhikevich`] (the pillars delegate)
-/// fixes this, so the two do NOT produce identical spike trains.
-#[doc(hidden)]
-pub fn sim_izhikevich_legacy(
-    connectome: &ConnectomeData,
-    state: &mut BrainState,
-    params: &IzhikevichParams,
-    external_I: &[f32],
-    n_steps: usize,
-) -> Vec<i32> {
-    let n = connectome.n_neurons;
-    let n_neurons = connectome.row_ptr.len() - 1;
-    let n_padded = state.n_padded;
-    let spike_buf_len = n_steps * n;
-    let mut spike_buffer = vec![0i32; spike_buf_len];
-
-    let dt = params.dt_ms;
-
-    // Pad params to match padded state arrays
-    let padded_a = pad_to(&params.a, n_padded);
-    let padded_b = pad_to(&params.b, n_padded);
-    let padded_c = pad_to(&params.c, n_padded);
-    let padded_d = pad_to(&params.d, n_padded);
-
-    for step in 0..n_steps {
-        // 1. Set I = external_I
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 2. Izhikevich step (SIMD + rayon) — clamp is INSIDE safe::izhikevich_step
-        safe::izhikevich_step(
-            &mut state.v,
-            &mut state.u,
-            &mut state.trace,
-            &padded_a,
-            &padded_b,
-            &mut state.I_buf,
-            dt,
-            0.99, // dt, trace_decay
-            &mut state.spikes,
-            &padded_c,
-            &padded_d,
-            &mut state.refractory,
-            params.tau_ref,
-            None,
-        );
-
-        // 4. Push spikes to queue
-        push_spikes_to_queue(&state.spikes, n_neurons, &mut state.queue);
-
-        // 5. Record spikes
-        record_spikes(&state.spikes, n_neurons, &mut spike_buffer, step);
-
-        // 6. Reset I = external_I
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
-
-        // 7. CSR propagate from queue
-        csr_propagate_from_queue(
-            &connectome.row_ptr,
-            &connectome.col_indices,
-            &connectome.values,
-            &connectome.nt_types,
-            &mut state.queue,
-            &mut state.I_buf,
-            1.0,
-        );
-    }
-
-    spike_buffer
-}
-
 /// Simulate `n_steps` of Izhikevich dynamics on a connectome via the
 /// pillars-native orchestrator (`pillars-connectome::Brain`).
 ///
-/// Same public signature as [`sim_izhikevich_legacy`], but the engine is 100%
-/// pillars. **Behavior differs from the legacy on purpose**: the legacy CSR
-/// propagation was a no-op (propagated current got overwritten by
-/// `external_I`); here spikes genuinely reach post-synaptic neurons.
+/// Note: the legacy `sim_izhikevich` dropped the CSR propagation (propagated
+/// current was overwritten by `external_I`); here spikes genuinely reach
+/// post-synaptic neurons — an intentional fix.
 pub fn sim_izhikevich(
     connectome: &ConnectomeData,
     state: &mut BrainState,
