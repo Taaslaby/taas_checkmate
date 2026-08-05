@@ -234,12 +234,14 @@ pub fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {
     padded
 }
 
-/// Simulate `n_steps` of Izhikevich dynamics on a connectome.
+/// The ORIGINAL hand-rolled `sim_izhikevich`, kept as the parity reference.
 ///
-/// `safe::izhikevich_step` expects all arrays to have the same length as `v`.
-/// Since `v` is padded to `n_padded` (multiple of 8 for SIMD),
-/// we pad `a`, `b`, `c`, `d` params too before passing to the SIMD kernel.
-pub fn sim_izhikevich(
+/// NOTE: the legacy CSR propagation is a **no-op** — the propagated current is
+/// overwritten by `external_I` at the start of the next step, so neurons only
+/// ever see the external drive. [`sim_izhikevich`] (the pillars delegate)
+/// fixes this, so the two do NOT produce identical spike trains.
+#[doc(hidden)]
+pub fn sim_izhikevich_legacy(
     connectome: &ConnectomeData,
     state: &mut BrainState,
     params: &IzhikevichParams,
@@ -309,6 +311,76 @@ pub fn sim_izhikevich(
         );
     }
 
+    spike_buffer
+}
+
+/// Simulate `n_steps` of Izhikevich dynamics on a connectome via the
+/// pillars-native orchestrator (`pillars-connectome::Brain`).
+///
+/// Same public signature as [`sim_izhikevich_legacy`], but the engine is 100%
+/// pillars. **Behavior differs from the legacy on purpose**: the legacy CSR
+/// propagation was a no-op (propagated current got overwritten by
+/// `external_I`); here spikes genuinely reach post-synaptic neurons.
+pub fn sim_izhikevich(
+    connectome: &ConnectomeData,
+    state: &mut BrainState,
+    params: &IzhikevichParams,
+    external_I: &[f32],
+    n_steps: usize,
+) -> Vec<i32> {
+    let n = connectome.n_neurons;
+    let n_neurons = connectome.row_ptr.len() - 1;
+    let mut spike_buffer = vec![0i32; n_steps * n];
+    if n_neurons == 0 || n_steps == 0 {
+        return spike_buffer;
+    }
+
+    let new_conn = pillars_connectome::ConnectomeData::from_csr(
+        connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+        connectome.col_indices.iter().map(|&v| v as u32).collect(),
+        connectome.values.clone(),
+        vec![0u8; connectome.n_synapses],
+        vec![0u8; connectome.n_synapses],
+    );
+    let mut brain =
+        pillars_connectome::Brain::<pillars::zoo::IzhikevichModel>::from_connectome(&new_conn);
+    brain.configure(|p| {
+        for i in 0..n_neurons {
+            p.param_slice_mut(0)[i] = params.dt_ms; // dt
+            p.param_slice_mut(1)[i] = params.a[i]; // a
+            p.param_slice_mut(2)[i] = params.b[i]; // b
+            p.param_slice_mut(3)[i] = params.c[i]; // c
+            p.param_slice_mut(4)[i] = params.d[i]; // d
+            p.param_slice_mut(5)[i] = params.tau_ref;
+            p.param_slice_mut(6)[i] = 30.0; // v_thresh (legacy hardcoded)
+            p.state_slice_mut(0)[i] = state.v[i]; // v
+            p.state_slice_mut(1)[i] = state.u[i]; // u
+            p.state_slice_mut(2)[i] = state.refractory[i]; // refr
+        }
+    });
+
+    let idx: Vec<u32> = (0..n_neurons as u32).collect();
+    for step in 0..n_steps {
+        let ext: Vec<f32> = (0..n_neurons)
+            .map(|i| external_I.get(i).copied().unwrap_or(0.0))
+            .collect();
+        brain.inject(&idx, &ext);
+        brain.step();
+        for i in 0..n_neurons {
+            spike_buffer[step * n + i] = brain.spikes()[i];
+        }
+    }
+
+    // Sync back the membrane state (trace/slow_state are not part of the
+    // pillars Izhikevich model — left untouched).
+    let v = brain.state(0);
+    let u = brain.state(1);
+    let refr = brain.state(2);
+    for i in 0..n_neurons {
+        state.v[i] = v[i];
+        state.u[i] = u[i];
+        state.refractory[i] = refr[i];
+    }
     spike_buffer
 }
 

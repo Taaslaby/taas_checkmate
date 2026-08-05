@@ -266,6 +266,46 @@ mod tests {
         }
     }
 
+    /// Izhikevich delegate must genuinely propagate: chain 0→1→2, drive
+    /// neuron 0, neuron 2 spikes. The legacy `sim_izhikevich` dropped this
+    /// (propagated current overwritten by external_I before the neuron step).
+    #[test]
+    fn izhikevich_propagates_through_chain() {
+        use pillars::zoo::{IzhikevichModel, IzhikevichModelParamIdx as P, IzhikevichModelStateIdx as S};
+
+        let conn = ConnectomeData::from_csr(
+            vec![0u32, 1, 2, 2],
+            vec![1u32, 2],
+            vec![50.0f32, 50.0],
+            vec![0u8, 0],
+            vec![0u8, 0],
+        );
+        let mut brain = Brain::<IzhikevichModel>::from_connectome(&conn);
+        brain.configure(|p| {
+            p.fill_param(P::dt.into(), 0.5);
+            p.fill_param(P::a.into(), 0.02);
+            p.fill_param(P::b.into(), 0.2);
+            p.fill_param(P::c.into(), -65.0);
+            p.fill_param(P::d.into(), 8.0);
+            p.fill_param(P::tau_ref.into(), 2.0);
+            p.fill_param(P::v_thresh.into(), 30.0);
+            p.fill_state(S::v.into(), -65.0);
+            p.fill_state(S::u.into(), 0.0);
+            p.fill_state(S::refr.into(), 0.0);
+        });
+
+        let mut neuron2_spikes = 0;
+        for _ in 0..300 {
+            brain.inject(&[0], &[10.0]);
+            brain.step();
+            neuron2_spikes += brain.spikes()[2];
+        }
+        assert!(
+            neuron2_spikes > 0,
+            "Izhikevich signal must propagate 0→1→2 (the legacy dropped it)"
+        );
+    }
+
     /// Empty connectome (no synapses) — Brain must still build and step.
     #[test]
     fn empty_connectome_steps() {
