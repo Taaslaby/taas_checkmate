@@ -937,74 +937,102 @@ impl BrainRunner {
     ) {
         let n = self.n_neurons;
         let n_neurons = self.connectome.row_ptr.len() - 1;
-        let n_padded = self.state.n_padded;
 
-        let padded_a = crate::sim::pad_to(&vec![a; n], n_padded);
-        let padded_b = crate::sim::pad_to(&vec![b; n], n_padded);
-        let padded_c = crate::sim::pad_to(&vec![c; n], n_padded);
-        let padded_d = crate::sim::pad_to(&vec![d; n], n_padded);
-
-        let trace_decay = 0.99;
-
-        for step in 0..n_steps {
-            // 1. Add external_I + Poisson
-            for i in 0..n.min(external_I.len()) {
-                self.state.I_buf[i] += external_I[i];
-            }
-            self.inject_poisson(dt_ms);
-
+        // Delegate to pillars-connectome (Brain instant / SynapticBrain
+        // conductance). v_thresh = 30 matches the legacy hardcoded value.
+        let new_conn = pillars_connectome::ConnectomeData::from_csr(
+            self.connectome.row_ptr.iter().map(|&v| v as u32).collect(),
+            self.connectome.col_indices.iter().map(|&v| v as u32).collect(),
+            self.connectome.values.clone(),
+            vec![0u8; self.connectome.n_synapses],
             if synaptic {
-                let kinetics = self.kinetics.as_mut().unwrap();
-                kinetics.decay_all(&DecayFactors::new(dt_ms));
-                kinetics.compute_currents(&self.state.v, &mut self.state.I_buf);
-            }
-
-            // 2. Izhikevich step
-            taas_kernels::safe::izhikevich_step(
-                &mut self.state.v,
-                &mut self.state.u,
-                &mut self.state.trace,
-                &padded_a,
-                &padded_b,
-                &mut self.state.I_buf,
-                dt_ms,
-                trace_decay,
-                &mut self.state.spikes,
-                &padded_c,
-                &padded_d,
-                &mut self.state.refractory,
-                tau_ref,
-                None,
-            );
-
-            // 3. Push spikes → record
-            push_spikes_to_queue(&self.state.spikes, n_neurons, &mut self.state.queue);
-            record_spikes(&self.state.spikes, n_neurons, &mut self.spike_buffer, step);
-
-            // 4. Clear I_buf
-            self.state.I_buf[..n].fill(0.0);
-
-            // 5. CSR propagate
-            if synaptic {
-                csr_propagate_conductance_from_queue(
-                    &self.connectome.row_ptr,
-                    &self.connectome.col_indices,
-                    &self.connectome.values,
-                    &self.connectome.receptor_types,
-                    &mut self.state.queue,
-                    self.kinetics.as_mut().unwrap(),
-                    1.0,
-                );
+                self.connectome.receptor_types.clone()
             } else {
-                csr_propagate_from_queue(
-                    &self.connectome.row_ptr,
-                    &self.connectome.col_indices,
-                    &self.connectome.values,
-                    &self.connectome.nt_types,
-                    &mut self.state.queue,
-                    &mut self.state.I_buf,
-                    1.0,
+                vec![0u8; self.connectome.n_synapses]
+            },
+        );
+
+        let mut poisson_buf = vec![0.0f32; n];
+        let mut ext = vec![0.0f32; n_neurons];
+
+        if synaptic {
+            let mut brain =
+                pillars_connectome::SynapticBrain::<pillars::zoo::IzhikevichModel>::from_connectome(
+                    &new_conn,
+                    dt_ms,
                 );
+            if let Some(k) = &self.kinetics {
+                brain.set_kinetics(&kinetics_legacy_to_pillars(k));
+            }
+            brain.configure(|p| {
+                for i in 0..n_neurons {
+                    p.param_slice_mut(0)[i] = dt_ms;
+                    p.param_slice_mut(1)[i] = a;
+                    p.param_slice_mut(2)[i] = b;
+                    p.param_slice_mut(3)[i] = c;
+                    p.param_slice_mut(4)[i] = d;
+                    p.param_slice_mut(5)[i] = tau_ref;
+                    p.param_slice_mut(6)[i] = 30.0; // v_thresh
+                    p.state_slice_mut(0)[i] = self.state.v[i];
+                    p.state_slice_mut(1)[i] = self.state.u[i];
+                    p.state_slice_mut(2)[i] = self.state.refractory[i];
+                }
+            });
+            for step in 0..n_steps {
+                poisson_buf.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                for i in 0..n_neurons {
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                }
+                let s = brain.step(&ext);
+                record_spikes(&s, n_neurons, &mut self.spike_buffer, step);
+            }
+            self.kinetics = Some(kinetics_pillars_to_legacy(brain.kinetics()));
+            let v = brain.state(0);
+            let u = brain.state(1);
+            let refr = brain.state(2);
+            for i in 0..n_neurons {
+                self.state.v[i] = v[i];
+                self.state.u[i] = u[i];
+                self.state.refractory[i] = refr[i];
+            }
+        } else {
+            let mut brain =
+                pillars_connectome::Brain::<pillars::zoo::IzhikevichModel>::from_connectome(
+                    &new_conn,
+                );
+            brain.configure(|p| {
+                for i in 0..n_neurons {
+                    p.param_slice_mut(0)[i] = dt_ms;
+                    p.param_slice_mut(1)[i] = a;
+                    p.param_slice_mut(2)[i] = b;
+                    p.param_slice_mut(3)[i] = c;
+                    p.param_slice_mut(4)[i] = d;
+                    p.param_slice_mut(5)[i] = tau_ref;
+                    p.param_slice_mut(6)[i] = 30.0; // v_thresh
+                    p.state_slice_mut(0)[i] = self.state.v[i];
+                    p.state_slice_mut(1)[i] = self.state.u[i];
+                    p.state_slice_mut(2)[i] = self.state.refractory[i];
+                }
+            });
+            let idx: Vec<u32> = (0..n_neurons as u32).collect();
+            for step in 0..n_steps {
+                poisson_buf.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                for i in 0..n_neurons {
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                }
+                brain.inject(&idx, &ext);
+                brain.step();
+                record_spikes(brain.spikes(), n_neurons, &mut self.spike_buffer, step);
+            }
+            let v = brain.state(0);
+            let u = brain.state(1);
+            let refr = brain.state(2);
+            for i in 0..n_neurons {
+                self.state.v[i] = v[i];
+                self.state.u[i] = u[i];
+                self.state.refractory[i] = refr[i];
             }
         }
 
