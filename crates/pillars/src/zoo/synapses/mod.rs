@@ -9,12 +9,18 @@
 //! | `CaPlasticity` | Calcium-driven plasticity rule (weight update) |
 //! | `Exp2Syn` | Dual-exponential conductance synapse (rise/decay) |
 
-pub mod nmda;
-pub mod tsodyks_markram;
 pub mod ca_plasticity;
 pub mod exp2syn;
+pub mod nmda;
+pub mod tsodyks_markram;
 
+pub use ca_plasticity::{
+    CaPlastParamIdx, CaPlasticityModel, CaPlasticityModelParamIdx, CaPlasticityModelStateIdx,
+    CaPlasticityParams, CaPlasticityState,
+};
+pub use exp2syn::{
+    exp2syn_factor, Exp2SynModel, Exp2SynModelParamIdx, Exp2SynModelStateIdx, Exp2SynParamIdx,
+    Exp2SynParams, Exp2SynState,
+};
 pub use nmda::nmda_mg_block_step;
 pub use tsodyks_markram::tsodyks_markram_step;
-pub use ca_plasticity::{CaPlasticityModel, CaPlasticityState, CaPlasticityParams, CaPlastParamIdx};
-pub use exp2syn::{Exp2SynModel, Exp2SynState, Exp2SynParams, Exp2SynParamIdx, exp2syn_factor};
