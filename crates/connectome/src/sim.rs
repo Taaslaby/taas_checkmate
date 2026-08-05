@@ -103,7 +103,7 @@ pub fn sim_lif(
 /// Bridge the two duplicate `SynapticKinetics` implementations: the legacy
 /// `taas_kernels::neuron::synapse` copy and the canonical
 /// `pillars::kernels::synapse` one. Same conductance buffers, two copies.
-fn kinetics_legacy_to_pillars(
+pub(crate) fn kinetics_legacy_to_pillars(
     l: &taas_kernels::neuron::synapse::SynapticKinetics,
 ) -> pillars::kernels::synapse::SynapticKinetics {
     let mut k = pillars::kernels::synapse::SynapticKinetics::new(l.n);
@@ -117,7 +117,7 @@ fn kinetics_legacy_to_pillars(
     k
 }
 
-fn kinetics_pillars_to_legacy(
+pub(crate) fn kinetics_pillars_to_legacy(
     p: &pillars::kernels::synapse::SynapticKinetics,
 ) -> taas_kernels::neuron::synapse::SynapticKinetics {
     let mut k = taas_kernels::neuron::synapse::SynapticKinetics::new(p.n);
