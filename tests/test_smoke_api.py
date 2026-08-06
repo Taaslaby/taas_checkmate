@@ -454,6 +454,7 @@ from taas_checkmate import pillars as pillars_mod
 LIFPopulation = pillars_mod.LIFPopulation
 RatePopulation = pillars_mod.RatePopulation
 AdExPopulation = pillars_mod.AdExPopulation
+GLIF4Population = pillars_mod.GLIF4Population
 ConnectomeBrain = pillars_mod.ConnectomeBrain
 SynapticConnectomeBrain = pillars_mod.SynapticConnectomeBrain
 
@@ -484,6 +485,15 @@ adex = AdExPopulation(n)
 adex.tau_m = 20.0
 adex.step(i_in, spikes)
 check(len(adex.v) == n, f"AdExPopulation v shape {len(adex.v)}")
+
+# GLIF4 fires with strong drive
+glif4 = GLIF4Population(n)
+glif4.dt = 0.5
+glif4_total = 0
+for _ in range(100):
+    glif4.step(np.full(n, 30.0, dtype=np.float32), spikes)
+    glif4_total += int(spikes.sum())
+check(glif4_total > 0, f"GLIF4Population fires (total={glif4_total})")
 
 # ConnectomeBrain routes spikes through a CSR chain 0→1→2
 cb = ConnectomeBrain(

@@ -759,6 +759,81 @@ impl PyAdExPopulation {
     }
 }
 
+/// GLIF4 neuron population (v, adaptive threshold th, AHP conductance g).
+///
+/// Params: `dt`, `g_leak`, `e_leak`, `v_thresh_0`, `v_reset`, `inv_tau_ahp`,
+/// `delta_g`, `e_ahp`, `inv_tau_theta`, `delta_theta`, `tau_ref`.
+/// States: `v`, `th`, `g`, `refr`.
+#[pyclass(name = "GLIF4Population", module = "taas_checkmate.pillars")]
+pub struct PyGLIF4Population {
+    inner: NeuralPopulation<pillars::zoo::GLIF4Model>,
+}
+
+#[pymethods]
+impl PyGLIF4Population {
+    #[new]
+    fn new(n: usize) -> Self {
+        let mut pop = NeuralPopulation::<pillars::zoo::GLIF4Model>::new(n);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::dt.into(), 0.5);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::g_leak.into(), 0.1);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::e_leak.into(), -65.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::v_thresh_0.into(), -50.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::v_reset.into(), -70.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::inv_tau_ahp.into(), 1.0 / 100.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::delta_g.into(), 2.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::e_ahp.into(), -70.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::inv_tau_theta.into(), 1.0 / 10.0);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::delta_theta.into(), 0.5);
+        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::tau_ref.into(), 2.0);
+        pop.fill_state(pillars::zoo::GLIF4ModelStateIdx::v.into(), -65.0);
+        pop.fill_state(pillars::zoo::GLIF4ModelStateIdx::th.into(), -50.0);
+        pop.fill_state(pillars::zoo::GLIF4ModelStateIdx::g.into(), 0.0);
+        Self { inner: pop }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::GLIF4ModelParamIdx::dt.into(), v);
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::GLIF4ModelParamIdx::v_thresh_0.into(), v);
+    }
+    #[setter]
+    fn set_v_reset(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::GLIF4ModelParamIdx::v_reset.into(), v);
+    }
+
+    /// Membrane potential as numpy array.
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state_slice(0)))
+    }
+
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("GLIF4Population(n={})", self.inner.len())
+    }
+}
+
 /// Connectome brain on the pillars engine — LIF population wired to a CSR
 /// graph, spike-routed with axonal delays.
 ///
@@ -977,6 +1052,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyVSNPopulation>()?;
     sub.add_class::<PyRatePopulation>()?;
     sub.add_class::<PyAdExPopulation>()?;
+    sub.add_class::<PyGLIF4Population>()?;
     sub.add_class::<PyConnectomeBrain>()?;
     sub.add_class::<PySynapticConnectomeBrain>()?;
     m.add_submodule(&sub)?;
@@ -987,6 +1063,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVSNPopulation>()?;
     m.add_class::<PyRatePopulation>()?;
     m.add_class::<PyAdExPopulation>()?;
+    m.add_class::<PyGLIF4Population>()?;
     m.add_class::<PyConnectomeBrain>()?;
     m.add_class::<PySynapticConnectomeBrain>()?;
     Ok(())
