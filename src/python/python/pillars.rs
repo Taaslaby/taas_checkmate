@@ -663,6 +663,102 @@ impl PyRatePopulation {
     }
 }
 
+/// Adaptive Exponential (AdEx) neuron population.
+///
+/// Params: `dt`, `inv_tau_m`, `inv_tau_w`, `v_rest`, `v_thresh`, `v_reset`,
+/// `delta_t`, `inv_delta_t`, `a`, `b`, `tau_ref`, `v_peak`.
+///
+/// States: `v`, `w` (adaptation), `refr`.
+#[pyclass(name = "AdExPopulation", module = "taas_checkmate.pillars")]
+pub struct PyAdExPopulation {
+    inner: NeuralPopulation<pillars::zoo::AdExModel>,
+}
+
+#[pymethods]
+impl PyAdExPopulation {
+    #[new]
+    fn new(n: usize) -> Self {
+        let mut pop = NeuralPopulation::<pillars::zoo::AdExModel>::new(n);
+        let m = pillars::zoo::AdExModelParamIdx::dt;
+        for col in 0..pillars::zoo::AdExModel::N_PARAMS {
+            pop.fill_param(col, 0.0);
+        }
+        // Sensible defaults (all neurons uniform).
+        pop.fill_param(m.into(), 0.5); // dt
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_m.into(), 1.0 / 20.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_w.into(), 1.0 / 100.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::v_rest.into(), -65.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::v_thresh.into(), -50.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::v_reset.into(), -70.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::delta_t.into(), 2.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::inv_delta_t.into(), 0.5);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::a.into(), 0.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::b.into(), 2.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::tau_ref.into(), 2.0);
+        pop.fill_param(pillars::zoo::AdExModelParamIdx::v_peak.into(), 20.0);
+        pop.fill_state(pillars::zoo::AdExModelStateIdx::v.into(), -65.0);
+        pop.fill_state(pillars::zoo::AdExModelStateIdx::w.into(), 0.0);
+        Self { inner: pop }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::dt.into(), v);
+    }
+    #[setter]
+    fn set_v_rest(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::v_rest.into(), v);
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::v_thresh.into(), v);
+    }
+    #[setter]
+    fn set_v_reset(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::v_reset.into(), v);
+    }
+    #[setter]
+    fn set_tau_m(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_m.into(), 1.0 / v.max(1e-6));
+    }
+    #[setter]
+    fn set_b(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::AdExModelParamIdx::b.into(), v);
+    }
+
+    /// Membrane potential as numpy array.
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state_slice(0)))
+    }
+
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("AdExPopulation(n={})", self.inner.len())
+    }
+}
+
 /// Connectome brain on the pillars engine — LIF population wired to a CSR
 /// graph, spike-routed with axonal delays.
 ///
@@ -781,6 +877,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyHHPopulation>()?;
     sub.add_class::<PyVSNPopulation>()?;
     sub.add_class::<PyRatePopulation>()?;
+    sub.add_class::<PyAdExPopulation>()?;
     sub.add_class::<PyConnectomeBrain>()?;
     m.add_submodule(&sub)?;
     // Also register at root for convenience
@@ -789,6 +886,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHHPopulation>()?;
     m.add_class::<PyVSNPopulation>()?;
     m.add_class::<PyRatePopulation>()?;
+    m.add_class::<PyAdExPopulation>()?;
     m.add_class::<PyConnectomeBrain>()?;
     Ok(())
 }
