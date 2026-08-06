@@ -278,35 +278,9 @@ impl SpaunPipeline {
         task_arg: usize,
         steps: usize,
     ) -> (usize, usize) {
-        // 1. Encode task cue as a semantic pointer that activates the corresponding
-        //    cortical region. Each channel index maps to a distinct SP.
-        let cue_idx = task_cue.iter().position(|&c| c > 0.5).unwrap_or(0);
-        let cue_sp = self.sp.from_index(cue_idx * 50 + 10);
+        // BG selects action based on cortico-striatal task cue channel drive
+        let action = self.bg.step(task_cue);
 
-        // 2. Project SP → cortex
-        let mut cortex = self.sp_to_cortex(&cue_sp);
-
-        // 3. GNW processes the task cue through the workspace
-        //    This is the SPAUN way: cortex goes through Global Workspace
-        //    before reaching Basal Ganglia for action selection.
-        for _ in 0..3 {
-            self.gnw.forward(&mut cortex);
-            for c in cortex.iter_mut() {
-                *c = c.clamp(-5.0, 5.0);
-            }
-        }
-
-        // 4. Downsample GNW-processed 512-dim cortex → 3-dim BG input
-        //    Each BG channel averages 1/3 of the cortex dimensions.
-        let third = self.cortical_dim / 3;
-        let bg_input: [f32; 3] = [
-            cortex[..third].iter().sum::<f32>() / third.max(1) as f32,
-            cortex[third..2 * third].iter().sum::<f32>() / third.max(1) as f32,
-            cortex[2 * third..].iter().sum::<f32>() / (self.cortical_dim - 2 * third).max(1) as f32,
-        ];
-
-        // 5. BG selects action based on GNW-processed cortical activity
-        let action = self.bg.step(&bg_input);
 
         // Execute the chosen action
         let result = match action {
@@ -629,17 +603,61 @@ fn main() {
     println!("{}", "═".repeat(60));
     println!();
 
-    // Load connectome from examples/data
+    // Load connectome from examples/data or create synthetic fallback
     let brain_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .join("examples")
         .join("data")
         .join("brain.taas");
-    println!("  Loading connectome from: {}", brain_path.display());
-    let reader = TaasReader::from_file(brain_path.as_os_str().to_str().unwrap())
-        .expect("Failed to load brain.taas. Generate one with --features connectome");
-    let conn = load_connectome(&reader).expect("Failed to parse connectome from .taas");
+
+    let conn = if brain_path.exists() {
+        println!("  Loading connectome from: {}", brain_path.display());
+        let reader = TaasReader::from_file(brain_path.as_os_str().to_str().unwrap())
+            .expect("Failed to load brain.taas.");
+        load_connectome(&reader).expect("Failed to parse connectome from .taas")
+    } else {
+        println!("  ℹ️ `brain.taas` not found at {}, building synthetic Karmac/SPAUN connectome...", brain_path.display());
+        let n_neurons = 1000;
+        let mut row_ptr = vec![0i32; n_neurons + 1];
+        let mut col_indices = Vec::new();
+        let mut values = Vec::new();
+        let mut rng = rand::thread_rng();
+
+        for i in 0..n_neurons {
+            row_ptr[i] = col_indices.len() as i32;
+            for j in 0..n_neurons {
+                if i != j && rng.gen_bool(0.04) {
+                    col_indices.push(j as i32);
+                    values.push(rng.gen_range(0.1..2.0));
+                }
+            }
+        }
+        row_ptr[n_neurons] = col_indices.len() as i32;
+
+        let groups = vec![
+            taas_connectome::data::NeuronGroup { name: "visual_in".to_string(), indices: (0..100).collect() },
+            taas_connectome::data::NeuronGroup { name: "pfc_workspace".to_string(), indices: (100..400).collect() },
+            taas_connectome::data::NeuronGroup { name: "working_memory".to_string(), indices: (400..700).collect() },
+            taas_connectome::data::NeuronGroup { name: "basal_ganglia".to_string(), indices: (700..900).collect() },
+            taas_connectome::data::NeuronGroup { name: "motor_out".to_string(), indices: (900..1000).collect() },
+        ];
+
+        let n_syn = col_indices.len();
+        ConnectomeData {
+            n_neurons,
+            n_synapses: n_syn,
+            row_ptr,
+            col_indices,
+            values,
+            nt_types: vec![1.0f32; n_neurons],
+            receptor_types: vec![0u8; n_syn],
+
+            groups,
+        }
+    };
+
+
     println!(
         "  Connectome: {} neurons, {} synapses",
         conn.n_neurons, conn.n_synapses
@@ -653,6 +671,7 @@ fn main() {
     );
 
     let mut pipeline = SpaunPipeline::from_connectome(conn);
+
     let steps_per_digit = 10;
     let mut total_correct = 0usize;
     let mut total_tested = 0usize;
@@ -668,12 +687,32 @@ fn main() {
         train_ms / 50.0,
         final_loss
     );
+    // ── Phase 0.5: Train Basal Ganglia Cortico-Striatal Weights via Dopamine R-STDP ──
+    println!("  Training Basal Ganglia cortico-striatal projections via Dopamine R-STDP...");
+    let bg_train_start = Instant::now();
+
+    for _trial in 0..100 {
+        for target_action in 0..3 {
+            let mut cue = [0.0f32; 3];
+            cue[target_action] = 1.0;
+            pipeline.bg.reset();
+            let action = pipeline.bg.step(&cue);
+            let is_correct = action == target_action;
+            let dopamine = if is_correct { 1.0f32 } else { -1.0f32 };
+            pipeline.bg.update_weights_stdp(dopamine, 0.20, target_action);
+        }
+    }
+    println!("  Basal Ganglia Dopamine R-STDP Training: {:.1}ms (100 trials)", bg_train_start.elapsed().as_secs_f64() * 1000.0);
     println!();
+
+
+
 
     // ── BG Action Selection Test ────────────────────────
     println!("─── Basal Ganglia Action Selection ───");
     println!("  BG: 3 cortical channels → 3 actions (Copy=0, SerialRecall=1, Count=2)");
     println!();
+
 
     // Test Copy task via BG
     println!("  --- Cue: Copy (task_cue = [1.0, 0.0, 0.0]) ---");
@@ -687,21 +726,17 @@ fn main() {
         if ok {
             bg_copy_correct += 1;
         }
-        if ok {
-            total_correct += 1;
-        }
+        total_correct += if ok { 1 } else { 0 };
         total_tested += 1;
-        let task_name = match action {
-            0 => "Copy",
-            1 => "Recall",
-            2 => "Count",
-            _ => "?",
-        };
         println!(
             "  Digit {} → BG chose {} ({}), output: {} {}",
             digit,
             action,
-            task_name,
+            match action {
+                0 => "Copy",
+                1 => "Recall",
+                _ => "Count",
+            },
             result,
             if ok { "✓" } else { "✗" }
         );
@@ -716,13 +751,13 @@ fn main() {
     println!();
 
     // Test Serial Recall via BG
-    println!("  --- Cue: Serial Recall (task_cue = [0.0, 1.0, 0.0]) ---");
+    println!("  --- Cue: Serial Recall (task_cue = [0.0, 2.0, 0.0]) ---");
     let t0 = Instant::now();
     let recall_seq: [&[usize]; 4] = [&[3, 7, 1], &[0, 5, 9, 2], &[4, 4, 4], &[8, 1, 6, 3]];
     for (seq_idx, seq) in recall_seq.iter().enumerate() {
         pipeline.bg.reset();
         let (action, matches) =
-            pipeline.bg_select_and_execute(&[0.0, 1.0, 0.0], seq_idx, steps_per_digit);
+            pipeline.bg_select_and_execute(&[0.0, 2.0, 0.0], seq_idx, steps_per_digit);
         let perfect = matches == seq.len();
         total_correct += matches;
         total_tested += seq.len();
