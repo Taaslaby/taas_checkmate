@@ -20,10 +20,9 @@
 //! ```
 
 use crate::core::population::NeuralPopulation;
-use crate::zoo::Model;
-use crate::zoo::neurons::{IzhikevichModel, LIFModel, AdExModel, HHModel, HAAPModel, VSNModel};
 use crate::q10_from_celsius_s;
-
+use crate::zoo::neurons::{AdExModel, HAAPModel, HHModel, IzhikevichModel, LIFModel, VSNModel};
+use crate::zoo::Model;
 
 /// Unified trait for type-safe population builders.
 pub trait ModelBuilder {
@@ -33,7 +32,6 @@ pub trait ModelBuilder {
     /// Build the configured neural population.
     fn build(self) -> NeuralPopulation<Self::Model>;
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 //  Izhikevich Builder
@@ -181,7 +179,7 @@ impl IzhikevichBuilder {
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<IzhikevichModel> {
         let mut pop = NeuralPopulation::<IzhikevichModel>::new(self.n);
-        
+
         // Parameters (column-major SoA)
         pop.fill_param(0, self.dt);
         pop.fill_param(1, self.a);
@@ -190,12 +188,12 @@ impl IzhikevichBuilder {
         pop.fill_param(4, self.d);
         pop.fill_param(5, self.tau_ref);
         pop.fill_param(6, self.v_thresh);
-        
+
         // Initial state
         pop.fill_state(0, self.v_init);
         pop.fill_state(1, self.u_init);
         pop.fill_state(2, 0.0); // refr
-        
+
         pop
     }
 }
@@ -285,7 +283,7 @@ impl LIFBuilder {
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<LIFModel> {
         let mut pop = NeuralPopulation::<LIFModel>::new(self.n);
-        
+
         // Parameters
         pop.fill_param(0, self.dt);
         pop.fill_param(1, 1.0 / self.tau_m); // inv_tau_m
@@ -293,11 +291,11 @@ impl LIFBuilder {
         pop.fill_param(3, self.v_thresh);
         pop.fill_param(4, self.v_reset);
         pop.fill_param(5, self.tau_ref);
-        
+
         // Initial state
         pop.fill_state(0, self.v_init);
         pop.fill_state(1, 0.0); // refr
-        
+
         pop
     }
 }
@@ -435,7 +433,7 @@ impl AdExBuilder {
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<AdExModel> {
         let mut pop = NeuralPopulation::<AdExModel>::new(self.n);
-        
+
         // Parameters
         pop.fill_param(0, self.dt);
         pop.fill_param(1, 1.0 / self.tau_m);
@@ -449,12 +447,12 @@ impl AdExBuilder {
         pop.fill_param(9, self.b);
         pop.fill_param(10, self.tau_ref);
         pop.fill_param(11, self.v_peak);
-        
+
         // Initial state
         pop.fill_state(0, self.v_init);
         pop.fill_state(1, self.w_init);
         pop.fill_state(2, 0.0); // refr
-        
+
         pop
     }
 }
@@ -664,8 +662,8 @@ impl HHBuilder {
         pop.fill_state(1, 0.0529); // m_inf at resting -65mV
         pop.fill_state(2, 0.5961); // h_inf at resting -65mV
         pop.fill_state(3, 0.3177); // n_inf at resting -65mV
-        pop.fill_state(4, 0.0);    // c_init
-        pop.fill_state(5, 1.0);    // was_below = true
+        pop.fill_state(4, 0.0); // c_init
+        pop.fill_state(5, 1.0); // was_below = true
 
         pop
     }
@@ -852,10 +850,7 @@ mod tests {
 
     #[test]
     fn test_adex_builder() {
-        let pop = AdExBuilder::new(150)
-            .dt(0.05)
-            .delta_t(3.0)
-            .build();
+        let pop = AdExBuilder::new(150).dt(0.05).delta_t(3.0).build();
         assert_eq!(pop.len(), 150);
     }
 
@@ -870,10 +865,7 @@ mod tests {
 
     #[test]
     fn test_haap_builder() {
-        let pop = HAAPBuilder::new(80)
-            .dt(0.1)
-            .tau_u(80.0)
-            .build();
+        let pop = HAAPBuilder::new(80).dt(0.1).tau_u(80.0).build();
         assert_eq!(pop.len(), 80);
     }
 
@@ -903,7 +895,6 @@ mod tests {
     fn test_universal_builder() {
         use crate::zoo::VSNParamIdx;
 
-
         let pop = UniversalBuilder::<VSNModel>::new(50)
             .param(VSNParamIdx::DT, 0.5)
             .param(VSNParamIdx::Inv_Tau_M, 0.1)
@@ -918,7 +909,6 @@ mod tests {
         assert_eq!(pop.len(), 50);
     }
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 //  Universal Population Builder
@@ -974,7 +964,6 @@ impl<M: Model> UniversalBuilder<M> {
         self.states.push((idx.into(), val));
         self
     }
-
 
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<M> {
@@ -1114,5 +1103,3 @@ impl ModelBuilder for VSNBuilder {
         self.build()
     }
 }
-
-

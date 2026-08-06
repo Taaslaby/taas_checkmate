@@ -151,7 +151,7 @@ impl SparseGraph {
     /// - If any `col_idx` index >= `n_neurons`
     /// - If `delays` contains values >= `MAX_DELAY_SLOTS`
     pub fn from_csr(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: &[f32], delays: &[u8]) -> Self {
-        assert!(row_ptr.len() >= 1, "row_ptr must have at least one entry");
+        assert!(!row_ptr.is_empty(), "row_ptr must have at least one entry");
         let n_neurons = row_ptr.len() - 1;
         assert_eq!(
             row_ptr[n_neurons] as usize,

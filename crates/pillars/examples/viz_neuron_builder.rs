@@ -56,11 +56,11 @@
 use std::collections::VecDeque;
 
 use eframe::egui::{
-    self, pos2, vec2, Align2, Color32, FontId, Key, Modifiers, PointerButton, Pos2, Rect,
-    Rounding, Sense, Stroke, Vec2,
+    self, pos2, vec2, Align2, Color32, FontId, Key, Modifiers, PointerButton, Pos2, Rect, Rounding,
+    Sense, Stroke, Vec2,
 };
 use egui_plot::{HLine, Legend, Line, Plot, PlotPoints, VLine};
-use pillars::api::formula::{self, OpKind, OpNode, N_REGS, S0, S1, S2, S3, I_SYN, TEMP0};
+use pillars::api::formula::{self, OpKind, OpNode, I_SYN, N_REGS, S0, S1, S2, S3, TEMP0};
 
 // ─── Layout constants ───────────────────────────────────────────
 const NODE_W: f32 = 150.0;
@@ -80,24 +80,96 @@ struct Spec {
 
 fn spec_of(kind: OpKind) -> Spec {
     match kind {
-        OpKind::State =>      Spec { name: "State",     ins: &[],                        outs: &["s0", "s1", "s2", "s3"] },
-        OpKind::Stimulus =>   Spec { name: "Stimulus",  ins: &[],                        outs: &["I"] },
-        OpKind::Const =>      Spec { name: "Const",     ins: &[],                        outs: &["out"] },
-        OpKind::Leak =>       Spec { name: "Leak",      ins: &["v", "i", "inv_tau", "v_rest"], outs: &["v'"] },
-        OpKind::Ohmic =>      Spec { name: "Ohmic",     ins: &["g", "v", "e"],           outs: &["I"] },
-        OpKind::Add =>        Spec { name: "Add",       ins: &["a", "b"],                outs: &["out"] },
-        OpKind::Mul =>        Spec { name: "Mul",       ins: &["a", "b"],                outs: &["out"] },
-        OpKind::Div =>        Spec { name: "Div",       ins: &["a", "b"],                outs: &["out"] },
-        OpKind::CmpGe =>      Spec { name: "CmpGe",     ins: &["a", "b"],                outs: &["mask"] },
-        OpKind::CmpGt =>      Spec { name: "CmpGt",     ins: &["a", "b"],                outs: &["mask"] },
-        OpKind::Blend =>      Spec { name: "Blend",     ins: &["mask", "a", "b"],        outs: &["out"] },
-        OpKind::GateStep =>   Spec { name: "GateStep",  ins: &["g", "g_inf", "inv_tau"], outs: &["g'"] },
-        OpKind::Sigmoid =>    Spec { name: "Sigmoid",   ins: &["x"],                     outs: &["out"] },
-        OpKind::Exp =>        Spec { name: "Exp",       ins: &["x"],                     outs: &["out"] },
-        OpKind::FireReset =>  Spec { name: "FireReset", ins: &["v", "thresh", "reset"],  outs: &["v"] },
-        OpKind::RefrClamp =>  Spec { name: "RefrClamp", ins: &["v", "refr", "reset"],    outs: &["v"] },
-        OpKind::RefrTimer =>  Spec { name: "RefrTimer", ins: &["refr", "tau_ref"],       outs: &["refr'"] },
-        OpKind::Scope =>      Spec { name: "Scope",     ins: &["x"],                     outs: &[] },
+        OpKind::State => Spec {
+            name: "State",
+            ins: &[],
+            outs: &["s0", "s1", "s2", "s3"],
+        },
+        OpKind::Stimulus => Spec {
+            name: "Stimulus",
+            ins: &[],
+            outs: &["I"],
+        },
+        OpKind::Const => Spec {
+            name: "Const",
+            ins: &[],
+            outs: &["out"],
+        },
+        OpKind::Leak => Spec {
+            name: "Leak",
+            ins: &["v", "i", "inv_tau", "v_rest"],
+            outs: &["v'"],
+        },
+        OpKind::Ohmic => Spec {
+            name: "Ohmic",
+            ins: &["g", "v", "e"],
+            outs: &["I"],
+        },
+        OpKind::Add => Spec {
+            name: "Add",
+            ins: &["a", "b"],
+            outs: &["out"],
+        },
+        OpKind::Mul => Spec {
+            name: "Mul",
+            ins: &["a", "b"],
+            outs: &["out"],
+        },
+        OpKind::Div => Spec {
+            name: "Div",
+            ins: &["a", "b"],
+            outs: &["out"],
+        },
+        OpKind::CmpGe => Spec {
+            name: "CmpGe",
+            ins: &["a", "b"],
+            outs: &["mask"],
+        },
+        OpKind::CmpGt => Spec {
+            name: "CmpGt",
+            ins: &["a", "b"],
+            outs: &["mask"],
+        },
+        OpKind::Blend => Spec {
+            name: "Blend",
+            ins: &["mask", "a", "b"],
+            outs: &["out"],
+        },
+        OpKind::GateStep => Spec {
+            name: "GateStep",
+            ins: &["g", "g_inf", "inv_tau"],
+            outs: &["g'"],
+        },
+        OpKind::Sigmoid => Spec {
+            name: "Sigmoid",
+            ins: &["x"],
+            outs: &["out"],
+        },
+        OpKind::Exp => Spec {
+            name: "Exp",
+            ins: &["x"],
+            outs: &["out"],
+        },
+        OpKind::FireReset => Spec {
+            name: "FireReset",
+            ins: &["v", "thresh", "reset"],
+            outs: &["v"],
+        },
+        OpKind::RefrClamp => Spec {
+            name: "RefrClamp",
+            ins: &["v", "refr", "reset"],
+            outs: &["v"],
+        },
+        OpKind::RefrTimer => Spec {
+            name: "RefrTimer",
+            ins: &["refr", "tau_ref"],
+            outs: &["refr'"],
+        },
+        OpKind::Scope => Spec {
+            name: "Scope",
+            ins: &["x"],
+            outs: &[],
+        },
     }
 }
 
@@ -130,12 +202,12 @@ fn cat_of(kind: OpKind) -> NodeCat {
 /// Bright accent — headers, wires, port glows, hover borders.
 fn cat_color(cat: NodeCat) -> Color32 {
     match cat {
-        NodeCat::System   => Color32::from_rgb(155, 89, 182),  // violet
-        NodeCat::Source   => Color32::from_rgb(46, 204, 113),  // green
-        NodeCat::Membrane => Color32::from_rgb(52, 152, 219),  // blue
-        NodeCat::Math     => Color32::from_rgb(230, 126, 34),  // amber
-        NodeCat::Gate     => Color32::from_rgb(26, 188, 156),  // teal
-        NodeCat::Logic    => Color32::from_rgb(231, 76, 60),   // red
+        NodeCat::System => Color32::from_rgb(155, 89, 182), // violet
+        NodeCat::Source => Color32::from_rgb(46, 204, 113), // green
+        NodeCat::Membrane => Color32::from_rgb(52, 152, 219), // blue
+        NodeCat::Math => Color32::from_rgb(230, 126, 34),   // amber
+        NodeCat::Gate => Color32::from_rgb(26, 188, 156),   // teal
+        NodeCat::Logic => Color32::from_rgb(231, 76, 60),   // red
     }
 }
 
@@ -148,12 +220,12 @@ fn cat_tint(cat: NodeCat) -> Color32 {
 /// Small icon badge for the header (helps pattern-match at a glance).
 fn cat_icon(cat: NodeCat) -> &'static str {
     match cat {
-        NodeCat::System   => "🧩",
-        NodeCat::Source   => "📥",
+        NodeCat::System => "🧩",
+        NodeCat::Source => "📥",
         NodeCat::Membrane => "🧫",
-        NodeCat::Math     => "🧮",
-        NodeCat::Gate     => "🚪",
-        NodeCat::Logic    => "🔀",
+        NodeCat::Math => "🧮",
+        NodeCat::Gate => "🚪",
+        NodeCat::Logic => "🔀",
     }
 }
 
@@ -183,15 +255,30 @@ fn bezier_eval(a: Pos2, b: Pos2, t: f32) -> Pos2 {
 
 /// Polyline approximation of the bezier (for drawing + hit-testing).
 fn bezier_polyline(a: Pos2, b: Pos2, steps: usize) -> Vec<Pos2> {
-    (0..=steps).map(|i| bezier_eval(a, b, i as f32 / steps as f32)).collect()
+    (0..=steps)
+        .map(|i| bezier_eval(a, b, i as f32 / steps as f32))
+        .collect()
 }
 
 /// Every op in a stable order (serialization index + palette).
 const ALL_KINDS: &[OpKind] = &[
-    OpKind::State, OpKind::Stimulus, OpKind::Const, OpKind::Leak, OpKind::Ohmic,
-    OpKind::Add, OpKind::Mul, OpKind::Div, OpKind::CmpGe, OpKind::Blend,
-    OpKind::GateStep, OpKind::Sigmoid, OpKind::Exp,
-    OpKind::FireReset, OpKind::RefrClamp, OpKind::RefrTimer, OpKind::Scope,
+    OpKind::State,
+    OpKind::Stimulus,
+    OpKind::Const,
+    OpKind::Leak,
+    OpKind::Ohmic,
+    OpKind::Add,
+    OpKind::Mul,
+    OpKind::Div,
+    OpKind::CmpGe,
+    OpKind::Blend,
+    OpKind::GateStep,
+    OpKind::Sigmoid,
+    OpKind::Exp,
+    OpKind::FireReset,
+    OpKind::RefrClamp,
+    OpKind::RefrTimer,
+    OpKind::Scope,
     // appended LAST — keeps serialization indices of existing kinds stable
     OpKind::CmpGt,
 ];
@@ -243,8 +330,13 @@ struct GEdge {
 #[derive(Clone, Copy, PartialEq)]
 enum Drag {
     None,
-    Wire { from: usize, from_pin: usize },
-    Node { idx: usize },
+    Wire {
+        from: usize,
+        from_pin: usize,
+    },
+    Node {
+        idx: usize,
+    },
     Pan,
     /// Panning the view by dragging inside the minimap.
     Minimap,
@@ -304,8 +396,21 @@ struct NeuronApp {
     status: String,
 }
 
-fn add_node(nodes: &mut Vec<GNode>, kind: OpKind, pos: Pos2, out_reg: usize, c: f32, c2: f32) -> usize {
-    nodes.push(GNode { kind, pos, out_reg, c, c2 });
+fn add_node(
+    nodes: &mut Vec<GNode>,
+    kind: OpKind,
+    pos: Pos2,
+    out_reg: usize,
+    c: f32,
+    c2: f32,
+) -> usize {
+    nodes.push(GNode {
+        kind,
+        pos,
+        out_reg,
+        c,
+        c2,
+    });
     nodes.len() - 1
 }
 
@@ -319,7 +424,11 @@ struct PBuilder {
 
 impl PBuilder {
     fn new() -> Self {
-        Self { nodes: Vec::new(), edges: Vec::new(), next_t: TEMP0 }
+        Self {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            next_t: TEMP0,
+        }
     }
 
     fn alloc_t(&mut self) -> usize {
@@ -346,7 +455,12 @@ impl PBuilder {
     }
 
     fn wire(&mut self, from: usize, from_pin: usize, to: usize, to_pin: usize) {
-        self.edges.push(GEdge { from, from_pin, to, to_pin });
+        self.edges.push(GEdge {
+            from,
+            from_pin,
+            to,
+            to_pin,
+        });
     }
 }
 
@@ -839,7 +953,10 @@ impl NeuronApp {
             _ => self.alloc_reg(),
         };
         let pos = if self.snap {
-            pos2((world.x / GRID).round() * GRID, (world.y / GRID).round() * GRID)
+            pos2(
+                (world.x / GRID).round() * GRID,
+                (world.y / GRID).round() * GRID,
+            )
         } else {
             pos2(world.x, world.y)
         };
@@ -900,12 +1017,7 @@ impl NeuronApp {
             ..node
         });
         // copy incoming wires
-        let incoming: Vec<GEdge> = self
-            .edges
-            .iter()
-            .filter(|e| e.to == idx)
-            .cloned()
-            .collect();
+        let incoming: Vec<GEdge> = self.edges.iter().filter(|e| e.to == idx).cloned().collect();
         for mut e in incoming {
             e.to = new_idx;
             self.edges.push(e);
@@ -929,7 +1041,12 @@ impl NeuronApp {
         }
         self.push_undo();
         self.edges.retain(|e| !(e.to == to && e.to_pin == to_pin));
-        self.edges.push(GEdge { from, from_pin, to, to_pin });
+        self.edges.push(GEdge {
+            from,
+            from_pin,
+            to,
+            to_pin,
+        });
         self.running = false;
     }
 
@@ -1002,12 +1119,18 @@ impl NeuronApp {
 
     fn in_pin_pos(&self, i: usize, pin: usize) -> Vec2 {
         let node = &self.nodes[i];
-        vec2(node.pos.x, node.pos.y + HEADER_H + (pin as f32 + 0.5) * PIN_H)
+        vec2(
+            node.pos.x,
+            node.pos.y + HEADER_H + (pin as f32 + 0.5) * PIN_H,
+        )
     }
 
     fn out_pin_pos(&self, i: usize, pin: usize) -> Vec2 {
         let node = &self.nodes[i];
-        vec2(node.pos.x + NODE_W, node.pos.y + HEADER_H + (pin as f32 + 0.5) * PIN_H)
+        vec2(
+            node.pos.x + NODE_W,
+            node.pos.y + HEADER_H + (pin as f32 + 0.5) * PIN_H,
+        )
     }
 
     fn hit_node(&self, p: Vec2) -> Option<usize> {
@@ -1082,7 +1205,10 @@ impl NeuronApp {
     /// Screen rect of the minimap overlay (bottom-right of the canvas).
     fn minimap_rect(&self, canvas_size: Vec2) -> Rect {
         let mm = vec2(190.0, 132.0);
-        Rect::from_min_size(vec2(canvas_size.x - mm.x - 14.0, canvas_size.y - mm.y - 14.0).to_pos2(), mm)
+        Rect::from_min_size(
+            vec2(canvas_size.x - mm.x - 14.0, canvas_size.y - mm.y - 14.0).to_pos2(),
+            mm,
+        )
     }
 
     /// (rect, scale, world-min) — maps world coords onto the minimap rect.
@@ -1090,7 +1216,9 @@ impl NeuronApp {
         let (gmn, gmx) = self.graph_world_bounds();
         let mm = self.minimap_rect(canvas_size);
         let gs = gmx - gmn;
-        let scale = ((mm.width() - 10.0) / gs.x).min((mm.height() - 10.0) / gs.y).clamp(0.01, 1.0);
+        let scale = ((mm.width() - 10.0) / gs.x)
+            .min((mm.height() - 10.0) / gs.y)
+            .clamp(0.01, 1.0);
         let drawn = vec2(gs.x * scale, gs.y * scale);
         let off = mm.min + vec2((mm.width() - drawn.x) * 0.5, (mm.height() - drawn.y) * 0.5);
         (Rect::from_min_size(off, drawn), scale, gmn)
@@ -1107,7 +1235,11 @@ impl NeuronApp {
 
     fn draw_minimap(&self, painter: &egui::Painter, canvas_size: Vec2) {
         let mm = self.minimap_rect(canvas_size);
-        painter.rect_filled(mm, Rounding::same(6.0), Color32::from_rgba_unmultiplied(14, 14, 25, 215));
+        painter.rect_filled(
+            mm,
+            Rounding::same(6.0),
+            Color32::from_rgba_unmultiplied(14, 14, 25, 215),
+        );
         painter.rect_stroke(
             mm,
             Rounding::same(6.0),
@@ -1140,8 +1272,16 @@ impl NeuronApp {
         let v0 = grect.min + (w0 - gmn) * scale;
         let v1 = grect.min + (w1 - gmn) * scale;
         let vr = Rect::from_min_max(v0, v1);
-        painter.rect_filled(vr, Rounding::same(1.0), Color32::from_rgba_unmultiplied(255, 255, 255, 14));
-        painter.rect_stroke(vr, Rounding::same(1.0), Stroke::new(1.0_f32, Color32::from_rgb(255, 255, 255)));
+        painter.rect_filled(
+            vr,
+            Rounding::same(1.0),
+            Color32::from_rgba_unmultiplied(255, 255, 255, 14),
+        );
+        painter.rect_stroke(
+            vr,
+            Rounding::same(1.0),
+            Stroke::new(1.0_f32, Color32::from_rgb(255, 255, 255)),
+        );
     }
 
     // ── Rendering ──────────────────────────────────────────────
@@ -1170,7 +1310,13 @@ impl NeuronApp {
         }
     }
 
-    fn draw_canvas(&self, painter: &egui::Painter, origin: Pos2, size: Vec2, pointer_world: Option<Vec2>) {
+    fn draw_canvas(
+        &self,
+        painter: &egui::Painter,
+        origin: Pos2,
+        size: Vec2,
+        pointer_world: Option<Vec2>,
+    ) {
         self.draw_grid(painter, origin, size);
 
         // ── wires: cubic bezier, colored by the source node's category ──
@@ -1243,7 +1389,12 @@ impl NeuronApp {
             let header = Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + header_h));
             painter.rect_filled(
                 header,
-                Rounding { nw: rounding.nw, ne: rounding.ne, sw: 0.0, se: 0.0 },
+                Rounding {
+                    nw: rounding.nw,
+                    ne: rounding.ne,
+                    sw: 0.0,
+                    se: 0.0,
+                },
                 cat_tint(cat),
             );
             painter.rect_filled(
@@ -1279,7 +1430,11 @@ impl NeuronApp {
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
                     painter.circle_filled(c, pr, Color32::from_rgb(16, 18, 32));
                 } else {
-                    painter.circle_stroke(c, pr, Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)));
+                    painter.circle_stroke(
+                        c,
+                        pr,
+                        Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)),
+                    );
                     painter.circle_filled(c, pr * 0.35, col.gamma_multiply(0.5));
                 }
                 painter.text(
@@ -1297,7 +1452,11 @@ impl NeuronApp {
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
                     painter.circle_filled(c, pr, Color32::from_rgb(16, 18, 32));
                 } else {
-                    painter.circle_stroke(c, pr, Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)));
+                    painter.circle_stroke(
+                        c,
+                        pr,
+                        Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)),
+                    );
                     painter.circle_filled(c, pr * 0.35, col.gamma_multiply(0.5));
                 }
                 let out_label = match node.kind {
@@ -1328,7 +1487,10 @@ impl NeuronApp {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new("🧠 Neuron Builder").strong().size(16.0));
                 ui.separator();
-                if ui.button(if self.running { "⏸ Pause" } else { "▶ Run" }).clicked() {
+                if ui
+                    .button(if self.running { "⏸ Pause" } else { "▶ Run" })
+                    .clicked()
+                {
                     self.running = !self.running;
                 }
                 if ui.button("↺ Reset").clicked() {
@@ -1491,8 +1653,7 @@ impl NeuronApp {
                 }
             });
         }
-        if !spec.outs.is_empty()
-            && !matches!(self.nodes[i].kind, OpKind::State | OpKind::Stimulus)
+        if !spec.outs.is_empty() && !matches!(self.nodes[i].kind, OpKind::State | OpKind::Stimulus)
         {
             ui.separator();
             ui.label("Output register:");
@@ -1592,7 +1753,12 @@ impl NeuronApp {
             edges: self
                 .edges
                 .iter()
-                .map(|e| FileEdge { from: e.from, from_pin: e.from_pin, to: e.to, to_pin: e.to_pin })
+                .map(|e| FileEdge {
+                    from: e.from,
+                    from_pin: e.from_pin,
+                    to: e.to,
+                    to_pin: e.to_pin,
+                })
                 .collect(),
         };
         match serde_json::to_string_pretty(&file) {
@@ -1626,7 +1792,12 @@ impl NeuronApp {
                         .edges
                         .iter()
                         .filter(|e| e.from < nodes.len() && e.to < nodes.len())
-                        .map(|e| GEdge { from: e.from, from_pin: e.from_pin, to: e.to, to_pin: e.to_pin })
+                        .map(|e| GEdge {
+                            from: e.from,
+                            from_pin: e.from_pin,
+                            to: e.to,
+                            to_pin: e.to_pin,
+                        })
                         .collect();
                     self.push_undo();
                     self.nodes = nodes;
@@ -1675,7 +1846,10 @@ fn draw_wire(painter: &egui::Painter, a: Pos2, b: Pos2, color: Color32, width: f
     let pts = bezier_polyline(a, b, 24);
     painter.add(egui::Shape::line(
         pts.clone(),
-        Stroke::new(width + 3.0, Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 42)),
+        Stroke::new(
+            width + 3.0,
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 42),
+        ),
     ));
     painter.add(egui::Shape::line(pts, Stroke::new(width, color)));
 }
@@ -1685,7 +1859,8 @@ impl eframe::App for NeuronApp {
         // ── Keyboard shortcuts (skip while typing in a text field) ──
         if !ctx.wants_keyboard_input() {
             if ctx.input_mut(|i| {
-                i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace)
+                i.consume_key(Modifiers::NONE, Key::Delete)
+                    || i.consume_key(Modifiers::NONE, Key::Backspace)
             }) {
                 if let Some(e) = self.selected_edge {
                     self.delete_edge(e);
@@ -1731,7 +1906,8 @@ impl eframe::App for NeuronApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();
             let canvas_h = (avail.y - 320.0).max(160.0);
-            let (mut resp, painter) = ui.allocate_painter(vec2(avail.x, canvas_h), Sense::click_and_drag());
+            let (mut resp, painter) =
+                ui.allocate_painter(vec2(avail.x, canvas_h), Sense::click_and_drag());
             let origin = resp.rect.min;
             let size = resp.rect.size();
             let pointer_screen = resp.interact_pointer_pos().map(|p| p - origin);
@@ -1785,7 +1961,10 @@ impl eframe::App for NeuronApp {
                 self.ctx_menu = None;
                 let p = pointer_world.unwrap_or(Vec2::ZERO);
                 if let Some((n, pin)) = self.hit_out_pin(p) {
-                    self.drag = Drag::Wire { from: n, from_pin: pin };
+                    self.drag = Drag::Wire {
+                        from: n,
+                        from_pin: pin,
+                    };
                 } else if let Some(n) = self.hit_node(p) {
                     self.drag = Drag::Node { idx: n };
                     self.selected = Some(n);
@@ -1871,9 +2050,7 @@ impl eframe::App for NeuronApp {
             // ── context menu ──
             if let Some(menu) = self.ctx_menu.take() {
                 let (screen, action) = match menu {
-                    CtxMenu::Canvas { screen, world } => {
-                        (screen, CtxMenuAction::Canvas { world })
-                    }
+                    CtxMenu::Canvas { screen, world } => (screen, CtxMenuAction::Canvas { world }),
                     CtxMenu::Node { screen, idx } => (screen, CtxMenuAction::Node { idx }),
                     CtxMenu::Wire { screen, idx } => (screen, CtxMenuAction::Wire { idx }),
                 };
@@ -1953,9 +2130,23 @@ mod tests {
     fn presets_fit_register_file_and_simulate() {
         // (name, graph, dt, i_syn, v_init, gate init s1..s3)
         let presets: [(&str, (Vec<GNode>, Vec<GEdge>), f32, f32, f32, [f32; 3]); 3] = [
-            ("LIF", default_lif_graph(), 0.5, 30.0, -70.0, [0.0, 0.0, 0.0]),
+            (
+                "LIF",
+                default_lif_graph(),
+                0.5,
+                30.0,
+                -70.0,
+                [0.0, 0.0, 0.0],
+            ),
             ("ML", ml_graph(), 0.05, 50.0, -60.0, [0.0003, 0.0, 0.0]),
-            ("HH-lite", hh_lite_graph(), 0.05, 10.0, -65.0, [0.0153, 0.697, 0.182]),
+            (
+                "HH-lite",
+                hh_lite_graph(),
+                0.05,
+                10.0,
+                -65.0,
+                [0.0153, 0.697, 0.182],
+            ),
         ];
         for (name, (nodes, edges), dt, i_syn, v_init, gates) in presets {
             // 1. Register file bounds: every node's out_reg must be valid.
@@ -1969,9 +2160,13 @@ mod tests {
             }
             // 2. Edge bounds: every edge must reference existing nodes.
             for (i, e) in edges.iter().enumerate() {
-                assert!(e.from < nodes.len() && e.to < nodes.len(),
+                assert!(
+                    e.from < nodes.len() && e.to < nodes.len(),
                     "{name}: edge {i} references {}-{} but nodes len is {}",
-                    e.from, e.to, nodes.len());
+                    e.from,
+                    e.to,
+                    nodes.len()
+                );
             }
             // 3. Simulation: 1000 steps, no NaN, no panic, and it must be alive.
             let prog = graph_to_program(&nodes, &edges);
@@ -2008,8 +2203,18 @@ mod tests {
     fn stale_edges_are_skipped() {
         let (nodes, mut edges) = default_lif_graph();
         // Simulate corruption from an old snapshot: edge to node 999.
-        edges.push(GEdge { from: 16, from_pin: 0, to: 11, to_pin: 0 });
-        edges.push(GEdge { from: 0, from_pin: 0, to: 999, to_pin: 0 });
+        edges.push(GEdge {
+            from: 16,
+            from_pin: 0,
+            to: 11,
+            to_pin: 0,
+        });
+        edges.push(GEdge {
+            from: 0,
+            from_pin: 0,
+            to: 999,
+            to_pin: 0,
+        });
         // These must not panic: program builds, sim runs.
         let prog = graph_to_program(&nodes, &edges);
         let mut regs = [0.0f32; N_REGS];
@@ -2039,8 +2244,13 @@ mod tests {
             }
         }
         for e in &edges {
-            assert!(e.from < nodes.len() && e.to < nodes.len(),
-                "edge after delete out of range: {}-{} vs len {}", e.from, e.to, nodes.len());
+            assert!(
+                e.from < nodes.len() && e.to < nodes.len(),
+                "edge after delete out of range: {}-{} vs len {}",
+                e.from,
+                e.to,
+                nodes.len()
+            );
         }
         // And the reduced graph still simulates.
         let prog = graph_to_program(&nodes, &edges);

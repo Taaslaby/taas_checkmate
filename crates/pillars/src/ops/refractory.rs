@@ -37,7 +37,7 @@ mod tests {
 
     #[test]
     fn test_refractory_clamp_active() {
-        let v = f32x8::splat(30.0);   // spike peak
+        let v = f32x8::splat(30.0); // spike peak
         let refr = f32x8::splat(5.0); // still refractory
         let reset = f32x8::splat(-70.0);
         let clamped = refractory_clamp(v, refr, reset);
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_refractory_clamp_inactive() {
         let v = f32x8::splat(-65.0);
-        let refr = f32x8::splat(0.0);  // not refractory
+        let refr = f32x8::splat(0.0); // not refractory
         let reset = f32x8::splat(-70.0);
         let clamped = refractory_clamp(v, refr, reset);
         assert_eq!(clamped.to_array()[0], -65.0, "should NOT clamp when refr=0");

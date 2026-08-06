@@ -25,9 +25,18 @@ use crate::core::lane::SimdLane;
 
 /// NO/cGMP signaling: returns (NO', cGMP', mod_factor).
 #[inline(always)]
-pub fn no_cgmp_step<S: SimdLane>(no: S, cgmp: S, ca: S,
-    k_nnos: S, k_deg_no: S, k_gc: S, k_pde: S, gain: S, kd: S, dt: S) -> (S, S, S)
-{
+pub fn no_cgmp_step<S: SimdLane>(
+    no: S,
+    cgmp: S,
+    ca: S,
+    k_nnos: S,
+    k_deg_no: S,
+    k_gc: S,
+    k_pde: S,
+    gain: S,
+    kd: S,
+    dt: S,
+) -> (S, S, S) {
     let new_no = (no + (k_nnos * ca - k_deg_no * no) * dt).max(S::zero());
     let new_cgmp = (cgmp + (k_gc * new_no - k_pde * cgmp) * dt).max(S::zero());
     let mod_factor = S::one() + gain * new_cgmp / (new_cgmp + kd);
@@ -44,9 +53,17 @@ pub fn camkii_step<S: SimdLane>(camkii: S, ca: S, k_on: S, k_off: S, dt: S) -> S
 
 /// Endocannabinoid (2-AG) signaling: returns (ecb', mod_factor).
 #[inline(always)]
-pub fn endocb_step<S: SimdLane>(ecb: S, ca: S, gq: S,
-    k_prod: S, k_mglur: S, k_deg: S, gain: S, kd: S, dt: S) -> (S, S)
-{
+pub fn endocb_step<S: SimdLane>(
+    ecb: S,
+    ca: S,
+    gq: S,
+    k_prod: S,
+    k_mglur: S,
+    k_deg: S,
+    gain: S,
+    kd: S,
+    dt: S,
+) -> (S, S) {
     let new_ecb = (ecb + (k_prod * ca * ca + k_mglur * gq - k_deg * ecb) * dt).max(S::zero());
     let mod_val = S::one() - gain * new_ecb / (new_ecb + kd);
     (new_ecb, mod_val.max(S::one() - gain).min(S::one()))
@@ -69,7 +86,8 @@ mod tests {
         let gain = f32x8::splat(0.5);
         let kd_val = f32x8::splat(0.5);
         let dt = f32x8::splat(1.0);
-        let (new_no, _new_cgmp, mod_f) = no_cgmp_step(no, cgmp, ca, kn, kd, kgc, kpde, gain, kd_val, dt);
+        let (new_no, _new_cgmp, mod_f) =
+            no_cgmp_step(no, cgmp, ca, kn, kd, kgc, kpde, gain, kd_val, dt);
         assert!(new_no.to_array()[0].abs() < 1e-6, "no Ca → no NO");
         assert!((mod_f.to_array()[0] - 1.0).abs() < 1e-6, "no modulation");
     }

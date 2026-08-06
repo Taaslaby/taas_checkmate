@@ -15,43 +15,73 @@
 //!   0.1   → 21.2    8       [-72.82, 41.79]     dt=0.01, 0.025, 0.05 all give 8
 //!   0.2   → 42.4    3       [-73.62, 43.29]     CVode adaptive step — see I=200 note
 
-use pillars::prelude::HHModel;
 use pillars::prelude::run_neuron;
+use pillars::prelude::HHModel;
 
 /// NEURON area-based conversion: 1/4.7124e-6 cm² / 1000 * 1e6 ≈ 212.2
 const NA_TO_UA: f32 = 212.2;
 
 struct Cfg {
     label: &'static str,
-    i_ua: f32,       // pillars µA/cm²
+    i_ua: f32, // pillars µA/cm²
     dt: f32,
     ref_spikes: u32,
 }
 
 const CONFIGS: &[Cfg] = &[
-    Cfg { label: "rest",      i_ua: 0.0 * NA_TO_UA,  dt: 0.01,  ref_spikes: 0 },
-    Cfg { label: "I50",       i_ua: 0.05 * NA_TO_UA, dt: 0.01,  ref_spikes: 7 },
-    Cfg { label: "I100",      i_ua: 0.1 * NA_TO_UA,  dt: 0.01,  ref_spikes: 8 },
-    Cfg { label: "I100_dt25", i_ua: 0.1 * NA_TO_UA,  dt: 0.025, ref_spikes: 8 },
-    Cfg { label: "I100_dt50", i_ua: 0.1 * NA_TO_UA,  dt: 0.05,  ref_spikes: 8 },
-    Cfg { label: "I200",      i_ua: 0.2 * NA_TO_UA,  dt: 0.01,  ref_spikes: 3 },
+    Cfg {
+        label: "rest",
+        i_ua: 0.0 * NA_TO_UA,
+        dt: 0.01,
+        ref_spikes: 0,
+    },
+    Cfg {
+        label: "I50",
+        i_ua: 0.05 * NA_TO_UA,
+        dt: 0.01,
+        ref_spikes: 7,
+    },
+    Cfg {
+        label: "I100",
+        i_ua: 0.1 * NA_TO_UA,
+        dt: 0.01,
+        ref_spikes: 8,
+    },
+    Cfg {
+        label: "I100_dt25",
+        i_ua: 0.1 * NA_TO_UA,
+        dt: 0.025,
+        ref_spikes: 8,
+    },
+    Cfg {
+        label: "I100_dt50",
+        i_ua: 0.1 * NA_TO_UA,
+        dt: 0.05,
+        ref_spikes: 8,
+    },
+    Cfg {
+        label: "I200",
+        i_ua: 0.2 * NA_TO_UA,
+        dt: 0.01,
+        ref_spikes: 3,
+    },
 ];
 
 fn make_params(num: usize, dt: f32) -> Vec<f32> {
     let mut p = vec![0.0f32; num * 12];
     for i in 0..num {
-        p[i] = dt;              // dt (ms)
-        p[num+i] = 120.0;       // g_Na (mS/cm²)
-        p[2*num+i] = 50.0;      // E_Na (mV)
-        p[3*num+i] = 36.0;      // g_K (mS/cm²)
-        p[4*num+i] = -77.0;     // E_K (mV)
-        p[5*num+i] = 0.3;       // g_leak (mS/cm²)
-        p[6*num+i] = -54.3;     // E_leak (mV)
-        p[7*num+i] = 1.0;       // q10 (6.3°C)
-        p[8*num+i] = 0.0;       // v_thresh (mV)
-        p[9*num+i] = 1.0;       // inv_C_m (1/µF)
-        p[10*num+i] = 0.0;      // g_CaT (standard: no CaT current)
-        p[11*num+i] = 120.0;    // E_CaT (mV)
+        p[i] = dt; // dt (ms)
+        p[num + i] = 120.0; // g_Na (mS/cm²)
+        p[2 * num + i] = 50.0; // E_Na (mV)
+        p[3 * num + i] = 36.0; // g_K (mS/cm²)
+        p[4 * num + i] = -77.0; // E_K (mV)
+        p[5 * num + i] = 0.3; // g_leak (mS/cm²)
+        p[6 * num + i] = -54.3; // E_leak (mV)
+        p[7 * num + i] = 1.0; // q10 (6.3°C)
+        p[8 * num + i] = 0.0; // v_thresh (mV)
+        p[9 * num + i] = 1.0; // inv_C_m (1/µF)
+        p[10 * num + i] = 0.0; // g_CaT (standard: no CaT current)
+        p[11 * num + i] = 120.0; // E_CaT (mV)
     }
     p
 }
@@ -79,13 +109,25 @@ fn run_hh(num: usize, dt: f32, i_syn: f32, t_ms: f32) -> (Vec<u32>, f32, f32, f3
         i_arr.fill(if step >= on && step < off { i_syn } else { 0.0 });
         unsafe {
             run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), num,
+                v.as_mut_ptr(),
+                m.as_mut_ptr(),
+                h.as_mut_ptr(),
+                k.as_mut_ptr(),
+                cat.as_mut_ptr(),
+                flag.as_mut_ptr(),
+                i_arr.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                num,
             );
         }
-        for j in 0..num { per[j] += spikes[j] as u32; }
-        for &vv in &v { vmin = vmin.min(vv); vmax = vmax.max(vv); }
+        for j in 0..num {
+            per[j] += spikes[j] as u32;
+        }
+        for &vv in &v {
+            vmin = vmin.min(vv);
+            vmax = vmax.max(vv);
+        }
     }
     (per, vmin, vmax, v[0])
 }
@@ -107,11 +149,20 @@ fn test_hh_resting_rates_match_neuron() {
     let mut spikes = vec![0i32; 8];
 
     for _ in 0..5000 {
-        unsafe { run_neuron::<HHModel>(
-            v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k.as_mut_ptr(),
-            cat.as_mut_ptr(), flag.as_mut_ptr(),
-            i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), 8,
-        ); }
+        unsafe {
+            run_neuron::<HHModel>(
+                v.as_mut_ptr(),
+                m.as_mut_ptr(),
+                h.as_mut_ptr(),
+                k.as_mut_ptr(),
+                cat.as_mut_ptr(),
+                flag.as_mut_ptr(),
+                i_arr.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                8,
+            );
+        }
     }
     for i in 0..8 {
         assert!((m[i] - 0.052932).abs() < 0.005, "m[{}]={:.6}", i, m[i]);
@@ -125,8 +176,10 @@ fn test_hh_resting_rates_match_neuron() {
 fn test_hh_vs_neuron_comprehensive() {
     let mut report = String::from("\n📊 PILLARS HH vs NEURON hh.mod VALIDATION\n");
     report.push_str(&format!("{:-<72}\n", ""));
-    report.push_str(&format!("{:<10} {:<8} {:<15} {:<10} {:<10}\n",
-        "Config", "µA/cm²", "pillars/NEURON", "V_range", "Status"));
+    report.push_str(&format!(
+        "{:<10} {:<8} {:<15} {:<10} {:<10}\n",
+        "Config", "µA/cm²", "pillars/NEURON", "V_range", "Status"
+    ));
     report.push_str(&format!("{:-<72}\n", ""));
 
     let mut ok = 0u32;
@@ -146,16 +199,25 @@ fn test_hh_vs_neuron_comprehensive() {
         };
 
         let (status, emoji) = if acceptable {
-            if diff == 0 { ok += 1; ("OK", "✅") } else { warn += 1; ("OK~", "⚠️") }
+            if diff == 0 {
+                ok += 1;
+                ("OK", "✅")
+            } else {
+                warn += 1;
+                ("OK~", "⚠️")
+            }
         } else {
             ("FAIL", "❌")
         };
 
-        let diff_s = if diff != 0 { format!(" (Δ={:+})", diff) } else { String::new() };
+        let diff_s = if diff != 0 {
+            format!(" (Δ={:+})", diff)
+        } else {
+            String::new()
+        };
         report.push_str(&format!(
             "{:<10} {:<6.1}  {:<5.0}/{:<3}   [{:>5.1},{:>5.1}]  {}{}{}\n",
-            c.label, c.i_ua, avg, c.ref_spikes, vmin, vmax,
-            emoji, status, diff_s,
+            c.label, c.i_ua, avg, c.ref_spikes, vmin, vmax, emoji, status, diff_s,
         ));
     }
 
@@ -180,7 +242,13 @@ fn test_hh_dt_robustness() {
         let (per, _, _, _) = run_hh(8, dt, i_ua, 100.0);
         let avg = per.iter().sum::<u32>() as f32 / 8.0;
         if let Some(p) = prev {
-            assert!((avg-p).abs() <= 2.0, "dt={:.3} spike diff {:.0}→{:.0}", dt, p, avg);
+            assert!(
+                (avg - p).abs() <= 2.0,
+                "dt={:.3} spike diff {:.0}→{:.0}",
+                dt,
+                p,
+                avg
+            );
         }
         prev = Some(avg);
     }

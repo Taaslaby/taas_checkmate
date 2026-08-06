@@ -78,13 +78,13 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod api;
 pub mod core;
+pub mod kernels;
 pub mod math;
 pub mod ops;
-pub mod zoo;
-pub mod api;
-pub mod kernels;
 pub mod prelude;
+pub mod zoo;
 
 pub use api::NeuralPopulation;
 
@@ -99,22 +99,26 @@ use wide::f32x8;
 
 /// Q10 temperature factor: `3^((T - 6.3) / 10)`.
 /// At 6.3°C → 1.0, at 37°C → 29.
-#[inline(always)] pub fn q10_from_celsius_s(celsius: f32) -> f32 {
+#[inline(always)]
+pub fn q10_from_celsius_s(celsius: f32) -> f32 {
     (3.0_f32).powf((celsius - 6.3) / 10.0)
 }
 
 /// SIMD broadcast of Q10.
-#[inline(always)] pub fn q10_from_celsius(celsius: f32) -> f32x8 {
+#[inline(always)]
+pub fn q10_from_celsius(celsius: f32) -> f32x8 {
     f32x8::splat(q10_from_celsius_s(celsius))
 }
 
 /// τ_eff = τ / Q10 — kinetics accelerate at higher temperature.
-#[inline(always)] pub fn scale_tau_q10_s(tau: f32, celsius: f32) -> f32 {
+#[inline(always)]
+pub fn scale_tau_q10_s(tau: f32, celsius: f32) -> f32 {
     tau / q10_from_celsius_s(celsius)
 }
 
 /// SIMD broadcast of scaled tau.
-#[inline(always)] pub fn scale_tau_q10(tau: f32, celsius: f32) -> f32x8 {
+#[inline(always)]
+pub fn scale_tau_q10(tau: f32, celsius: f32) -> f32x8 {
     f32x8::splat(scale_tau_q10_s(tau, celsius))
 }
 
@@ -140,8 +144,8 @@ pub const E_CA: f32 = 0.0;
 
 #[cfg(test)]
 mod tests {
-    use wide::f32x8;
     use crate::prelude::*;
+    use wide::f32x8;
 
     #[test]
     fn test_sigmoid_simd() {

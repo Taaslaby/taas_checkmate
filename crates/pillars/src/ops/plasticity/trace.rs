@@ -12,8 +12,10 @@
 //! | `trace_step` | `tr' = tr · exp(-dt·τ⁻¹) + spike_float` | Decay + add in one pass |
 //!
 //! # Spike convention
-//! Accepts SIMD masks (`-1.0`/`0.0` from `cmp_ge`) OR arithmetic flags
-//! (`1.0`/`0.0`). Converted via `spike_to_float`: `spike² > 0 → 1.0`.
+//! Accepts SIMD NaN masks (from `cmp_ge`), scalar `-1.0` masks, or arithmetic
+//! flags (`1.0`/`0.0`). Converted via
+//! [`spike_to_float`](crate::ops::spike::spike_to_float) (IEEE 754
+//! NaN-detection).
 
 use crate::core::lane::SimdLane;
 use crate::ops::spike::spike_to_float;
@@ -64,10 +66,16 @@ mod tests {
         // Float 1.0
         let f = trace_step(tr, f32x8::splat(1.0), inv_tau, dt);
 
-        assert!((m.to_array()[0] - 1.0).abs() < 0.01,
-            "mask → ~1.0, got {:.4}", m.to_array()[0]);
-        assert!((f.to_array()[0] - 1.0).abs() < 0.01,
-            "float → ~1.0, got {:.4}", f.to_array()[0]);
+        assert!(
+            (m.to_array()[0] - 1.0).abs() < 0.01,
+            "mask → ~1.0, got {:.4}",
+            m.to_array()[0]
+        );
+        assert!(
+            (f.to_array()[0] - 1.0).abs() < 0.01,
+            "float → ~1.0, got {:.4}",
+            f.to_array()[0]
+        );
     }
 
     #[test]
@@ -84,7 +92,11 @@ mod tests {
         let m = trace_add(tr, f32x8::splat(-1.0));
         let f = trace_add(tr, f32x8::splat(1.0));
         assert!((m.to_array()[0] - 1.5).abs() < 1e-6);
-        assert!((m.to_array()[0] - f.to_array()[0]).abs() < 1e-6,
-            "mask({:.4}) ≠ float({:.4})", m.to_array()[0], f.to_array()[0]);
+        assert!(
+            (m.to_array()[0] - f.to_array()[0]).abs() < 1e-6,
+            "mask({:.4}) ≠ float({:.4})",
+            m.to_array()[0],
+            f.to_array()[0]
+        );
     }
 }

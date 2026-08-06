@@ -114,15 +114,30 @@ pub fn standard_channels() -> Vec<ChannelSpec> {
         ChannelSpec {
             name: "NaV",
             gates: vec![
-                GateSpec { label: "m", alpha: na_m_alpha, beta: na_m_beta, power: 3 },
-                GateSpec { label: "h", alpha: na_h_alpha, beta: na_h_beta, power: 1 },
+                GateSpec {
+                    label: "m",
+                    alpha: na_m_alpha,
+                    beta: na_m_beta,
+                    power: 3,
+                },
+                GateSpec {
+                    label: "h",
+                    alpha: na_h_alpha,
+                    beta: na_h_beta,
+                    power: 1,
+                },
             ],
             E_rev: 50.0,
             g_max: 120.0,
         },
         ChannelSpec {
             name: "KV",
-            gates: vec![GateSpec { label: "n", alpha: k_n_alpha, beta: k_n_beta, power: 4 }],
+            gates: vec![GateSpec {
+                label: "n",
+                alpha: k_n_alpha,
+                beta: k_n_beta,
+                power: 4,
+            }],
             E_rev: -77.0,
             g_max: 36.0,
         },
@@ -135,7 +150,12 @@ pub fn pacemaking_channels() -> Vec<ChannelSpec> {
     let mut ch = standard_channels();
     ch.push(ChannelSpec {
         name: "CaT",
-        gates: vec![GateSpec { label: "c", alpha: cat_c_alpha, beta: cat_c_beta, power: 1 }],
+        gates: vec![GateSpec {
+            label: "c",
+            alpha: cat_c_alpha,
+            beta: cat_c_beta,
+            power: 1,
+        }],
         E_rev: 120.0,
         g_max: 0.5,
     });
@@ -245,7 +265,10 @@ mod tests {
             }
             assert!(v.is_finite() && v > -120.0 && v < 80.0, "v runaway: {v}");
         }
-        assert!(spikes >= 3, "pacemaking HH should fire ≥3 spikes in 200 ms, got {spikes}");
+        assert!(
+            spikes >= 3,
+            "pacemaking HH should fire ≥3 spikes in 200 ms, got {spikes}"
+        );
     }
 
     /// Gate ordering: 4 gates for pacemaking (m, h, n, c), steady states in [0,1].
@@ -272,6 +295,9 @@ mod tests {
         let channels = standard_channels();
         let g_hyper = steady_state_gates(-80.0, &channels);
         let g_depol = steady_state_gates(0.0, &channels);
-        assert!(g_depol[0] > g_hyper[0], "m_inf should rise with depolarization");
+        assert!(
+            g_depol[0] > g_hyper[0],
+            "m_inf should rise with depolarization"
+        );
     }
 }

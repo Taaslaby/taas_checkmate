@@ -67,7 +67,9 @@ impl PoissonGenerator {
         for i in 0..n {
             let p = (self.rates[i] * self.dt).clamp(0.0, 1.0);
             if p > 0.0 {
-                self.rng_states[i] = self.rng_states[i].wrapping_mul(1664525).wrapping_add(1013904223);
+                self.rng_states[i] = self.rng_states[i]
+                    .wrapping_mul(1664525)
+                    .wrapping_add(1013904223);
                 let r = (self.rng_states[i] >> 8) as f32 * RNG_SCALE_24;
                 spikes_out[i] = if r < p { 1 } else { 0 };
             } else {
@@ -167,7 +169,11 @@ pub fn phase_encode(
     threshold: f32,
     gain: f32,
 ) -> usize {
-    let n = spikes_out.len().min(phases.len()).min(cos_phases.len()).min(signal.len());
+    let n = spikes_out
+        .len()
+        .min(phases.len())
+        .min(cos_phases.len())
+        .min(signal.len());
     let mut spike_count = 0;
     for i in 0..n {
         phases[i] += signal[i] * gain;
@@ -207,7 +213,10 @@ impl TtfsEncoder {
     /// Encode values into TTFS spikes over multiple steps.
     /// Returns `true` if there are active spikes on this step.
     pub fn encode_step(&mut self, values: &[f32], spikes_out: &mut [i32]) -> bool {
-        let n = spikes_out.len().min(values.len()).min(self.fire_times.len());
+        let n = spikes_out
+            .len()
+            .min(values.len())
+            .min(self.fire_times.len());
         let mut any_spike = false;
 
         if self.current_step == 0 {
@@ -285,14 +294,20 @@ mod tests {
         let count = bsa_encode(&mut spikes, &signal, &kernel, &mut recon, 0.5);
         assert!(count > 0, "step signal should produce spikes");
         // Reconstruction should track the signal (last sample near 1)
-        assert!((recon[7] - signal[7]).abs() < 0.6, "recon should approach signal");
+        assert!(
+            (recon[7] - signal[7]).abs() < 0.6,
+            "recon should approach signal"
+        );
     }
 
     #[test]
     fn bsa_kernel_normalized() {
         let k = bsa_kernel_hamming(8);
         let sum: f32 = k.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-4, "kernel should be normalized, sum={sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-4,
+            "kernel should be normalized, sum={sum}"
+        );
     }
 
     #[test]
@@ -318,6 +333,9 @@ mod tests {
         let signal = vec![0.1f32; 4];
         let count = phase_encode(&mut spikes, &mut phases, &cos_phases, &signal, 0.3, 1.0);
         assert_eq!(count, 4, "cos=0.5 > 0.3 → all spike");
-        assert!((phases[0] - 0.1).abs() < 1e-6, "phase should advance by signal·gain");
+        assert!(
+            (phases[0] - 0.1).abs() < 1e-6,
+            "phase should advance by signal·gain"
+        );
     }
 }

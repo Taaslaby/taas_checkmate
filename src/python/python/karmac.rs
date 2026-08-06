@@ -194,3 +194,137 @@ impl PyMinBrain {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  BasalGanglia — Action Selection + Dopamine R-STDP Plasticity
+// ═══════════════════════════════════════════════════════════════
+
+/// Basal Ganglia winner-take-all action selection with online Dopamine R-STDP.
+///
+/// Creates a cortical → striatum → GPi/SNr → thalamus → action pathway.
+///
+/// Usage:
+/// ```python
+/// from taas_checkmate.karmac import BasalGanglia
+///
+/// bg = BasalGanglia(n_cortical=8, n_actions=4)
+/// cortex = np.array([0.1, 0.9, 0.3, 0.2, 0.05, 0.1, 0.0, 0.0], dtype=np.float32)
+/// action = bg.step(cortex)      # winner-take-all action index
+///
+/// # Online Dopamine R-STDP weight update
+/// bg.update_weights_stdp(dopamine=1.0, lr=0.1, target_action=1)
+/// ```
+#[pyclass(name = "BasalGanglia", module = "taas_checkmate.karmac")]
+pub struct PyBasalGanglia {
+    inner: crate::karmac::basal_ganglia::BasalGanglia,
+}
+
+#[pymethods]
+impl PyBasalGanglia {
+    /// Create Basal Ganglia with `n_cortical` input channels and `n_actions` competing actions.
+    #[new]
+    pub fn new(n_cortical: usize, n_actions: usize) -> Self {
+        Self {
+            inner: crate::karmac::basal_ganglia::BasalGanglia::new(n_cortical, n_actions),
+        }
+    }
+
+    /// Run one step of winner-take-all action selection.
+    ///
+    /// Args:
+    ///     cortex_input: float32 numpy array of cortical drive values (length n_cortical)
+    ///
+    /// Returns:
+    ///     int: selected action index (0..n_actions-1)
+    pub fn step(&mut self, cortex_input: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+        let ro = cortex_input.readonly();
+        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        Ok(self.inner.step(slice))
+    }
+
+    /// 3-Factor Neuromodulated Dopamine R-STDP weight update.
+    ///
+    /// Reinforces the target action row with +dopamine and suppresses competitors.
+    /// ΔW_ij = η · dopamine · state_j (target row)
+    /// ΔW_ij = -0.8 · η · state_j    (competing rows)
+    ///
+    /// Args:
+    ///     dopamine: dopamine signal (+1.0 reward, -0.5 punishment)
+    ///     lr: learning rate (e.g. 0.1)
+    ///     target_action: action index to reinforce
+    pub fn update_weights_stdp(&mut self, dopamine: f32, lr: f32, target_action: usize) {
+        self.inner.update_weights_stdp(dopamine, lr, target_action);
+    }
+
+    /// Get cortico-striatal weights as flat numpy array (n_actions x n_cortical, row-major).
+    pub fn get_weights<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        PyArray1::from_slice(py, &self.inner.cortico_stratial)
+    }
+
+    /// Number of cortical input channels.
+    #[getter]
+    pub fn n_cortical(&self) -> usize { self.inner.config.n_cortical }
+
+    /// Number of competing actions.
+    #[getter]
+    pub fn n_actions(&self) -> usize { self.inner.config.n_actions }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BasalGanglia(n_cortical={}, n_actions={})",
+            self.inner.config.n_cortical, self.inner.config.n_actions
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GlobalWorkspace — GNW Attention Ignition
+// ═══════════════════════════════════════════════════════════════
+
+/// Global Neuronal Workspace (GNW) attention ignition module.
+///
+/// Implements Baars/Dehaene GNW with gate → softmax → broadcast residual:
+///   output = r + broadcast(softmax(gate(r)))
+///
+/// Usage:
+/// ```python
+/// from taas_checkmate.karmac import GlobalWorkspace
+///
+/// gnw = GlobalWorkspace(n_neurons=512, workspace_size=64)
+/// cortex = np.zeros(512, dtype=np.float32)
+/// gnw.forward(cortex)  # in-place ignition update
+/// ```
+#[pyclass(name = "GlobalWorkspace", module = "taas_checkmate.karmac")]
+pub struct PyGlobalWorkspace {
+    inner: crate::karmac::gnw::GlobalWorkspace,
+}
+
+#[pymethods]
+impl PyGlobalWorkspace {
+    /// Create GNW with `n_neurons` and `workspace_size`.
+    ///
+    /// Args:
+    ///     n_neurons: number of cortical neurons to gate
+    ///     workspace_size: bottleneck workspace dimension
+    #[new]
+    pub fn new(n_neurons: usize, workspace_size: usize) -> Self {
+        Self {
+            inner: crate::karmac::gnw::GlobalWorkspace::new(n_neurons, workspace_size),
+        }
+    }
+
+    /// Run GNW forward pass (in-place): gate → softmax → broadcast residual.
+    ///
+    /// Args:
+    ///     cortex: float32 numpy array of neuron activations (length n_neurons, modified in-place)
+    pub fn forward(&mut self, cortex: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+        let mut rw = cortex.readwrite();
+        let slice = rw.as_slice_mut().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        self.inner.forward(slice);
+        Ok(())
+    }
+
+    fn __repr__(&self) -> String {
+        format!("GlobalWorkspace(n={}, ws={})", self.inner.n, self.inner.ws)
+    }
+}
+

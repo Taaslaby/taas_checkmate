@@ -34,9 +34,17 @@ pub fn mean_field_gap<S: SimdLane>(v: S, v_avg: S, coupling: S, g_gap: S) -> S {
 
 /// 1D drift-diffusion: `C' = C + (D·∇²C - μ·E·∇C)·dt`
 #[inline(always)]
-pub fn drift_diffusion_1d<S: SimdLane>(c: S, c_left: S, c_right: S, e_field: S,
-    diff_const: S, mobility: S, inv_dx2: S, inv_2dx: S, dt: S) -> S
-{
+pub fn drift_diffusion_1d<S: SimdLane>(
+    c: S,
+    c_left: S,
+    c_right: S,
+    e_field: S,
+    diff_const: S,
+    mobility: S,
+    inv_dx2: S,
+    inv_2dx: S,
+    dt: S,
+) -> S {
     let laplacian = (c_left + c_right - S::splat(2.0) * c) * inv_dx2;
     let gradient = (c_right - c_left) * inv_2dx;
     let transport = diff_const * laplacian - mobility * e_field * gradient;
@@ -53,9 +61,13 @@ mod tests {
         let v = f32x8::splat(-65.0);
         let v_avg = f32x8::splat(-65.0);
         let alpha = f32x8::splat(1.0);
-        let g = f32x8::splat(0.0);  // g = 0 → no current
+        let g = f32x8::splat(0.0); // g = 0 → no current
         let i = mean_field_gap(v, v_avg, alpha, g);
-        assert!(i.to_array()[0].abs() < 1e-6, "no conductance → no current, got {:.8}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0].abs() < 1e-6,
+            "no conductance → no current, got {:.8}",
+            i.to_array()[0]
+        );
     }
 
     #[test]

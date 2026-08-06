@@ -18,9 +18,21 @@ pub fn t3_complex_decoder(
 ) {
     let n_out = outputs.len();
     let n_in = amplitudes.len();
-    assert_eq!(cos_buf.len(), n_in, "t3_complex_decoder: cos_buf length mismatch");
-    assert_eq!(biases.len(), n_out, "t3_complex_decoder: biases length mismatch");
-    assert_eq!(weights.len(), n_in * n_out, "t3_complex_decoder: weights length mismatch");
+    assert_eq!(
+        cos_buf.len(),
+        n_in,
+        "t3_complex_decoder: cos_buf length mismatch"
+    );
+    assert_eq!(
+        biases.len(),
+        n_out,
+        "t3_complex_decoder: biases length mismatch"
+    );
+    assert_eq!(
+        weights.len(),
+        n_in * n_out,
+        "t3_complex_decoder: weights length mismatch"
+    );
     let n8 = n_in & !7;
 
     for o in 0..n_out {
@@ -30,7 +42,9 @@ pub fn t3_complex_decoder(
         let mut i = 0;
         unsafe {
             while i < n8 {
-                vdot += load8(amplitudes.as_ptr(), i) * load8(cos_buf.as_ptr(), i) * load8(weights.as_ptr(), row + i);
+                vdot += load8(amplitudes.as_ptr(), i)
+                    * load8(cos_buf.as_ptr(), i)
+                    * load8(weights.as_ptr(), row + i);
                 i += 8;
             }
         }
@@ -46,8 +60,16 @@ pub fn t3_complex_decoder(
 pub fn t3_pst_features(out_sin: &mut [f32], out_cos: &mut [f32], ph1: &[f32], ph2: &[f32]) {
     let n1 = ph1.len();
     let n2 = ph2.len();
-    assert_eq!(out_sin.len(), n1 * n2, "t3_pst_features: out_sin length mismatch");
-    assert_eq!(out_cos.len(), n1 * n2, "t3_pst_features: out_cos length mismatch");
+    assert_eq!(
+        out_sin.len(),
+        n1 * n2,
+        "t3_pst_features: out_sin length mismatch"
+    );
+    assert_eq!(
+        out_cos.len(),
+        n1 * n2,
+        "t3_pst_features: out_cos length mismatch"
+    );
     for i in 0..n1 {
         for j in 0..n2 {
             let d = ph1[i] - ph2[j];
@@ -61,7 +83,10 @@ pub fn t3_pst_features(out_sin: &mut [f32], out_cos: &mut [f32], ph1: &[f32], ph
 pub fn t3_lms_train(weights: &mut [f32], bias: &mut [f32], states: &[f32], error: f32, lr: f32) {
     let n = weights.len();
     assert_eq!(states.len(), n, "t3_lms_train: states length mismatch");
-    assert!(!bias.is_empty(), "t3_lms_train: bias must have at least 1 element");
+    assert!(
+        !bias.is_empty(),
+        "t3_lms_train: bias must have at least 1 element"
+    );
     let lr_e = f32x8::splat(lr * error);
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
@@ -77,10 +102,20 @@ pub fn t3_lms_train(weights: &mut [f32], bias: &mut [f32], states: &[f32], error
 }
 
 /// NLMS training step: `w += lr·error·states / (‖states‖² + ε)`.
-pub fn nlms_train(weights: &mut [f32], bias: &mut [f32], states: &[f32], error: f32, lr: f32, eps: f32) {
+pub fn nlms_train(
+    weights: &mut [f32],
+    bias: &mut [f32],
+    states: &[f32],
+    error: f32,
+    lr: f32,
+    eps: f32,
+) {
     let n = weights.len();
     assert_eq!(states.len(), n, "nlms_train: states length mismatch");
-    assert!(!bias.is_empty(), "nlms_train: bias must have at least 1 element");
+    assert!(
+        !bias.is_empty(),
+        "nlms_train: bias must have at least 1 element"
+    );
 
     // Norm² via SIMD reduction
     let n8 = n & !7;
@@ -208,8 +243,16 @@ pub fn adam_train(
 /// `output[f] = Σ_t weights[t·F + f]·buffer[(pos + t) % l][f]`.
 pub fn pst_decode(output: &mut [f32], buffer: &[f32], weights: &[f32], l: usize, pos: usize) {
     let feat_dim = output.len();
-    assert_eq!(buffer.len(), l * feat_dim, "pst_decode: buffer length mismatch");
-    assert_eq!(weights.len(), l * feat_dim, "pst_decode: weights length mismatch");
+    assert_eq!(
+        buffer.len(),
+        l * feat_dim,
+        "pst_decode: buffer length mismatch"
+    );
+    assert_eq!(
+        weights.len(),
+        l * feat_dim,
+        "pst_decode: weights length mismatch"
+    );
     output.fill(0.0);
 
     let n8 = feat_dim & !7;
@@ -239,13 +282,23 @@ pub fn pst_decode(output: &mut [f32], buffer: &[f32], weights: &[f32], l: usize,
 /// Ring synthesis: `out[i] = w[i]·a[i]·trig[i]`.
 pub fn ring_synthesis(output: &mut [f32], amplitudes: &[f32], trig_buf: &[f32], weights: &[f32]) {
     let n = output.len();
-    assert_eq!(amplitudes.len(), n, "ring_synthesis: amplitudes length mismatch");
-    assert_eq!(trig_buf.len(), n, "ring_synthesis: trig_buf length mismatch");
+    assert_eq!(
+        amplitudes.len(),
+        n,
+        "ring_synthesis: amplitudes length mismatch"
+    );
+    assert_eq!(
+        trig_buf.len(),
+        n,
+        "ring_synthesis: trig_buf length mismatch"
+    );
     assert_eq!(weights.len(), n, "ring_synthesis: weights length mismatch");
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
         unsafe {
-            let v = load8(weights.as_ptr(), off) * load8(amplitudes.as_ptr(), off) * load8(trig_buf.as_ptr(), off);
+            let v = load8(weights.as_ptr(), off)
+                * load8(amplitudes.as_ptr(), off)
+                * load8(trig_buf.as_ptr(), off);
             store8(output.as_mut_ptr(), off, v);
         }
     }
@@ -266,11 +319,19 @@ mod tests {
         let states: Vec<f32> = (0..n).map(|i| (i + 1) as f32 * 0.1).collect();
         for _ in 0..100 {
             let target = 1.0;
-            let pred: f32 = weights.iter().zip(states.iter()).map(|(w, s)| w * s).sum::<f32>() + bias[0];
+            let pred: f32 = weights
+                .iter()
+                .zip(states.iter())
+                .map(|(w, s)| w * s)
+                .sum::<f32>()
+                + bias[0];
             let err = target - pred;
             nlms_train(&mut weights, &mut bias, &states, err, 0.01, 1e-8);
         }
-        assert!(weights.iter().any(|&w| w.abs() > 0.001), "NLMS weights should update");
+        assert!(
+            weights.iter().any(|&w| w.abs() > 0.001),
+            "NLMS weights should update"
+        );
     }
 
     #[test]
@@ -283,10 +344,18 @@ mod tests {
             let target = 1.0;
             let pred: f32 = weights.iter().zip(states.iter()).map(|(w, s)| w * s).sum();
             let err = target - pred;
-            let s: f32 = states.iter().zip(cov.iter()).map(|(x, c)| c * x * x).sum::<f32>() + 0.1;
+            let s: f32 = states
+                .iter()
+                .zip(cov.iter())
+                .map(|(x, c)| c * x * x)
+                .sum::<f32>()
+                + 0.1;
             kalman_update(&mut weights, &mut cov, &states, err, s);
         }
-        assert!(weights.iter().any(|&w| w.abs() > 0.001), "Kalman weights should update");
+        assert!(
+            weights.iter().any(|&w| w.abs() > 0.001),
+            "Kalman weights should update"
+        );
         assert!(cov.iter().all(|&c| c < 1.0), "Covariance should decrease");
     }
 
@@ -315,7 +384,11 @@ mod tests {
         let mut output = vec![0.0f32; n];
         ring_synthesis(&mut output, &amps, &trig, &weights);
         for i in 0..n {
-            assert!((output[i] - 1.0).abs() < 1e-6, "ring_synthesis[{i}]: {}", output[i]);
+            assert!(
+                (output[i] - 1.0).abs() < 1e-6,
+                "ring_synthesis[{i}]: {}",
+                output[i]
+            );
         }
     }
 
@@ -338,12 +411,20 @@ mod tests {
         let mut b = vec![0.0f32; 1];
         let states: Vec<f32> = (0..n).map(|i| (i as f32 + 1.0) * 0.1).collect();
         t3_lms_train(&mut w, &mut b, &states, 0.5, 0.01);
-        assert!(w.iter().any(|&x| x.abs() > 0.001), "LMS should update weights");
+        assert!(
+            w.iter().any(|&x| x.abs() > 0.001),
+            "LMS should update weights"
+        );
 
         let mut wa = vec![0.0f32; n];
         let mut m = vec![0.0f32; n];
         let mut v = vec![0.0f32; n];
-        adam_train(&mut wa, &mut m, &mut v, &states, 0.5, 0.01, 0.9, 0.999, 0.9, 0.999, 1e-8);
-        assert!(wa.iter().any(|&x| x.abs() > 0.001), "Adam should update weights");
+        adam_train(
+            &mut wa, &mut m, &mut v, &states, 0.5, 0.01, 0.9, 0.999, 0.9, 0.999, 1e-8,
+        );
+        assert!(
+            wa.iter().any(|&x| x.abs() > 0.001),
+            "Adam should update weights"
+        );
     }
 }

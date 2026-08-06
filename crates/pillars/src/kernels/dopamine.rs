@@ -53,9 +53,17 @@ pub fn dopamine_traces_step(
 ) {
     let n = trace_pre.len();
     assert_eq!(trace_post.len(), n, "dopamine: trace_post length mismatch");
-    assert_eq!(eligibility.len(), n, "dopamine: eligibility length mismatch");
+    assert_eq!(
+        eligibility.len(),
+        n,
+        "dopamine: eligibility length mismatch"
+    );
     assert_eq!(pre_spikes.len(), n, "dopamine: pre_spikes length mismatch");
-    assert_eq!(post_spikes.len(), n, "dopamine: post_spikes length mismatch");
+    assert_eq!(
+        post_spikes.len(),
+        n,
+        "dopamine: post_spikes length mismatch"
+    );
 
     // BUGFIX: clamp to EPSILON (was 1.0) — prevents div-by-zero without
     // silently changing dynamics. Both SIMD and scalar paths use EPSILON so
@@ -118,8 +126,16 @@ pub fn dopamine_traces_step(
         if post_spikes[i] != 0 {
             trace_post[i] += 1.0;
         }
-        let ltp = if post_spikes[i] != 0 { a_ltp * trace_pre[i] } else { 0.0 };
-        let ltd = if pre_spikes[i] != 0 { a_ltd * trace_post[i] } else { 0.0 };
+        let ltp = if post_spikes[i] != 0 {
+            a_ltp * trace_pre[i]
+        } else {
+            0.0
+        };
+        let ltd = if pre_spikes[i] != 0 {
+            a_ltd * trace_post[i]
+        } else {
+            0.0
+        };
         eligibility[i] += ltp - ltd;
         let decay_e = fast_exp(-dt / tau_e.max(epsi));
         eligibility[i] *= decay_e;
@@ -141,7 +157,11 @@ pub fn dopamine_weight_update(
     w_max: f32,
 ) {
     let n = weights.len();
-    assert_eq!(eligibility.len(), n, "dopamine_weight: eligibility length mismatch");
+    assert_eq!(
+        eligibility.len(),
+        n,
+        "dopamine_weight: eligibility length mismatch"
+    );
     let lr_dopa = f32x8::splat(lr * dopamine);
     let wmin_s = f32x8::splat(w_min);
     let wmax_s = f32x8::splat(w_max);
@@ -175,9 +195,17 @@ mod tests {
         let pre_spikes = vec![1i32; n];
         let post_spikes = vec![1i32; n];
         dopamine_traces_step(
-            &mut trace_pre, &mut trace_post, &mut eligibility,
-            &pre_spikes, &post_spikes,
-            1.0, 20.0, 20.0, 200.0, 0.01, 0.01,
+            &mut trace_pre,
+            &mut trace_post,
+            &mut eligibility,
+            &pre_spikes,
+            &post_spikes,
+            1.0,
+            20.0,
+            20.0,
+            200.0,
+            0.01,
+            0.01,
         );
         assert!(trace_pre[0] > 0.0, "trace_pre should increase");
         assert!(trace_post[0] > 0.0, "trace_post should increase");
@@ -190,7 +218,11 @@ mod tests {
         let eligibility = vec![1.0f32; n];
         dopamine_weight_update(&mut weights, &eligibility, 1.0, 0.1, 0.0, 1.0);
         for i in 0..n {
-            assert!((weights[i] - 0.6).abs() < 0.01, "dopamine_weight[{i}]: {}", weights[i]);
+            assert!(
+                (weights[i] - 0.6).abs() < 0.01,
+                "dopamine_weight[{i}]: {}",
+                weights[i]
+            );
         }
     }
 
@@ -204,15 +236,15 @@ mod tests {
         let pre = vec![1i32; n];
         let post = vec![0i32; n];
         dopamine_traces_step(
-            &mut tp, &mut tpo, &mut el,
-            &pre, &post,
-            0.5, 20.0, 20.0, 200.0, 0.01, 0.01,
+            &mut tp, &mut tpo, &mut el, &pre, &post, 0.5, 20.0, 20.0, 200.0, 0.01, 0.01,
         );
         for i in 0..n {
             assert!(
                 (tp[i] - tp[0]).abs() < 1e-6,
                 "trace_pre SIMD/tail mismatch: [0]={} [{}]={}",
-                tp[0], i, tp[i]
+                tp[0],
+                i,
+                tp[i]
             );
         }
     }

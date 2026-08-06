@@ -40,6 +40,8 @@ rayon = ["dep:rayon"]
 # в SimdLane (~1e-5 rel err вместо ~1 ULP). Модели не меняются —
 # exp() маршрутизируется на fast_exp() на этапе компиляции.
 fast-exp = []
+# Точный exp() в HH gates (вместо fast_exp). ~3x медленнее, но биофизически точнее.
+hh-precise-gates = []
 
 [dev-dependencies]
 pillars-macros = { path = "../pillars-macros" }

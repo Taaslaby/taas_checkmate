@@ -67,7 +67,14 @@ fn bench_interpreter(c: &mut Criterion) {
     regs8[S0] = f32x8::splat(-70.0);
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_f32x8", |b| {
-        b.iter(|| black_box(run_program(&program, &mut regs8, f32x8::splat(dt), f32x8::splat(i_syn))))
+        b.iter(|| {
+            black_box(run_program(
+                &program,
+                &mut regs8,
+                f32x8::splat(dt),
+                f32x8::splat(i_syn),
+            ))
+        })
     });
     g.finish();
 }

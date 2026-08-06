@@ -184,7 +184,10 @@ impl ReceptorType {
     /// True if this receptor produces inward (depolarizing) current.
     #[inline(always)]
     pub fn is_excitatory(self) -> bool {
-        matches!(self, ReceptorType::AMPA | ReceptorType::NMDA | ReceptorType::nAChR)
+        matches!(
+            self,
+            ReceptorType::AMPA | ReceptorType::NMDA | ReceptorType::nAChR
+        )
     }
 
     /// All receptor variants for iteration.
@@ -219,7 +222,9 @@ pub fn nmda_mg_block(v: f32) -> f32 {
 fn nmda_mg_block_simd(v: f32x8) -> f32x8 {
     let one = f32x8::splat(1.0);
     let factor = f32x8::splat(0.33);
-    let arg = (f32x8::splat(-0.06) * v).max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
+    let arg = (f32x8::splat(-0.06) * v)
+        .max(f32x8::splat(-10.0))
+        .min(f32x8::splat(10.0));
     one / (one + factor * fast_exp_poly_simd(arg))
 }
 
@@ -392,10 +397,17 @@ impl SynapticKinetics {
             unsafe {
                 let vi = load8(v.as_ptr(), off);
                 let mut cur = load8(i_out.as_ptr(), off);
-                for (r, (b, &e_r)) in ReceptorType::all().into_iter().zip(gbufs.iter().zip(er.iter())) {
+                for (r, (b, &e_r)) in ReceptorType::all()
+                    .into_iter()
+                    .zip(gbufs.iter().zip(er.iter()))
+                {
                     let g = load8(*b, off);
                     // Mg²⁺ block applies only to the NMDA conductance.
-                    let g_eff = if r == ReceptorType::NMDA { g * block(vi) } else { g };
+                    let g_eff = if r == ReceptorType::NMDA {
+                        g * block(vi)
+                    } else {
+                        g
+                    };
                     cur += g_eff * (e_r - vi);
                 }
                 store8(i_out.as_mut_ptr(), off, cur);
@@ -450,7 +462,10 @@ impl SynapticKinetics {
         if i >= self.n {
             return 0.0;
         }
-        ReceptorType::all().into_iter().map(|r| self.g_of(r, i)).sum()
+        ReceptorType::all()
+            .into_iter()
+            .map(|r| self.g_of(r, i))
+            .sum()
     }
 }
 
@@ -493,7 +508,11 @@ mod tests {
     #[test]
     fn test_decay_factors_precision() {
         let factors = DecayFactors::new(0.5); // dt = 0.5 ms
-        assert!((factors.ampa - 0.7788).abs() < 0.001, "AMPA decay: {}", factors.ampa);
+        assert!(
+            (factors.ampa - 0.7788).abs() < 0.001,
+            "AMPA decay: {}",
+            factors.ampa
+        );
     }
 
     #[test]
@@ -503,8 +522,16 @@ mod tests {
         kin.g_gaba_a[1] = 2.0;
         let factors = DecayFactors::new(2.0);
         kin.decay_all(&factors);
-        assert!((kin.g_ampa[0] - 0.3679).abs() < 0.001, "AMPA: {}", kin.g_ampa[0]);
-        assert!((kin.g_gaba_a[1] - 1.6375).abs() < 0.001, "GABA_A: {}", kin.g_gaba_a[1]);
+        assert!(
+            (kin.g_ampa[0] - 0.3679).abs() < 0.001,
+            "AMPA: {}",
+            kin.g_ampa[0]
+        );
+        assert!(
+            (kin.g_gaba_a[1] - 1.6375).abs() < 0.001,
+            "GABA_A: {}",
+            kin.g_gaba_a[1]
+        );
     }
 
     #[test]

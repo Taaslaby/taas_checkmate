@@ -65,7 +65,13 @@ impl<S: SimdLane> StepContext<S> {
     /// Create a new step context.
     #[inline(always)]
     pub fn new(i_syn: S, i_pre: S, i_post: S, dt: f32) -> Self {
-        Self { i_syn, i_pre, i_post, dt, spike_mask: S::zero() }
+        Self {
+            i_syn,
+            i_pre,
+            i_post,
+            dt,
+            spike_mask: S::zero(),
+        }
     }
 
     /// Time step broadcast to SIMD lane.
@@ -122,12 +128,8 @@ mod tests {
     #[test]
     fn test_step_context_new() {
         let dt = 0.5;
-        let ctx = StepContext::<f32x8>::new(
-            f32x8::splat(10.0),
-            f32x8::splat(1.0),
-            f32x8::splat(0.0),
-            dt,
-        );
+        let ctx =
+            StepContext::<f32x8>::new(f32x8::splat(10.0), f32x8::splat(1.0), f32x8::splat(0.0), dt);
         assert!((ctx.i_syn.to_array()[0] - 10.0).abs() < 1e-6);
         assert!((ctx.i_pre.to_array()[0] - 1.0).abs() < 1e-6);
         // spike_mask should start as zero
@@ -136,18 +138,14 @@ mod tests {
 
     #[test]
     fn test_step_context_dt_simd() {
-        let ctx = StepContext::<f32x8>::new(
-            f32x8::zero(), f32x8::zero(), f32x8::zero(), 0.1,
-        );
+        let ctx = StepContext::<f32x8>::new(f32x8::zero(), f32x8::zero(), f32x8::zero(), 0.1);
         let dt_s = ctx.dt_simd();
         assert!((dt_s.to_array()[0] - 0.1).abs() < 1e-6);
     }
 
     #[test]
     fn test_step_context_spike() {
-        let mut ctx = StepContext::<f32x8>::new(
-            f32x8::zero(), f32x8::zero(), f32x8::zero(), 0.5,
-        );
+        let mut ctx = StepContext::<f32x8>::new(f32x8::zero(), f32x8::zero(), f32x8::zero(), 0.5);
         // Emit spike where v >= 0
         let v = f32x8::new([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]);
         let spike = v.cmp_ge(f32x8::zero());

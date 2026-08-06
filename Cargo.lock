@@ -2544,6 +2544,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pillars-connectome"
+version = "0.1.0"
+dependencies = [
+ "pillars",
+ "rand",
+ "taas-connectome",
+]
+
+[[package]]
+name = "pillars-cuda"
+version = "0.1.0"
+dependencies = [
+ "pillars",
+ "pillars-macros",
+]
+
+[[package]]
 name = "pillars-macros"
 version = "0.1.0"
 dependencies = [
@@ -3344,6 +3361,7 @@ dependencies = [
  "cuda-kernels",
  "numpy",
  "pillars",
+ "pillars-connectome",
  "pyo3",
  "rand",
  "rayon",
@@ -3365,6 +3383,7 @@ dependencies = [
  "criterion",
  "cuda-kernels",
  "pillars",
+ "pillars-connectome",
  "rand",
  "serde",
  "taas-core",
@@ -3388,12 +3407,11 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "crc32fast",
- "cuda-kernels",
  "memmap2",
+ "pillars",
  "serde",
  "serde_json",
  "taas-connectome",
- "taas-core",
  "taas-t3",
  "taas-train",
  "zstd",

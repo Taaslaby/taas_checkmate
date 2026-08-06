@@ -25,7 +25,15 @@ use crate::core::lane::SimdLane;
 /// `spike` может быть SIMD-маской (NaN от `cmp_ge`) или float (1.0).
 /// Конвертируется в 1.0/0.0 через `spike_to_float` — безопасно для blend.
 #[inline(always)]
-pub fn dual_exp_step<S: SimdLane>(g1: S, g2: S, spike: S, weight: S, inv_tau1: S, inv_tau2: S, dt: S) -> (S, S) {
+pub fn dual_exp_step<S: SimdLane>(
+    g1: S,
+    g2: S,
+    spike: S,
+    weight: S,
+    inv_tau1: S,
+    inv_tau2: S,
+    dt: S,
+) -> (S, S) {
     // Exponential Euler: g' = g · exp(-dt · inv_tau)
     // Zero-division safe: inv_tau precomputed at init, exp(-dt*inv_tau) ∈ (0, 1]
     let g1_decay = g1 * (-dt * inv_tau1).exp();
@@ -69,8 +77,11 @@ mod tests {
         let dt = f32x8::splat(1.0);
         let (g1n, g2n) = dual_exp_step(g1, g2, spike, w, inv_tau1, inv_tau2, dt);
         // Exponential: 1 * exp(-1/5) ≈ 0.8187
-        assert!((g1n.to_array()[0] - 0.8187).abs() < 0.01,
-            "g1 should decay to ~0.819, got {:.4}", g1n.to_array()[0]);
+        assert!(
+            (g1n.to_array()[0] - 0.8187).abs() < 0.01,
+            "g1 should decay to ~0.819, got {:.4}",
+            g1n.to_array()[0]
+        );
         assert!(g2n.to_array()[0] < 0.001, "g2 should stay near 0");
     }
 
@@ -85,8 +96,14 @@ mod tests {
         let dt = f32x8::splat(1.0);
         let (g1n, g2n) = dual_exp_step(g1, g2, spike, w, inv_tau1, inv_tau2, dt);
         // With spike: g = 0 * exp + 0.5 = 0.5
-        assert!((g1n.to_array()[0] - 0.5).abs() < 1e-6, "g1 should bump to w");
-        assert!((g2n.to_array()[0] - 0.5).abs() < 1e-6, "g2 should bump to w");
+        assert!(
+            (g1n.to_array()[0] - 0.5).abs() < 1e-6,
+            "g1 should bump to w"
+        );
+        assert!(
+            (g2n.to_array()[0] - 0.5).abs() < 1e-6,
+            "g2 should bump to w"
+        );
     }
 
     #[test]
@@ -98,22 +115,28 @@ mod tests {
         let g2 = f32x8::splat(0.0);
         let spike = f32x8::splat(0.0);
         let w = f32x8::splat(0.0);
-        let inv_tau1 = f32x8::splat(10.0);  // 1/0.1ms
+        let inv_tau1 = f32x8::splat(10.0); // 1/0.1ms
         let inv_tau2 = f32x8::splat(1.0 / 50.0);
         let dt = f32x8::splat(1.0);
         let (g1n, _) = dual_exp_step(g1, g2, spike, w, inv_tau1, inv_tau2, dt);
-        assert!(g1n.to_array()[0] > 0.0,
-            "Exp Euler: g1 should be positive with tau1=0.1, got {:.6}", g1n.to_array()[0]);
-        assert!(g1n.to_array()[0] < 0.01,
-            "Exp Euler: g1 should decay near 0 with tau1=0.1, got {:.6}", g1n.to_array()[0]);
+        assert!(
+            g1n.to_array()[0] > 0.0,
+            "Exp Euler: g1 should be positive with tau1=0.1, got {:.6}",
+            g1n.to_array()[0]
+        );
+        assert!(
+            g1n.to_array()[0] < 0.01,
+            "Exp Euler: g1 should decay near 0 with tau1=0.1, got {:.6}",
+            g1n.to_array()[0]
+        );
     }
 
     #[test]
     fn test_dual_exp_current_sign() {
         let g1 = f32x8::splat(0.0);
-        let g2 = f32x8::splat(1.0);  // g = g2 - g1 = 1.0
+        let g2 = f32x8::splat(1.0); // g = g2 - g1 = 1.0
         let v = f32x8::splat(-65.0);
-        let e_exc = f32x8::splat(0.0);   // excitatory
+        let e_exc = f32x8::splat(0.0); // excitatory
         let e_inh = f32x8::splat(-70.0); // inhibitory
         let scale = f32x8::splat(1.0);
 
@@ -122,10 +145,16 @@ mod tests {
 
         // This uses ADDING convention: (g1-g2)*(V-E) = g*(E-V)
         // Excitatory (E=0, V=-65): I = g*(0+65) > 0 → depolarizing when ADDED
-        assert!(i_exc.to_array()[0] > 0.0,
-            "excitatory current should be positive: {:.4}", i_exc.to_array()[0]);
+        assert!(
+            i_exc.to_array()[0] > 0.0,
+            "excitatory current should be positive: {:.4}",
+            i_exc.to_array()[0]
+        );
         // Inhibitory (E=-70, V=-65): I = g*(-70+65) = g*(-5) < 0 → hyperpolarizing when ADDED
-        assert!(i_inh.to_array()[0] < 0.0,
-            "inhibitory current should be negative: {:.4}", i_inh.to_array()[0]);
+        assert!(
+            i_inh.to_array()[0] < 0.0,
+            "inhibitory current should be negative: {:.4}",
+            i_inh.to_array()[0]
+        );
     }
 }

@@ -36,7 +36,11 @@ mod tests {
         let k = f32x8::splat(5.0);
         let i = kir_current(v, g, e, off, k);
         // V=E_K → V-E_K=0 → I=0
-        assert!((i.to_array()[0]).abs() < 1e-6, "Kir at E_K should be 0: {:.6}", i.to_array()[0]);
+        assert!(
+            (i.to_array()[0]).abs() < 1e-6,
+            "Kir at E_K should be 0: {:.6}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -47,7 +51,11 @@ mod tests {
         let off = f32x8::splat(10.0);
         let k = f32x8::splat(5.0);
         let i = kir_current(v, g, e, off, k);
-        assert!(i.to_array()[0] < 0.0, "Kir at hyperpolarized should be inward (negative): {:.6}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0] < 0.0,
+            "Kir at hyperpolarized should be inward (negative): {:.6}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -57,7 +65,11 @@ mod tests {
         assert!((i).abs() < 1e-6, "Kir at E_K scalar should be 0: {:.6}", i);
         // Scalar hyperpolarized
         let i2 = kir_current(-100.0f32, 1.0f32, -80.0f32, 10.0f32, 5.0f32);
-        assert!(i2 < 0.0, "Kir scalar hyperpolarized should be negative: {:.6}", i2);
+        assert!(
+            i2 < 0.0,
+            "Kir scalar hyperpolarized should be negative: {:.6}",
+            i2
+        );
     }
 
     #[test]
@@ -71,7 +83,11 @@ mod tests {
         let i = kir_current(v, g, e, off, k);
         // V-E_K = -40+80=40, so raw current would be 40, but block should suppress
         // block ≈ 1/(1+exp(40+10)/5) = 1/(1+exp(10)) ≈ 0
-        assert!(i.to_array()[0].abs() < 0.01, "Kir at depolarized should block, got: {:.8}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0].abs() < 0.01,
+            "Kir at depolarized should block, got: {:.8}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -89,8 +105,11 @@ mod tests {
         // raw current = 1.0 * (-10) = -10
         // block = 1/(1+exp((-10+10)/5)) = 1/(1+exp(0)) = 0.5
         // final = -10 * 0.5 = -5
-        assert!((i.to_array()[0] - (-5.0)).abs() < 1e-4,
-            "Kir at V-E_K=-offset should be half-blocked: {:.4}", i.to_array()[0]);
+        assert!(
+            (i.to_array()[0] - (-5.0)).abs() < 1e-4,
+            "Kir at V-E_K=-offset should be half-blocked: {:.4}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -101,7 +120,11 @@ mod tests {
         let off = f32x8::splat(10.0);
         let k = f32x8::splat(5.0);
         let i = kir_current(v, g, e, off, k);
-        assert!((i.to_array()[0]).abs() < 1e-6, "zero conductance should give zero: {:.8}", i.to_array()[0]);
+        assert!(
+            (i.to_array()[0]).abs() < 1e-6,
+            "zero conductance should give zero: {:.8}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -116,10 +139,22 @@ mod tests {
 
         // At V=-100: V-E_K = -20, block=1/(1+exp(-10/5)) = 1/(1+exp(-2)) ≈ 0.88
         // I = -20 * 0.88 ≈ -17.6
-        assert!(currents[0] < 0.0, "V=-100: inward current: {:.4}", currents[0]);
+        assert!(
+            currents[0] < 0.0,
+            "V=-100: inward current: {:.4}",
+            currents[0]
+        );
         // At V=-80 (E_K): should be 0
-        assert!((currents[3]).abs() < 1e-6, "V=-80 (E_K): should be 0: {:.4}", currents[3]);
+        assert!(
+            (currents[3]).abs() < 1e-6,
+            "V=-80 (E_K): should be 0: {:.4}",
+            currents[3]
+        );
         // At V=-40: blocked
-        assert!(currents[7].abs() < 0.01, "V=-40: should be blocked: {:.6}", currents[7]);
+        assert!(
+            currents[7].abs() < 0.01,
+            "V=-40: should be blocked: {:.6}",
+            currents[7]
+        );
     }
 }

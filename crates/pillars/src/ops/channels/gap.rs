@@ -21,7 +21,12 @@ pub fn gap_current<S: SimdLane>(v_pre: S, v_post: S, g_gap: S) -> S {
 /// Accumulate gap junction current into a neuron from all neighbors.
 /// `v_self` is this neuron's V, `v_neighbors` is summed V of neighbors.
 #[inline(always)]
-pub fn gap_network_current<S: SimdLane>(v_self: S, sum_v_neighbors: S, g_gap: S, n_connections: S) -> S {
+pub fn gap_network_current<S: SimdLane>(
+    v_self: S,
+    sum_v_neighbors: S,
+    g_gap: S,
+    n_connections: S,
+) -> S {
     g_gap * (sum_v_neighbors - n_connections * v_self)
 }
 

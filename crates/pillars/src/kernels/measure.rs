@@ -26,7 +26,11 @@ use core::f32::consts::PI;
 pub fn interference(output: &mut [f32], phases_a: &[f32], phases_b: &[f32]) {
     let na = phases_a.len();
     let nb = phases_b.len();
-    assert_eq!(output.len(), na * nb, "interference: output length mismatch");
+    assert_eq!(
+        output.len(),
+        na * nb,
+        "interference: output length mismatch"
+    );
     for i in 0..na {
         for j in 0..nb {
             output[i * nb + j] = (1.0 + (phases_a[i] - phases_b[j]).cos()) * 0.5;
@@ -37,7 +41,11 @@ pub fn interference(output: &mut [f32], phases_a: &[f32], phases_b: &[f32]) {
 /// Mean interference: average of `(1 + cos(φ_a − φ_b)) / 2`. SIMD reduction.
 pub fn interference_mean(output: &mut f32, phases_a: &[f32], phases_b: &[f32]) {
     let n = phases_a.len();
-    assert_eq!(phases_b.len(), n, "interference_mean: phases_b length mismatch");
+    assert_eq!(
+        phases_b.len(),
+        n,
+        "interference_mean: phases_b length mismatch"
+    );
     let n8 = n & !7;
     let mut sum = f32x8::splat(0.0);
     for off in (0..n8).step_by(8) {
@@ -64,7 +72,11 @@ pub fn interference_mean(output: &mut f32, phases_a: &[f32], phases_b: &[f32]) {
 pub fn phase_coherence(output: &mut f32, sin_buf: &[f32], cos_buf: &[f32], amplitudes: &[f32]) {
     let n = sin_buf.len();
     assert_eq!(cos_buf.len(), n, "phase_coherence: cos_buf length mismatch");
-    assert_eq!(amplitudes.len(), n, "phase_coherence: amplitudes length mismatch");
+    assert_eq!(
+        amplitudes.len(),
+        n,
+        "phase_coherence: amplitudes length mismatch"
+    );
     let n8 = n & !7;
     let (mut ss, mut cc, mut sa) = (f32x8::splat(0.0), f32x8::splat(0.0), f32x8::splat(0.0));
     for off in (0..n8).step_by(8) {
@@ -93,7 +105,12 @@ pub fn phase_coherence(output: &mut f32, sin_buf: &[f32], cos_buf: &[f32], ampli
 ///
 /// `band_edges` has `n_bands + 1` entries; each oscillator falls into the
 /// first band where `edges[b] ≤ |ω| < edges[b+1]`.
-pub fn band_energy(band_energies: &mut [f32], amplitudes: &[f32], omegas: &[f32], band_edges: &[f32]) {
+pub fn band_energy(
+    band_energies: &mut [f32],
+    amplitudes: &[f32],
+    omegas: &[f32],
+    band_edges: &[f32],
+) {
     let n_bands = band_energies.len();
     let n = amplitudes.len();
     assert_eq!(omegas.len(), n, "band_energy: omegas length mismatch");
@@ -119,7 +136,11 @@ pub fn band_energy(band_energies: &mut [f32], amplitudes: &[f32], omegas: &[f32]
 pub fn winding_matrix(output: &mut [f32], phases_a: &[f32], phases_b: &[f32]) {
     let na = phases_a.len();
     let nb = phases_b.len();
-    assert_eq!(output.len(), na * nb, "winding_matrix: output length mismatch");
+    assert_eq!(
+        output.len(),
+        na * nb,
+        "winding_matrix: output length mismatch"
+    );
     for i in 0..na {
         for j in 0..nb {
             let d = phases_a[i] - phases_b[j];
@@ -141,7 +162,11 @@ pub fn lazy_sincos_update(
     let n = sin_out.len();
     assert_eq!(cos_out.len(), n, "lazy_sincos: cos_out length mismatch");
     assert_eq!(phases.len(), n, "lazy_sincos: phases length mismatch");
-    assert_eq!(phases_prev.len(), n, "lazy_sincos: phases_prev length mismatch");
+    assert_eq!(
+        phases_prev.len(),
+        n,
+        "lazy_sincos: phases_prev length mismatch"
+    );
     let eps_s = f32x8::splat(eps);
     let n8 = n & !7;
     for off in (0..n8).step_by(8) {
@@ -233,10 +258,26 @@ pub fn batch_coherence_sweep(
     n_areas: usize,
     n_elem: usize,
 ) {
-    assert_eq!(output.len(), n_areas * n_areas, "batch_coherence: output length mismatch");
-    assert_eq!(areas.len(), n_areas * n_elem, "batch_coherence: areas length mismatch");
-    assert_eq!(areas_sin.len(), n_areas * n_elem, "batch_coherence: areas_sin length mismatch");
-    assert_eq!(areas_cos.len(), n_areas * n_elem, "batch_coherence: areas_cos length mismatch");
+    assert_eq!(
+        output.len(),
+        n_areas * n_areas,
+        "batch_coherence: output length mismatch"
+    );
+    assert_eq!(
+        areas.len(),
+        n_areas * n_elem,
+        "batch_coherence: areas length mismatch"
+    );
+    assert_eq!(
+        areas_sin.len(),
+        n_areas * n_elem,
+        "batch_coherence: areas_sin length mismatch"
+    );
+    assert_eq!(
+        areas_cos.len(),
+        n_areas * n_elem,
+        "batch_coherence: areas_cos length mismatch"
+    );
     let n8 = n_elem & !7;
 
     // Precompute per-area mean-field vectors
@@ -288,14 +329,20 @@ mod tests {
         let b = vec![0.0f32; n];
         let mut out = vec![0.0f32; n * n];
         interference(&mut out, &a, &b);
-        assert!((out[0] - 1.0).abs() < 1e-5, "in-phase interference should be 1");
+        assert!(
+            (out[0] - 1.0).abs() < 1e-5,
+            "in-phase interference should be 1"
+        );
 
         let sin_buf = vec![0.0f32; n];
         let cos_buf = vec![1.0f32; n];
         let amps = vec![1.0f32; n];
         let mut coherence = 0.0;
         phase_coherence(&mut coherence, &sin_buf, &cos_buf, &amps);
-        assert!((coherence - 1.0).abs() < 1e-4, "in-phase coherence should be 1");
+        assert!(
+            (coherence - 1.0).abs() < 1e-4,
+            "in-phase coherence should be 1"
+        );
     }
 
     #[test]
@@ -322,11 +369,17 @@ mod tests {
         let phases = vec![0.5f32; n];
         let mut prev = vec![0.0f32; n];
         lazy_sincos_update(&mut sin_out, &mut cos_out, &phases, &mut prev, 0.01);
-        assert!((sin_out[0] - 0.5f32.sin()).abs() < 1e-5, "lazy sin should recompute on change");
+        assert!(
+            (sin_out[0] - 0.5f32.sin()).abs() < 1e-5,
+            "lazy sin should recompute on change"
+        );
         // No change → values stay
         let phases2 = vec![0.5f32; n];
         lazy_sincos_update(&mut sin_out, &mut cos_out, &phases2, &mut prev, 0.01);
-        assert!((sin_out[0] - 0.5f32.sin()).abs() < 1e-5, "no change → sin preserved");
+        assert!(
+            (sin_out[0] - 0.5f32.sin()).abs() < 1e-5,
+            "no change → sin preserved"
+        );
     }
 
     #[test]
@@ -335,7 +388,10 @@ mod tests {
         let counts = vec![1.0f32; 4];
         let (h, penalty) = spike_entropy(&counts, 4.0, 2.0);
         assert!((h - 2.0).abs() < 1e-4, "uniform H should be 2, got {h}");
-        assert!(penalty < 1e-3, "penalty should be ~0 at target, got {penalty}");
+        assert!(
+            penalty < 1e-3,
+            "penalty should be ~0 at target, got {penalty}"
+        );
     }
 
     #[test]

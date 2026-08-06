@@ -55,7 +55,13 @@ pub fn gs_cascade<S: SimdLane>(camp: S, ligand: S, k_ac: S, k_pde: S, dt: S) -> 
 /// `k_ac` — удельная активность AC на единицу Gs*.
 #[inline(always)]
 pub fn gs_cascade_hill<S: SimdLane>(
-    camp: S, r_frac: S, g_total: S, kd: S, k_ac: S, k_pde: S, dt: S,
+    camp: S,
+    r_frac: S,
+    g_total: S,
+    kd: S,
+    k_ac: S,
+    k_pde: S,
+    dt: S,
 ) -> S {
     let gs_act = r_frac * g_total / (r_frac + kd);
     let new = camp + (k_ac * gs_act - k_pde * camp) * dt;
@@ -72,9 +78,14 @@ pub fn gs_cascade_hill<S: SimdLane>(
 /// `ca_release_flux` должна быть добавлена в кальциевую динамику: `Ca += ca_release_flux · dt`.
 #[inline(always)]
 pub fn gq_ip3_step<S: SimdLane>(
-    ip3: S, ligand: S,
-    k_plc: S, k_ip3_deg: S, k_release: S,
-    ca_er: S, ca: S, dt: S,
+    ip3: S,
+    ligand: S,
+    k_plc: S,
+    k_ip3_deg: S,
+    k_release: S,
+    ca_er: S,
+    ca: S,
+    dt: S,
 ) -> (S, S) {
     let gq_active = ligand;
     let new_ip3 = (ip3 + (k_plc * gq_active - k_ip3_deg * ip3) * dt).max(S::zero());
@@ -91,9 +102,7 @@ pub fn gq_ip3_step<S: SimdLane>(
 /// ```
 /// tanh реализован через `exp`: `tanh(x) = (exp(2x) - 1) / (exp(2x) + 1)`.
 #[inline(always)]
-pub fn gq_ca_release_simple<S: SimdLane>(
-    ligand: S, ca_er: S, ca: S, k_q: S, dt: S,
-) -> S {
+pub fn gq_ca_release_simple<S: SimdLane>(ligand: S, ca_er: S, ca: S, k_q: S, dt: S) -> S {
     let x = (ca_er - ca) * S::splat(5.0);
     // tanh(x) = (exp(2x) - 1) / (exp(2x) + 1)
     let exp2x = (x * S::splat(2.0)).exp();
@@ -116,9 +125,13 @@ pub fn gq_ca_release_simple<S: SimdLane>(
 /// `camp_basal_prod` — базальная продукция cAMP (без Gs).
 #[inline(always)]
 pub fn gi_inhibit_camp<S: SimdLane>(
-    camp: S, ligand: S,
-    k_inhibit: S, kd_inhibit: S,
-    k_pde: S, camp_basal_prod: S, dt: S,
+    camp: S,
+    ligand: S,
+    k_inhibit: S,
+    kd_inhibit: S,
+    k_pde: S,
+    camp_basal_prod: S,
+    dt: S,
 ) -> S {
     let gi_active = ligand / (ligand + kd_inhibit);
     let ac_eff = camp_basal_prod * (S::one() - k_inhibit * gi_active);
@@ -205,8 +218,11 @@ mod tests {
         let k_pde = f32x8::splat(0.1);
         let dt = f32x8::splat(1.0);
         let new = gs_cascade(camp, ligand, k_ac, k_pde, dt);
-        assert!((new.to_array()[0]).abs() < 1e-6,
-            "no ligand → cAMP stays 0, got {:.6}", new.to_array()[0]);
+        assert!(
+            (new.to_array()[0]).abs() < 1e-6,
+            "no ligand → cAMP stays 0, got {:.6}",
+            new.to_array()[0]
+        );
     }
 
     #[test]
@@ -217,8 +233,11 @@ mod tests {
         let k_pde = f32x8::splat(0.1);
         let dt = f32x8::splat(1.0);
         let new = gs_cascade(camp, ligand, k_ac, k_pde, dt);
-        assert!((new.to_array()[0] - 0.5).abs() < 1e-6,
-            "cAMP should rise to 0.5, got {:.6}", new.to_array()[0]);
+        assert!(
+            (new.to_array()[0] - 0.5).abs() < 1e-6,
+            "cAMP should rise to 0.5, got {:.6}",
+            new.to_array()[0]
+        );
     }
 
     #[test]
@@ -234,8 +253,12 @@ mod tests {
             camp = gs_cascade(camp, ligand, k_ac, k_pde, dt);
         }
         let expected = k_ac.to_array()[0] * ligand.to_array()[0] / k_pde.to_array()[0];
-        assert!((camp.to_array()[0] - expected).abs() < 0.05,
-            "steady state cAMP should be ~{:.1}, got {:.4}", expected, camp.to_array()[0]);
+        assert!(
+            (camp.to_array()[0] - expected).abs() < 0.05,
+            "steady state cAMP should be ~{:.1}, got {:.4}",
+            expected,
+            camp.to_array()[0]
+        );
     }
 
     // ─── Gq cascade tests ───────────────────────────────────
@@ -251,10 +274,16 @@ mod tests {
         let ca = f32x8::splat(0.0);
         let dt = f32x8::splat(1.0);
         let (new_ip3, ca_flux) = gq_ip3_step(ip3, ligand, k_plc, k_deg, k_rel, ca_er, ca, dt);
-        assert!((new_ip3.to_array()[0] - 0.3).abs() < 1e-6,
-            "IP₃ should rise to 0.3, got {:.6}", new_ip3.to_array()[0]);
-        assert!((ca_flux.to_array()[0] - 0.3).abs() < 1e-6,
-            "Ca flux should be 0.3, got {:.6}", ca_flux.to_array()[0]);
+        assert!(
+            (new_ip3.to_array()[0] - 0.3).abs() < 1e-6,
+            "IP₃ should rise to 0.3, got {:.6}",
+            new_ip3.to_array()[0]
+        );
+        assert!(
+            (ca_flux.to_array()[0] - 0.3).abs() < 1e-6,
+            "Ca flux should be 0.3, got {:.6}",
+            ca_flux.to_array()[0]
+        );
     }
 
     #[test]
@@ -265,10 +294,16 @@ mod tests {
         let k_q = f32x8::splat(1.0);
         let dt = f32x8::splat(1.0);
         let release = gq_ca_release_simple(ligand, ca_er, ca, k_q, dt);
-        assert!(release.to_array()[0] > 0.0,
-            "Ca release should be positive with empty cytosol, got {:.6}", release.to_array()[0]);
-        assert!(release.to_array()[0].is_finite(),
-            "should be finite, got {:.6}", release.to_array()[0]);
+        assert!(
+            release.to_array()[0] > 0.0,
+            "Ca release should be positive with empty cytosol, got {:.6}",
+            release.to_array()[0]
+        );
+        assert!(
+            release.to_array()[0].is_finite(),
+            "should be finite, got {:.6}",
+            release.to_array()[0]
+        );
     }
 
     // ─── Gi cascade tests ───────────────────────────────────
@@ -283,8 +318,10 @@ mod tests {
         let basal_prod = f32x8::splat(0.5);
         let dt = f32x8::splat(1.0);
         let new = gi_inhibit_camp(camp, ligand, k_inh, kd_inh, k_pde, basal_prod, dt);
-        assert!(new.to_array()[0] < 5.0,
-            "Gi should reduce cAMP below baseline");
+        assert!(
+            new.to_array()[0] < 5.0,
+            "Gi should reduce cAMP below baseline"
+        );
     }
 
     // ─── Channel modulation tests ───────────────────────────
@@ -295,8 +332,11 @@ mod tests {
         let kd = f32x8::splat(0.5);
         let max_inh = f32x8::splat(0.5);
         let mod_f = pka_modulate_km(camp, kd, max_inh);
-        assert!((mod_f.to_array()[0] - 1.0).abs() < 1e-6,
-            "no cAMP → factor = 1, got {:.4}", mod_f.to_array()[0]);
+        assert!(
+            (mod_f.to_array()[0] - 1.0).abs() < 1e-6,
+            "no cAMP → factor = 1, got {:.4}",
+            mod_f.to_array()[0]
+        );
     }
 
     #[test]
@@ -308,8 +348,12 @@ mod tests {
         // PKA saturation = 10/(10+0.5) = 0.952, not 100%!
         // mod_f = 1 - 0.5 * 0.952 = 0.524
         let expected = 1.0 - 0.5 * (10.0 / (10.0 + 0.5));
-        assert!((mod_f.to_array()[0] - expected).abs() < 0.001,
-            "expected {:.4}, got {:.4}", expected, mod_f.to_array()[0]);
+        assert!(
+            (mod_f.to_array()[0] - expected).abs() < 0.001,
+            "expected {:.4}, got {:.4}",
+            expected,
+            mod_f.to_array()[0]
+        );
     }
 
     #[test]
@@ -318,14 +362,20 @@ mod tests {
         let kd = f32x8::splat(0.5);
         let max_shift = f32x8::splat(10.0);
         let shift = camp_modulate_hcn(camp, kd, max_shift);
-        assert!((shift.to_array()[0]).abs() < 1e-6,
-            "no cAMP → no shift, got {:.4}", shift.to_array()[0]);
+        assert!(
+            (shift.to_array()[0]).abs() < 1e-6,
+            "no cAMP → no shift, got {:.4}",
+            shift.to_array()[0]
+        );
 
         let camp_high = f32x8::splat(5.0);
         let shift_high = camp_modulate_hcn(camp_high, kd, max_shift);
         let expected = 10.0 * 5.0 / (5.0 + 0.5);
-        assert!((shift_high.to_array()[0] - expected).abs() < 0.01,
-            "HCN shift should be ~9.09, got {:.4}", shift_high.to_array()[0]);
+        assert!(
+            (shift_high.to_array()[0] - expected).abs() < 0.01,
+            "HCN shift should be ~9.09, got {:.4}",
+            shift_high.to_array()[0]
+        );
     }
 
     #[test]
@@ -334,10 +384,16 @@ mod tests {
         let kd = f32x8::splat(0.3);
         let max_pot = f32x8::splat(2.0);
         let mod_f = pkc_modulate_trp(gq, kd, max_pot);
-        assert!(mod_f.to_array()[0] > 1.0,
-            "PKC should potentiate TRP: got {:.4}", mod_f.to_array()[0]);
-        assert!(mod_f.to_array()[0] <= 3.0,
-            "max potentiation 2× → factor ≤ 3, got {:.4}", mod_f.to_array()[0]);
+        assert!(
+            mod_f.to_array()[0] > 1.0,
+            "PKC should potentiate TRP: got {:.4}",
+            mod_f.to_array()[0]
+        );
+        assert!(
+            mod_f.to_array()[0] <= 3.0,
+            "max potentiation 2× → factor ≤ 3, got {:.4}",
+            mod_f.to_array()[0]
+        );
     }
 
     // ─── Receptor activation test ───────────────────────────
@@ -348,23 +404,35 @@ mod tests {
         let ec50 = f32x8::splat(0.5);
         let n = 1.0;
         let act = receptor_activation(lig, ec50, n);
-        assert!((act.to_array()[0] - 0.5).abs() < 1e-6,
-            "Hill n=1 at EC50 → 0.5, got {:.4}", act.to_array()[0]);
+        assert!(
+            (act.to_array()[0] - 0.5).abs() < 1e-6,
+            "Hill n=1 at EC50 → 0.5, got {:.4}",
+            act.to_array()[0]
+        );
 
         let act_steep = receptor_activation(lig, ec50, 4.0);
-        assert!((act_steep.to_array()[0] - 0.5).abs() < 1e-6,
-            "Hill at EC50 → 0.5 regardless of n, got {:.4}", act_steep.to_array()[0]);
+        assert!(
+            (act_steep.to_array()[0] - 0.5).abs() < 1e-6,
+            "Hill at EC50 → 0.5 regardless of n, got {:.4}",
+            act_steep.to_array()[0]
+        );
     }
 
     #[test]
     fn test_q10_scale() {
         let rate = f32x8::splat(1.0);
         let scaled = q10_scale(22.0, rate, 2.0, 22.0);
-        assert!((scaled.to_array()[0] - 1.0).abs() < 1e-6,
-            "Q10 at ref temp → 1, got {:.4}", scaled.to_array()[0]);
+        assert!(
+            (scaled.to_array()[0] - 1.0).abs() < 1e-6,
+            "Q10 at ref temp → 1, got {:.4}",
+            scaled.to_array()[0]
+        );
 
         let scaled_hot = q10_scale(32.0, rate, 2.0, 22.0);
-        assert!((scaled_hot.to_array()[0] - 2.0).abs() < 0.01,
-            "Q10 at +10°C → 2, got {:.4}", scaled_hot.to_array()[0]);
+        assert!(
+            (scaled_hot.to_array()[0] - 2.0).abs() < 0.01,
+            "Q10 at +10°C → 2, got {:.4}",
+            scaled_hot.to_array()[0]
+        );
     }
 }

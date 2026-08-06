@@ -80,17 +80,6 @@ use crate::zoo::Model;
 //  Network
 // ═══════════════════════════════════════════════════════════════
 
-/// A spiking neural network: populations + connections + delay buffer.
-///
-/// ## Step Cycle
-///
-/// 1. **Read** `delay[step % MAX_DELAY_SLOTS]` → `i_in`
-/// 2. **Clear** that slot for future writes
-/// 3. **Step** all populations with `i_in`
-/// 4. **Compact** spikes → active indices
-/// 5. **Push** active spikes through graph into future delay slots
-/// 6. **Advance** `step_counter`
-
 /// A single directed edge: `pre` (index in the source population), `post`
 /// (index in the target population), `weight` and axonal `delay` (steps,
 /// `0` = delivered on the next step).
@@ -116,6 +105,16 @@ impl Edge {
     }
 }
 
+/// A spiking neural network: populations + connections + delay buffer.
+///
+/// ## Step Cycle
+///
+/// 1. **Read** `delay[step % MAX_DELAY_SLOTS]` → `i_in`
+/// 2. **Clear** that slot for future writes
+/// 3. **Step** all populations with `i_in`
+/// 4. **Compact** spikes → active indices
+/// 5. **Push** active spikes through graph into future delay slots
+/// 6. **Advance** `step_counter`
 pub struct Network {
     /// Populations (heterogeneous via trait object)
     pops: Vec<Box<dyn Population>>,

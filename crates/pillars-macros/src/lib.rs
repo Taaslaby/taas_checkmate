@@ -359,7 +359,6 @@ pub fn dual_neuron(attr: TokenStream, item: TokenStream) -> TokenStream {
                     _ => None,
                 }
                 })
-                .into_iter()
                 .flatten()
                 .map(|p| p.get_ident().map(|i| i.to_string()).unwrap_or_default())
                 .collect();
@@ -830,10 +829,7 @@ fn transpile_stmt(st: &Stmt, ctx: &mut Ctx) -> String {
                     // statements are emitted inline; its tail expression becomes
                     // this binding's initializer.
                     if let Some(call) = call_expr(init.expr.as_ref()) {
-                        let fname = match call_name(init.expr.as_ref()) {
-                            Some(n) => n,
-                            None => String::new(),
-                        };
+                        let fname = call_name(init.expr.as_ref()).unwrap_or_default();
                         if let Some(helper) = ctx.helpers.get(&fname).cloned() {
                             let args: Vec<&Expr> = call.args.iter().collect();
                             assert_eq!(
@@ -1284,15 +1280,19 @@ fn transpile_method(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> String {
                 .turbofish
                 .as_ref()
                 .and_then(|t| t.args.first())
-                .and_then(|g| match g {
-                    syn::GenericArgument::Const(expr) => match expr {
-                        syn::Expr::Lit(el) => match &el.lit {
-                            syn::Lit::Int(i) => i.base10_digits().parse().ok(),
-                            _ => None,
-                        },
+                .and_then(|g| {
+                    // `let ... else` instead of nested matches — each guard
+                    // early-returns None, the final match keeps the parse.
+                    let syn::GenericArgument::Const(expr) = g else {
+                        return None;
+                    };
+                    let syn::Expr::Lit(el) = expr else {
+                        return None;
+                    };
+                    match &el.lit {
+                        syn::Lit::Int(i) => i.base10_digits().parse().ok(),
                         _ => None,
-                    },
-                    _ => None,
+                    }
                 })
                 .expect("powi::<N> needs integer N");
             let mut s = format!("({recv})");

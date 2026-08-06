@@ -140,13 +140,25 @@ impl OpNode {
     /// Create an instruction with default (harmless) inputs.
     #[inline(always)]
     pub fn new(kind: OpKind, out_reg: usize) -> Self {
-        Self { kind, in_regs: [S0; 4], out_reg, c: 0.0, c2: 0.0 }
+        Self {
+            kind,
+            in_regs: [S0; 4],
+            out_reg,
+            c: 0.0,
+            c2: 0.0,
+        }
     }
 
     /// Constant literal.
     #[inline(always)]
     pub fn const_(out_reg: usize, value: f32) -> Self {
-        Self { kind: OpKind::Const, in_regs: [S0; 4], out_reg, c: value, c2: 0.0 }
+        Self {
+            kind: OpKind::Const,
+            in_regs: [S0; 4],
+            out_reg,
+            c: value,
+            c2: 0.0,
+        }
     }
 
     /// Override input registers; shorter slices are padded with `S0`.
@@ -174,12 +186,7 @@ impl OpNode {
 /// # Returns
 /// The spike mask of this step (from the last `FireReset` executed).
 #[inline]
-pub fn run_program<S: SimdLane>(
-    program: &[OpNode],
-    regs: &mut [S; N_REGS],
-    dt: S,
-    i_syn: S,
-) -> S {
+pub fn run_program<S: SimdLane>(program: &[OpNode], regs: &mut [S; N_REGS], dt: S, i_syn: S) -> S {
     let zero = S::zero();
     let one = S::one();
     regs[I_SYN] = i_syn;
@@ -193,13 +200,19 @@ pub fn run_program<S: SimdLane>(
         match op.kind {
             OpKind::Leak => {
                 let (v, i, inv_tau, v_rest) = (
-                    regs[op.in_regs[0]], regs[op.in_regs[1]],
-                    regs[op.in_regs[2]], regs[op.in_regs[3]],
+                    regs[op.in_regs[0]],
+                    regs[op.in_regs[1]],
+                    regs[op.in_regs[2]],
+                    regs[op.in_regs[3]],
                 );
                 regs[op.out_reg] = leak_integrate(v, v_rest, i, inv_tau, dt);
             }
             OpKind::Ohmic => {
-                let (g, v, e) = (regs[op.in_regs[0]], regs[op.in_regs[1]], regs[op.in_regs[2]]);
+                let (g, v, e) = (
+                    regs[op.in_regs[0]],
+                    regs[op.in_regs[1]],
+                    regs[op.in_regs[2]],
+                );
                 regs[op.out_reg] = ohmic_current(g, v, e);
             }
             OpKind::Add => regs[op.out_reg] = regs[op.in_regs[0]] + regs[op.in_regs[1]],
@@ -215,12 +228,16 @@ pub fn run_program<S: SimdLane>(
             }
             OpKind::Blend => {
                 let active = regs[op.in_regs[0]].abs().cmp_gt(zero);
-                regs[op.out_reg] =
-                    active.cond().then(regs[op.in_regs[1]]).else_(regs[op.in_regs[2]]);
+                regs[op.out_reg] = active
+                    .cond()
+                    .then(regs[op.in_regs[1]])
+                    .else_(regs[op.in_regs[2]]);
             }
             OpKind::GateStep => {
                 let (g, g_inf, inv_tau) = (
-                    regs[op.in_regs[0]], regs[op.in_regs[1]], regs[op.in_regs[2]],
+                    regs[op.in_regs[0]],
+                    regs[op.in_regs[1]],
+                    regs[op.in_regs[2]],
                 );
                 regs[op.out_reg] = integrate_gate(g, g_inf, inv_tau, dt);
             }
@@ -228,7 +245,9 @@ pub fn run_program<S: SimdLane>(
             OpKind::Exp => regs[op.out_reg] = regs[op.in_regs[0]].exp(),
             OpKind::FireReset => {
                 let (v, thresh, reset) = (
-                    regs[op.in_regs[0]], regs[op.in_regs[1]], regs[op.in_regs[2]],
+                    regs[op.in_regs[0]],
+                    regs[op.in_regs[1]],
+                    regs[op.in_regs[2]],
                 );
                 let (v_new, sp) = fire_reset(v, thresh, reset);
                 regs[op.out_reg] = v_new;
@@ -236,7 +255,9 @@ pub fn run_program<S: SimdLane>(
             }
             OpKind::RefrClamp => {
                 let (v, refr, reset) = (
-                    regs[op.in_regs[0]], regs[op.in_regs[1]], regs[op.in_regs[2]],
+                    regs[op.in_regs[0]],
+                    regs[op.in_regs[1]],
+                    regs[op.in_regs[2]],
                 );
                 regs[op.out_reg] = refractory_clamp(v, refr, reset);
             }
@@ -268,10 +289,10 @@ pub fn validate_program(program: &[OpNode]) -> Result<(), String> {
         }
         for (j, &r) in op.in_regs.iter().enumerate() {
             if r >= N_REGS {
-            return Err(format!(
-                "op {i} ({:?}): in_reg[{j}] {r} >= N_REGS ({N_REGS})",
-                op.kind
-            ));
+                return Err(format!(
+                    "op {i} ({:?}): in_reg[{j}] {r} >= N_REGS ({N_REGS})",
+                    op.kind
+                ));
             }
         }
     }
@@ -370,17 +391,24 @@ impl<const ID: usize> FormulaModel<ID> {
     /// Register the program executed by this model. Fails if the program
     /// fails [`validate_program`] or the slot is already taken.
     pub fn register(program: Vec<OpNode>) -> Result<(), String> {
-        const { assert!(ID < MAX_FORMULA_MODELS); }
+        const {
+            assert!(ID < MAX_FORMULA_MODELS);
+        }
         validate_program(&program)?;
         let used = used_param_mask(&program);
         let slot = &FORMULA_PROGRAMS[ID];
-        slot.set(RegisteredProgram { ops: program.into_boxed_slice(), used_params: used })
-            .map_err(|_| format!("FormulaModel<{ID}>: program already registered"))
+        slot.set(RegisteredProgram {
+            ops: program.into_boxed_slice(),
+            used_params: used,
+        })
+        .map_err(|_| format!("FormulaModel<{ID}>: program already registered"))
     }
 
     /// Whether a program has been registered for this model.
     pub fn is_registered() -> bool {
-        const { assert!(ID < MAX_FORMULA_MODELS); }
+        const {
+            assert!(ID < MAX_FORMULA_MODELS);
+        }
         FORMULA_PROGRAMS[ID].get().is_some()
     }
 }
@@ -392,7 +420,9 @@ impl<const ID: usize> Model for FormulaModel<ID> {
 
     #[inline(always)]
     fn step<S: SimdLane>(ctx: &mut SimdContext<S>) {
-        const { assert!(ID < MAX_FORMULA_MODELS); }
+        const {
+            assert!(ID < MAX_FORMULA_MODELS);
+        }
         let prog = FORMULA_PROGRAMS[ID].get().expect(
             "FormulaModel: no program registered — call FormulaModel::<ID>::register() first",
         );
@@ -431,8 +461,8 @@ impl<const ID: usize> Model for FormulaModel<ID> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NeuralPopulation;
     use crate::zoo::neurons::LIFModel;
+    use crate::NeuralPopulation;
 
     /// The canonical LIF program — mirrors `zoo/neurons/lif.rs` op-by-op.
     ///
@@ -451,12 +481,12 @@ mod tests {
         let t_raw = TEMP0 + 7;
         let t_gated = TEMP0 + 8;
         vec![
-            OpNode::const_(t_rest, -70.0),      // v_rest
-            OpNode::const_(t_tau, 0.1),         // inv_tau_m = 1/10
-            OpNode::const_(t_thresh, -54.0),    // v_thresh
-            OpNode::const_(t_reset, -70.0),     // v_reset
-            OpNode::const_(t_tref, 2.0),        // tau_ref
-            OpNode::const_(t_zero, 0.0),        // 0 for CmpGt
+            OpNode::const_(t_rest, -70.0),   // v_rest
+            OpNode::const_(t_tau, 0.1),      // inv_tau_m = 1/10
+            OpNode::const_(t_thresh, -54.0), // v_thresh
+            OpNode::const_(t_reset, -70.0),  // v_reset
+            OpNode::const_(t_tref, 2.0),     // tau_ref
+            OpNode::const_(t_zero, 0.0),     // 0 for CmpGt
             OpNode::new(OpKind::CmpGt, t_is_refr).with_in(&[S1, t_zero]),
             OpNode::new(OpKind::Leak, t_raw).with_in(&[S0, I_SYN, t_tau, t_rest]),
             OpNode::new(OpKind::Blend, t_gated).with_in(&[t_is_refr, S0, t_raw]),
@@ -560,8 +590,10 @@ mod tests {
             );
         }
 
-        assert_eq!(formula_spikes, zoo_spikes,
-            "spike counts must match: formula={formula_spikes} zoo={zoo_spikes}");
+        assert_eq!(
+            formula_spikes, zoo_spikes,
+            "spike counts must match: formula={formula_spikes} zoo={zoo_spikes}"
+        );
         assert!(zoo_spikes > 0, "LIF with I=30 must spike");
     }
 
@@ -605,14 +637,15 @@ mod tests {
         let i_syns = [5.0f32, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0];
 
         // Scalar reference: 8 independent register files
-        let mut scalar = [[0.0f32; N_REGS]; 8];          for row in scalar.iter_mut() {
-              row[P0 + 1] = 0.1;
-              row[P0 + 2] = -70.0;
-              row[P0 + 3] = -54.0;
-              row[P0 + 4] = -70.0;
-              row[P0 + 5] = 2.0;
-              row[S0] = -70.0;
-          }
+        let mut scalar = [[0.0f32; N_REGS]; 8];
+        for row in scalar.iter_mut() {
+            row[P0 + 1] = 0.1;
+            row[P0 + 2] = -70.0;
+            row[P0 + 3] = -54.0;
+            row[P0 + 4] = -70.0;
+            row[P0 + 5] = 2.0;
+            row[S0] = -70.0;
+        }
 
         // SIMD: 8 lanes, same params splatted, per-lane i_syn
         let mut simd = [f32x8::zero(); N_REGS];

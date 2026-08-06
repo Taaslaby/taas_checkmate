@@ -81,7 +81,11 @@ pub fn vnc_step_mapping(
 
     for i in 0..n_mapped {
         let mn_i = map_mn_idx[i] as usize;
-        let rate = if mn_i < mn_rates.len() { mn_rates[mn_i] as f64 } else { 0.0 };
+        let rate = if mn_i < mn_rates.len() {
+            mn_rates[mn_i] as f64
+        } else {
+            0.0
+        };
         let act_idx = map_act_idx[i] as usize;
         if act_idx >= n_actuators {
             continue;
@@ -141,19 +145,38 @@ mod tests {
         let mut ctrl_out = vec![0.0f64; n_actuators];
 
         vnc_step_mapping(
-            &mn_rates, &balance_gain, &contact_boost, 0.5,
+            &mn_rates,
+            &balance_gain,
+            &contact_boost,
+            0.5,
             n_actuators,
-            &map_mn_idx, &map_act_idx, &map_scale, &map_leg_idx,
-            &mirror_left, &mirror_right,
+            &map_mn_idx,
+            &map_act_idx,
+            &map_scale,
+            &map_leg_idx,
+            &mirror_left,
+            &mirror_right,
             &mut ctrl_out,
         );
 
         // rate 10·1=10 → clamp 1 → 1·0.5 = 0.5
-        assert!((ctrl_out[0] - 0.5).abs() < 1e-9, "ctrl[0] should be 0.5, got {}", ctrl_out[0]);
+        assert!(
+            (ctrl_out[0] - 0.5).abs() < 1e-9,
+            "ctrl[0] should be 0.5, got {}",
+            ctrl_out[0]
+        );
         // rate 20·1=20 → clamp 1 → 1·0.5 = 0.5
-        assert!((ctrl_out[1] - 0.5).abs() < 1e-9, "ctrl[1] should be 0.5, got {}", ctrl_out[1]);
+        assert!(
+            (ctrl_out[1] - 0.5).abs() < 1e-9,
+            "ctrl[1] should be 0.5, got {}",
+            ctrl_out[1]
+        );
         // rate 5·1=5 → clamp 1 → 1·scale(0.5)=0.5 → 0.5·gain(0.5) = 0.25
-        assert!((ctrl_out[2] - 0.25).abs() < 1e-9, "ctrl[2] should be 0.25, got {}", ctrl_out[2]);
+        assert!(
+            (ctrl_out[2] - 0.25).abs() < 1e-9,
+            "ctrl[2] should be 0.25, got {}",
+            ctrl_out[2]
+        );
         assert_eq!(ctrl_out[3], 0.0, "unmapped actuator stays 0");
     }
 
@@ -171,9 +194,18 @@ mod tests {
         let mut ctrl_out = vec![0.0f64; 2];
 
         vnc_step_mapping(
-            &mn_rates, &balance_gain, &contact_boost, 0.1,
-            2, &map_mn_idx, &map_act_idx, &map_scale, &map_leg_idx,
-            &mirror_left, &mirror_right, &mut ctrl_out,
+            &mn_rates,
+            &balance_gain,
+            &contact_boost,
+            0.1,
+            2,
+            &map_mn_idx,
+            &map_act_idx,
+            &map_scale,
+            &map_leg_idx,
+            &mirror_left,
+            &mirror_right,
+            &mut ctrl_out,
         );
 
         assert!(

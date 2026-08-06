@@ -20,7 +20,15 @@ use crate::core::lane::SimdLane;
 /// One step of Tsodyks-Markram STP.
 /// Returns (u_new, x_new).
 #[inline(always)]
-pub fn stp_step<S: SimdLane>(u: S, x: S, spike: S, u0: S, inv_tau_rec: S, inv_tau_facil: S, dt: S) -> (S, S) {
+pub fn stp_step<S: SimdLane>(
+    u: S,
+    x: S,
+    spike: S,
+    u0: S,
+    inv_tau_rec: S,
+    inv_tau_facil: S,
+    dt: S,
+) -> (S, S) {
     let one = S::one();
     let zero = S::zero();
 

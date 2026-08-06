@@ -43,9 +43,9 @@
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
 
+pub mod decode;
 pub mod delay;
 pub mod dendrite;
-pub mod decode;
 pub mod dopamine;
 pub mod hh_channels;
 pub mod input;

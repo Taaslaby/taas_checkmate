@@ -13,6 +13,12 @@
 //! Synapses, glia and muscle live in [`super::synapses`] / [`super::glia`]
 //! and are re-exported by [`super`] — neurons are **point bodies only**.
 
+// deliberate: every `#[dual_neuron]` model lives in a file module (`lif.rs`)
+// that contains a same-named inline block (`pub mod lif`) whose contents are
+// re-exported via `pub use lif::*`. The macro strips outer attrs, so the
+// allow must live at this module scope.
+#![allow(clippy::module_inception)]
+
 mod adex;
 mod atlasov_neuromotor;
 mod fhn;

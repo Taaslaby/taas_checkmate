@@ -39,10 +39,11 @@ use crate::ops::spike::spike_to_float;
 /// ```
 #[inline(always)]
 pub fn atp_step<S: SimdLane>(
-    atp: S, na_influx: S,
-    k_restore: S,      // 1/τ_restore
-    atp_baseline: S,   // ATP₀
-    k_consume: S,      // ATP расход на единицу Na⁺
+    atp: S,
+    na_influx: S,
+    k_restore: S,    // 1/τ_restore
+    atp_baseline: S, // ATP₀
+    k_consume: S,    // ATP расход на единицу Na⁺
     dt: S,
 ) -> S {
     let restore = k_restore * (atp_baseline - atp);
@@ -77,11 +78,13 @@ pub fn na_influx_from_spike<S: SimdLane>(spike_mask: S, alpha_na: S) -> S {
 /// ```
 #[inline(always)]
 pub fn pump_current<S: SimdLane>(
-    atp: S, na_i: S, k_o: S,
+    atp: S,
+    na_i: S,
+    k_o: S,
     i_pump_max: S,
-    inv_km_atp: S,  // 1 / K_m_ATP
-    inv_km_na: S,   // 1 / K_m_Na
-    km_k: S,        // K_m_K (≈ 0.33)
+    inv_km_atp: S, // 1 / K_m_ATP
+    inv_km_na: S,  // 1 / K_m_Na
+    km_k: S,       // K_m_K (≈ 0.33)
 ) -> S {
     // f_ATP = ATP / (ATP + Km) = (ATP·inv_km) / (ATP·inv_km + 1)
     // Только одно деление вместо двух (без recip!)
@@ -92,14 +95,14 @@ pub fn pump_current<S: SimdLane>(
     // [Na]/Km = na_i * inv_km_na. inverse → (1 / (na_i * inv_km_na))³
     let na_ratio = na_i * inv_km_na;
     let inv_na_ratio_cubed = (na_ratio + S::splat(1e-12)).recip().cube();
-        // (Km/[Na])³, clamped to avoid div-by-zero
+    // (Km/[Na])³, clamped to avoid div-by-zero
     let f_na = S::one() / (S::one() + inv_na_ratio_cubed);
 
     // f_K = [K] / ([K] + Km_K) — простой Michaelis
     let f_k = k_o / (k_o + km_k);
 
     let pump = i_pump_max * f_atp * f_na * f_k;
-    -pump  // всегда гиперполяризующий
+    -pump // всегда гиперполяризующий
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -114,8 +117,8 @@ pub fn pump_current<S: SimdLane>(
 #[inline(always)]
 pub fn na_concentration_step<S: SimdLane>(
     na_i: S,
-    i_na_flux: S,     // Na⁺ ток (NEURON convention: inward = negative)
-    scale_na: S,      // конверсия ток→концентрация
+    i_na_flux: S,      // Na⁺ ток (NEURON convention: inward = negative)
+    scale_na: S,       // конверсия ток→концентрация
     pump_extrusion: S, // экструзия Na⁺ насосом
     dt: S,
 ) -> S {
@@ -135,7 +138,7 @@ pub fn k_concentration_step<S: SimdLane>(
     k_o: S,
     i_k_flux: S,      // K⁺ ток (outward = positive)
     scale_k: S,       // конверсия ток→концентрация
-    pump_k_influx: S,  // K⁺ influx через насос
+    pump_k_influx: S, // K⁺ influx через насос
     dt: S,
 ) -> S {
     let efflux = i_k_flux.max(S::zero()) * scale_k;
@@ -159,9 +162,7 @@ pub fn k_concentration_step<S: SimdLane>(
 ///
 /// Returns: (new_noise, new_seed) — seed обновлён на 2 шага LCG.
 #[inline(always)]
-pub fn ou_noise_step<S: SimdLane>(
-    x: S, theta: S, mu: S, sigma: S, dt: S, seed: &mut S,
-) -> S {
+pub fn ou_noise_step<S: SimdLane>(x: S, theta: S, mu: S, sigma: S, dt: S, seed: &mut S) -> S {
     let a = S::splat(1664525.0f32);
     let c = S::splat(1013904223.0f32);
     let m = S::splat(4294967296.0f32);
@@ -175,7 +176,7 @@ pub fn ou_noise_step<S: SimdLane>(
     let u1 = *seed;
     *seed = next(u1);
     let u2 = *seed;
-    *seed = next(*seed);  // advance one more
+    *seed = next(*seed); // advance one more
 
     // Box-Muller: scale to (0,1) avoiding log(0)
     let eps = S::splat(1e-10);
@@ -206,7 +207,7 @@ pub fn uniform_noise_step<S: SimdLane>(seed: &mut S, amplitude: S) -> S {
     let raw = a * *seed + c;
     *seed = raw - (raw / m).trunc() * m;
 
-    let u = *seed / m;  // [0, 1)
+    let u = *seed / m; // [0, 1)
     (u * S::splat(2.0) - S::one()) * amplitude
 }
 
@@ -222,8 +223,8 @@ pub fn uniform_noise_step<S: SimdLane>(seed: &mut S, amplitude: S) -> S {
 pub fn channel_noise<S: SimdLane>(
     m: S,
     noise_seed: &mut S,
-    n_channels: S,     // число каналов в кластере
-    inv_tau: S,        // 1/τ_act
+    n_channels: S, // число каналов в кластере
+    inv_tau: S,    // 1/τ_act
     dt: S,
 ) -> S {
     let one = S::one();
@@ -277,8 +278,11 @@ mod tests {
         let k_consume = f32x8::splat(0.05);
         let dt = f32x8::splat(1.0);
         let new = atp_step(atp, na, k_restore, baseline, k_consume, dt);
-        assert!((new.to_array()[0] - 1.0).abs() < 1e-6,
-            "ATP should stay at baseline, got {:.4}", new.to_array()[0]);
+        assert!(
+            (new.to_array()[0] - 1.0).abs() < 1e-6,
+            "ATP should stay at baseline, got {:.4}",
+            new.to_array()[0]
+        );
     }
 
     #[test]
@@ -290,8 +294,11 @@ mod tests {
         let k_consume = f32x8::splat(0.05);
         let dt = f32x8::splat(1.0);
         let new = atp_step(atp, na, k_restore, baseline, k_consume, dt);
-        assert!((new.to_array()[0] - 0.5).abs() < 0.01,
-            "ATP should deplete to ~0.5, got {:.4}", new.to_array()[0]);
+        assert!(
+            (new.to_array()[0] - 0.5).abs() < 0.01,
+            "ATP should deplete to ~0.5, got {:.4}",
+            new.to_array()[0]
+        );
     }
 
     #[test]
@@ -303,8 +310,11 @@ mod tests {
         let k_consume = f32x8::splat(1.0);
         let dt = f32x8::splat(1.0);
         let new = atp_step(atp, na, k_restore, baseline, k_consume, dt);
-        assert!(new.to_array()[0] >= 0.0,
-            "ATP should never go negative, got {:.6}", new.to_array()[0]);
+        assert!(
+            new.to_array()[0] >= 0.0,
+            "ATP should never go negative, got {:.6}",
+            new.to_array()[0]
+        );
     }
 
     // ─── Na influx test ─────────────────────────────────────
@@ -314,8 +324,11 @@ mod tests {
         let spike = f32x8::splat(1.0);
         let alpha = f32x8::splat(0.1);
         let flux = na_influx_from_spike(spike, alpha);
-        assert!((flux.to_array()[0] - 0.1).abs() < 1e-6,
-            "Na influx should be 0.1, got {:.4}", flux.to_array()[0]);
+        assert!(
+            (flux.to_array()[0] - 0.1).abs() < 1e-6,
+            "Na influx should be 0.1, got {:.4}",
+            flux.to_array()[0]
+        );
     }
 
     #[test]
@@ -323,8 +336,11 @@ mod tests {
         let spike = f32x8::splat(-1.0);
         let alpha = f32x8::splat(0.1);
         let flux = na_influx_from_spike(spike, alpha);
-        assert!((flux.to_array()[0] - 0.1).abs() < 1e-6,
-            "mask -1.0 should also give 0.1, got {:.4}", flux.to_array()[0]);
+        assert!(
+            (flux.to_array()[0] - 0.1).abs() < 1e-6,
+            "mask -1.0 should also give 0.1, got {:.4}",
+            flux.to_array()[0]
+        );
     }
 
     #[test]
@@ -332,8 +348,11 @@ mod tests {
         let spike = f32x8::splat(0.0);
         let alpha = f32x8::splat(0.1);
         let flux = na_influx_from_spike(spike, alpha);
-        assert!((flux.to_array()[0]).abs() < 1e-6,
-            "no spike → no influx, got {:.4}", flux.to_array()[0]);
+        assert!(
+            (flux.to_array()[0]).abs() < 1e-6,
+            "no spike → no influx, got {:.4}",
+            flux.to_array()[0]
+        );
     }
 
     // ─── Pump current tests ─────────────────────────────────
@@ -348,8 +367,11 @@ mod tests {
         let inv_km_na = f32x8::splat(50.0);
         let km_k = f32x8::splat(0.33);
         let i = pump_current(atp, na_i, k_o, i_max, inv_km_atp, inv_km_na, km_k);
-        assert!(i.to_array()[0] < 0.0,
-            "pump current should be negative, got {:.4}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0] < 0.0,
+            "pump current should be negative, got {:.4}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -364,9 +386,12 @@ mod tests {
         let km_k = f32x8::splat(0.33);
         let i_low = pump_current(atp_low, na_i, k_o, i_max, inv_km_atp, inv_km_na, km_k);
         let i_high = pump_current(atp_high, na_i, k_o, i_max, inv_km_atp, inv_km_na, km_k);
-        assert!(i_low.to_array()[0] > i_high.to_array()[0],
+        assert!(
+            i_low.to_array()[0] > i_high.to_array()[0],
             "low ATP → weaker pump: {:.4} vs {:.4}",
-            i_low.to_array()[0], i_high.to_array()[0]);
+            i_low.to_array()[0],
+            i_high.to_array()[0]
+        );
     }
 
     // ─── Ion concentration tests ────────────────────────────
@@ -379,9 +404,12 @@ mod tests {
         let pump = f32x8::splat(0.001);
         let dt = f32x8::splat(1.0);
         let new = na_concentration_step(na_i, i_na, scale, pump, dt);
-        assert!(new.to_array()[0] > na_i.to_array()[0],
+        assert!(
+            new.to_array()[0] > na_i.to_array()[0],
             "inward current → na_i rises: {:.6} > {:.6}",
-            new.to_array()[0], na_i.to_array()[0]);
+            new.to_array()[0],
+            na_i.to_array()[0]
+        );
     }
 
     // ─── Noise tests ────────────────────────────────────────
@@ -396,12 +424,14 @@ mod tests {
         let mut seed = f32x8::splat(12345.0);
         let xn = ou_noise_step(x, theta, mu, sigma, dt, &mut seed);
         for i in 0..8 {
-            assert!(xn.to_array()[i].is_finite(),
-                "OU noise should be finite at idx {}", i);
+            assert!(
+                xn.to_array()[i].is_finite(),
+                "OU noise should be finite at idx {}",
+                i
+            );
         }
         let seed_diff = seed.to_array()[0] - 12345.0;
-        assert!(seed_diff.abs() > 0.1,
-            "seed should change after step");
+        assert!(seed_diff.abs() > 0.1, "seed should change after step");
     }
 
     #[test]
@@ -414,10 +444,17 @@ mod tests {
         let m_noisy = channel_noise(m, &mut seed, n_ch, inv_tau, dt);
         for i in 0..8 {
             let val = m_noisy.to_array()[i];
-            assert!(val.is_finite(),
-                "channel noise should be finite at idx {}", i);
-            assert!((0.0..=1.0).contains(&val),
-                "channel noise should stay in [0,1], got {:.4} at idx {}", val, i);
+            assert!(
+                val.is_finite(),
+                "channel noise should be finite at idx {}",
+                i
+            );
+            assert!(
+                (0.0..=1.0).contains(&val),
+                "channel noise should stay in [0,1], got {:.4} at idx {}",
+                val,
+                i
+            );
         }
     }
 }

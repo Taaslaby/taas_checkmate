@@ -75,8 +75,11 @@ mod tests {
         let inv_tau = f32x8::splat(1.0 / 1000.0);
         let dt = f32x8::splat(1.0);
         let new_w = homeostatic_scale(w, rate, target, inv_tau, dt);
-        assert!(new_w.to_array()[0] < 1.0,
-            "high rate → decrease w: {:.6}", new_w.to_array()[0]);
+        assert!(
+            new_w.to_array()[0] < 1.0,
+            "high rate → decrease w: {:.6}",
+            new_w.to_array()[0]
+        );
     }
 
     #[test]
@@ -87,8 +90,11 @@ mod tests {
         let inv_tau = f32x8::splat(1.0 / 1000.0);
         let dt = f32x8::splat(1.0);
         let new_w = homeostatic_scale(w, rate, target, inv_tau, dt);
-        assert!(new_w.to_array()[0] > 0.5,
-            "low rate → increase w: {:.6}", new_w.to_array()[0]);
+        assert!(
+            new_w.to_array()[0] > 0.5,
+            "low rate → increase w: {:.6}",
+            new_w.to_array()[0]
+        );
     }
 
     #[test]
@@ -98,8 +104,11 @@ mod tests {
         let inv_tau = f32x8::splat(1.0 / 100.0);
         let dt = f32x8::splat(1.0);
         let new = rate_estimate(rate, spike, inv_tau, dt);
-        assert!(new.to_array()[0] < 10.0,
-            "rate should decay: {:.4} < 10", new.to_array()[0]);
+        assert!(
+            new.to_array()[0] < 10.0,
+            "rate should decay: {:.4} < 10",
+            new.to_array()[0]
+        );
     }
 
     #[test]
@@ -114,10 +123,16 @@ mod tests {
         // At dt=1ms, spike_hz = 1.0·1000/1.0 = 1000 Hz
         // decay = exp(-1/1000) ≈ 0.999
         // rate' = 1000 * (1 - 0.999) ≈ 1.0
-        assert!(r_mask.to_array()[0] > 0.5,
-            "mask spike → rate ~1 Hz: {:.4}", r_mask.to_array()[0]);
-        assert!(r_float.to_array()[0] > 0.5,
-            "float spike → rate ~1 Hz: {:.4}", r_float.to_array()[0]);
+        assert!(
+            r_mask.to_array()[0] > 0.5,
+            "mask spike → rate ~1 Hz: {:.4}",
+            r_mask.to_array()[0]
+        );
+        assert!(
+            r_float.to_array()[0] > 0.5,
+            "float spike → rate ~1 Hz: {:.4}",
+            r_float.to_array()[0]
+        );
     }
 
     #[test]
@@ -128,20 +143,32 @@ mod tests {
         // dt=1ms: 1 spike every 10 steps = 100 Hz
         let mut rate_1 = f32x8::splat(0.0);
         for step in 0..100 {
-            let spike = if step % 10 == 0 { f32x8::splat(-1.0) } else { f32x8::splat(0.0) };
+            let spike = if step % 10 == 0 {
+                f32x8::splat(-1.0)
+            } else {
+                f32x8::splat(0.0)
+            };
             rate_1 = rate_estimate(rate_1, spike, inv_tau, f32x8::splat(1.0));
         }
 
         // dt=0.5ms: same 100 Hz, 1 spike every 20 steps
         let mut rate_05 = f32x8::splat(0.0);
         for step in 0..200 {
-            let spike = if step % 20 == 0 { f32x8::splat(-1.0) } else { f32x8::splat(0.0) };
+            let spike = if step % 20 == 0 {
+                f32x8::splat(-1.0)
+            } else {
+                f32x8::splat(0.0)
+            };
             rate_05 = rate_estimate(rate_05, spike, inv_tau, f32x8::splat(0.5));
         }
 
         let diff = (rate_1.to_array()[0] - rate_05.to_array()[0]).abs();
-        assert!(diff < 2.0,
+        assert!(
+            diff < 2.0,
             "dt invariance: dt=1 → {:.1}, dt=0.5 → {:.1}, diff={:.1}",
-            rate_1.to_array()[0], rate_05.to_array()[0], diff);
+            rate_1.to_array()[0],
+            rate_05.to_array()[0],
+            diff
+        );
     }
 }

@@ -124,21 +124,23 @@ impl Model for OldGLIF4Model {
         let refr = ctx.s(3);
 
         let is_refr = refr.cmp_gt(S::zero()).cond();
-        let v = is_refr.then(ctx.p(4)).else_(v_raw);       // v_reset
+        let v = is_refr.then(ctx.p(4)).else_(v_raw); // v_reset
 
-        let v_th_eff = ctx.p(3) + th;                      // v_thresh_0 + θ
-        let i_total = (ctx.i() + ctx.p(1) * ctx.p(2) + g * ctx.p(7))
-            - (ctx.p(1) + g) * v;                          // g_leak·E_leak + g·E_ahp − (g_leak+g)·v
+        let v_th_eff = ctx.p(3) + th; // v_thresh_0 + θ
+        let i_total = (ctx.i() + ctx.p(1) * ctx.p(2) + g * ctx.p(7)) - (ctx.p(1) + g) * v; // g_leak·E_leak + g·E_ahp − (g_leak+g)·v
         let v_new = v + i_total * ctx.dt();
 
         let theta_decay = th + ctx.dt() * (-th * ctx.p(8)); // inv_tau_theta
-        let g_decay = g + ctx.dt() * (-g * ctx.p(5));       // inv_tau_ahp
+        let g_decay = g + ctx.dt() * (-g * ctx.p(5)); // inv_tau_ahp
 
         let spike = v_new.cmp_ge(v_th_eff);
         ctx.spike(spike);
 
         ctx.set_s(0, spike.cond().then(ctx.p(4)).else_(v_new));
-        ctx.set_s(1, spike.cond().then(theta_decay + ctx.p(9)).else_(theta_decay));
+        ctx.set_s(
+            1,
+            spike.cond().then(theta_decay + ctx.p(9)).else_(theta_decay),
+        );
         ctx.set_s(2, spike.cond().then(g_decay + ctx.p(6)).else_(g_decay));
 
         let refr_dec = refr - ctx.dt();
@@ -162,27 +164,27 @@ impl Model for OldHAAPModel {
         let h = ctx.s(2);
 
         let i_leak = ctx.p(2) * (v - ctx.p(3));
-        let i_m    = ctx.p(4) * u * (v - ctx.p(5));
-        let i_h    = ctx.p(6) * h * (v - ctx.p(7));
+        let i_m = ctx.p(4) * u * (v - ctx.p(5));
+        let i_h = ctx.p(6) * h * (v - ctx.p(7));
 
         let i_total = i_leak + i_m + i_h;
-        let dv = (ctx.i() - i_total) * ctx.p(1);           // inv_cm
+        let dv = (ctx.i() - i_total) * ctx.p(1); // inv_cm
         let v_new = v + dv * ctx.dt();
 
         let u_inf = S::sigmoid(v_new, ctx.pf(10), ctx.pf(11)); // v_half_u, k_u
-        let u_new = u + ctx.dt() * (u_inf - u) * ctx.p(8);     // inv_tau_u
+        let u_new = u + ctx.dt() * (u_inf - u) * ctx.p(8); // inv_tau_u
 
         let h_inf = S::sigmoid(ctx.p(12) - v_new, 0.0, ctx.pf(13)); // v_half_h, k_h
-        let h_new = h + ctx.dt() * (h_inf - h) * ctx.p(9);         // inv_tau_h
+        let h_new = h + ctx.dt() * (h_inf - h) * ctx.p(9); // inv_tau_h
 
         let u_new = u_new.clamp01();
         let h_new = h_new.clamp01();
 
-        let spike = v_new.cmp_ge(ctx.p(14));               // v_thresh
+        let spike = v_new.cmp_ge(ctx.p(14)); // v_thresh
         ctx.spike(spike);
 
         ctx.set_s(0, spike.cond().then(ctx.p(15)).else_(v_new)); // v_reset
-        let u_bump = (u_new + ctx.p(16)).clamp01();              // delta_u
+        let u_bump = (u_new + ctx.p(16)).clamp01(); // delta_u
         ctx.set_s(1, spike.cond().then(u_bump).else_(u_new));
         ctx.set_s(2, h_new);
     }
@@ -200,7 +202,11 @@ fn bench_model<M: Model>(
     i_in: &[f32],
     init: &[f32],
 ) {
-    debug_assert!(init.len() >= M::N_STATE, "init must cover all {} states", M::N_STATE);
+    debug_assert!(
+        init.len() >= M::N_STATE,
+        "init must cover all {} states",
+        M::N_STATE
+    );
     let n = N_NEURONS;
     let mut v = vec![0.0f32; n];
     let mut s1 = vec![0.0f32; n];
@@ -215,15 +221,28 @@ fn bench_model<M: Model>(
     group.bench_function("n138k_step100", |b| {
         b.iter(|| {
             v.fill(init[0]);
-            if M::N_STATE > 1 { s1.fill(init[1]); }
-            if M::N_STATE > 2 { s2.fill(init[2]); }
-            if M::N_STATE > 3 { s3.fill(init[3]); }
+            if M::N_STATE > 1 {
+                s1.fill(init[1]);
+            }
+            if M::N_STATE > 2 {
+                s2.fill(init[2]);
+            }
+            if M::N_STATE > 3 {
+                s3.fill(init[3]);
+            }
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron::<M>(
-                        v.as_mut_ptr(), s1.as_mut_ptr(), s2.as_mut_ptr(),
-                        s3.as_mut_ptr(), s4.as_mut_ptr(), s5.as_mut_ptr(),
-                        i_in.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        s1.as_mut_ptr(),
+                        s2.as_mut_ptr(),
+                        s3.as_mut_ptr(),
+                        s4.as_mut_ptr(),
+                        s5.as_mut_ptr(),
+                        i_in.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -236,13 +255,25 @@ fn bench_model<M: Model>(
 fn bench_glif4_old(c: &mut Criterion) {
     let params = make_glif4_params(N_NEURONS);
     let i_in = make_current(N_NEURONS, 30.0, 5.0);
-    bench_model::<OldGLIF4Model>(c, "glif4_old_compose", &params, &i_in, &[-65.0, 0.0, 0.0, 0.0]);
+    bench_model::<OldGLIF4Model>(
+        c,
+        "glif4_old_compose",
+        &params,
+        &i_in,
+        &[-65.0, 0.0, 0.0, 0.0],
+    );
 }
 
 fn bench_glif4_new_run(c: &mut Criterion) {
     let params = make_glif4_params(N_NEURONS);
     let i_in = make_current(N_NEURONS, 30.0, 5.0);
-    bench_model::<GLIF4Model>(c, "glif4_new_run_neuron", &params, &i_in, &[-65.0, 0.0, 0.0, 0.0]);
+    bench_model::<GLIF4Model>(
+        c,
+        "glif4_new_run_neuron",
+        &params,
+        &i_in,
+        &[-65.0, 0.0, 0.0, 0.0],
+    );
 }
 
 fn bench_glif4_new_pop(c: &mut Criterion) {

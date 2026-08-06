@@ -36,7 +36,11 @@ pub fn cubic_fhn<S: SimdLane>(v: S) -> S {
 /// `dv_fn(v, u, I)` returns the derivative.
 #[inline(always)]
 pub fn substep_euler_izhi<S: SimdLane, F: Fn(S, S, S) -> S>(
-    v: S, u: S, i_syn: S, half_dt: S, dv_fn: F,
+    v: S,
+    u: S,
+    i_syn: S,
+    half_dt: S,
+    dv_fn: F,
 ) -> S {
     let dv1 = dv_fn(v, u, i_syn) * half_dt;
     let v_mid = v + dv1;
@@ -70,7 +74,11 @@ mod tests {
         // At V=1: 1*(1-1/3) = 0.666...
         let v = f32x8::splat(1.0);
         let c = cubic_fhn(v).to_array()[0];
-        assert!((c - (2.0/3.0)).abs() < 1e-6, "cubic(1) = 2/3, got {:.6}", c);
+        assert!(
+            (c - (2.0 / 3.0)).abs() < 1e-6,
+            "cubic(1) = 2/3, got {:.6}",
+            c
+        );
     }
 
     #[test]
@@ -86,7 +94,10 @@ mod tests {
             super::horner_izhi(v) + _i // dv = f(v) + I (u=0 at t=0)
         };
         let v_double = substep_euler_izhi(v, u, i, half_dt, dv_fn);
-        assert!(v_double.to_array()[0].is_finite(), "substep should be finite");
+        assert!(
+            v_double.to_array()[0].is_finite(),
+            "substep should be finite"
+        );
         // At this low current, v may slightly hyperpolarize before recovering.
         // Just check finiteness and no NaN.
         assert!(!v_double.to_array()[0].is_nan(), "no NaN");

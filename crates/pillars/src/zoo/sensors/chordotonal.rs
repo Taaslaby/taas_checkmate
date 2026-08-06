@@ -26,9 +26,9 @@
 //!   [7n..8n]    threshold
 //!   [8n..9n]    max_rate (Hz)
 
-use wide::f32x8;
 use crate::core::lane::SimdLane;
 use crate::core::util::{load8, store8};
+use wide::f32x8;
 
 /// Step chordotonal sensory neurons — converts mechanical load to firing rate.
 ///
@@ -55,7 +55,9 @@ pub unsafe fn chordotonal_step(
     n: usize,
 ) {
     // FIX #5: Early return for empty arrays — prevents UB on params slice
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
     let p = std::slice::from_raw_parts(params, n * 9);
     let dt_splat = f32x8::splat(p[0]);
     let zero = f32x8::splat(0.0);
@@ -71,7 +73,11 @@ pub unsafe fn chordotonal_step(
         let mut ad = load8(adapt, off);
         let load_v = load8(loads, off);
         let stretch_v = load8(stretches, off);
-        let dload_v = if !d_loads.is_null() { load8(d_loads, off) } else { zero };
+        let dload_v = if !d_loads.is_null() {
+            load8(d_loads, off)
+        } else {
+            zero
+        };
 
         let tau_sens_v = load8(params.wrapping_add(n), off).max(eps);
         let tau_adapt_v = load8(params.wrapping_add(2 * n), off).max(eps);
@@ -122,14 +128,20 @@ pub unsafe fn chordotonal_step(
 
             let load = *loads.add(i);
             let stretch = *stretches.add(i);
-            let dload = if !d_loads.is_null() { *d_loads.add(i) } else { 0.0 };
+            let dload = if !d_loads.is_null() {
+                *d_loads.add(i)
+            } else {
+                0.0
+            };
 
             let vs_i = v_sens.add(i);
             let ad_i = adapt.add(i);
 
             let inv_tau_s = 1.0 / tau_sens;
             let inv_tau_a = 1.0 / tau_adapt;
-            *vs_i += dt * (-*vs_i + load_gain * load + stretch_gain * stretch + dload + baseline) * inv_tau_s;
+            *vs_i += dt
+                * (-*vs_i + load_gain * load + stretch_gain * stretch + dload + baseline)
+                * inv_tau_s;
             let raw_diff = (*vs_i - threshold).clamp(-50.0, 50.0);
             let raw_sig = 1.0 / (1.0 + <f32 as SimdLane>::exp(-raw_diff));
             *ad_i += dt * (-*ad_i + b_adapt * max_rate * raw_sig) * inv_tau_a;
@@ -153,15 +165,15 @@ mod tests {
     fn make_sensor_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0f32; n * 9];
         for i in 0..n {
-            p[i] = 1.0;                // dt
-            p[n + i] = 10.0;           // tau_sens
-            p[2*n + i] = 100.0;        // tau_adapt
-            p[3*n + i] = 0.01;         // b_adapt
-            p[4*n + i] = 50.0;         // load_gain
-            p[5*n + i] = 20.0;         // stretch_gain
-            p[6*n + i] = 0.0;          // baseline
-            p[7*n + i] = 0.5;          // threshold
-            p[8*n + i] = 200.0;        // max_rate (Hz)
+            p[i] = 1.0; // dt
+            p[n + i] = 10.0; // tau_sens
+            p[2 * n + i] = 100.0; // tau_adapt
+            p[3 * n + i] = 0.01; // b_adapt
+            p[4 * n + i] = 50.0; // load_gain
+            p[5 * n + i] = 20.0; // stretch_gain
+            p[6 * n + i] = 0.0; // baseline
+            p[7 * n + i] = 0.5; // threshold
+            p[8 * n + i] = 200.0; // max_rate (Hz)
         }
         p
     }
@@ -173,14 +185,19 @@ mod tests {
         let mut v_sens = vec![0.0f32; n];
         let mut adapt = vec![0.0f32; n];
         let mut rates = vec![0.0f32; n];
-        let loads = vec![1.0f32; n];     // max load
+        let loads = vec![1.0f32; n]; // max load
         let stretches = vec![0.0f32; n];
 
         unsafe {
             chordotonal_step(
-                v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                params.as_ptr(), n,
+                v_sens.as_mut_ptr(),
+                adapt.as_mut_ptr(),
+                rates.as_mut_ptr(),
+                loads.as_ptr(),
+                stretches.as_ptr(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
             );
         }
 
@@ -204,26 +221,44 @@ mod tests {
 
         unsafe {
             chordotonal_step(
-                v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                params.as_ptr(), n,
+                v_sens.as_mut_ptr(),
+                adapt.as_mut_ptr(),
+                rates.as_mut_ptr(),
+                loads.as_ptr(),
+                stretches.as_ptr(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
             );
         }
 
         // With zero input and baseline=0, v_sens should stay near 0
-        assert!(v_sens[0].abs() < 1e-4, "v_sens should stay near 0 with no load: {}", v_sens[0]);
+        assert!(
+            v_sens[0].abs() < 1e-4,
+            "v_sens should stay near 0 with no load: {}",
+            v_sens[0]
+        );
         // Rate is sigmoid(threshold) * max_rate ≈ 200/(1+exp(0.5)) ≈ 75 Hz
         // Baseline=0, threshold=0.5 → quiescent firing at ~75 Hz with max 200
-        assert!(rates[0] > 0.0 && rates[0] <= 200.0, "rate should be in valid range: {}", rates[0]);
+        assert!(
+            rates[0] > 0.0 && rates[0] <= 200.0,
+            "rate should be in valid range: {}",
+            rates[0]
+        );
     }
 
     #[test]
     fn test_chordotonal_empty_input() {
         unsafe {
             chordotonal_step(
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
-                std::ptr::null(), std::ptr::null(), std::ptr::null(),
-                std::ptr::null(), 0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
             );
         }
         // Must not crash with n=0
@@ -241,9 +276,14 @@ mod tests {
 
         unsafe {
             chordotonal_step(
-                v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                params.as_ptr(), n,
+                v_sens.as_mut_ptr(),
+                adapt.as_mut_ptr(),
+                rates.as_mut_ptr(),
+                loads.as_ptr(),
+                stretches.as_ptr(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
             );
         }
 
@@ -253,8 +293,12 @@ mod tests {
             assert!(v_i.is_finite());
         }
         // Aligned and tail parts should match
-        assert!((v_sens[7] - v_sens[9]).abs() < 0.01,
-            "SIMD v_sens[7]={:.4} != tail v_sens[9]={:.4}", v_sens[7], v_sens[9]);
+        assert!(
+            (v_sens[7] - v_sens[9]).abs() < 0.01,
+            "SIMD v_sens[7]={:.4} != tail v_sens[9]={:.4}",
+            v_sens[7],
+            v_sens[9]
+        );
     }
 
     #[test]
@@ -270,9 +314,14 @@ mod tests {
         for _ in 0..1000 {
             unsafe {
                 chordotonal_step(
-                    v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                    loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                    params.as_ptr(), n,
+                    v_sens.as_mut_ptr(),
+                    adapt.as_mut_ptr(),
+                    rates.as_mut_ptr(),
+                    loads.as_ptr(),
+                    stretches.as_ptr(),
+                    std::ptr::null(),
+                    params.as_ptr(),
+                    n,
                 );
             }
             for (i, &v_i) in v_sens.iter().enumerate() {
@@ -280,7 +329,11 @@ mod tests {
             }
         }
         // After many steps with zero input, v_sens should settle near 0
-        assert!(v_sens[0].abs() < 0.01, "v_sens should settle: {}", v_sens[0]);
+        assert!(
+            v_sens[0].abs() < 0.01,
+            "v_sens should settle: {}",
+            v_sens[0]
+        );
     }
 
     #[test]
@@ -290,15 +343,20 @@ mod tests {
         let mut v_sens = vec![0.0f32; n];
         let mut adapt = vec![0.0f32; n];
         let mut rates = vec![0.0f32; n];
-        let loads = vec![100.0f32; n];  // extreme load
+        let loads = vec![100.0f32; n]; // extreme load
         let stretches = vec![10.0f32; n];
 
         for _ in 0..1000 {
             unsafe {
                 chordotonal_step(
-                    v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                    loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                    params.as_ptr(), n,
+                    v_sens.as_mut_ptr(),
+                    adapt.as_mut_ptr(),
+                    rates.as_mut_ptr(),
+                    loads.as_ptr(),
+                    stretches.as_ptr(),
+                    std::ptr::null(),
+                    params.as_ptr(),
+                    n,
                 );
             }
             for i in 0..n {
@@ -324,15 +382,24 @@ mod tests {
 
         unsafe {
             chordotonal_step(
-                v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                loads.as_ptr(), stretches.as_ptr(), d_loads.as_ptr(),
-                params.as_ptr(), n,
+                v_sens.as_mut_ptr(),
+                adapt.as_mut_ptr(),
+                rates.as_mut_ptr(),
+                loads.as_ptr(),
+                stretches.as_ptr(),
+                d_loads.as_ptr(),
+                params.as_ptr(),
+                n,
             );
         }
 
         // Velocity sensitivity should produce a positive v_sens
         assert!(v_sens[0] > 0.0, "d_load should depolarize: {}", v_sens[0]);
-        assert!(rates[0] > 0.0, "rate should be positive with d_load: {}", rates[0]);
+        assert!(
+            rates[0] > 0.0,
+            "rate should be positive with d_load: {}",
+            rates[0]
+        );
     }
 
     #[test]
@@ -347,9 +414,14 @@ mod tests {
 
         unsafe {
             chordotonal_step(
-                v_sens.as_mut_ptr(), adapt.as_mut_ptr(), rates.as_mut_ptr(),
-                loads.as_ptr(), stretches.as_ptr(), std::ptr::null(),
-                params.as_ptr(), n,
+                v_sens.as_mut_ptr(),
+                adapt.as_mut_ptr(),
+                rates.as_mut_ptr(),
+                loads.as_ptr(),
+                stretches.as_ptr(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
             );
         }
 
@@ -362,11 +434,20 @@ mod tests {
         let neg_stretches = vec![-1.0f32; n];
         unsafe {
             chordotonal_step(
-                v_sens2.as_mut_ptr(), adapt2.as_mut_ptr(), rates2.as_mut_ptr(),
-                loads.as_ptr(), neg_stretches.as_ptr(), std::ptr::null(),
-                params.as_ptr(), n,
+                v_sens2.as_mut_ptr(),
+                adapt2.as_mut_ptr(),
+                rates2.as_mut_ptr(),
+                loads.as_ptr(),
+                neg_stretches.as_ptr(),
+                std::ptr::null(),
+                params.as_ptr(),
+                n,
             );
         }
-        assert!(v_sens2[0] < 0.0, "negative stretch should hyperpolarize: {}", v_sens2[0]);
+        assert!(
+            v_sens2[0] < 0.0,
+            "negative stretch should hyperpolarize: {}",
+            v_sens2[0]
+        );
     }
 }

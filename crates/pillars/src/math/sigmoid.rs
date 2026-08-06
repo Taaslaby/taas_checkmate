@@ -17,9 +17,9 @@
 //! The polynomial pair exists for batch microkernels, where the SIMD lane
 //! and the scalar tail must produce **bit-identical** results.
 
-use wide::f32x8;
 use crate::core::lane::SimdLane;
 use crate::math::fast_exp::{fast_exp, fast_exp_poly_simd};
+use wide::f32x8;
 
 /// SIMD sigmoid: `1 / (1 + exp(-(V - V_half) / k))`
 ///
@@ -74,13 +74,21 @@ mod tests {
     #[test]
     fn test_sigmoid_at_midpoint() {
         let s = super::sigmoid(f32x8::splat(-35.0), -35.0, 5.0);
-        assert!((s.to_array()[0] - 0.5).abs() < 0.01, "mid: {}", s.to_array()[0]);
+        assert!(
+            (s.to_array()[0] - 0.5).abs() < 0.01,
+            "mid: {}",
+            s.to_array()[0]
+        );
     }
 
     #[test]
     fn test_sigmoid_saturation() {
         let s1 = super::sigmoid(f32x8::splat(50.0), -35.0, 5.0);
-        assert!((s1.to_array()[0] - 1.0).abs() < 0.01, "high: {}", s1.to_array()[0]);
+        assert!(
+            (s1.to_array()[0] - 1.0).abs() < 0.01,
+            "high: {}",
+            s1.to_array()[0]
+        );
 
         let s2 = super::sigmoid(f32x8::splat(-80.0), -35.0, 5.0);
         assert!(s2.to_array()[0] < 0.01, "low: {}", s2.to_array()[0]);
@@ -103,7 +111,8 @@ mod tests {
             assert!(
                 simd.to_array()[i].to_bits() == scalar.to_bits(),
                 "poly sigmoid lane {i} (x={x}): SIMD={:e} != scalar={:e}",
-                simd.to_array()[i], scalar
+                simd.to_array()[i],
+                scalar
             );
         }
     }

@@ -41,7 +41,11 @@ mod tests {
         let v = f32x8::splat(-54.0);
         let th = f32x8::splat(-54.0);
         let g = fast_sigmoid_surrogate(v, th);
-        assert!((g.to_array()[0] - 1.0).abs() < 1e-6, "at threshold: {:.6}", g.to_array()[0]);
+        assert!(
+            (g.to_array()[0] - 1.0).abs() < 1e-6,
+            "at threshold: {:.6}",
+            g.to_array()[0]
+        );
     }
 
     #[test]
@@ -49,6 +53,10 @@ mod tests {
         let v = f32x8::splat(-65.0);
         let th = f32x8::splat(-54.0);
         let g = fast_sigmoid_surrogate(v, th);
-        assert!(g.to_array()[0] < 0.5, "far from threshold: {:.6}", g.to_array()[0]);
+        assert!(
+            g.to_array()[0] < 0.5,
+            "far from threshold: {:.6}",
+            g.to_array()[0]
+        );
     }
 }

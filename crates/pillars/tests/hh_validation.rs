@@ -4,8 +4,8 @@
 //! Reference values at V=-65mV, T=6.3°C:
 //!   minf=0.052932, hinf=0.596121, ninf=0.317677
 
-use pillars::prelude::HHModel;
 use pillars::prelude::run_neuron;
+use pillars::prelude::HHModel;
 
 const NEURON_MINF_REST: f32 = 0.052932;
 const NEURON_HINF_REST: f32 = 0.596121;
@@ -14,18 +14,18 @@ const NEURON_NINF_REST: f32 = 0.317677;
 fn make_hh_params(num: usize, dt: f32) -> Vec<f32> {
     let mut p = vec![0.0f32; num * 12];
     for i in 0..num {
-        p[i] = dt;              // dt
-        p[num+i] = 120.0;       // g_Na
-        p[2*num+i] = 50.0;      // E_Na
-        p[3*num+i] = 36.0;      // g_K
-        p[4*num+i] = -77.0;     // E_K
-        p[5*num+i] = 0.3;       // g_leak
-        p[6*num+i] = -54.387;   // E_leak
-        p[7*num+i] = 1.0;       // q10 (6.3°C)
-        p[8*num+i] = 0.0;       // v_thresh
-        p[9*num+i] = 1.0;       // inv_C_m
-        p[10*num+i] = 0.0;      // g_CaT (standard HH: no CaT current)
-        p[11*num+i] = 120.0;    // E_CaT
+        p[i] = dt; // dt
+        p[num + i] = 120.0; // g_Na
+        p[2 * num + i] = 50.0; // E_Na
+        p[3 * num + i] = 36.0; // g_K
+        p[4 * num + i] = -77.0; // E_K
+        p[5 * num + i] = 0.3; // g_leak
+        p[6 * num + i] = -54.387; // E_leak
+        p[7 * num + i] = 1.0; // q10 (6.3°C)
+        p[8 * num + i] = 0.0; // v_thresh
+        p[9 * num + i] = 1.0; // inv_C_m
+        p[10 * num + i] = 0.0; // g_CaT (standard HH: no CaT current)
+        p[11 * num + i] = 120.0; // E_CaT
     }
     p
 }
@@ -47,9 +47,16 @@ fn run_hh_simd(n_steps: usize, i_syn: f32, dt: f32) -> (u32, f32, f32, f32) {
     for _ in 0..n_steps {
         unsafe {
             run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), n_gate.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                v.as_mut_ptr(),
+                m.as_mut_ptr(),
+                h.as_mut_ptr(),
+                n_gate.as_mut_ptr(),
+                cat.as_mut_ptr(),
+                flag.as_mut_ptr(),
+                i_arr.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
             );
         }
         total_spikes += spikes.iter().sum::<i32>() as u32;
@@ -74,10 +81,16 @@ fn run_hh_scalar(n_steps: usize, i_syn: f32, dt: f32) -> u32 {
     for _ in 0..n_steps {
         unsafe {
             run_neuron::<HHModel>(
-                &mut v as *mut f32, &mut m as *mut f32, &mut h as *mut f32,
-                &mut k as *mut f32, &mut cat as *mut f32, &mut flag as *mut f32,
-                &i_syn as *const f32, &mut spikes as *mut i32,
-                params.as_ptr(), n,
+                &mut v as *mut f32,
+                &mut m as *mut f32,
+                &mut h as *mut f32,
+                &mut k as *mut f32,
+                &mut cat as *mut f32,
+                &mut flag as *mut f32,
+                &i_syn as *const f32,
+                &mut spikes as *mut i32,
+                params.as_ptr(),
+                n,
             );
         }
         total_spikes += spikes[0] as u32;
@@ -108,23 +121,49 @@ fn test_hh_resting_state_simd() {
     for _ in 0..5000 {
         unsafe {
             run_neuron::<HHModel>(
-                v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k.as_mut_ptr(),
-                cat.as_mut_ptr(), flag.as_mut_ptr(),
-                i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                v.as_mut_ptr(),
+                m.as_mut_ptr(),
+                h.as_mut_ptr(),
+                k.as_mut_ptr(),
+                cat.as_mut_ptr(),
+                flag.as_mut_ptr(),
+                i_arr.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
             );
         }
     }
 
     // All 8 neurons should match NEURON reference
     for i in 0..n {
-        assert!((m[i] - NEURON_MINF_REST).abs() < 0.01,
-            "m[{}]={:.6} != NEURON minf={:.6}", i, m[i], NEURON_MINF_REST);
-        assert!((h[i] - NEURON_HINF_REST).abs() < 0.01,
-            "h[{}]={:.6} != NEURON hinf={:.6}", i, h[i], NEURON_HINF_REST);
-        assert!((k[i] - NEURON_NINF_REST).abs() < 0.01,
-            "n[{}]={:.6} != NEURON ninf={:.6}", i, k[i], NEURON_NINF_REST);
-        assert!((v[i] - (-65.0)).abs() < 2.0,
-            "v[{}]={:.2} should be near -65", i, v[i]);
+        assert!(
+            (m[i] - NEURON_MINF_REST).abs() < 0.01,
+            "m[{}]={:.6} != NEURON minf={:.6}",
+            i,
+            m[i],
+            NEURON_MINF_REST
+        );
+        assert!(
+            (h[i] - NEURON_HINF_REST).abs() < 0.01,
+            "h[{}]={:.6} != NEURON hinf={:.6}",
+            i,
+            h[i],
+            NEURON_HINF_REST
+        );
+        assert!(
+            (k[i] - NEURON_NINF_REST).abs() < 0.01,
+            "n[{}]={:.6} != NEURON ninf={:.6}",
+            i,
+            k[i],
+            NEURON_NINF_REST
+        );
+        assert!(
+            (v[i] - (-65.0)).abs() < 2.0,
+            "v[{}]={:.2} should be near -65",
+            i,
+            v[i]
+        );
     }
 }
 
@@ -132,32 +171,44 @@ fn test_hh_resting_state_simd() {
 #[test]
 fn test_hh_fires_simd_i50() {
     let (spikes, _, _, _) = run_hh_simd(5000, 50.0, 0.01);
-    assert!(spikes > 3,
-        "SIMD HH I=50 should spike >3 in 50ms, got {}", spikes);
+    assert!(
+        spikes > 3,
+        "SIMD HH I=50 should spike >3 in 50ms, got {}",
+        spikes
+    );
 }
 
 /// I=100 fires on SIMD path (8 neurons).
 #[test]
 fn test_hh_fires_simd_i100() {
     let (spikes, _, _, _) = run_hh_simd(5000, 100.0, 0.01);
-    assert!(spikes > 3,
-        "SIMD HH I=100 should spike >3 in 50ms, got {}", spikes);
+    assert!(
+        spikes > 3,
+        "SIMD HH I=100 should spike >3 in 50ms, got {}",
+        spikes
+    );
 }
 
 /// Scalar path also fires (1 neuron).
 #[test]
 fn test_hh_fires_scalar() {
     let spikes = run_hh_scalar(5000, 50.0, 0.01);
-    assert!(spikes > 3,
-        "Scalar HH I=50 should spike >3 in 50ms, got {}", spikes);
+    assert!(
+        spikes > 3,
+        "Scalar HH I=50 should spike >3 in 50ms, got {}",
+        spikes
+    );
 }
 
 /// Sustained firing: I=100 produces regular spiking for 100ms (SIMD).
 #[test]
 fn test_hh_sustained_firing_simd() {
     let (spikes, v, m, h) = run_hh_simd(10000, 100.0, 0.01);
-    assert!(spikes > 5,
-        "I=100 should fire >5 spikes in 100ms (SIMD), got {}", spikes);
+    assert!(
+        spikes > 5,
+        "I=100 should fire >5 spikes in 100ms (SIMD), got {}",
+        spikes
+    );
     assert!((-100.0..=60.0).contains(&v), "V={:.2} out of range", v);
     assert!((0.0..=1.0).contains(&m), "m={:.4}", m);
     assert!((0.0..=1.0).contains(&h), "h={:.4}", h);
@@ -169,6 +220,9 @@ fn test_hh_sustained_firing_scalar() {
     let spikes = run_hh_scalar(10000, 100.0, 0.01);
     // Scalar path can produce fewer spikes than SIMD due to numerical differences
     // in NaN-mask handling, but should still produce at least some.
-    assert!(spikes > 0,
-        "I=100 should produce some spikes in 100ms (scalar), got {}", spikes);
+    assert!(
+        spikes > 0,
+        "I=100 should produce some spikes in 100ms (scalar), got {}",
+        spikes
+    );
 }

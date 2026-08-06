@@ -30,7 +30,10 @@ pub fn surrogate_gradient(v: f32, v_thresh: f32, tau_surrogate: f32) -> f32 {
 ///
 /// All three arrays have length `n`; the update is elementwise.
 pub fn eprop_update(weights: &mut [f32], eligibility: &[f32], learning_signals: &[f32], lr: f32) {
-    let n = weights.len().min(eligibility.len()).min(learning_signals.len());
+    let n = weights
+        .len()
+        .min(eligibility.len())
+        .min(learning_signals.len());
     for i in 0..n {
         weights[i] += lr * learning_signals[i] * eligibility[i];
     }
@@ -55,10 +58,7 @@ pub fn stdp_update(
     w_min: f32,
     w_max: f32,
 ) {
-    let n = weights
-        .len()
-        .min(traces_pre.len())
-        .min(traces_post.len());
+    let n = weights.len().min(traces_pre.len()).min(traces_post.len());
     let n8 = n & !7;
     let ltp_s = f32x8::splat(lr_ltp);
     let ltd_s = f32x8::splat(lr_ltd);
@@ -75,7 +75,8 @@ pub fn stdp_update(
         }
     }
     for i in n8..n {
-        weights[i] = (weights[i] + lr_ltp * traces_post[i] - lr_ltd * traces_pre[i]).clamp(w_min, w_max);
+        weights[i] =
+            (weights[i] + lr_ltp * traces_post[i] - lr_ltd * traces_pre[i]).clamp(w_min, w_max);
     }
 }
 
@@ -103,12 +104,12 @@ pub fn stdp_update(
 /// "Theory for the development of neuron selectivity".
 #[allow(clippy::too_many_arguments)]
 pub fn bcm_step(
-    x: &mut [f32],          // pre-synaptic trace
-    y: &mut [f32],          // post-synaptic trace
-    theta_m: &mut [f32],    // sliding modification threshold
+    x: &mut [f32],       // pre-synaptic trace
+    y: &mut [f32],       // post-synaptic trace
+    theta_m: &mut [f32], // sliding modification threshold
     weights: &mut [f32],
-    pre_spikes: &[f32],     // pre firing rate / spike indicator
-    post_spikes: &[f32],    // post firing rate / spike indicator
+    pre_spikes: &[f32],  // pre firing rate / spike indicator
+    post_spikes: &[f32], // post firing rate / spike indicator
     dt: f32,
     tau_x: f32,
     tau_y: f32,
@@ -191,13 +192,7 @@ pub fn bcm_step(
 ///
 /// `y` is the post-synaptic activity trace (same value for all synapses of
 /// one neuron); weights are clamped ≥ 0. SIMD + scalar tail, bit-consistent.
-pub fn homeostatic_scale(
-    weights: &mut [f32],
-    y: &[f32],
-    dt: f32,
-    eta_h: f32,
-    target_rate: f32,
-) {
+pub fn homeostatic_scale(weights: &mut [f32], y: &[f32], dt: f32, eta_h: f32, target_rate: f32) {
     let n = weights.len().min(y.len());
     let n8 = n & !7;
     let dt_s = f32x8::splat(dt);
@@ -226,7 +221,13 @@ pub fn homeostatic_scale(
 
 /// Intrinsic plasticity: adapts neuron thresholds to maintain a target
 /// firing rate. `θ += lr_ip·(rate − target)`, decayed and clamped to [0, 50].
-pub fn intrinsic_plasticity(theta: &mut [f32], spikes: &[i32], lr_ip: f32, target_rate: f32, decay: f32) {
+pub fn intrinsic_plasticity(
+    theta: &mut [f32],
+    spikes: &[i32],
+    lr_ip: f32,
+    target_rate: f32,
+    decay: f32,
+) {
     for (t, &s) in theta.iter_mut().zip(spikes.iter()) {
         let rate = if s != 0 { 1.0 } else { 0.0 };
         *t += lr_ip * (rate - target_rate);
@@ -237,7 +238,13 @@ pub fn intrinsic_plasticity(theta: &mut [f32], spikes: &[i32], lr_ip: f32, targe
 
 /// Synaptic normalization: rescales each post-neuron's incoming weights to
 /// `target_sum`. `weights` is row-major `[n_pre × n_post]`.
-pub fn synaptic_normalization(weights: &mut [f32], n_pre: usize, n_post: usize, target_sum: f32, eps: f32) {
+pub fn synaptic_normalization(
+    weights: &mut [f32],
+    n_pre: usize,
+    n_post: usize,
+    target_sum: f32,
+    eps: f32,
+) {
     assert!(weights.len() >= n_pre * n_post);
     // Column sums (per post-neuron)
     let mut col_scales = vec![1.0f32; n_post];
@@ -313,8 +320,20 @@ impl SornNetwork {
             self.w_min,
             self.w_max,
         );
-        intrinsic_plasticity(&mut self.theta, spikes, self.lr_ip, self.target_rate, self.ip_decay);
-        synaptic_normalization(&mut self.weights, self.n, self.n, self.w_target_sum, self.sn_eps);
+        intrinsic_plasticity(
+            &mut self.theta,
+            spikes,
+            self.lr_ip,
+            self.target_rate,
+            self.ip_decay,
+        );
+        synaptic_normalization(
+            &mut self.weights,
+            self.n,
+            self.n,
+            self.w_target_sum,
+            self.sn_eps,
+        );
     }
 
     pub fn reset(&mut self) {
@@ -344,7 +363,11 @@ mod tests {
         let learning_signals = vec![0.1f32; n];
         eprop_update(&mut weights, &eligibility, &learning_signals, 0.1);
         for i in 0..n {
-            assert!((weights[i] - 0.51).abs() < 1e-5, "w should be 0.51, got {}", weights[i]);
+            assert!(
+                (weights[i] - 0.51).abs() < 1e-5,
+                "w should be 0.51, got {}",
+                weights[i]
+            );
         }
     }
 
@@ -366,8 +389,14 @@ mod tests {
         synaptic_normalization(&mut w, n_pre, n_post, 1.0, 1e-8);
         let col0: f32 = w[0] + w[2];
         let col1: f32 = w[1] + w[3];
-        assert!((col0 - 1.0).abs() < 1e-5, "col0 sum should be 1, got {col0}");
-        assert!((col1 - 1.0).abs() < 1e-5, "col1 sum should be 1, got {col1}");
+        assert!(
+            (col0 - 1.0).abs() < 1e-5,
+            "col0 sum should be 1, got {col0}"
+        );
+        assert!(
+            (col1 - 1.0).abs() < 1e-5,
+            "col1 sum should be 1, got {col1}"
+        );
     }
 
     #[test]
@@ -409,17 +438,15 @@ mod tests {
         let traces_pre = vec![0.0f32; 64];
         let traces_post = vec![0.0f32; 64];
         sorn.step(&spikes, &traces_pre, &traces_post);
-        assert!(sorn.weights.iter().all(|&w| w.is_finite()), "weights must stay finite");
+        assert!(
+            sorn.weights.iter().all(|&w| w.is_finite()),
+            "weights must stay finite"
+        );
     }
 
     // ─── BCM ────────────────────────────────────────────────────
 
-    fn run_bcm(
-        n: usize,
-        post_val: f32,
-        theta_init: f32,
-        steps: usize,
-    ) -> (Vec<f32>, Vec<f32>) {
+    fn run_bcm(n: usize, post_val: f32, theta_init: f32, steps: usize) -> (Vec<f32>, Vec<f32>) {
         let dt = 1.0;
         let tau_x = 20.0;
         let tau_y = 20.0;
@@ -438,8 +465,20 @@ mod tests {
 
         for _ in 0..steps {
             bcm_step(
-                &mut x, &mut y, &mut theta, &mut weights,
-                &pre, &post, dt, tau_x, tau_y, tau_theta, eta, decay, w_min, w_max,
+                &mut x,
+                &mut y,
+                &mut theta,
+                &mut weights,
+                &pre,
+                &post,
+                dt,
+                tau_x,
+                tau_y,
+                tau_theta,
+                eta,
+                decay,
+                w_min,
+                w_max,
             );
         }
         (weights, theta)
@@ -449,13 +488,26 @@ mod tests {
     fn bcm_bidirectional_plasticity() {
         // LTP: post (10) > θ (5) → weight increases
         let (w_ltp, _) = run_bcm(8, 10.0, 5.0, 1);
-        assert!(w_ltp[0] > 1.0, "BCM LTP: weight should increase, got {:.6}", w_ltp[0]);
+        assert!(
+            w_ltp[0] > 1.0,
+            "BCM LTP: weight should increase, got {:.6}",
+            w_ltp[0]
+        );
 
         // LTD: post (1) < θ (5) → weight decreases
         let (w_ltd, _) = run_bcm(8, 1.0, 5.0, 1);
-        assert!(w_ltd[0] < 1.0, "BCM LTD: weight should decrease, got {:.6}", w_ltd[0]);
+        assert!(
+            w_ltd[0] < 1.0,
+            "BCM LTD: weight should decrease, got {:.6}",
+            w_ltd[0]
+        );
 
-        assert!(w_ltp[0] > w_ltd[0], "LTP ({:.6}) > LTD ({:.6})", w_ltp[0], w_ltd[0]);
+        assert!(
+            w_ltp[0] > w_ltd[0],
+            "LTP ({:.6}) > LTD ({:.6})",
+            w_ltp[0],
+            w_ltd[0]
+        );
     }
 
     #[test]
@@ -463,7 +515,11 @@ mod tests {
         // θ_M tracks y² ≈ 21 (post=5, τ_θ=100, 50 steps): θ should rise but < 30
         let (_, theta) = run_bcm(8, 5.0, 0.0, 50);
         assert!(theta[0] > 2.0, "BCM: θ_M should rise, got {:.4}", theta[0]);
-        assert!(theta[0] < 30.0, "BCM: θ_M should be <30, got {:.4}", theta[0]);
+        assert!(
+            theta[0] < 30.0,
+            "BCM: θ_M should be <30, got {:.4}",
+            theta[0]
+        );
     }
 
     #[test]
@@ -482,7 +538,10 @@ mod tests {
             theta[0],
             theta[12]
         );
-        assert!(weights.iter().all(|&w| w.is_finite()), "weights must be finite");
+        assert!(
+            weights.iter().all(|&w| w.is_finite()),
+            "weights must be finite"
+        );
     }
 
     #[test]
@@ -495,18 +554,30 @@ mod tests {
         let mut w_hi = vec![1.0f32; 8];
         let y_hi = vec![10.0f32; 8];
         homeostatic_scale(&mut w_hi, &y_hi, dt, eta_h, target);
-        assert!(w_hi[0] < 1.0, "high activity should shrink weights, got {}", w_hi[0]);
+        assert!(
+            w_hi[0] < 1.0,
+            "high activity should shrink weights, got {}",
+            w_hi[0]
+        );
 
         // Low activity (2 < 5) → weights grow
         let mut w_lo = vec![1.0f32; 8];
         let y_lo = vec![2.0f32; 8];
         homeostatic_scale(&mut w_lo, &y_lo, dt, eta_h, target);
-        assert!(w_lo[0] > 1.0, "low activity should grow weights, got {}", w_lo[0]);
+        assert!(
+            w_lo[0] > 1.0,
+            "low activity should grow weights, got {}",
+            w_lo[0]
+        );
 
         // At target → no change
         let mut w_at = vec![1.0f32; 8];
         let y_at = vec![5.0f32; 8];
         homeostatic_scale(&mut w_at, &y_at, dt, eta_h, target);
-        assert!((w_at[0] - 1.0).abs() < 1e-6, "at target: {}, want 1.0", w_at[0]);
+        assert!(
+            (w_at[0] - 1.0).abs() < 1e-6,
+            "at target: {}, want 1.0",
+            w_at[0]
+        );
     }
 }

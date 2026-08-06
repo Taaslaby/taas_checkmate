@@ -131,7 +131,11 @@ mod tests {
             .map(|(i, _)| i as u32)
             .collect();
         assert_eq!(out, reference);
-        assert!(out.len() > 80, "expected sparse activity, got {}", out.len());
+        assert!(
+            out.len() > 80,
+            "expected sparse activity, got {}",
+            out.len()
+        );
     }
 
     #[test]

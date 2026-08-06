@@ -54,13 +54,21 @@ mod tests {
         let e = f32x8::splat(-90.0);
         let i = leak_current(v, g, e);
         // I = 10.0 * (100 - (-90)) = 1900
-        assert!((i.to_array()[0] - 1900.0).abs() < 1e-3, "extreme depolarized: {}", i.to_array()[0]);
+        assert!(
+            (i.to_array()[0] - 1900.0).abs() < 1e-3,
+            "extreme depolarized: {}",
+            i.to_array()[0]
+        );
 
         // Extreme hyperpolarization
         let v2 = f32x8::splat(-120.0);
         let i2 = leak_current(v2, g, e);
         // I = 10.0 * (-120 - (-90)) = -300
-        assert!((i2.to_array()[0] - (-300.0)).abs() < 1e-3, "extreme hyperpolarized: {}", i2.to_array()[0]);
+        assert!(
+            (i2.to_array()[0] - (-300.0)).abs() < 1e-3,
+            "extreme hyperpolarized: {}",
+            i2.to_array()[0]
+        );
     }
 
     #[test]
@@ -72,8 +80,13 @@ mod tests {
         let currents = leak_current(v, g, e).to_array();
         for i in 0..8 {
             let expected = 0.5 * (v_vals[i] + 70.0);
-            assert!((currents[i] - expected).abs() < 1e-5,
-                "leak[{i}]: v={}, expected={}, got={}", v_vals[i], expected, currents[i]);
+            assert!(
+                (currents[i] - expected).abs() < 1e-5,
+                "leak[{i}]: v={}, expected={}, got={}",
+                v_vals[i],
+                expected,
+                currents[i]
+            );
         }
     }
 
@@ -83,6 +96,10 @@ mod tests {
         let e = f32x8::splat(-65.0);
         let v = f32x8::splat(100.0);
         let i = leak_current(v, g, e);
-        assert!((i.to_array()[0]).abs() < 1e-6, "zero conductance should give zero current: {}", i.to_array()[0]);
+        assert!(
+            (i.to_array()[0]).abs() < 1e-6,
+            "zero conductance should give zero current: {}",
+            i.to_array()[0]
+        );
     }
 }

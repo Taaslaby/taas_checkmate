@@ -36,7 +36,9 @@ pub fn integrate_ahp<S: SimdLane>(g: S, inv_tau: S, dt: S) -> S {
 /// ```
 #[inline(always)]
 pub fn adex_exp<S: SimdLane>(v: S, v_thresh: S, inv_delta_t: S, delta_t: S) -> S {
-    let exp_arg = ((v - v_thresh) * inv_delta_t).max(S::splat(-10.0)).min(S::splat(10.0));
+    let exp_arg = ((v - v_thresh) * inv_delta_t)
+        .max(S::splat(-10.0))
+        .min(S::splat(10.0));
     delta_t * exp_arg.exp()
 }
 

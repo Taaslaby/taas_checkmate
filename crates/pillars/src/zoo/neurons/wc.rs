@@ -12,48 +12,69 @@
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 
-use pillars_macros::NeuronModel;
-use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
+#![allow(clippy::module_inception)] // deliberate: `pub mod wc` mirrors the file module
+
+use pillars_macros::dual_neuron;
 
 /// Wilson-Cowan (1972) — excitatory-inhibitory rate model.
 /// No spiking output (HAS_SPIKE = false).
-#[derive(NeuronModel)]
-pub struct WCModel {
-    #[state] pub e: f32,  // excitatory population rate
-    #[state] pub i: f32,  // inhibitory population rate
+#[dual_neuron]
+pub mod wc {
+    use crate::core::compute::{ComputeNeuron, StepContext};
+    use crate::core::lane::SimdLane;
+    use pillars_macros::NeuronModel;
 
-    #[param] pub dt: f32,
-    #[param] pub inv_tau_e: f32,
-    #[param] pub inv_tau_i: f32,
-    #[param] pub w_ee: f32,
-    #[param] pub w_ei: f32,
-    #[param] pub w_ie: f32,
-    #[param] pub w_ii: f32,
-    #[param] pub beta: f32,
-}
+    #[derive(NeuronModel)]
+    pub struct WCModel {
+        #[state]
+        pub e: f32, // excitatory population rate
+        #[state]
+        pub i: f32, // inhibitory population rate
 
-impl ComputeNeuron for WCModel {
-    type State<S: SimdLane> = WCState<S>;
-    type Params<S: SimdLane> = WCParams<S>;
+        #[param]
+        pub dt: f32,
+        #[param]
+        pub inv_tau_e: f32,
+        #[param]
+        pub inv_tau_i: f32,
+        #[param]
+        pub w_ee: f32,
+        #[param]
+        pub w_ei: f32,
+        #[param]
+        pub w_ie: f32,
+        #[param]
+        pub w_ii: f32,
+        #[param]
+        pub beta: f32,
+    }
 
-    #[inline(always)]
-    fn step<S: SimdLane>(
-        state: &mut Self::State<S>,
-        params: &Self::Params<S>,
-        ctx: &mut StepContext<S>,
-    ) {
-        let input_e = params.w_ee * state.e - params.w_ei * state.i + ctx.i_syn;
-        let input_i = params.w_ie * state.e - params.w_ii * state.i;
+    impl ComputeNeuron for WCModel {
+        type State<S: SimdLane> = WCState<S>;
+        type Params<S: SimdLane> = WCParams<S>;
 
-        let beta_s = params.beta.to_array()[0];
-        let f_e = S::sigmoid(input_e, 0.0, beta_s);
-        let f_i = S::sigmoid(input_i, 0.0, beta_s);
+        #[inline(always)]
+        fn step<S: SimdLane>(
+            state: &mut Self::State<S>,
+            params: &Self::Params<S>,
+            ctx: &mut StepContext<S>,
+        ) {
+            let input_e = params.w_ee * state.e - params.w_ei * state.i + ctx.i_syn;
+            let input_i = params.w_ie * state.e - params.w_ii * state.i;
 
-        state.e = state.e + (-state.e + f_e) * params.inv_tau_e * ctx.dt_simd();
-        state.i = state.i + (-state.i + f_i) * params.inv_tau_i * ctx.dt_simd();
+            let beta_s = params.beta.to_array()[0];
+            let f_e = S::sigmoid(input_e, 0.0, beta_s);
+            let f_i = S::sigmoid(input_i, 0.0, beta_s);
+
+            state.e = state.e + (-state.e + f_e) * params.inv_tau_e * ctx.dt_simd();
+            state.i = state.i + (-state.i + f_i) * params.inv_tau_i * ctx.dt_simd();
+        }
     }
 }
+
+// Re-export so existing paths keep working:
+// `pillars::zoo::neurons::wc::WCModel` etc.
+pub use wc::*;
 
 #[cfg(test)]
 mod tests {
@@ -78,35 +99,70 @@ mod tests {
 
     #[test]
     fn test_wc_converges_to_equilibrium() {
-        let n = 8; let params = make_params(n);
-        let mut e = vec![0.0; n]; let mut i = vec![0.0; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut e = vec![0.0; n];
+        let mut i = vec![0.0; n];
         let mut dummy = vec![0.0; n];
-        let i_e = vec![0.5; n]; let mut spikes = vec![0i32; n];
+        let i_e = vec![0.5; n];
+        let mut spikes = vec![0i32; n];
         for _ in 0..500 {
-            unsafe { run_neuron::<WCModel>(
-                e.as_mut_ptr(), i.as_mut_ptr(), dummy.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                i_e.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<WCModel>(
+                    e.as_mut_ptr(),
+                    i.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    i_e.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
         }
         for idx in 0..n {
-            assert!(e[idx] > 0.0 && e[idx] < 1.0, "E[{idx}]={} should be in (0,1)", e[idx]);
-            assert!(i[idx] > 0.0 && i[idx] < 1.0, "I[{idx}]={} should be in (0,1)", i[idx]);
+            assert!(
+                e[idx] > 0.0 && e[idx] < 1.0,
+                "E[{idx}]={} should be in (0,1)",
+                e[idx]
+            );
+            assert!(
+                i[idx] > 0.0 && i[idx] < 1.0,
+                "I[{idx}]={} should be in (0,1)",
+                i[idx]
+            );
         }
     }
 
     #[test]
     fn test_wc_stress_silence() {
-        let n = 8; let params = make_params(n);
-        let mut e = vec![0.0; n]; let mut i = vec![0.0; n];
-        let mut dummy = vec![0.0; n]; let i_e = vec![0.0; n]; let mut spikes = vec![0i32; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut e = vec![0.0; n];
+        let mut i = vec![0.0; n];
+        let mut dummy = vec![0.0; n];
+        let i_e = vec![0.0; n];
+        let mut spikes = vec![0i32; n];
         for step in 0..10000 {
-            unsafe { run_neuron::<WCModel>(
-                e.as_mut_ptr(), i.as_mut_ptr(), dummy.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                i_e.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
-            for (i, &e_i) in e.iter().enumerate() { assert!(!e_i.is_nan(), "E[{i}] NaN {step}"); }
+            unsafe {
+                run_neuron::<WCModel>(
+                    e.as_mut_ptr(),
+                    i.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    i_e.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
+            for (i, &e_i) in e.iter().enumerate() {
+                assert!(!e_i.is_nan(), "E[{i}] NaN {step}");
+            }
         }
     }
 }

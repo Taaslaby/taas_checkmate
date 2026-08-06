@@ -13,7 +13,7 @@ use wide::f32x8;
 use wide::CmpGt;
 
 use crate::core::util::{load8, store8};
-use crate::math::sigmoid::{sigmoid_poly_simd, sigmoid_poly_s};
+use crate::math::sigmoid::{sigmoid_poly_s, sigmoid_poly_simd};
 
 /// Clamp all values in `data` to `[min, max]`.
 pub fn safety_clamp(data: &mut [f32], min: f32, max: f32) {
@@ -41,7 +41,11 @@ pub fn stochastic_encoder(
     spike_val: f32,
 ) {
     let n = target_i.len();
-    assert_eq!(inputs.len(), n, "stochastic_encoder: inputs length mismatch");
+    assert_eq!(
+        inputs.len(),
+        n,
+        "stochastic_encoder: inputs length mismatch"
+    );
     assert_eq!(noise.len(), n, "stochastic_encoder: noise length mismatch");
     let th_s = f32x8::splat(threshold);
     let sv_s = f32x8::splat(spike_val);
@@ -56,7 +60,11 @@ pub fn stochastic_encoder(
         }
     }
     for i in n8..n {
-        target_i[i] = if inputs[i] + noise[i] > threshold { spike_val } else { 0.0 };
+        target_i[i] = if inputs[i] + noise[i] > threshold {
+            spike_val
+        } else {
+            0.0
+        };
     }
 }
 
@@ -64,7 +72,11 @@ pub fn stochastic_encoder(
 pub fn linear_decoder(outputs: &mut [f32], states: &[f32], weights: &[f32], biases: &[f32]) {
     let n_out = outputs.len();
     let n_in = states.len();
-    assert_eq!(biases.len(), n_out, "linear_decoder: biases length mismatch");
+    assert_eq!(
+        biases.len(),
+        n_out,
+        "linear_decoder: biases length mismatch"
+    );
     assert_eq!(
         weights.len(),
         n_in * n_out,
@@ -94,7 +106,13 @@ pub fn linear_decoder(outputs: &mut [f32], states: &[f32], weights: &[f32], bias
 }
 
 /// Thalamic gate: `target = source × σ(gain·(gate − threshold))`.
-pub fn thalamic_gate(target_i: &mut [f32], source_v: &[f32], gate_v: &[f32], threshold: f32, gain: f32) {
+pub fn thalamic_gate(
+    target_i: &mut [f32],
+    source_v: &[f32],
+    gate_v: &[f32],
+    threshold: f32,
+    gain: f32,
+) {
     let n = target_i.len();
     assert_eq!(source_v.len(), n, "thalamic_gate: source_v length mismatch");
     assert_eq!(gate_v.len(), n, "thalamic_gate: gate_v length mismatch");
@@ -125,7 +143,11 @@ pub fn sigmoid_gate(output: &mut [f32], input: &[f32], gain: f32, threshold: f32
     for off in (0..n8).step_by(8) {
         unsafe {
             let inp = load8(input.as_ptr(), off);
-            store8(output.as_mut_ptr(), off, sigmoid_poly_simd(gain_s * (inp - th_s)));
+            store8(
+                output.as_mut_ptr(),
+                off,
+                sigmoid_poly_simd(gain_s * (inp - th_s)),
+            );
         }
     }
     for i in n8..n {
@@ -145,7 +167,11 @@ pub fn phase_gate_apply(output: &mut [f32], input: &[f32], r: &[f32], gain: f32,
         unsafe {
             let inp = load8(input.as_ptr(), off);
             let rr = load8(r.as_ptr(), off);
-            store8(output.as_mut_ptr(), off, inp * sigmoid_poly_simd(gain_s * (rr - th_s)));
+            store8(
+                output.as_mut_ptr(),
+                off,
+                inp * sigmoid_poly_simd(gain_s * (rr - th_s)),
+            );
         }
     }
     for i in n8..n {
@@ -171,7 +197,13 @@ pub fn t3_drive_encoder(drives: &mut [f32], inputs: &[f32], gain: f32) {
 }
 
 /// T3 TACT generator: output 1.0 when all 3 phases exceed threshold, else 0.0.
-pub fn t3_tact_generator(pulses: &mut [f32], ph1: &[f32], ph2: &[f32], ph3: &[f32], threshold: f32) {
+pub fn t3_tact_generator(
+    pulses: &mut [f32],
+    ph1: &[f32],
+    ph2: &[f32],
+    ph3: &[f32],
+    threshold: f32,
+) {
     let n = pulses.len();
     assert_eq!(ph1.len(), n, "t3_tact_generator: ph1 length mismatch");
     assert_eq!(ph2.len(), n, "t3_tact_generator: ph2 length mismatch");
@@ -231,7 +263,11 @@ pub fn t3_inverse_kuramoto(
 ) {
     let n = drive_out.len();
     assert_eq!(r.len(), n, "t3_inverse_kuramoto: r length mismatch");
-    assert_eq!(r_prev.len(), n, "t3_inverse_kuramoto: r_prev length mismatch");
+    assert_eq!(
+        r_prev.len(),
+        n,
+        "t3_inverse_kuramoto: r_prev length mismatch"
+    );
     let dt_inv = f32x8::splat(1.0 / dt.max(eps));
     let gain_s = f32x8::splat(gain);
     let decay_s = f32x8::splat(decay);
@@ -287,7 +323,13 @@ pub fn add_simd(a: &mut [f32], b: &[f32]) {
 }
 
 /// SGD optimizer step with momentum: `v = mom·v + (1−mom)·g; w -= lr·v`.
-pub fn sgd_step_simd(velocity: &mut [f32], weight: &mut [f32], grad: &[f32], lr: f32, momentum: f32) {
+pub fn sgd_step_simd(
+    velocity: &mut [f32],
+    weight: &mut [f32],
+    grad: &[f32],
+    lr: f32,
+    momentum: f32,
+) {
     let n = velocity.len();
     assert_eq!(weight.len(), n, "sgd_step_simd: weight length mismatch");
     assert_eq!(grad.len(), n, "sgd_step_simd: grad length mismatch");
@@ -370,7 +412,11 @@ pub fn adam_step_simd(
 /// Hebbian weight update: `w += lr·cos_diff − decay·w·dt`.
 pub fn hebbian_update(weights: &mut [f32], cos_diff: &[f32], lr: f32, decay: f32, dt: f32) {
     let n = weights.len();
-    assert_eq!(cos_diff.len(), n, "hebbian_update: cos_diff length mismatch");
+    assert_eq!(
+        cos_diff.len(),
+        n,
+        "hebbian_update: cos_diff length mismatch"
+    );
     let lr_s = f32x8::splat(lr);
     let decay_dt = f32x8::splat(decay * dt);
     let n8 = n & !7;
@@ -410,7 +456,10 @@ mod tests {
         let mut output = vec![0.0f32; n];
         sigmoid_gate(&mut output, &input, 1.0, 0.0);
         let mid = output[8];
-        assert!((mid - 0.5).abs() < 0.05, "sigmoid at 0 should be ~0.5, got {mid}");
+        assert!(
+            (mid - 0.5).abs() < 0.05,
+            "sigmoid at 0 should be ~0.5, got {mid}"
+        );
         for &v in &output {
             assert!(v > 0.0 && v < 1.0, "sigmoid output {v} out of (0,1)");
         }
@@ -423,7 +472,10 @@ mod tests {
         let mut drives = vec![0.0f32; n];
         t3_drive_encoder(&mut drives, &inputs, 10.0);
         for i in 0..n {
-            assert!((drives[i] - inputs[i] * 10.0).abs() < 1e-6, "drive_encoder: {i}");
+            assert!(
+                (drives[i] - inputs[i] * 10.0).abs() < 1e-6,
+                "drive_encoder: {i}"
+            );
         }
     }
 
@@ -433,7 +485,10 @@ mod tests {
         relu_simd(&mut data);
         let expected = [0.0, 0.0, 0.0, 1.0, 3.0, 5.0, 0.0, 2.0];
         for (i, (&got, &exp)) in data.iter().zip(expected.iter()).enumerate() {
-            assert!((got - exp).abs() < 1e-6, "relu[{i}]: got {got}, expected {exp}");
+            assert!(
+                (got - exp).abs() < 1e-6,
+                "relu[{i}]: got {got}, expected {exp}"
+            );
         }
     }
 
@@ -516,7 +571,9 @@ mod tests {
         let mut m = vec![0.0f32; 16];
         let mut v = vec![0.0f32; 16];
         let mut wa = vec![0.5f32; 16];
-        adam_step_simd(&mut wa, &mut m, &mut v, &g, 0.1, 0.9, 0.999, 1e-8, 0.9, 0.999);
+        adam_step_simd(
+            &mut wa, &mut m, &mut v, &g, 0.1, 0.9, 0.999, 1e-8, 0.9, 0.999,
+        );
         assert!(wa[0] < 0.5, "adam should decrease w, got {}", wa[0]);
 
         let mut wh = vec![0.5f32; 16];

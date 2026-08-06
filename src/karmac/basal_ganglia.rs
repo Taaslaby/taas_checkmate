@@ -83,9 +83,9 @@ pub struct BasalGanglia {
     pub config: BgConfig,
     /// Accumulated cortical state [n_cortical].
     state: Vec<f32>,
-    /// Weight matrix: cortical → action (D1/D2 combined).
-    /// [n_actions × n_cortical] row-major.
-    cortico_stratial: Vec<f32>,
+    /// Weight matrix: cortical -> action (D1/D2 combined).
+    /// [n_actions x n_cortical] row-major.
+    pub(crate) cortico_stratial: Vec<f32>,
     /// Lateral inhibition matrix [n_actions × n_actions].
     lateral_inhibit: Vec<f32>,
     /// Previous winning action (for hysteresis).
@@ -280,6 +280,36 @@ impl BasalGanglia {
         self.prev_action = None;
     }
 
+    /// Update cortico-striatal weights via 3-Factor Dopamine R-STDP.
+    ///
+    /// Target action row gets `+lr * state[j]` reinforcement.
+    /// Competing action rows get `-lr * state[j]` suppression.
+    pub fn update_weights_stdp(&mut self, dopamine: f32, lr: f32, target_action: usize) {
+        let n_c = self.config.n_cortical;
+        let n_a = self.config.n_actions;
+        if target_action >= n_a {
+            return;
+        }
+
+        let state_max = self.state.iter().cloned().fold(f32::NEG_INFINITY, f32::max).max(1e-5);
+
+        for a in 0..n_a {
+            let row_start = a * n_c;
+            for j in 0..n_c {
+                let norm_s = self.state[j] / state_max;
+                let dw = if a == target_action {
+                    if dopamine > 0.0 { lr * norm_s * 2.0 } else { lr * norm_s * 3.0 }
+                } else {
+                    -lr * norm_s * 1.5
+                };
+                self.cortico_stratial[row_start + j] =
+                    (self.cortico_stratial[row_start + j] + dw).clamp(-10.0, 10.0);
+            }
+        }
+    }
+
+
+
     pub fn n_cortical(&self) -> usize {
         self.config.n_cortical
     }
@@ -287,6 +317,7 @@ impl BasalGanglia {
         self.config.n_actions
     }
 }
+
 
 #[cfg(test)]
 mod tests {

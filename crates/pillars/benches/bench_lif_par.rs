@@ -55,10 +55,10 @@ fn make_params(n: usize) -> Vec<f32> {
     for i in 0..n {
         p[i] = DT;
         p[n + i] = TAU_M;
-        p[2*n + i] = V_REST;
-        p[3*n + i] = V_THRESH;
-        p[4*n + i] = V_RESET;
-        p[5*n + i] = TAU_REF;
+        p[2 * n + i] = V_REST;
+        p[3 * n + i] = V_THRESH;
+        p[4 * n + i] = V_RESET;
+        p[5 * n + i] = TAU_REF;
     }
     p
 }
@@ -66,7 +66,13 @@ fn make_params(n: usize) -> Vec<f32> {
 fn make_current(n: usize) -> Vec<f32> {
     let mut I = Vec::with_capacity(n);
     for i in 0..n {
-        I.push(if i % 3 == 0 { 40.0 } else if i % 3 == 1 { 10.0 } else { 0.0 });
+        I.push(if i % 3 == 0 {
+            40.0
+        } else if i % 3 == 1 {
+            10.0
+        } else {
+            0.0
+        });
     }
     I
 }
@@ -93,9 +99,16 @@ fn bench_seq(c: &mut Criterion) {
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron::<LIFModel>(
-                        v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                        h.as_mut_ptr(), h.as_mut_ptr(), h.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        u.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -127,10 +140,17 @@ fn bench_par(c: &mut Criterion) {
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron_par::<LIFModel>(
-                        v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                        h.as_mut_ptr(), h.as_mut_ptr(), h.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(),
-                        n, 256,
+                        v.as_mut_ptr(),
+                        u.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
+                        256,
                     );
                 }
             }

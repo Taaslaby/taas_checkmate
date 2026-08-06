@@ -40,13 +40,13 @@ pub fn gaba_a_current<S: SimdLane>(v: S, gaba: S, g_max: S, bzd_mod: S, barb_mod
 #[inline(always)]
 pub fn nachr_current<S: SimdLane>(v: S, ach: S, g_max: S, nico_mod: S) -> S {
     let g_eff = g_max * ach * (S::one() + nico_mod);
-    g_eff * v  // E_rev ≈ 0 mV
+    g_eff * v // E_rev ≈ 0 mV
 }
 
 /// AMPA receptor current (fast excitatory): `I = g_max · [glu] · (V - 0 mV)`
 #[inline(always)]
 pub fn ampa_current<S: SimdLane>(v: S, glu: S, g_max: S) -> S {
-    g_max * glu * v  // E_rev ≈ 0 mV
+    g_max * glu * v // E_rev ≈ 0 mV
 }
 
 #[cfg(test)]
@@ -64,7 +64,11 @@ mod tests {
         let i = nmda_current(v, glu, g, e, mg);
         // At -65mV: Mg_block ≈ 1/(1+1.2*exp(4.03)) ≈ 1/(1+68) ≈ 0.014
         // I ≈ 1*1*0.014*(-65) ≈ -0.94 (small inward current due to Mg block)
-        assert!(i.to_array()[0] < 0.0, "NMDA at -65 should be weak inward: {:.6}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0] < 0.0,
+            "NMDA at -65 should be weak inward: {:.6}",
+            i.to_array()[0]
+        );
     }
 
     #[test]
@@ -77,7 +81,11 @@ mod tests {
         let i = nmda_current(v, glu, g, e, mg);
         // At -10mV: Mg_block ≈ 1/(1+1.2*exp(0.62)) ≈ 1/(1+2.24) ≈ 0.31
         // I ≈ 1*1*0.31*(-10) ≈ -3.09
-        assert!(i.to_array()[0] < -3.0, "NMDA at -10: {:.6}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0] < -3.0,
+            "NMDA at -10: {:.6}",
+            i.to_array()[0]
+        );
     }
 
     #[test]

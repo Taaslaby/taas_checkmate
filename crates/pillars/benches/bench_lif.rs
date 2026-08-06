@@ -28,7 +28,7 @@ use pillars::prelude::*;
 const N_NEURONS: usize = 138_000;
 const N_STEPS: usize = 1000;
 const DT: f32 = 0.1;
-const INV_TAU_M: f32 = 0.1;     // 1/10 ms⁻¹
+const INV_TAU_M: f32 = 0.1; // 1/10 ms⁻¹
 const V_REST: f32 = -70.0;
 const V_THRESH: f32 = -54.0;
 const V_RESET: f32 = -70.0;
@@ -37,12 +37,12 @@ const TAU_REF: f32 = 2.0;
 fn make_params(n: usize) -> Vec<f32> {
     let mut p = vec![0.0f32; n * LIFModel::N_PARAMS];
     for i in 0..n {
-        p[i] = DT;                     // [0] dt
-        p[n + i] = INV_TAU_M;        // [1] inv_tau_m
-        p[2*n + i] = V_REST;           // [2] v_rest
-        p[3*n + i] = V_THRESH;         // [3] v_thresh
-        p[4*n + i] = V_RESET;          // [4] v_reset
-        p[5*n + i] = TAU_REF;          // [5] tau_ref
+        p[i] = DT; // [0] dt
+        p[n + i] = INV_TAU_M; // [1] inv_tau_m
+        p[2 * n + i] = V_REST; // [2] v_rest
+        p[3 * n + i] = V_THRESH; // [3] v_thresh
+        p[4 * n + i] = V_RESET; // [4] v_reset
+        p[5 * n + i] = TAU_REF; // [5] tau_ref
     }
     p
 }
@@ -50,7 +50,13 @@ fn make_params(n: usize) -> Vec<f32> {
 fn make_current(n: usize) -> Vec<f32> {
     let mut I = Vec::with_capacity(n);
     for i in 0..n {
-        I.push(if i % 3 == 0 { 40.0 } else if i % 3 == 1 { 10.0 } else { 0.0 });
+        I.push(if i % 3 == 0 {
+            40.0
+        } else if i % 3 == 1 {
+            10.0
+        } else {
+            0.0
+        });
     }
     I
 }
@@ -138,9 +144,16 @@ fn bench_lif_pillars(c: &mut Criterion) {
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron::<LIFModel>(
-                        v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                        h.as_mut_ptr(), h.as_mut_ptr(), h.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        u.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -224,9 +237,16 @@ fn bench_lif_n8_all(c: &mut Criterion) {
             v.fill(V_REST);
             unsafe {
                 run_neuron::<LIFModel>(
-                    v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                    h.as_mut_ptr(), h.as_mut_ptr(), h.as_mut_ptr(),
-                    Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    Ii.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
                 );
             }
             black_box(&spikes);

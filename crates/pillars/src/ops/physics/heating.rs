@@ -53,6 +53,10 @@ mod tests {
     fn test_q10_10_degrees() {
         let q10 = f32x8::splat(3.0);
         let f = q10_factor(q10, 16.3, 6.3); // ΔT = 10 → factor = 3
-        assert!((f.to_array()[0] - 3.0).abs() < 0.01, "Q10=3 at ΔT=10: {:.4}", f.to_array()[0]);
+        assert!(
+            (f.to_array()[0] - 3.0).abs() < 0.01,
+            "Q10=3 at ΔT=10: {:.4}",
+            f.to_array()[0]
+        );
     }
 }

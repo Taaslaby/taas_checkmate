@@ -34,7 +34,7 @@
 //! it dereferences raw pointers into SoA memory. All higher layers
 //! (`ops/`, `zoo/`, `api/`) use `load_param` behind safe wrappers.
 
-use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use super::cond::Cond;
 
@@ -46,9 +46,15 @@ use super::cond::Cond;
 ///
 /// Implemented for `f32x8` (SIMD) and `f32` (scalar tail).
 /// Every method maps to a single hardware instruction where possible.
-pub trait SimdLane: Copy + Sized + Add<Output = Self> + Sub<Output = Self>
-                   + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self> {
-
+pub trait SimdLane:
+    Copy
+    + Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Neg<Output = Self>
+{
     /// Number of scalar elements in one SIMD lane (8 for f32x8, 1 for f32).
     const SIZE: usize;
 
@@ -105,8 +111,12 @@ pub trait SimdLane: Copy + Sized + Add<Output = Self> + Sub<Output = Self>
 
     // ─── Trigonometry ──────────────────────────────────────────────
 
-    fn sin(self) -> Self; fn cos(self) -> Self; fn tan(self) -> Self;
-    fn asin(self) -> Self; fn acos(self) -> Self; fn atan(self) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn tan(self) -> Self;
+    fn asin(self) -> Self;
+    fn acos(self) -> Self;
+    fn atan(self) -> Self;
     fn atan2(self, other: Self) -> Self;
 
     // ─── Exponentials & Logarithms ─────────────────────────────────
@@ -123,7 +133,9 @@ pub trait SimdLane: Copy + Sized + Add<Output = Self> + Sub<Output = Self>
 
     #[cfg(feature = "fast-exp")]
     #[inline(always)]
-    fn exp(self) -> Self { self.fast_exp() }
+    fn exp(self) -> Self {
+        self.fast_exp()
+    }
 
     /// Fast exponential — polynomial approximation (~1e-5 relative error).
     ///
@@ -138,46 +150,92 @@ pub trait SimdLane: Copy + Sized + Add<Output = Self> + Sub<Output = Self>
 
     #[cfg(not(feature = "fast-exp"))]
     #[inline(always)]
-    fn fast_exp(self) -> Self { self.exp() }
+    fn fast_exp(self) -> Self {
+        self.exp()
+    }
 
     fn ln(self) -> Self;
-    fn log2(self) -> Self; fn log10(self) -> Self;
+    fn log2(self) -> Self;
+    fn log10(self) -> Self;
     fn powf(self, e: f32) -> Self;
     /// Integer power (compile-time constant N) — unrolled, no branches.
+    ///
+    /// # Compile-time limit
+    /// `N` must be ≤ 16 to prevent excessive compile times and stack usage.
+    /// For larger exponents, use `powf()`.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// let x2 = x.powi::<2>();   // ✅ OK
+    /// let x4 = x.powi::<4>();   // ✅ OK
+    /// let x16 = x.powi::<16>(); // ✅ OK (max)
+    /// // let x100 = x.powi::<100>(); // ❌ Compile error
+    /// ```
     ///
     /// N=0 → 1.0, N=1 → self, N=2 → square(), N=3 → cube(),
     /// N=4 → square().square(), N>4 → binary exponentiation.
     /// Due to `const N: usize`, LLVM resolves the match at compile time.
-    fn powi<const N: usize>(self) -> Self;
+    fn powi<const N: usize>(self) -> Self {
+        const {
+            assert!(
+                N <= 16,
+                "powi<N>: N must be <= 16 (use powf for larger exponents)"
+            )
+        }
+        self.powi_impl::<N>()
+    }
+
+    /// Internal implementation of powi (no bounds check).
+    /// Do not call directly — use `powi<N>()` instead.
+    #[doc(hidden)]
+    fn powi_impl<const N: usize>(self) -> Self;
 
     /// Square: `self * self` — 1 FMA-able multiply on AVX2.
-    #[inline(always)] fn square(self) -> Self { self * self }
+    #[inline(always)]
+    fn square(self) -> Self {
+        self * self
+    }
     /// Cube: `self * self * self` — 2 linked FMAs on AVX2.
-    #[inline(always)] fn cube(self) -> Self { self * self * self }
+    #[inline(always)]
+    fn cube(self) -> Self {
+        self * self * self
+    }
 
     // ─── Arithmetic ────────────────────────────────────────────────
 
-    fn abs(self) -> Self; fn signum(self) -> Self;
+    fn abs(self) -> Self;
+    fn signum(self) -> Self;
     fn mul_add(self, a: Self, b: Self) -> Self;
-    fn recip(self) -> Self; fn sqrt(self) -> Self; fn cbrt(self) -> Self;
+    fn recip(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn cbrt(self) -> Self;
     fn hypot(self, other: Self) -> Self;
 
     // ─── Rounding ──────────────────────────────────────────────────
 
-    fn round(self) -> Self; fn floor(self) -> Self; fn ceil(self) -> Self;
-    fn trunc(self) -> Self; fn fract(self) -> Self;
+    fn round(self) -> Self;
+    fn floor(self) -> Self;
+    fn ceil(self) -> Self;
+    fn trunc(self) -> Self;
+    fn fract(self) -> Self;
 
     // ─── Comparison & Logic ────────────────────────────────────────
 
     fn blend(cond: Self, t: Self, f: Self) -> Self;
-    fn and(self, other: Self) -> Self; fn not(self) -> Self;
-    fn cmp_ge(self, other: Self) -> Self; fn cmp_gt(self, other: Self) -> Self;
-    fn max(self, other: Self) -> Self; fn min(self, other: Self) -> Self;
+    fn and(self, other: Self) -> Self;
+    fn not(self) -> Self;
+    fn cmp_ge(self, other: Self) -> Self;
+    fn cmp_gt(self, other: Self) -> Self;
+    fn max(self, other: Self) -> Self;
+    fn min(self, other: Self) -> Self;
     fn clamp01(self) -> Self;
     fn move_mask(self) -> u32;
 
     /// Wrap comparison result as a `Cond` for `.then().else_()` chaining.
-    #[inline(always)] fn cond(self) -> Cond<Self> { Cond(self) }
+    #[inline(always)]
+    fn cond(self) -> Cond<Self> {
+        Cond(self)
+    }
 
     // ─── Memory ────────────────────────────────────────────────────
 

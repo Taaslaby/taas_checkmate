@@ -18,8 +18,8 @@
 #![allow(clippy::approx_constant)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use pillars::ops::triangulated::{LutBuilder, LutConfig, TriangLUT};
 use pillars::prelude::*;
-use pillars::ops::triangulated::{TriangLUT, LutBuilder, LutConfig};
 use pillars::zoo::neurons::TriangulatedModel;
 use std::sync::OnceLock;
 
@@ -61,18 +61,18 @@ fn make_params(n: usize) -> Vec<f32> {
     // raw-runner benches read out of bounds and segfault at n=138k.
     let mut p = vec![0.0f32; n * pillars::zoo::HHModel::N_PARAMS];
     for i in 0..n {
-        p[i] = 0.01;           // dt
-        p[n + i] = 120.0;    // g_Na
-        p[2*n + i] = 50.0;     // E_Na
-        p[3*n + i] = 36.0;     // g_K
-        p[4*n + i] = -77.0;    // E_K
-        p[5*n + i] = 0.3;      // g_Leak
-        p[6*n + i] = -54.387;  // E_Leak
-        p[7*n + i] = Q10;      // q10
-        p[8*n + i] = 0.0;      // v_thresh
-        p[9*n + i] = 1.0;      // inv_cm
-        p[10*n + i] = 0.0;     // g_CaT — 0 = standard squid-axon HH
-        p[11*n + i] = 120.0;   // E_CaT
+        p[i] = 0.01; // dt
+        p[n + i] = 120.0; // g_Na
+        p[2 * n + i] = 50.0; // E_Na
+        p[3 * n + i] = 36.0; // g_K
+        p[4 * n + i] = -77.0; // E_K
+        p[5 * n + i] = 0.3; // g_Leak
+        p[6 * n + i] = -54.387; // E_Leak
+        p[7 * n + i] = Q10; // q10
+        p[8 * n + i] = 0.0; // v_thresh
+        p[9 * n + i] = 1.0; // inv_cm
+        p[10 * n + i] = 0.0; // g_CaT — 0 = standard squid-axon HH
+        p[11 * n + i] = 120.0; // E_CaT
     }
     p
 }
@@ -91,15 +91,34 @@ fn make_current(n: usize) -> Vec<f32> {
 
 /// Hodgkin-Huxley scalar step (no SIMD, no trait).
 #[inline(never)]
-fn hh_scalar_step(v: &mut f32, m: &mut f32, h: &mut f32, n: &mut f32, was_below: &mut f32,
-                  i_syn: f32, dt: f32, g_na: f32, e_na: f32, g_k: f32, e_k: f32,
-                  g_l: f32, e_l: f32, q10: f32, v_thresh: f32, inv_cm: f32) {
+fn hh_scalar_step(
+    v: &mut f32,
+    m: &mut f32,
+    h: &mut f32,
+    n: &mut f32,
+    was_below: &mut f32,
+    i_syn: f32,
+    dt: f32,
+    g_na: f32,
+    e_na: f32,
+    g_k: f32,
+    e_k: f32,
+    g_l: f32,
+    e_l: f32,
+    q10: f32,
+    v_thresh: f32,
+    inv_cm: f32,
+) {
     let dt_q10 = dt * q10;
 
     // m-gate
     let vm40 = -40.0 - *v;
     let exp_m = (vm40 / 10.0).exp();
-    let vtrap_m = if vm40.abs() > 1e-10 { vm40 / (exp_m - 1.0) } else { 10.0 };
+    let vtrap_m = if vm40.abs() > 1e-10 {
+        vm40 / (exp_m - 1.0)
+    } else {
+        10.0
+    };
     let alpha_m = 0.1 * vtrap_m;
     let beta_m = 4.0 * (-(*v + 65.0) / 18.0).exp();
     let sum_m = alpha_m + beta_m;
@@ -116,7 +135,11 @@ fn hh_scalar_step(v: &mut f32, m: &mut f32, h: &mut f32, n: &mut f32, was_below:
     // n-gate
     let vn55 = -55.0 - *v;
     let exp_n = (vn55 / 10.0).exp();
-    let vtrap_n = if vn55.abs() > 1e-10 { vn55 / (exp_n - 1.0) } else { 10.0 };
+    let vtrap_n = if vn55.abs() > 1e-10 {
+        vn55 / (exp_n - 1.0)
+    } else {
+        10.0
+    };
     let alpha_n = 0.01 * vtrap_n;
     let beta_n = 0.125 * (-(*v + 65.0) / 80.0).exp();
     let sum_n = alpha_n + beta_n;
@@ -150,13 +173,30 @@ fn bench_hh_raw_scalar(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n as u64));
     group.bench_function("n138k_step100", |b| {
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            flag.fill(1.0);
             for _ in 0..N_STEPS {
                 for i in 0..n {
                     hh_scalar_step(
-                        &mut v[i], &mut m[i], &mut h[i], &mut k_g[i], &mut flag[i],
-                        Ii[i], 0.01, 120.0, 50.0, 36.0, -77.0, 0.3, -54.387,
-                        Q10, 0.0, 1.0,
+                        &mut v[i],
+                        &mut m[i],
+                        &mut h[i],
+                        &mut k_g[i],
+                        &mut flag[i],
+                        Ii[i],
+                        0.01,
+                        120.0,
+                        50.0,
+                        36.0,
+                        -77.0,
+                        0.3,
+                        -54.387,
+                        Q10,
+                        0.0,
+                        1.0,
                     );
                 }
             }
@@ -185,16 +225,20 @@ impl Model for OldHHModel {
         let n = ctx.s(3);
         let was_below = ctx.s(4);
 
-        let dt_q10 = ctx.dt() * ctx.p(7);  // q10
+        let dt_q10 = ctx.dt() * ctx.p(7); // q10
 
         // ─── Gates (same compute_gate_state as before) ───
-        let m_new = old_gate(v, m, -40.0, 10.0, 0.1, 4.0, 65.0, 18.0, false, false, dt_q10);
+        let m_new = old_gate(
+            v, m, -40.0, 10.0, 0.1, 4.0, 65.0, 18.0, false, false, dt_q10,
+        );
         let h_new = old_gate(v, h, -65.0, 20.0, 0.07, 1.0, 35.0, 10.0, true, true, dt_q10);
-        let n_new = old_gate(v, n, -55.0, 10.0, 0.01, 0.125, 65.0, 80.0, false, false, dt_q10);
+        let n_new = old_gate(
+            v, n, -55.0, 10.0, 0.01, 0.125, 65.0, 80.0, false, false, dt_q10,
+        );
 
         // ─── Ionic currents via loops (old style) ───
-        let i_na   = old_ohmic(ctx.p(1), v, ctx.p(2), m_new, 3, h_new, 1);
-        let i_k    = old_ohmic(ctx.p(3), v, ctx.p(4), n_new, 4, S::one(), 0);
+        let i_na = old_ohmic(ctx.p(1), v, ctx.p(2), m_new, 3, h_new, 1);
+        let i_k = old_ohmic(ctx.p(3), v, ctx.p(4), n_new, 4, S::one(), 0);
         let i_leak = ctx.p(5) * (v - ctx.p(6));
 
         // ─── Membrane ───
@@ -214,9 +258,19 @@ impl Model for OldHHModel {
 }
 
 #[inline(always)]
-fn old_gate<S: SimdLane>(v: S, gate: S, v_off: f32, scale: f32, alpha_c: f32,
-                         beta_c: f32, beta_volt: f32, beta_div: f32,
-                         alpha_exp: bool, beta_sigmoid: bool, dt_q10: S) -> S {
+fn old_gate<S: SimdLane>(
+    v: S,
+    gate: S,
+    v_off: f32,
+    scale: f32,
+    alpha_c: f32,
+    beta_c: f32,
+    beta_volt: f32,
+    beta_div: f32,
+    alpha_exp: bool,
+    beta_sigmoid: bool,
+    dt_q10: S,
+) -> S {
     let v_shift = S::splat(v_off) - v;
     let alpha = if alpha_exp {
         S::splat(alpha_c) * (v_shift / S::splat(scale)).exp()
@@ -235,11 +289,14 @@ fn old_gate<S: SimdLane>(v: S, gate: S, v_off: f32, scale: f32, alpha_c: f32,
 }
 
 #[inline(always)]
-fn old_ohmic<S: SimdLane>(g_max: S, v: S, e_rev: S, g1: S, p1: u32,
-                          g2: S, p2: u32) -> S {
+fn old_ohmic<S: SimdLane>(g_max: S, v: S, e_rev: S, g1: S, p1: u32, g2: S, p2: u32) -> S {
     let mut g = g_max;
-    for _ in 0..p1 { g = g * g1; }
-    for _ in 0..p2 { g = g * g2; }
+    for _ in 0..p1 {
+        g = g * g1;
+    }
+    for _ in 0..p2 {
+        g = g * g2;
+    }
     g.mul_add(v, -g * e_rev)
 }
 
@@ -259,13 +316,24 @@ fn bench_hh_old_pillars(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n as u64));
     group.bench_function("n138k_step100", |b| {
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            flag.fill(1.0);
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron::<OldHHModel>(
-                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
-                        flag.as_mut_ptr(), dummy.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        m.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        k_g.as_mut_ptr(),
+                        flag.as_mut_ptr(),
+                        dummy.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -285,8 +353,8 @@ fn bench_hh_new_run_neuron(c: &mut Criterion) {
     let mut m = vec![0.05; n];
     let mut h = vec![0.6; n];
     let mut k_g = vec![0.32; n];
-    let mut cat = vec![0.19; n];   // CaV-T gate (6th state)
-    let mut flag = vec![1.0; n];   // was_below (7th state)
+    let mut cat = vec![0.19; n]; // CaV-T gate (6th state)
+    let mut flag = vec![1.0; n]; // was_below (7th state)
     let Ii = make_current(n);
     let mut spikes = vec![0i32; n];
     let params = make_params(n);
@@ -295,15 +363,26 @@ fn bench_hh_new_run_neuron(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n as u64));
     group.bench_function("n138k_step100", |b| {
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32);
-            cat.fill(0.19); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            cat.fill(0.19);
+            flag.fill(1.0);
             for _ in 0..N_STEPS {
                 unsafe {
                     // Pointer order: (v, m, h, n, c, was_below)
                     run_neuron::<pillars::zoo::HHModel>(
-                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
-                        cat.as_mut_ptr(), flag.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        m.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        k_g.as_mut_ptr(),
+                        cat.as_mut_ptr(),
+                        flag.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -322,16 +401,16 @@ fn bench_hh_new_population(c: &mut Criterion) {
     let mut pop = pillars::NeuralPopulation::<pillars::zoo::HHModel>::new(n);
 
     // Fill params across all neurons
-    pop.fill_param(0, 0.01);     // dt
-    pop.fill_param(1, 120.0);    // g_Na
-    pop.fill_param(2, 50.0);     // E_Na
-    pop.fill_param(3, 36.0);     // g_K
-    pop.fill_param(4, -77.0);    // E_K
-    pop.fill_param(5, 0.3);      // g_Leak
-    pop.fill_param(6, -54.387);  // E_Leak
-    pop.fill_param(7, Q10);      // q10
-    pop.fill_param(8, 0.0);      // v_thresh
-    pop.fill_param(9, 1.0);      // inv_cm
+    pop.fill_param(0, 0.01); // dt
+    pop.fill_param(1, 120.0); // g_Na
+    pop.fill_param(2, 50.0); // E_Na
+    pop.fill_param(3, 36.0); // g_K
+    pop.fill_param(4, -77.0); // E_K
+    pop.fill_param(5, 0.3); // g_Leak
+    pop.fill_param(6, -54.387); // E_Leak
+    pop.fill_param(7, Q10); // q10
+    pop.fill_param(8, 0.0); // v_thresh
+    pop.fill_param(9, 1.0); // inv_cm
 
     let Ii = make_current(n);
     let mut spikes = vec![0i32; n];
@@ -364,11 +443,11 @@ fn bench_hh_triang_lut(c: &mut Criterion) {
 
     let n = N_NEURONS;
     let mut pop = pillars::NeuralPopulation::<TriangulatedModel>::new(n);
-    pop.fill_param(0, 0.01);    // dt
-    pop.fill_param(1, 0.0);     // v_thresh (HH uses 0.0)
-    pop.fill_param(2, 0.5);     // input_thresh
-    pop.fill_state(0, -65.0);   // v
-    pop.fill_state(1, 0.0);     // history
+    pop.fill_param(0, 0.01); // dt
+    pop.fill_param(1, 0.0); // v_thresh (HH uses 0.0)
+    pop.fill_param(2, 0.5); // input_thresh
+    pop.fill_state(0, -65.0); // v
+    pop.fill_state(1, 0.0); // history
 
     let Ii = make_current(n);
     let mut spikes = vec![0i32; n];
@@ -415,14 +494,25 @@ fn bench_hh_par(c: &mut Criterion) {
         let mut cat = vec![0.19; n];
         let mut flag = vec![1.0; n];
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32);
-            cat.fill(0.19); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            cat.fill(0.19);
+            flag.fill(1.0);
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron::<pillars::zoo::HHModel>(
-                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
-                        cat.as_mut_ptr(), flag.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        m.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        k_g.as_mut_ptr(),
+                        cat.as_mut_ptr(),
+                        flag.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                     );
                 }
             }
@@ -438,14 +528,25 @@ fn bench_hh_par(c: &mut Criterion) {
         let mut cat = vec![0.19; n];
         let mut flag = vec![1.0; n];
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32);
-            cat.fill(0.19); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            cat.fill(0.19);
+            flag.fill(1.0);
             for _ in 0..N_STEPS {
                 unsafe {
                     run_neuron_par::<pillars::zoo::HHModel>(
-                        v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
-                        cat.as_mut_ptr(), flag.as_mut_ptr(),
-                        Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                        v.as_mut_ptr(),
+                        m.as_mut_ptr(),
+                        h.as_mut_ptr(),
+                        k_g.as_mut_ptr(),
+                        cat.as_mut_ptr(),
+                        flag.as_mut_ptr(),
+                        Ii.as_ptr(),
+                        spikes.as_mut_ptr(),
+                        params.as_ptr(),
+                        n,
                         4096,
                     );
                 }
@@ -479,12 +580,23 @@ fn bench_hh_n8(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n as u64));
     group.bench_function("run_neuron", |b| {
         b.iter(|| {
-            v.fill(-65.0); m.fill(0.05); h.fill(0.6); k_g.fill(0.32); flag.fill(1.0);
+            v.fill(-65.0);
+            m.fill(0.05);
+            h.fill(0.6);
+            k_g.fill(0.32);
+            flag.fill(1.0);
             unsafe {
                 run_neuron::<OldHHModel>(
-                    v.as_mut_ptr(), m.as_mut_ptr(), h.as_mut_ptr(), k_g.as_mut_ptr(),
-                    flag.as_mut_ptr(), dummy.as_mut_ptr(),
-                    Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                    v.as_mut_ptr(),
+                    m.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    k_g.as_mut_ptr(),
+                    flag.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    Ii.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
                 );
             }
             black_box(&spikes);
@@ -497,20 +609,31 @@ fn bench_hh_n8(c: &mut Criterion) {
     let mut m2 = vec![0.05; n];
     let mut h2 = vec![0.6; n];
     let mut k_g2 = vec![0.32; n];
-    let mut cat2 = vec![0.19; n];   // CaV-T gate
-    let mut flag2 = vec![1.0; n];   // was_below
+    let mut cat2 = vec![0.19; n]; // CaV-T gate
+    let mut flag2 = vec![1.0; n]; // was_below
     let mut group2 = c.benchmark_group("hh_n8_new");
     group2.throughput(Throughput::Elements(n as u64));
     group2.bench_function("run_neuron", |b| {
         b.iter(|| {
-            v2.fill(-65.0); m2.fill(0.05); h2.fill(0.6); k_g2.fill(0.32);
-            cat2.fill(0.19); flag2.fill(1.0);
+            v2.fill(-65.0);
+            m2.fill(0.05);
+            h2.fill(0.6);
+            k_g2.fill(0.32);
+            cat2.fill(0.19);
+            flag2.fill(1.0);
             unsafe {
                 // Pointer order: (v, m, h, n, c, was_below)
                 run_neuron::<pillars::zoo::HHModel>(
-                    v2.as_mut_ptr(), m2.as_mut_ptr(), h2.as_mut_ptr(), k_g2.as_mut_ptr(),
-                    cat2.as_mut_ptr(), flag2.as_mut_ptr(),
-                    Ii.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                    v2.as_mut_ptr(),
+                    m2.as_mut_ptr(),
+                    h2.as_mut_ptr(),
+                    k_g2.as_mut_ptr(),
+                    cat2.as_mut_ptr(),
+                    flag2.as_mut_ptr(),
+                    Ii.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
                 );
             }
             black_box(&spikes);

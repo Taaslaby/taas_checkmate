@@ -330,8 +330,14 @@ mod tests {
         // step 7: delay 0 → next step slot 8; delay 3 → slot 10
         let triples = collect_push_triples(&[0, 1], &graph, 7);
         assert_eq!(triples.len(), 2);
-        assert!(triples.contains(&(2, 8, 1.0)), "delay 0 → slot 8: {triples:?}");
-        assert!(triples.contains(&(3, 10, 2.0)), "delay 3 → slot 10: {triples:?}");
+        assert!(
+            triples.contains(&(2, 8, 1.0)),
+            "delay 0 → slot 8: {triples:?}"
+        );
+        assert!(
+            triples.contains(&(3, 10, 2.0)),
+            "delay 3 → slot 10: {triples:?}"
+        );
 
         // Same result as the sequential push_spikes: scatter triples → compare.
         let mut par = DelayBuffer::new(4);

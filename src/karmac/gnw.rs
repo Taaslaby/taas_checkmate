@@ -21,8 +21,8 @@ pub struct GlobalWorkspace {
     gate_w: Vec<f32>,
     /// broadcast matrix [n_neurons × workspace_size] (row-major)
     broadcast_w: Vec<f32>,
-    n: usize,
-    ws: usize,
+    pub(crate) n: usize,
+    pub(crate) ws: usize,
     /// Pre-allocated delta buffer — avoids heap alloc in hot path.
     delta_buf: Vec<f32>,
 }

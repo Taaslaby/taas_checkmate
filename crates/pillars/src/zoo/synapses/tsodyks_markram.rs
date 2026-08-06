@@ -11,9 +11,9 @@
 //!   u ← u + U · (1 - u)  (facilitation)
 //!   Effective weight: W_eff = W_base · u · x
 
-use wide::f32x8;
 use crate::core::lane::SimdLane;
 use crate::core::util::{load8, store8};
+use wide::f32x8;
 
 /// Tsodyks-Markram STP SIMD step for n synapses.
 ///
@@ -42,22 +42,22 @@ pub unsafe fn tsodyks_markram_step(
         let xx = load8(x, off);
         let uu = load8(u, off);
 
-        let mut U_arr      = [0.0f32; 8];
-        let mut tau_d_arr  = [0.0f32; 8];
-        let mut tau_f_arr  = [0.0f32; 8];
+        let mut U_arr = [0.0f32; 8];
+        let mut tau_d_arr = [0.0f32; 8];
+        let mut tau_f_arr = [0.0f32; 8];
         let mut W_base_arr = [0.0f32; 8];
 
         for i in 0..8 {
             let p = params.add((off + i) * 4);
-            U_arr[i]      = *p.add(0);
-            tau_d_arr[i]  = *p.add(1);
-            tau_f_arr[i]  = *p.add(2);
+            U_arr[i] = *p.add(0);
+            tau_d_arr[i] = *p.add(1);
+            tau_f_arr[i] = *p.add(2);
             W_base_arr[i] = *p.add(3);
         }
 
-        let U      = f32x8::from(U_arr);
-        let tau_d  = f32x8::from(tau_d_arr);
-        let tau_f  = f32x8::from(tau_f_arr);
+        let U = f32x8::from(U_arr);
+        let tau_d = f32x8::from(tau_d_arr);
+        let tau_f = f32x8::from(tau_f_arr);
         let W_base = f32x8::from(W_base_arr);
 
         // Continuous relaxation between spikes (Exponential Euler — stable for ANY tau)
@@ -77,8 +77,14 @@ pub unsafe fn tsodyks_markram_step(
         // Apply spike updates if spike occurred
         let p_spk = spikes.add(off);
         let arr_spk = [
-            *p_spk.add(0), *p_spk.add(1), *p_spk.add(2), *p_spk.add(3),
-            *p_spk.add(4), *p_spk.add(5), *p_spk.add(6), *p_spk.add(7),
+            *p_spk.add(0),
+            *p_spk.add(1),
+            *p_spk.add(2),
+            *p_spk.add(3),
+            *p_spk.add(4),
+            *p_spk.add(5),
+            *p_spk.add(6),
+            *p_spk.add(7),
         ];
 
         let mut arr_x = next_x.to_array();
@@ -111,9 +117,9 @@ pub unsafe fn tsodyks_markram_step(
         let mut uu = *u.add(i);
 
         let p = params.add(i * 4);
-        let U_val  = *p.add(0);
-        let tau_d  = *p.add(1);
-        let tau_f  = *p.add(2);
+        let U_val = *p.add(0);
+        let tau_d = *p.add(1);
+        let tau_f = *p.add(2);
         let W_base = *p.add(3);
 
         let tau_d_safe = tau_d.max(1e-12);
@@ -150,20 +156,31 @@ mod tests {
 
         let mut params = vec![0.0f32; n * 4];
         for i in 0..n {
-            params[i * 4]     = 0.5;   // U
+            params[i * 4] = 0.5; // U
             params[i * 4 + 1] = 100.0; // tau_d (ms)
-            params[i * 4 + 2] = 50.0;  // tau_f (ms)
-            params[i * 4 + 3] = 1.0;   // W_base
+            params[i * 4 + 2] = 50.0; // tau_f (ms)
+            params[i * 4 + 3] = 1.0; // W_base
         }
 
         unsafe {
-            tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+            tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                1.0,
+            );
         }
 
         // Without spikes, x decays toward 1.0, u decays toward U
         assert!(x[0] < 1.001 && x[0] > 0.99, "x should approach 1: {}", x[0]);
-        assert!(u[0] < 0.5 && u[0] > 0.19, "u should approach U=0.5: {}", u[0]);
+        assert!(
+            u[0] < 0.5 && u[0] > 0.19,
+            "u should approach U=0.5: {}",
+            u[0]
+        );
     }
 
     #[test]
@@ -176,21 +193,32 @@ mod tests {
 
         let mut params = vec![0.0f32; n * 4];
         for i in 0..n {
-            params[i * 4]     = 0.5;
+            params[i * 4] = 0.5;
             params[i * 4 + 1] = 100.0;
             params[i * 4 + 2] = 50.0;
             params[i * 4 + 3] = 1.0;
         }
 
         unsafe {
-            tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+            tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                1.0,
+            );
         }
 
         // On spike: u increases, x decreases (depression)
         assert!(u[0] > 0.5, "Facilitation should increase u: {}", u[0]);
         assert!(x[0] < 1.0, "Depression should decrease x: {}", x[0]);
-        assert!(w_eff[0] > 0.0, "Effective weight should be positive: {}", w_eff[0]);
+        assert!(
+            w_eff[0] > 0.0,
+            "Effective weight should be positive: {}",
+            w_eff[0]
+        );
     }
 
     #[test]
@@ -203,15 +231,22 @@ mod tests {
 
         let mut params = vec![0.0f32; n * 4];
         for i in 0..n {
-            params[i * 4]     = 0.5;
+            params[i * 4] = 0.5;
             params[i * 4 + 1] = 100.0;
             params[i * 4 + 2] = 50.0;
             params[i * 4 + 3] = 1.0;
         }
 
         unsafe {
-            tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+            tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                1.0,
+            );
         }
 
         let diff = (w_eff[0] - w_eff[8]).abs();
@@ -229,24 +264,38 @@ mod tests {
 
         let mut params = vec![0.0f32; n * 4];
         for i in 0..n {
-            params[i * 4]     = 0.2;     // U (low)
-            params[i * 4 + 1] = 800.0;   // tau_d (slow depression)
-            params[i * 4 + 2] = 50.0;    // tau_f (fast facilitation)
+            params[i * 4] = 0.2; // U (low)
+            params[i * 4 + 1] = 800.0; // tau_d (slow depression)
+            params[i * 4 + 2] = 50.0; // tau_f (fast facilitation)
             params[i * 4 + 3] = 1.0;
         }
 
         let mut w_vals = Vec::new();
         for _step in 0..10 {
             unsafe {
-                tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                    w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+                tsodyks_markram_step(
+                    x.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    spikes.as_ptr(),
+                    w_eff.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                    1.0,
+                );
             }
             w_vals.push(w_eff[0]);
         }
 
         // With fast tau_d (slow depression), x remains high → weight stays positive
-        assert!(w_vals[0] > 0.0, "Initial weight should be positive: {}", w_vals[0]);
-        assert!(w_vals.iter().all(|&w| w >= 0.0), "All weights should be non-negative");
+        assert!(
+            w_vals[0] > 0.0,
+            "Initial weight should be positive: {}",
+            w_vals[0]
+        );
+        assert!(
+            w_vals.iter().all(|&w| w >= 0.0),
+            "All weights should be non-negative"
+        );
     }
 
     #[test]
@@ -261,37 +310,55 @@ mod tests {
         //   Step 2: u=0.22→0.37, x=0.98→0.77, w≈0.29 ← weight INCREASES because
         //   u grows faster than x drops (spike uses pre-decay x for depression)
         let n = 8;
-        let mut x = vec![0.99f32; n];  // near-full recovery
-        let mut u = vec![0.01f32; n];  // very low facilitation
+        let mut x = vec![0.99f32; n]; // near-full recovery
+        let mut u = vec![0.01f32; n]; // very low facilitation
         let spikes = vec![1i32; n];
         let mut w_eff = vec![0.0f32; n];
 
         let mut params = vec![0.0f32; n * 4];
         for i in 0..n {
-            params[i * 4]     = 0.2;     // U
+            params[i * 4] = 0.2; // U
             params[i * 4 + 1] = 10000.0; // tau_d (very slow depression)
-            params[i * 4 + 2] = 20.0;    // tau_f (facilitation recovery)
+            params[i * 4 + 2] = 20.0; // tau_f (facilitation recovery)
             params[i * 4 + 3] = 1.0;
         }
 
         // Step 1: first spike
         unsafe {
-            tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+            tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                1.0,
+            );
         }
         let w1 = w_eff[0];
 
         // Step 2: second spike — facilitation builds up
         unsafe {
-            tsodyks_markram_step(x.as_mut_ptr(), u.as_mut_ptr(), spikes.as_ptr(),
-                w_eff.as_mut_ptr(), params.as_ptr(), n, 1.0);
+            tsodyks_markram_step(
+                x.as_mut_ptr(),
+                u.as_mut_ptr(),
+                spikes.as_ptr(),
+                w_eff.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                1.0,
+            );
         }
         let w2 = w_eff[0];
 
         // With parallel Euler, spike uses pre-decay u for depression:
         // w1 = u₁·x₁ ≈ 0.217·0.98 ≈ 0.213
         // w2 = u₂·x₂ ≈ 0.373·0.77 ≈ 0.286 → should increase
-        assert!(w2 > w1,
-            "Facilitation-dominant: weight should increase ({:.4} → {:.4})", w1, w2);
+        assert!(
+            w2 > w1,
+            "Facilitation-dominant: weight should increase ({:.4} → {:.4})",
+            w1,
+            w2
+        );
     }
 }

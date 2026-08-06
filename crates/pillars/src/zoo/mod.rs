@@ -31,18 +31,18 @@
 //! 3. Register in `zoo/neurons/mod.rs`
 //! 4. Add tests following the `test_stress_silence` / `test_stress_explosion` pattern
 
-pub mod neurons;
-pub mod synapses;
-pub mod sensors;
 pub mod glia;
+pub mod neurons;
+pub mod sensors;
+pub mod synapses;
 
-pub use neurons::*;
-pub use synapses::*;
-pub use sensors::*;
 pub use glia::*;
+pub use neurons::*;
+pub use sensors::*;
+pub use synapses::*;
 
-use crate::core::SimdContext;
 use crate::core::lane::SimdLane;
+use crate::core::SimdContext;
 
 /// Core Model Trait — Zero-Cost Hardware Abstraction for Neural Dynamics.
 ///

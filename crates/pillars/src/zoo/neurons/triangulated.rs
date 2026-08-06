@@ -33,13 +33,10 @@
 //!   coarse approximation, spike count error 2-100×
 //! - **Morris-Lecar** (2nd-order: V, w): unknown, needs calibration
 
-use std::marker::PhantomData;
-use std::ptr::NonNull;
 use pillars_macros::NeuronModel;
 
-
+use crate::core::compute::{ComputeNeuron, StepContext};
 use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
 use crate::ops::triangulated::TriangLUT;
 #[cfg(not(test))]
 use std::sync::OnceLock;
@@ -76,12 +73,17 @@ thread_local! {
 /// - `input_thresh`: threshold for binary input quantization (default 0.5)
 #[derive(NeuronModel)]
 pub struct TriangulatedModel {
-    #[state] pub v: f32,
-    #[state] pub history: f32,
+    #[state]
+    pub v: f32,
+    #[state]
+    pub history: f32,
 
-    #[param] pub dt: f32,
-    #[param] pub v_thresh: f32,
-    #[param] pub input_thresh: f32,
+    #[param]
+    pub dt: f32,
+    #[param]
+    pub v_thresh: f32,
+    #[param]
+    pub input_thresh: f32,
 }
 
 impl TriangulatedModel {
@@ -111,14 +113,14 @@ impl TriangulatedModel {
         {
             TRIANG_LUT.with(|cell| {
                 *cell.borrow().as_ref().expect(
-                    "TriangLUT not initialized. Call TriangulatedModel::set_lut() before stepping."
+                    "TriangLUT not initialized. Call TriangulatedModel::set_lut() before stepping.",
                 )
             })
         }
         #[cfg(not(test))]
         {
             TRIANG_LUT.get().expect(
-                "TriangLUT not initialized. Call TriangulatedModel::set_lut() before stepping."
+                "TriangLUT not initialized. Call TriangulatedModel::set_lut() before stepping.",
             )
         }
     }
@@ -145,11 +147,14 @@ impl ComputeNeuron for TriangulatedModel {
             unsafe {
                 let state_f32x8 = &mut *(state as *mut TriangulatedState<S>
                     as *mut TriangulatedState<wide::f32x8>);
-                let ctx_f32x8 = &mut *(ctx as *mut StepContext<S>
-                    as *mut StepContext<wide::f32x8>);
+                let ctx_f32x8 = &mut *(ctx as *mut StepContext<S> as *mut StepContext<wide::f32x8>);
                 let (v2, h2, s2) = crate::ops::triangulated::avx2::triang_step_f32x8(
-                    state_f32x8.v, state_f32x8.history, ctx_f32x8.i_syn,
-                    lut, v_thresh_scalar, input_thresh_scalar,
+                    state_f32x8.v,
+                    state_f32x8.history,
+                    ctx_f32x8.i_syn,
+                    lut,
+                    v_thresh_scalar,
+                    input_thresh_scalar,
                 );
                 state_f32x8.v = v2;
                 state_f32x8.history = h2;
@@ -178,7 +183,11 @@ impl ComputeNeuron for TriangulatedModel {
             let i_cur = i_arr[i];
 
             let v_q = lut.quantize_v(v_cur);
-            let input_bit = if i_cur > input_thresh_scalar { 1u8 } else { 0u8 };
+            let input_bit = if i_cur > input_thresh_scalar {
+                1u8
+            } else {
+                0u8
+            };
             let entry = lut.lookup(v_q, h_cur);
 
             v_out[i] = v_cur + entry.delta_v;
@@ -209,6 +218,8 @@ mod tests {
     use crate::zoo::neurons::LIFModel;
     use crate::zoo::Model;
     use crate::NeuralPopulation;
+    use std::marker::PhantomData;
+    use std::ptr::NonNull;
 
     fn make_lif_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0; n * LIFModel::N_PARAMS];
@@ -247,7 +258,10 @@ mod tests {
                 max_dv = max_dv.max(lut.entries[k].delta_v.abs());
             }
         }
-        assert!(filled > 500, "LUT should have >500 filled entries, got {filled}");
+        assert!(
+            filled > 500,
+            "LUT should have >500 filled entries, got {filled}"
+        );
         assert!(max_dv > 0.5, "LUT max delta_v {max_dv:.3} should be >0.5");
     }
 
@@ -256,14 +270,21 @@ mod tests {
         let lut = calibrate_triang_lif();
         let v_q_rest = lut.quantize_v(-70.0);
         let entry = lut.lookup(v_q_rest, 0x00);
-        assert!(entry.delta_v > 0.5,
-            "Entry for (V=-70, hist=0): delta_v={:.4}, expected >0.5", entry.delta_v);
-        eprintln!("DIAG: (Vq={v_q_rest}, hist=0x00) delta_v={:.4} spike={}",
-            entry.delta_v, entry.spike);
+        assert!(
+            entry.delta_v > 0.5,
+            "Entry for (V=-70, hist=0): delta_v={:.4}, expected >0.5",
+            entry.delta_v
+        );
+        eprintln!(
+            "DIAG: (Vq={v_q_rest}, hist=0x00) delta_v={:.4} spike={}",
+            entry.delta_v, entry.spike
+        );
         let v_q_thresh = lut.quantize_v(-54.0);
         let entry_th = lut.lookup(v_q_thresh, 0xFF);
-        eprintln!("DIAG: (Vq={v_q_thresh}, hist=0xFF) delta_v={:.4} spike={}",
-            entry_th.delta_v, entry_th.spike);
+        eprintln!(
+            "DIAG: (Vq={v_q_thresh}, hist=0xFF) delta_v={:.4} spike={}",
+            entry_th.delta_v, entry_th.spike
+        );
         let mut max_dv = 0.0f32;
         for k in 0..4096 {
             if lut.entries[k].delta_v.abs() > max_dv {
@@ -280,7 +301,10 @@ mod tests {
         eprintln!("LUT entries near threshold (hist=0xFF):");
         for vq in 65u16..=78 {
             let entry = lut_ref.lookup(vq, 0xFF);
-            eprintln!("  Vq={vq}: delta_v={:.5} spike={}", entry.delta_v, entry.spike);
+            eprintln!(
+                "  Vq={vq}: delta_v={:.5} spike={}",
+                entry.delta_v, entry.spike
+            );
         }
         eprintln!("Vq→V mapping:");
         for v in &[-56.0f32, -55.0, -54.82, -54.50, -54.20, -54.0, -53.5] {
@@ -299,7 +323,9 @@ mod tests {
         let lut_ref = TriangulatedModel::get_lut();
 
         let mut p = [0.0; 3 * 8];
-        p[0] = 0.5; p[8] = -54.0; p[16] = 0.5;
+        p[0] = 0.5;
+        p[8] = -54.0;
+        p[16] = 0.5;
 
         let mut v = -70.0f32;
         let mut h = 0.0f32;
@@ -309,15 +335,18 @@ mod tests {
             let v_q = lut_ref.quantize_v(v);
             let h_u8 = h as u8;
             let entry = lut_ref.lookup(v_q, h_u8);
-            eprintln!("  step {step}: v={v:.3} vq={v_q} h=0x{h_u8:02X} dv={:.5} lut_spike={}",
-                entry.delta_v, entry.spike);
+            eprintln!(
+                "  step {step}: v={v:.3} vq={v_q} h=0x{h_u8:02X} dv={:.5} lut_spike={}",
+                entry.delta_v, entry.spike
+            );
 
             let mut state = [0.0f32; MAX_STATES];
             state[0] = v;
             state[1] = h;
             let ctx = SimdContext::<f32> {
                 state,
-                params_ptr: NonNull::new(p.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                params_ptr: NonNull::new(p.as_ptr() as *mut f32)
+                    .expect("params_ptr must be non-null"),
                 n: 8,
                 off: 0,
                 i_syn: 30.0,
@@ -334,15 +363,21 @@ mod tests {
                 <TriangulatedModel as ComputeNeuron>::step::<f32>(&mut state, &params, &mut sc);
                 let sm = sc.spike_mask();
                 total += sm.move_mask() as i32;
-                eprintln!("    → v={:.3} h={:.3} sm=0x{:08X} total={}",
-                    state.v.to_array()[0], state.history.to_array()[0], sm.to_bits(), total);
+                eprintln!(
+                    "    → v={:.3} h={:.3} sm=0x{:08X} total={}",
+                    state.v.to_array()[0],
+                    state.history.to_array()[0],
+                    sm.to_bits(),
+                    total
+                );
                 v = state.v.to_array()[0];
                 h = state.history.to_array()[0];
             }
-            if total > 0 { break; }
+            if total > 0 {
+                break;
+            }
         }
-        assert!(total > 0,
-            "Direct step: no spikes in 30 steps, got {total}");
+        assert!(total > 0, "Direct step: no spikes in 30 steps, got {total}");
     }
 
     #[test]
@@ -372,8 +407,10 @@ mod tests {
             v = if spike { -70.0 } else { v_new };
             hist = new_hist;
         }
-        assert!(spike_count > 0,
-            "LUT trace: no spikes in 30 steps (should fire via LUT spike flag)");
+        assert!(
+            spike_count > 0,
+            "LUT trace: no spikes in 30 steps (should fire via LUT spike flag)"
+        );
     }
 
     #[test]
@@ -381,12 +418,18 @@ mod tests {
         let lut = calibrate_triang_lif();
         TriangulatedModel::set_lut(lut);
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(8);
-        pop.fill_param(0, 0.5); pop.fill_param(1, -54.0); pop.fill_param(2, 0.5);
-        pop.fill_state(0, -70.0); pop.fill_state(1, 0.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, -54.0);
+        pop.fill_param(2, 0.5);
+        pop.fill_state(0, -70.0);
+        pop.fill_state(1, 0.0);
         let i_in = vec![30.0; 8];
         let mut spikes = vec![0i32; 8];
         let mut total = 0i32;
-        for _ in 0..200 { pop.step(&i_in, &mut spikes); total += spikes.iter().sum::<i32>(); }
+        for _ in 0..200 {
+            pop.step(&i_in, &mut spikes);
+            total += spikes.iter().sum::<i32>();
+        }
         assert!(total > 0, "Triang scalar(8) should spike, got {total}");
     }
 
@@ -395,12 +438,18 @@ mod tests {
         let lut = calibrate_triang_lif();
         TriangulatedModel::set_lut(lut);
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(16);
-        pop.fill_param(0, 0.5); pop.fill_param(1, -54.0); pop.fill_param(2, 0.5);
-        pop.fill_state(0, -70.0); pop.fill_state(1, 0.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, -54.0);
+        pop.fill_param(2, 0.5);
+        pop.fill_state(0, -70.0);
+        pop.fill_state(1, 0.0);
         let i_in = vec![30.0; 16];
         let mut spikes = vec![0i32; 16];
         let mut total = 0i32;
-        for _ in 0..200 { pop.step(&i_in, &mut spikes); total += spikes.iter().sum::<i32>(); }
+        for _ in 0..200 {
+            pop.step(&i_in, &mut spikes);
+            total += spikes.iter().sum::<i32>();
+        }
         assert!(total > 0, "Triang SIMD(16) should spike, got {total}");
     }
 
@@ -409,12 +458,18 @@ mod tests {
         let lut = calibrate_triang_lif();
         TriangulatedModel::set_lut(lut);
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(9);
-        pop.fill_param(0, 0.5); pop.fill_param(1, -54.0); pop.fill_param(2, 0.5);
-        pop.fill_state(0, -70.0); pop.fill_state(1, 0.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, -54.0);
+        pop.fill_param(2, 0.5);
+        pop.fill_state(0, -70.0);
+        pop.fill_state(1, 0.0);
         let i_in = vec![30.0; 9];
         let mut spikes = vec![0i32; 9];
         let mut total = 0i32;
-        for _ in 0..200 { pop.step(&i_in, &mut spikes); total += spikes.iter().sum::<i32>(); }
+        for _ in 0..200 {
+            pop.step(&i_in, &mut spikes);
+            total += spikes.iter().sum::<i32>();
+        }
         assert!(total > 0, "Triang SIMD(9) should spike, got {total}");
     }
 
@@ -424,13 +479,17 @@ mod tests {
         TriangulatedModel::set_lut(lut);
 
         let mut pop_lif = NeuralPopulation::<LIFModel>::new(8);
-        pop_lif.fill_param(0, 0.5); pop_lif.fill_param(1, 1.0/10.0);
-        pop_lif.fill_param(2, -70.0); pop_lif.fill_param(3, -54.0);
-        pop_lif.fill_param(4, -70.0); pop_lif.fill_param(5, 2.0);
+        pop_lif.fill_param(0, 0.5);
+        pop_lif.fill_param(1, 1.0 / 10.0);
+        pop_lif.fill_param(2, -70.0);
+        pop_lif.fill_param(3, -54.0);
+        pop_lif.fill_param(4, -70.0);
+        pop_lif.fill_param(5, 2.0);
         pop_lif.fill_state(0, -70.0);
 
         let mut pop_tri = NeuralPopulation::<TriangulatedModel>::new(8);
-        pop_tri.fill_param(0, 0.5); pop_tri.fill_param(1, -54.0);
+        pop_tri.fill_param(0, 0.5);
+        pop_tri.fill_param(1, -54.0);
         pop_tri.fill_param(2, 0.5);
         pop_tri.fill_state(0, -70.0);
         pop_tri.fill_state(1, 0.0);
@@ -453,8 +512,10 @@ mod tests {
         }
 
         let ratio = total_tri as f32 / total_lif.max(1) as f32;
-        assert!(ratio > 0.3 && ratio < 3.0,
-            "Triang spike count {total_tri} too far from LIF {total_lif} (ratio={ratio:.2})");
+        assert!(
+            ratio > 0.3 && ratio < 3.0,
+            "Triang spike count {total_tri} too far from LIF {total_lif} (ratio={ratio:.2})"
+        );
     }
 
     #[test]
@@ -463,7 +524,8 @@ mod tests {
         TriangulatedModel::set_lut(lut);
 
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(8);
-        pop.fill_param(0, 0.5); pop.fill_param(1, -54.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, -54.0);
         pop.fill_param(2, 0.5);
         pop.fill_state(0, -70.0);
         pop.fill_state(1, 0.0);
@@ -474,15 +536,18 @@ mod tests {
         for step in 0..1000 {
             pop.step(&i_zero, &mut spikes);
             for i in 0..8 {
-                assert!(!pop.state_slice(0)[i].is_nan(),
-                    "v[{i}] NaN at step {step}");
-                assert!(pop.state_slice(0)[i].is_finite(),
-                    "v[{i}] non-finite at step {step}");
+                assert!(!pop.state_slice(0)[i].is_nan(), "v[{i}] NaN at step {step}");
+                assert!(
+                    pop.state_slice(0)[i].is_finite(),
+                    "v[{i}] non-finite at step {step}"
+                );
             }
         }
         let total = spikes.iter().sum::<i32>();
-        assert!(total < 100,
-            "Triang should not spike much at I=0, got {total}");
+        assert!(
+            total < 100,
+            "Triang should not spike much at I=0, got {total}"
+        );
     }
 
     #[test]
@@ -491,19 +556,26 @@ mod tests {
         TriangulatedModel::set_lut(lut);
 
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(10);
-        pop.fill_param(0, 0.5); pop.fill_param(1, -54.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, -54.0);
         pop.fill_param(2, 0.5);
         pop.fill_state(0, -70.0);
         pop.fill_state(1, 0.0);
 
         let i_in = vec![30.0; 10];
         let mut spikes = vec![0i32; 10];
-        for _ in 0..20 { pop.step(&i_in, &mut spikes); }
+        for _ in 0..20 {
+            pop.step(&i_in, &mut spikes);
+        }
 
         let v8 = pop.state_slice(0)[8];
         let v0 = pop.state_slice(0)[0];
-        assert!((v8 - v0).abs() < 0.001,
-            "Tail v[8]={:.3} != SIMD v[0]={:.3}", v8, v0);
+        assert!(
+            (v8 - v0).abs() < 0.001,
+            "Tail v[8]={:.3} != SIMD v[0]={:.3}",
+            v8,
+            v0
+        );
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -565,9 +637,12 @@ mod tests {
         for idx in 0..HHModel::N_PARAMS {
             pop.fill_param(idx, make_hh_params_for_lut()[idx]);
         }
-        pop.fill_state(0, -65.0); pop.fill_state(1, 0.05);
-        pop.fill_state(2, 0.6); pop.fill_state(3, 0.32);
-        pop.fill_state(4, 0.19); pop.fill_state(5, 1.0);
+        pop.fill_state(0, -65.0);
+        pop.fill_state(1, 0.05);
+        pop.fill_state(2, 0.6);
+        pop.fill_state(3, 0.32);
+        pop.fill_state(4, 0.19);
+        pop.fill_state(5, 1.0);
         let mut spikes = vec![0i32; neurons];
         let mut total = 0i32;
         for _ in 0..steps {
@@ -579,8 +654,11 @@ mod tests {
 
     fn run_hh_lut(neurons: usize, i_in: &[f32], steps: usize) -> (Vec<f32>, i32) {
         let mut pop = NeuralPopulation::<TriangulatedModel>::new(neurons);
-        pop.fill_param(0, 0.01); pop.fill_param(1, 0.0); pop.fill_param(2, 0.5);
-        pop.fill_state(0, -65.0); pop.fill_state(1, 0.0);
+        pop.fill_param(0, 0.01);
+        pop.fill_param(1, 0.0);
+        pop.fill_param(2, 0.5);
+        pop.fill_state(0, -65.0);
+        pop.fill_state(1, 0.0);
         let mut spikes = vec![0i32; neurons];
         let mut total = 0i32;
         for _ in 0..steps {
@@ -610,20 +688,30 @@ mod tests {
         let (_, spike_ode_50) = run_hh_ode(n, &i50, test_steps);
         let (_, spike_lut_50) = run_hh_lut(n, &i50, test_steps);
         let ratio_50 = spike_lut_50 as f32 / spike_ode_50.max(1) as f32;
-        eprintln!("  I=50: ODE={} LUT={} ratio={:.1}", spike_ode_50, spike_lut_50, ratio_50);
+        eprintln!(
+            "  I=50: ODE={} LUT={} ratio={:.1}",
+            spike_ode_50, spike_lut_50, ratio_50
+        );
 
         let i10 = vec![10.0; n];
         let (_, spike_ode_10) = run_hh_ode(n, &i10, test_steps);
         let (_, spike_lut_10) = run_hh_lut(n, &i10, test_steps);
         let ratio_10 = spike_lut_10 as f32 / spike_ode_10.max(1) as f32;
-        eprintln!("  I=10: ODE={} LUT={} ratio={:.1}", spike_ode_10, spike_lut_10, ratio_10);
+        eprintln!(
+            "  I=10: ODE={} LUT={} ratio={:.1}",
+            spike_ode_10, spike_lut_10, ratio_10
+        );
 
         assert!(spike_lut_50 > 0, "LUT should produce spikes at I=50");
         assert!(spike_lut_10 > 0, "LUT should produce spikes at I=10");
-        assert!(ratio_50 < 300.0,
-            "I=50: LUT {spike_lut_50} vs ODE {spike_ode_50} ratio={ratio_50:.1} > 300");
-        assert!(ratio_10 < 300.0,
-            "I=10: LUT {spike_lut_10} vs ODE {spike_ode_10} ratio={ratio_10:.1} > 300");
+        assert!(
+            ratio_50 < 300.0,
+            "I=50: LUT {spike_lut_50} vs ODE {spike_ode_50} ratio={ratio_50:.1} > 300"
+        );
+        assert!(
+            ratio_10 < 300.0,
+            "I=10: LUT {spike_lut_10} vs ODE {spike_ode_10} ratio={ratio_10:.1} > 300"
+        );
         eprintln!("  ✓ LUT alive, ratios within bounds");
     }
 
@@ -645,12 +733,18 @@ mod tests {
         let ratio = spike_lut as f32 / spike_ode.max(1) as f32;
         eprintln!("HH ODE vs LUT (I=50 constant, 5000 steps, n={n}):");
         eprintln!("  ODE spikes: {spike_ode}, LUT spikes: {spike_lut}, ratio: {ratio:.1}");
-        eprintln!("  Final V ODE: {:.2} LUT: {:.2} (diff={:.3})",
-            v_ode[0], v_lut[0], (v_ode[0] - v_lut[0]).abs());
+        eprintln!(
+            "  Final V ODE: {:.2} LUT: {:.2} (diff={:.3})",
+            v_ode[0],
+            v_lut[0],
+            (v_ode[0] - v_lut[0]).abs()
+        );
 
         assert!(spike_lut > 0, "LUT should spike at I=50");
-        assert!(ratio < 300.0,
-            "LUT {spike_lut} vs ODE {spike_ode} ratio={ratio:.1} > 300");
+        assert!(
+            ratio < 300.0,
+            "LUT {spike_lut} vs ODE {spike_ode} ratio={ratio:.1} > 300"
+        );
         eprintln!("  ✓ LUT alive, ratio within bounds");
     }
 }

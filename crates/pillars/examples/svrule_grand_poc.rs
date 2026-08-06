@@ -28,7 +28,7 @@
 //! Запуск: `cargo run -p pillars --example svrule_grand_poc --release`
 //! Тесты:  `cargo test -p pillars --example svrule_grand_poc`
 
-use pillars::api::formula::{OpKind, OpNode, FormulaModel, S0, P0, TEMP0};
+use pillars::api::formula::{FormulaModel, OpKind, OpNode, P0, S0, TEMP0};
 use pillars::prelude::NeuralPopulation;
 
 // Регистры параметров: экспортируется только P0, остальные — P0 + k.
@@ -258,8 +258,16 @@ fn run_conditioning_experiment() -> ExperimentResult {
     // Звонок→выход слабый (0.1), еда→выход врождённо сильный (1.0).
     let mut tract = Tract {
         dendrites: vec![
-            Dendrite { pre: 0, w_st: 0.1, w_lt: 0.1 }, // звонок (учится)
-            Dendrite { pre: 1, w_st: 1.0, w_lt: 1.0 }, // еда (врождённо)
+            Dendrite {
+                pre: 0,
+                w_st: 0.1,
+                w_lt: 0.1,
+            }, // звонок (учится)
+            Dendrite {
+                pre: 1,
+                w_st: 1.0,
+                w_lt: 1.0,
+            }, // еда (врождённо)
         ],
         consolidate: 0.01,
         extinction: 0.02,
@@ -283,7 +291,12 @@ fn run_conditioning_experiment() -> ExperimentResult {
     // Sanity-проверки внутри VM (SPIKE-ПАРИТЕТ).
     debug_assert!(w0.0 <= 0.2, "baseline ST должно быть слабым: {:?}", w0);
     debug_assert!(w1.0 > 0.6, "после conditioning ST должно вырасти: {:?}", w1);
-    debug_assert!(w2.0 < w1.0, "ST должно падать при угасании: {:?} → {:?}", w1, w2);
+    debug_assert!(
+        w2.0 < w1.0,
+        "ST должно падать при угасании: {:?} → {:?}",
+        w1,
+        w2
+    );
     debug_assert!(w2.1 > w2.0, "LT держит память дольше ST: {:?}", w2);
 
     ExperimentResult {
@@ -309,10 +322,8 @@ fn build_simd_program() -> Vec<OpNode> {
     // p3 = reset, p4 = v_rest. dt берётся из param-колонки 0 автоматически.
     vec![
         OpNode::new(OpKind::Stimulus, TEMP0), // TEMP0 = i_syn (входной ток)
-        OpNode::new(OpKind::Leak, S0)
-            .with_in(&[S0, TEMP0, P1, P4]),   // v' = v + (v_rest + i − v)·inv_tau·dt
-        OpNode::new(OpKind::FireReset, S0)
-            .with_in(&[S0, P2, P3]),           // спайк если v ≥ порог; reset → v_rest
+        OpNode::new(OpKind::Leak, S0).with_in(&[S0, TEMP0, P1, P4]), // v' = v + (v_rest + i − v)·inv_tau·dt
+        OpNode::new(OpKind::FireReset, S0).with_in(&[S0, P2, P3]), // спайк если v ≥ порог; reset → v_rest
     ]
 }
 
@@ -321,17 +332,16 @@ fn run_simd(weight: f32, ticks: usize) -> u32 {
     const GAIN: f32 = 40.0; // масштаб: 0.1 → i=4 (подпорогово), 1.0 → i=40 (спайк)
 
     if !FormulaModel::<0>::is_registered() {
-        FormulaModel::<0>::register(build_simd_program())
-            .expect("register FormulaModel<0>");
+        FormulaModel::<0>::register(build_simd_program()).expect("register FormulaModel<0>");
     }
 
     let mut pop = NeuralPopulation::<FormulaModel<0>>::new(8);
     // param-колонки: 0=dt, 1=inv_tau, 2=порог, 3=reset, 4=v_rest
-    pop.fill_param(0, 0.5);   // dt (мс)
-    pop.fill_param(1, 0.5);   // inv_tau — утечка
-    pop.fill_param(2, 30.0);  // порог (мВ)
-    pop.fill_param(3, 0.0);   // reset (v_rest после спайка)
-    pop.fill_param(4, 0.0);   // v_rest
+    pop.fill_param(0, 0.5); // dt (мс)
+    pop.fill_param(1, 0.5); // inv_tau — утечка
+    pop.fill_param(2, 30.0); // порог (мВ)
+    pop.fill_param(3, 0.0); // reset (v_rest после спайка)
+    pop.fill_param(4, 0.0); // v_rest
 
     let i_in = vec![weight * GAIN; 8]; // входной ток = вес звонка · масштаб
     let mut spikes = vec![0i32; 8];
@@ -365,17 +375,38 @@ fn main() {
     let r = run_conditioning_experiment();
 
     println!("───────────────────────── ФАЗЫ ───────────────────────────────");
-    println!("  Baseline    : звонок без еды      → спайков: {:>4}  (связь слаба: нет реакции)", r.baseline_spikes);
+    println!(
+        "  Baseline    : звонок без еды      → спайков: {:>4}  (связь слаба: нет реакции)",
+        r.baseline_spikes
+    );
     println!("  Conditioning: звонок + еда + reward → ST растёт, LT консолидирует");
-    println!("  Test        : звонок в одиночку   → спайков: {:>4}  (условный рефлекс!)", r.test_spikes);
-    println!("  Extinction  : звонок без reward    → спайков: {:>4}  (рефлекс гаснет)", r.extinction_spikes);
+    println!(
+        "  Test        : звонок в одиночку   → спайков: {:>4}  (условный рефлекс!)",
+        r.test_spikes
+    );
+    println!(
+        "  Extinction  : звонок без reward    → спайков: {:>4}  (рефлекс гаснет)",
+        r.extinction_spikes
+    );
     println!();
     println!("───────────────────────── ВЕСА (звонок→выход) ──────────────────");
-    println!("  после обучения: ST = {:.3}   LT = {:.3}   (ST учится быстро, LT консолидирует)", r.st_after, r.lt_after);
-    println!("  после угасания: ST = {:.3}   LT = {:.3}   (ST стёрся, LT помнит!)", r.st_extinct, r.lt_extinct);
+    println!(
+        "  после обучения: ST = {:.3}   LT = {:.3}   (ST учится быстро, LT консолидирует)",
+        r.st_after, r.lt_after
+    );
+    println!(
+        "  после угасания: ST = {:.3}   LT = {:.3}   (ST стёрся, LT помнит!)",
+        r.st_extinct, r.lt_extinct
+    );
     println!();
-    println!("  Двухконтурная память Гранда: ST тает без reward ({:.3} → {:.3}),", r.st_after, r.st_extinct);
-    println!("  а LT удерживает след ({:.3} → {:.3}).", r.lt_after, r.lt_extinct);
+    println!(
+        "  Двухконтурная память Гранда: ST тает без reward ({:.3} → {:.3}),",
+        r.st_after, r.st_extinct
+    );
+    println!(
+        "  а LT удерживает след ({:.3} → {:.3}).",
+        r.lt_after, r.lt_extinct
+    );
     println!();
 
     // ── SIMD-мост: тот же выученный вес, но через FormulaModel на 8 лейнах ──
@@ -386,21 +417,37 @@ fn main() {
     println!("  Тот же нейрон, скомпилированный в FormulaModel (8 лейн AVX2):");
     println!("    OpKind::Stimulus → Leak → FireReset");
     println!("  звонок i=w·40, вес 0.1 (до)      → спайков: {simd_before:>4}  (молчит)");
-    println!("  звонок i=w·40, вес {:.2} (после)  → спайков: {simd_after:>4}  (спайкает!)", r.lt_after.max(r.st_after));
+    println!(
+        "  звонок i=w·40, вес {:.2} (после)  → спайков: {simd_after:>4}  (спайкает!)",
+        r.lt_after.max(r.st_after)
+    );
     println!();
 
     // Итоговая проверка концепта:
-    assert_eq!(r.baseline_spikes, 0, "baseline: звонок без обучения не должен спайкать");
-    assert!(r.test_spikes > 0, "test: после conditioning звонок обязан спайкать");
+    assert_eq!(
+        r.baseline_spikes, 0,
+        "baseline: звонок без обучения не должен спайкать"
+    );
+    assert!(
+        r.test_spikes > 0,
+        "test: после conditioning звонок обязан спайкать"
+    );
     assert!(
         r.extinction_spikes > 0 && r.extinction_spikes < r.test_spikes,
         "extinction: рефлекс гаснет постепенно: {} < {}",
-        r.extinction_spikes, r.test_spikes
+        r.extinction_spikes,
+        r.test_spikes
     );
-    assert!(r.st_extinct < r.st_after * 0.5, "ST обязан резко упасть при угасании");
+    assert!(
+        r.st_extinct < r.st_after * 0.5,
+        "ST обязан резко упасть при угасании"
+    );
     assert!(r.lt_extinct > r.st_extinct, "LT держит память дольше ST");
     assert_eq!(simd_before, 0, "SIMD: слабый вес (0.1) не должен спайкать");
-    assert!(simd_after > 0, "SIMD: выученный вес обязан спайкать на 8 лейнах");
+    assert!(
+        simd_after > 0,
+        "SIMD: выученный вес обязан спайкать на 8 лейнах"
+    );
 
     println!("✅ КОНЦЕПТ ДОКАЗАН: правило Гранда (опкоды + двухконтурные ST/LT");
     println!("   веса + reward-химия) порождает условный рефлекс, и выученный");
@@ -427,11 +474,17 @@ mod tests {
                 fired_any = true;
             }
         }
-        assert!(fired_any, "сильный вход обязан дать спайк через doPersistence");
+        assert!(
+            fired_any,
+            "сильный вход обязан дать спайк через doPersistence"
+        );
         // Слабый вход → NominalThreshold гасит, спайков нет
         let mut vars2 = [0.0f32; 8];
         for _ in 0..20 {
-            assert!(!run_svrule(&prog, &mut vars2, 0.01), "слабый вход не спайкает");
+            assert!(
+                !run_svrule(&prog, &mut vars2, 0.01),
+                "слабый вход не спайкает"
+            );
         }
     }
 
@@ -440,22 +493,44 @@ mod tests {
     fn test_pavlov_conditioning_learns() {
         let r = run_conditioning_experiment();
         assert_eq!(r.baseline_spikes, 0, "baseline: без обучения реакции нет");
-        assert!(r.test_spikes > 0, "после conditioning звонок спайкает (условный рефлекс)");
+        assert!(
+            r.test_spikes > 0,
+            "после conditioning звонок спайкает (условный рефлекс)"
+        );
         assert!(r.st_after > 0.6, "ST должен вырасти: {}", r.st_after);
-        assert!(r.lt_after > 0.2, "LT должен консолидировать: {}", r.lt_after);
+        assert!(
+            r.lt_after > 0.2,
+            "LT должен консолидировать: {}",
+            r.lt_after
+        );
     }
 
     /// Двухконтурная память: ST стирается при угасании, LT держит след.
     #[test]
     fn test_extinction_two_timescale_memory() {
         let r = run_conditioning_experiment();
-        assert!(r.st_extinct < r.st_after * 0.5,
-            "ST обязан резко упасть: {} → {}", r.st_after, r.st_extinct);
-        assert!(r.lt_extinct > r.st_extinct,
-            "LT держит память дольше ST: {} vs {}", r.lt_extinct, r.st_extinct);
-        assert!(r.extinction_spikes > 0, "рефлекс гаснет постепенно (сначала спайкает)");
-        assert!(r.extinction_spikes < r.test_spikes,
-            "рефлекс угасает: {} < {}", r.extinction_spikes, r.test_spikes);
+        assert!(
+            r.st_extinct < r.st_after * 0.5,
+            "ST обязан резко упасть: {} → {}",
+            r.st_after,
+            r.st_extinct
+        );
+        assert!(
+            r.lt_extinct > r.st_extinct,
+            "LT держит память дольше ST: {} vs {}",
+            r.lt_extinct,
+            r.st_extinct
+        );
+        assert!(
+            r.extinction_spikes > 0,
+            "рефлекс гаснет постепенно (сначала спайкает)"
+        );
+        assert!(
+            r.extinction_spikes < r.test_spikes,
+            "рефлекс угасает: {} < {}",
+            r.extinction_spikes,
+            r.test_spikes
+        );
     }
 
     /// SIMD-мост: выученный вес спайкает на 8 лейнах, слабый — нет.

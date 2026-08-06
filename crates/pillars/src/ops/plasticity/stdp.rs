@@ -16,8 +16,10 @@
 //! where δ is dopamine concentration (reward-prediction error).
 //!
 //! # Spike convention
-//! Accepts SIMD masks (`-1.0`/`0.0` from `cmp_ge`) OR arithmetic flags
-//! (`1.0`/`0.0`). Converted via `spike_to_float`: `spike² > 0 → 1.0`.
+//! Accepts SIMD NaN masks (from `cmp_ge`), scalar `-1.0` masks, or arithmetic
+//! flags (`1.0`/`0.0`). Converted via
+//! [`spike_to_float`](crate::ops::spike::spike_to_float) (IEEE 754
+//! NaN-detection).
 
 use crate::core::lane::SimdLane;
 use crate::ops::spike::spike_to_float;
@@ -30,9 +32,12 @@ use crate::ops::spike::spike_to_float;
 /// Returns `(tr_pre_new, tr_post_new)`.
 #[inline(always)]
 pub fn stdp_trace<S: SimdLane>(
-    tr_pre: S, tr_post: S,
-    pre_spike: S, post_spike: S,
-    inv_tau_plus: S, inv_tau_minus: S,
+    tr_pre: S,
+    tr_post: S,
+    pre_spike: S,
+    post_spike: S,
+    inv_tau_plus: S,
+    inv_tau_minus: S,
     dt: S,
 ) -> (S, S) {
     let pre = spike_to_float(pre_spike);
@@ -52,8 +57,12 @@ pub fn stdp_trace<S: SimdLane>(
 /// LTD when post precedes pre (tr_post is high at pre-spike time).
 #[inline(always)]
 pub fn stdp_weight_update<S: SimdLane>(
-    w: S, tr_pre: S, tr_post: S,
-    pre_spike: S, post_spike: S, lr: S,
+    w: S,
+    tr_pre: S,
+    tr_post: S,
+    pre_spike: S,
+    post_spike: S,
+    lr: S,
 ) -> S {
     let pre = spike_to_float(pre_spike);
     let post = spike_to_float(post_spike);
@@ -73,8 +82,13 @@ pub fn stdp_weight_update<S: SimdLane>(
 /// - Synaptic weights soft-clamped to [0, 1].
 #[inline(always)]
 pub fn dopamine_weight_update<S: SimdLane>(
-    w: S, tr_pre: S, tr_post: S,
-    pre_spike: S, post_spike: S, dopamine: S, lr: S,
+    w: S,
+    tr_pre: S,
+    tr_post: S,
+    pre_spike: S,
+    post_spike: S,
+    dopamine: S,
+    lr: S,
 ) -> S {
     let pre = spike_to_float(pre_spike);
     let post = spike_to_float(post_spike);
@@ -92,9 +106,15 @@ mod tests {
         let tr = f32x8::splat(1.0);
         let inv_tau = f32x8::splat(1.0 / 20.0);
         let dt = f32x8::splat(1.0);
-        let (new, _) = stdp_trace(tr, f32x8::splat(0.0),
-            f32x8::splat(0.0), f32x8::splat(0.0),
-            inv_tau, inv_tau, dt);
+        let (new, _) = stdp_trace(
+            tr,
+            f32x8::splat(0.0),
+            f32x8::splat(0.0),
+            f32x8::splat(0.0),
+            inv_tau,
+            inv_tau,
+            dt,
+        );
         assert!(new.to_array()[0] < 1.0, "trace should decay");
         assert!(new.to_array()[0] > 0.0, "trace should stay positive");
     }
@@ -106,17 +126,35 @@ mod tests {
         let dt = f32x8::splat(0.1);
 
         // Test with mask (-1.0) and float (1.0)
-        let (m, _) = stdp_trace(tr, f32x8::splat(0.0),
-            f32x8::splat(-1.0), f32x8::splat(0.0),
-            inv_tau, inv_tau, dt);
-        let (f, _) = stdp_trace(tr, f32x8::splat(0.0),
-            f32x8::splat(1.0), f32x8::splat(0.0),
-            inv_tau, inv_tau, dt);
+        let (m, _) = stdp_trace(
+            tr,
+            f32x8::splat(0.0),
+            f32x8::splat(-1.0),
+            f32x8::splat(0.0),
+            inv_tau,
+            inv_tau,
+            dt,
+        );
+        let (f, _) = stdp_trace(
+            tr,
+            f32x8::splat(0.0),
+            f32x8::splat(1.0),
+            f32x8::splat(0.0),
+            inv_tau,
+            inv_tau,
+            dt,
+        );
 
-        assert!((m.to_array()[0] - 1.5).abs() < 0.01,
-            "mask spike: expected ~1.5, got {:.4}", m.to_array()[0]);
-        assert!((f.to_array()[0] - 1.5).abs() < 0.01,
-            "float spike: expected ~1.5, got {:.4}", f.to_array()[0]);
+        assert!(
+            (m.to_array()[0] - 1.5).abs() < 0.01,
+            "mask spike: expected ~1.5, got {:.4}",
+            m.to_array()[0]
+        );
+        assert!(
+            (f.to_array()[0] - 1.5).abs() < 0.01,
+            "float spike: expected ~1.5, got {:.4}",
+            f.to_array()[0]
+        );
     }
 
     #[test]
@@ -124,12 +162,11 @@ mod tests {
         let w = f32x8::splat(0.5);
         let tr_pre = f32x8::splat(0.1);
         let tr_post = f32x8::splat(0.05);
-        let pre = f32x8::splat(-1.0);   // mask
-        let post = f32x8::splat(-1.0);  // mask
+        let pre = f32x8::splat(-1.0); // mask
+        let post = f32x8::splat(-1.0); // mask
         let dopamine = f32x8::splat(0.5);
         let lr = f32x8::splat(0.01);
-        let new_w = dopamine_weight_update(w, tr_pre, tr_post,
-            pre, post, dopamine, lr);
+        let new_w = dopamine_weight_update(w, tr_pre, tr_post, pre, post, dopamine, lr);
         assert!(new_w.to_array()[0] > 0.5, "should increase w");
         assert!(new_w.to_array()[0] <= 1.0, "should be clamped ≤ 1");
     }
@@ -142,15 +179,23 @@ mod tests {
         let lr = f32x8::splat(0.1);
 
         // Mask format: pre=-1.0 (active), post=-1.0 (active)
-        let wm = stdp_weight_update(w, tr_pre, tr_post,
-            f32x8::splat(-1.0), f32x8::splat(-1.0), lr);
+        let wm = stdp_weight_update(
+            w,
+            tr_pre,
+            tr_post,
+            f32x8::splat(-1.0),
+            f32x8::splat(-1.0),
+            lr,
+        );
 
         // Float format: pre=1.0 (active), post=1.0 (active)
-        let wf = stdp_weight_update(w, tr_pre, tr_post,
-            f32x8::splat(1.0), f32x8::splat(1.0), lr);
+        let wf = stdp_weight_update(w, tr_pre, tr_post, f32x8::splat(1.0), f32x8::splat(1.0), lr);
 
-        assert!((wm.to_array()[0] - wf.to_array()[0]).abs() < 1e-6,
+        assert!(
+            (wm.to_array()[0] - wf.to_array()[0]).abs() < 1e-6,
             "mask and float should give same w: {:.6} vs {:.6}",
-            wm.to_array()[0], wf.to_array()[0]);
+            wm.to_array()[0],
+            wf.to_array()[0]
+        );
     }
 }

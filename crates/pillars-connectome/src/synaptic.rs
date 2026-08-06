@@ -84,8 +84,8 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
 
         // 3. i_in = external + I_syn (the population clamps to ±100 anyway).
         let mut i_in = Vec::with_capacity(self.n);
-        for i in 0..self.n {
-            i_in.push(i_syn[i] + external_i.get(i).copied().unwrap_or(0.0));
+        for (i, &s) in i_syn.iter().enumerate() {
+            i_in.push(s + external_i.get(i).copied().unwrap_or(0.0));
         }
 
         // 4. Neuron step.
@@ -93,8 +93,8 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
         self.pop.step(&i_in, &mut spikes);
 
         // 5. Jump post-synaptic conductances on spikes.
-        for pre in 0..self.n {
-            if spikes[pre] == 0 {
+        for (pre, &sp) in spikes.iter().enumerate() {
+            if sp == 0 {
                 continue;
             }
             let start = self.graph.row_ptr[pre] as usize;
@@ -117,5 +117,10 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
     /// Number of neurons.
     pub fn len(&self) -> usize {
         self.n
+    }
+
+    /// Whether the brain has no neurons.
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
     }
 }

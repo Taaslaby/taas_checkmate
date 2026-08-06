@@ -16,9 +16,9 @@
 //!   term creates the spike upstroke naturally, peak detection catches it
 //! - **Pre-inverted inv_delta_t**: no division in hot path
 
-use pillars_macros::NeuronModel;
-use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
+#![allow(clippy::module_inception)] // deliberate: `pub mod adex` mirrors the file module
+
+use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
 //  ParamIdx Enum (for manual fill_param / slice access)
@@ -27,7 +27,7 @@ use crate::core::compute::{StepContext, ComputeNeuron};
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub enum AdExParamIdx {
-    DT = 0,       // ms
+    DT = 0,          // ms
     Inv_Tau_M = 1,   // 1/τ_m (ms⁻¹)
     Inv_Tau_W = 2,   // 1/τ_w (ms⁻¹)
     V_Rest = 3,      // mV
@@ -42,7 +42,10 @@ pub enum AdExParamIdx {
 }
 
 impl From<AdExParamIdx> for usize {
-    #[inline(always)] fn from(idx: AdExParamIdx) -> Self { idx as usize }
+    #[inline(always)]
+    fn from(idx: AdExParamIdx) -> Self {
+        idx as usize
+    }
 }
 
 /// Adaptive Exponential Integrate-and-Fire Neuron.
@@ -52,80 +55,106 @@ impl From<AdExParamIdx> for usize {
 ///   refractory counter `refr`
 /// - `#[param]` vars: `dt`, `inv_tau_m`, `inv_tau_w`, `v_rest`, `v_thresh`,
 ///   `v_reset`, `delta_t`, `inv_delta_t`, `a`, `b`, `tau_ref`, `v_peak`
-#[derive(NeuronModel)]
-pub struct AdExModel {
-    #[state] pub v: f32,
-    #[state] pub w: f32,
-    #[state] pub refr: f32,
+#[dual_neuron]
+pub mod adex {
+    use crate::core::compute::{ComputeNeuron, StepContext};
+    use crate::core::lane::SimdLane;
+    use pillars_macros::NeuronModel;
 
-    #[param] pub dt: f32,
-    #[param] pub inv_tau_m: f32,
-    #[param] pub inv_tau_w: f32,
-    #[param] pub v_rest: f32,
-    #[param] pub v_thresh: f32,
-    #[param] pub v_reset: f32,
-    #[param] pub delta_t: f32,
-    #[param] pub inv_delta_t: f32,
-    #[param] pub a: f32,
-    #[param] pub b: f32,
-    #[param] pub tau_ref: f32,
-    #[param] pub v_peak: f32,
-}
+    #[derive(NeuronModel)]
+    pub struct AdExModel {
+        #[state]
+        pub v: f32,
+        #[state]
+        pub w: f32,
+        #[state]
+        pub refr: f32,
 
-impl ComputeNeuron for AdExModel {
-    type State<S: SimdLane> = AdExState<S>;
-    type Params<S: SimdLane> = AdExParams<S>;
+        #[param]
+        pub dt: f32,
+        #[param]
+        pub inv_tau_m: f32,
+        #[param]
+        pub inv_tau_w: f32,
+        #[param]
+        pub v_rest: f32,
+        #[param]
+        pub v_thresh: f32,
+        #[param]
+        pub v_reset: f32,
+        #[param]
+        pub delta_t: f32,
+        #[param]
+        pub inv_delta_t: f32,
+        #[param]
+        pub a: f32,
+        #[param]
+        pub b: f32,
+        #[param]
+        pub tau_ref: f32,
+        #[param]
+        pub v_peak: f32,
+    }
 
-    #[inline(always)]
-    fn step<S: SimdLane>(
-        state: &mut AdExState<S>,
-        params: &AdExParams<S>,
-        ctx: &mut StepContext<S>,
-    ) {
-        let zero = S::zero();
-        let is_refr = state.refr.cmp_gt(zero);
+    impl ComputeNeuron for AdExModel {
+        type State<S: SimdLane> = AdExState<S>;
+        type Params<S: SimdLane> = AdExParams<S>;
 
-        // ─── Refractory clamp at INPUT ─────────────────────────────
-        // Clamping v to v_reset BEFORE the exponential computation
-        // prevents NaN from exp((v_reset - v_thresh) / Δ_T) edge cases.
-        let v = is_refr.cond().then(params.v_reset).else_(state.v);
+        #[inline(always)]
+        fn step<S: SimdLane>(
+            state: &mut AdExState<S>,
+            params: &AdExParams<S>,
+            ctx: &mut StepContext<S>,
+        ) {
+            let zero = S::zero();
+            let is_refr = state.refr.cmp_gt(zero);
 
-        // ─── Exponential spike term ─────────────────────────────────
-        // Pure SIMD: no division, (v - v_th) * inv_delta_t.
-        // Clamp arg to [-10, 10] to prevent exp overflow.
-        let exp_arg = (v - params.v_thresh) * params.inv_delta_t;
-        let exp_val = exp_arg.max(S::splat(-10.0)).min(S::splat(10.0)).exp();
-        let exp_term = params.delta_t * exp_val;
+            // ─── Refractory clamp at INPUT ─────────────────────────────
+            // Clamping v to v_reset BEFORE the exponential computation
+            // prevents NaN from exp((v_reset - v_thresh) / Δ_T) edge cases.
+            let v = is_refr.cond().then(params.v_reset).else_(state.v);
 
-        // ─── Membrane potential (Forward Euler) ─────────────────────
-        // dv = (v_rest - v + Δ_T·exp((v-V_th)/Δ_T) - w + I) · inv_τ_m · dt
-        let dv = (params.v_rest - v + exp_term - state.w + ctx.i_syn)
-            * params.inv_tau_m * ctx.dt_simd();
-        let v_new = v + dv;
+            // ─── Exponential spike term ─────────────────────────────────
+            // Pure SIMD: no division, (v - v_th) * inv_delta_t.
+            // Clamp arg to [-10, 10] to prevent exp overflow.
+            let exp_arg = (v - params.v_thresh) * params.inv_delta_t;
+            let exp_val = exp_arg.max(S::splat(-10.0)).min(S::splat(10.0)).exp();
+            let exp_term = params.delta_t * exp_val;
 
-        // ─── Adaptation variable ────────────────────────────────────
-        // dw = (a·(v - v_rest) - w) · inv_τ_w · dt
-        // NOTE: uses pre-refractory v for stability, not v_new
-        let dw = (params.a * (v - params.v_rest) - state.w)
-            * params.inv_tau_w * ctx.dt_simd();
-        let w_new = state.w + dw;
+            // ─── Membrane potential (Forward Euler) ─────────────────────
+            // dv = (v_rest - v + Δ_T·exp((v-V_th)/Δ_T) - w + I) · inv_τ_m · dt
+            let dv = (params.v_rest - v + exp_term - state.w + ctx.i_syn)
+                * params.inv_tau_m
+                * ctx.dt_simd();
+            let v_new = v + dv;
 
-        // ─── Spike detection at peak threshold ──────────────────────
-        // V_peak > V_thresh — catches the spike after the exponential
-        // upstroke, not at the subthreshold exponential foot.
-        let spike = v_new.cmp_ge(params.v_peak);
-        ctx.emit_spike(spike);
+            // ─── Adaptation variable ────────────────────────────────────
+            // dw = (a·(v - v_rest) - w) · inv_τ_w · dt
+            // NOTE: uses pre-refractory v for stability, not v_new
+            let dw = (params.a * (v - params.v_rest) - state.w) * params.inv_tau_w * ctx.dt_simd();
+            let w_new = state.w + dw;
 
-        // ─── Reset on spike ─────────────────────────────────────────
-        state.v = spike.cond().then(params.v_reset).else_(v_new);
-        state.w = spike.cond().then(w_new + params.b).else_(w_new);
+            // ─── Spike detection at peak threshold ──────────────────────
+            // V_peak > V_thresh — catches the spike after the exponential
+            // upstroke, not at the subthreshold exponential foot.
+            let spike = v_new.cmp_ge(params.v_peak);
+            ctx.emit_spike(spike);
 
-        // ─── Refractory timer ───────────────────────────────────────
-        let refr_dec = state.refr - ctx.dt_simd();
-        let refr_set = spike.cond().then(params.tau_ref).else_(refr_dec);
-        state.refr = refr_set.max(zero);
+            // ─── Reset on spike ─────────────────────────────────────────
+            state.v = spike.cond().then(params.v_reset).else_(v_new);
+            state.w = spike.cond().then(w_new + params.b).else_(w_new);
+
+            // ─── Refractory timer ───────────────────────────────────────
+            let refr_dec = state.refr - ctx.dt_simd();
+            let refr_set = spike.cond().then(params.tau_ref).else_(refr_dec);
+            state.refr = refr_set.max(zero);
+        }
     }
 }
+
+// Re-export so existing paths keep working:
+// `pillars::zoo::neurons::adex::AdExModel` etc.
+pub use adex::*;
 
 // ═══════════════════════════════════════════════════════════════
 //  Tests
@@ -160,18 +189,31 @@ mod tests {
 
     #[test]
     fn test_adex_spikes_with_current() {
-        let n = 8; let params = make_params(n);
-        let mut v = vec![-65.0; n]; let mut w = vec![0.0; n]; let mut refr = vec![0.0; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut v = vec![-65.0; n];
+        let mut w = vec![0.0; n];
+        let mut refr = vec![0.0; n];
         let mut dummy = vec![0.0; n];
-        let I = vec![15.0; n]; let mut spikes = vec![0i32; n];
+        let I = vec![15.0; n];
+        let mut spikes = vec![0i32; n];
 
         let mut total = 0i32;
         for _ in 0..1000 {
-            unsafe { run_neuron::<AdExModel>(
-                v.as_mut_ptr(), w.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<AdExModel>(
+                    v.as_mut_ptr(),
+                    w.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "AdEx should spike with I=15");
@@ -179,35 +221,65 @@ mod tests {
 
     #[test]
     fn test_adex_silent_without_current() {
-        let n = 8; let params = make_params(n);
-        let mut v = vec![-65.0; n]; let mut w = vec![0.0; n]; let mut refr = vec![0.0; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut v = vec![-65.0; n];
+        let mut w = vec![0.0; n];
+        let mut refr = vec![0.0; n];
         let mut dummy = vec![0.0; n];
-        let I = vec![0.0; n]; let mut spikes = vec![0i32; n];
+        let I = vec![0.0; n];
+        let mut spikes = vec![0i32; n];
 
         for _ in 0..500 {
-            unsafe { run_neuron::<AdExModel>(
-                v.as_mut_ptr(), w.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<AdExModel>(
+                    v.as_mut_ptr(),
+                    w.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
         }
-        assert_eq!(spikes.iter().sum::<i32>(), 0, "AdEx should not spike with I=0");
+        assert_eq!(
+            spikes.iter().sum::<i32>(),
+            0,
+            "AdEx should not spike with I=0"
+        );
     }
 
     #[test]
     fn test_adex_non_aligned() {
-        let n = 11; let params = make_params(n);
-        let mut v = vec![-65.0; n]; let mut w = vec![0.0; n]; let mut refr = vec![0.0; n];
+        let n = 11;
+        let params = make_params(n);
+        let mut v = vec![-65.0; n];
+        let mut w = vec![0.0; n];
+        let mut refr = vec![0.0; n];
         let mut dummy = vec![0.0; n];
-        let I = vec![20.0; n]; let mut spikes = vec![0i32; n];
+        let I = vec![20.0; n];
+        let mut spikes = vec![0i32; n];
 
         let mut total = 0i32;
         for _ in 0..1000 {
-            unsafe { run_neuron::<AdExModel>(
-                v.as_mut_ptr(), w.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<AdExModel>(
+                    v.as_mut_ptr(),
+                    w.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
             total += spikes.iter().sum::<i32>();
         }
         assert!(total > 0, "AdEx n=11 should spike");
@@ -243,31 +315,61 @@ mod tests {
 
     #[test]
     fn test_adex_stress_silence() {
-        let n = 8; let params = make_params(n);
-        let mut v = vec![-65.0; n]; let mut w = vec![0.0; n]; let mut refr = vec![0.0; n];
-        let mut dummy = vec![0.0; n]; let I = vec![0.0; n]; let mut spikes = vec![0i32; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut v = vec![-65.0; n];
+        let mut w = vec![0.0; n];
+        let mut refr = vec![0.0; n];
+        let mut dummy = vec![0.0; n];
+        let I = vec![0.0; n];
+        let mut spikes = vec![0i32; n];
         for step in 0..10000 {
-            unsafe { run_neuron::<AdExModel>(
-                v.as_mut_ptr(), w.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
-            for (i, &v_i) in v.iter().enumerate() { assert!(!v_i.is_nan(), "v[{i}] NaN step {step}"); }
+            unsafe {
+                run_neuron::<AdExModel>(
+                    v.as_mut_ptr(),
+                    w.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
+            for (i, &v_i) in v.iter().enumerate() {
+                assert!(!v_i.is_nan(), "v[{i}] NaN step {step}");
+            }
         }
         assert_eq!(spikes.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn test_adex_stress_explosion() {
-        let n = 8; let params = make_params(n);
-        let mut v = vec![-65.0; n]; let mut w = vec![0.0; n]; let mut refr = vec![0.0; n];
-        let mut dummy = vec![0.0; n]; let I = vec![1000.0; n]; let mut spikes = vec![0i32; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut v = vec![-65.0; n];
+        let mut w = vec![0.0; n];
+        let mut refr = vec![0.0; n];
+        let mut dummy = vec![0.0; n];
+        let I = vec![1000.0; n];
+        let mut spikes = vec![0i32; n];
         for step in 0..10000 {
-            unsafe { run_neuron::<AdExModel>(
-                v.as_mut_ptr(), w.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                I.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-            ); }
+            unsafe {
+                run_neuron::<AdExModel>(
+                    v.as_mut_ptr(),
+                    w.as_mut_ptr(),
+                    refr.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    dummy.as_mut_ptr(),
+                    I.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
+                );
+            }
             for (i, &v_i) in v.iter().enumerate() {
                 assert!(!v_i.is_nan(), "v[{i}] NaN step {step}");
                 assert!(v_i.is_finite(), "v[{i}] non-finite");

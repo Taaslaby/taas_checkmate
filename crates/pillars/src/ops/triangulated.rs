@@ -53,7 +53,11 @@ impl TriangLUT {
     #[inline(always)]
     pub fn new(v_min: f32, v_max: f32) -> Self {
         let entries = vec![LutEntry::default(); LUT_SIZE];
-        Self { entries, v_min, v_max }
+        Self {
+            entries,
+            v_min,
+            v_max,
+        }
     }
 
     /// Quantize a voltage value to 8 bits (0..255).
@@ -134,27 +138,56 @@ impl LutBuilder {
         &self,
         params: &[f32],
         state_init: &[f32],
-    ) -> TriangLUT
-    {
+    ) -> TriangLUT {
         let cfg = &self.config;
         let n = 1; // calibrate 1 neuron at a time
 
         // Allocate state buffers (run_neuron needs up to 6)
         let mut v: Vec<f32> = vec![state_init[0]]; // s0
-        let mut u: Vec<f32> = vec![if state_init.len() > 1 { state_init[1] } else { 0.0 }];
-        let mut h: Vec<f32> = vec![if state_init.len() > 2 { state_init[2] } else { 0.0 }];
-        let mut r: Vec<f32> = vec![if state_init.len() > 3 { state_init[3] } else { 0.0 }];
-        let mut s: Vec<f32> = vec![if state_init.len() > 4 { state_init[4] } else { 0.0 }];
-        let mut t: Vec<f32> = vec![if state_init.len() > 5 { state_init[5] } else { 0.0 }];
+        let mut u: Vec<f32> = vec![if state_init.len() > 1 {
+            state_init[1]
+        } else {
+            0.0
+        }];
+        let mut h: Vec<f32> = vec![if state_init.len() > 2 {
+            state_init[2]
+        } else {
+            0.0
+        }];
+        let mut r: Vec<f32> = vec![if state_init.len() > 3 {
+            state_init[3]
+        } else {
+            0.0
+        }];
+        let mut s: Vec<f32> = vec![if state_init.len() > 4 {
+            state_init[4]
+        } else {
+            0.0
+        }];
+        let mut t: Vec<f32> = vec![if state_init.len() > 5 {
+            state_init[5]
+        } else {
+            0.0
+        }];
 
         // Don't pass pointers to empty vecs — use null-safe run_neuron
         // Actually run_neuron reads all 6 pointers. We need to pass valid ones.
         // Ensure all vecs have at least n elements
-        while u.len() < n { u.push(0.0); }
-        while h.len() < n { h.push(0.0); }
-        while r.len() < n { r.push(0.0); }
-        while s.len() < n { s.push(0.0); }
-        while t.len() < n { t.push(0.0); }
+        while u.len() < n {
+            u.push(0.0);
+        }
+        while h.len() < n {
+            h.push(0.0);
+        }
+        while r.len() < n {
+            r.push(0.0);
+        }
+        while s.len() < n {
+            s.push(0.0);
+        }
+        while t.len() < n {
+            t.push(0.0);
+        }
 
         let mut i_in = vec![0.0f32; n];
         let mut spikes = vec![0i32; n];
@@ -174,12 +207,14 @@ impl LutBuilder {
 
         for _step in 0..cfg.n_steps {
             let v_before = v[0];
-            let v_q = lut_tmp.quantize_v(v_before);                // Select input mode for this step (cycle through modes)
+            let v_q = lut_tmp.quantize_v(v_before); // Select input mode for this step (cycle through modes)
             let mode_idx = _step % cfg.input_modes.len();
             let (mode_rate, mode_weight, _mode_dur) = cfg.input_modes[mode_idx];
 
             // Poisson spike within current mode
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let rnd = ((rng_state >> 33) as u32) as f32 / 4294967296.0;
             let input_bit = if rnd < mode_rate { 1u8 } else { 0u8 };
             i_in[0] = if input_bit != 0 { mode_weight } else { 0.0 };
@@ -190,10 +225,16 @@ impl LutBuilder {
             // Step reference model
             unsafe {
                 crate::core::population::run_neuron::<M>(
-                    v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                    r.as_mut_ptr(), s.as_mut_ptr(), t.as_mut_ptr(),
-                    i_in.as_ptr(), spikes.as_mut_ptr(),
-                    params.as_ptr(), n,
+                    v.as_mut_ptr(),
+                    u.as_mut_ptr(),
+                    h.as_mut_ptr(),
+                    r.as_mut_ptr(),
+                    s.as_mut_ptr(),
+                    t.as_mut_ptr(),
+                    i_in.as_ptr(),
+                    spikes.as_mut_ptr(),
+                    params.as_ptr(),
+                    n,
                 );
             }
 
@@ -201,7 +242,9 @@ impl LutBuilder {
             let spiked = spikes[0] != 0;
 
             sum_dv[key] += delta_v as f64;
-            if spiked { sum_spk[key] += 1; }
+            if spiked {
+                sum_spk[key] += 1;
+            }
             count[key] += 1;
 
             // Shift history (4-bit: mask to 0x0F)
@@ -259,16 +302,24 @@ fn nearest_valid(lut: &TriangLUT, v_q: u16, hist: u8) -> LutEntry {
         for dh in 0u16..=dh_lim {
             let dh_u8 = dh as u8;
             for &h in &[hist.wrapping_add(dh_u8), hist.wrapping_sub(dh_u8)] {
-                if h == hist { continue; }
+                if h == hist {
+                    continue;
+                }
                 let e = lut.entries[TriangLUT::key(v_q, h)];
-                if !e.count_is_zero() { return e; }
+                if !e.count_is_zero() {
+                    return e;
+                }
             }
         }
         // Adjacent V, same history
         for &v in &[v_q.saturating_add(d), v_q.saturating_sub(d)] {
-            if v > 255 { continue; }
+            if v > 255 {
+                continue;
+            }
             let e = lut.entries[TriangLUT::key(v, hist)];
-            if !e.count_is_zero() { return e; }
+            if !e.count_is_zero() {
+                return e;
+            }
         }
     }
     LutEntry::default()
@@ -293,17 +344,20 @@ pub mod avx2 {
     /// Must be called on x86_64 with AVX2 support.
     #[inline(always)]
     pub unsafe fn triang_step_avx2_raw(
-        v: __m256, history: __m256, i_syn: __m256,
+        v: __m256,
+        history: __m256,
+        i_syn: __m256,
         lut: &TriangLUT,
-        v_thresh: f32, input_thresh: f32,
+        v_thresh: f32,
+        input_thresh: f32,
     ) -> (__m256, __m256, __m256) {
         let v_min = _mm256_set1_ps(lut.v_min);
         let v_max = _mm256_set1_ps(lut.v_max);
         let range = lut.v_max - lut.v_min;
         let scale_v = _mm256_set1_ps(255.0 / range);
         let one_epi32 = _mm256_set1_epi32(1);
-        let mask_4bit = _mm256_set1_epi32(0x0F);  // 4-bit history
-        // 1. Clamp V, quantize to 0..255
+        let mask_4bit = _mm256_set1_epi32(0x0F); // 4-bit history
+                                                 // 1. Clamp V, quantize to 0..255
         let v_clamped = _mm256_min_ps(_mm256_max_ps(v, v_min), v_max);
         let v_scaled = _mm256_mul_ps(_mm256_sub_ps(v_clamped, v_min), scale_v);
         let v_q = _mm256_cvttps_epi32(v_scaled); // truncate f32→i32
@@ -334,10 +388,7 @@ pub mod avx2 {
         let input_cmp = _mm256_cmp_ps(i_syn, _mm256_set1_ps(input_thresh), _CMP_GT_OQ);
         let input_cmp_i32 = _mm256_castps_si256(input_cmp);
         let input_bit = _mm256_and_si256(input_cmp_i32, one_epi32);
-        let new_hist_i32 = _mm256_or_si256(
-            _mm256_slli_epi32(hist_masked, 1),
-            input_bit,
-        );
+        let new_hist_i32 = _mm256_or_si256(_mm256_slli_epi32(hist_masked, 1), input_bit);
         let new_hist = _mm256_cvtepi32_ps(new_hist_i32);
 
         // 8. Edge-triggered spike: (v_new >= thresh) AND (v < thresh)
@@ -364,8 +415,12 @@ pub mod avx2 {
     /// Must be called on x86_64 with AVX2 support.
     #[inline(always)]
     pub unsafe fn triang_step_f32x8(
-        v: wide::f32x8, history: wide::f32x8, i_syn: wide::f32x8,
-        lut: &TriangLUT, v_thresh: f32, input_thresh: f32,
+        v: wide::f32x8,
+        history: wide::f32x8,
+        i_syn: wide::f32x8,
+        lut: &TriangLUT,
+        v_thresh: f32,
+        input_thresh: f32,
     ) -> (wide::f32x8, wide::f32x8, wide::f32x8) {
         // INLINE-CRITICAL: transmute(32B) + call + transmute(32B)
         // MUST be #[inline(always)] — function call overhead (save/restore
@@ -376,7 +431,11 @@ pub mod avx2 {
             let h_mm: __m256 = core::mem::transmute(history);
             let i_mm: __m256 = core::mem::transmute(i_syn);
             let (v2, h2, s) = triang_step_avx2_raw(v_mm, h_mm, i_mm, lut, v_thresh, input_thresh);
-            (core::mem::transmute(v2), core::mem::transmute(h2), core::mem::transmute(s))
+            (
+                core::mem::transmute(v2),
+                core::mem::transmute(h2),
+                core::mem::transmute(s),
+            )
         }
     }
 }
@@ -402,7 +461,7 @@ mod tests {
     fn test_lut_key_12bit() {
         // 12-bit key: V_q << 4 | (history & 0x0F)
         let v_q: u16 = 128;
-        let hist: u8 = 0x0A;  // 4-bit valid
+        let hist: u8 = 0x0A; // 4-bit valid
         let key = TriangLUT::key(v_q, hist);
         assert_eq!(key >> HISTORY_BITS, v_q as usize);
         assert_eq!(key & HISTORY_MASK as usize, 0x0A);
@@ -418,9 +477,16 @@ mod tests {
     fn test_lut_nearest_valid() {
         let mut lut = TriangLUT::new(-100.0, 60.0);
         // Insert one known entry
-        lut.entries[TriangLUT::key(128, 0)] = LutEntry { delta_v: 0.5, spike: 0.0 };
+        lut.entries[TriangLUT::key(128, 0)] = LutEntry {
+            delta_v: 0.5,
+            spike: 0.0,
+        };
         let entry = nearest_valid(&lut, 128, 42);
-        assert!((entry.delta_v - 0.5).abs() < 1e-6, "Should find nearest: {}", entry.delta_v);
+        assert!(
+            (entry.delta_v - 0.5).abs() < 1e-6,
+            "Should find nearest: {}",
+            entry.delta_v
+        );
     }
 
     #[test]
@@ -431,14 +497,20 @@ mod tests {
             for hist in 0u8..=15 {
                 if hist % 3 == 0 {
                     let k = TriangLUT::key(v_q, hist);
-                    lut.entries[k] = LutEntry { delta_v: 0.1 * hist as f32, spike: 0.0 };
+                    lut.entries[k] = LutEntry {
+                        delta_v: 0.1 * hist as f32,
+                        spike: 0.0,
+                    };
                 }
             }
         }
         fill_missing(&mut lut);
         // Check all entries are filled
         for k in 0..LUT_SIZE {
-            assert!(!lut.entries[k].count_is_zero(), "Entry {k} still zero after fill_missing");
+            assert!(
+                !lut.entries[k].count_is_zero(),
+                "Entry {k} still zero after fill_missing"
+            );
         }
     }
 }

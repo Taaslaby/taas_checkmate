@@ -22,11 +22,20 @@ use crate::core::lane::SimdLane;
 /// HCN uses INVERTED sigmoid: `k` positive → activates at hyperpolarization.
 /// Implemented via `S::sigmoid(v, v_half, -k)` where negative k inverts.
 #[inline(always)]
-pub fn hcn_current<S: SimdLane>(v: S, m: S, g_max: S, e_rev: S, v_half: f32, k: f32, inv_tau: S, dt: S) -> (S, S) {
+pub fn hcn_current<S: SimdLane>(
+    v: S,
+    m: S,
+    g_max: S,
+    e_rev: S,
+    v_half: f32,
+    k: f32,
+    inv_tau: S,
+    dt: S,
+) -> (S, S) {
     // m_inf = 1 / (1 + exp(-(V - v_half) / k)) — standard sigmoid
     // For HCN: k is positive → pass sign-inverted: -k inverts the sigmoid
-    let m_inf = S::sigmoid(v, v_half, -k);  // same as 1/(1+exp((V-v_half)/k))
-    // Exponential Euler: m' = m_inf + (m - m_inf) · exp(-dt·inv_tau)
+    let m_inf = S::sigmoid(v, v_half, -k); // same as 1/(1+exp((V-v_half)/k))
+                                           // Exponential Euler: m' = m_inf + (m - m_inf) · exp(-dt·inv_tau)
     let decay = (-dt * inv_tau).exp();
     let m_new = m_inf + (m - m_inf) * decay;
     let i = g_max * m_new * (v - e_rev);
@@ -51,6 +60,10 @@ mod tests {
         let (i, _m_new) = hcn_current(v, m, g, e, vh, k, inv_tau, dt);
         // At V=-100, far below v_half=-75: m_inf ≈ 1/(1+exp((-100+75)/5.5)) = 1/(1+exp(-4.54)) = 0.99
         // I ≈ 1*0.99*(-100+30) = -69.3 (inward, depolarizing)
-        assert!(i.to_array()[0] < 0.0, "HCN at -100mV should be inward: {:.4}", i.to_array()[0]);
+        assert!(
+            i.to_array()[0] < 0.0,
+            "HCN at -100mV should be inward: {:.4}",
+            i.to_array()[0]
+        );
     }
 }

@@ -31,14 +31,14 @@
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-use crate::core::buf::AlignedVec;
-use crate::zoo::Model;
-use crate::core::lane::SimdLane;
-use crate::core::context::SimdContext;
 use crate::core::arch::SimdType;
+use crate::core::buf::AlignedVec;
+use crate::core::context::SimdContext;
+use crate::core::lane::SimdLane;
+use crate::zoo::Model;
 
 // Import SIMD state load/save macros from runner
-use crate::{load_state_scalar, save_state_scalar, load_state_simd, save_state_simd};
+use crate::{load_state_scalar, load_state_simd, save_state_scalar, save_state_simd};
 
 // ═══════════════════════════════════════════════════════════════
 //  Input Current Clamping
@@ -46,12 +46,19 @@ use crate::{load_state_scalar, save_state_scalar, load_state_simd, save_state_si
 
 /// Default range for input current clamping (nA or pA depending on model).
 ///
-/// **Why clamp?**
-/// - Prevents numerical instability from extreme input values
-/// - Protects against integration errors in stiff ODEs
-/// - Typical biological range: -100 to +100 pA for cortical neurons
+/// # Rationale
+/// Clamps input current to ±100 to prevent:
+/// 1. **Numerical overflow** in exponential models (AdEx, HH)
+/// 2. **Unrealistic firing rates** (>1000 Hz) that break refractory logic
+/// 3. **NaN propagation** from extreme exp() arguments
 ///
-/// **Override:** To disable clamping or use custom range, modify the
+/// # Biological context
+/// - Typical cortical neuron: I_syn ∈ [-50, +50] pA
+/// - Strong synaptic input: ~100 pA (saturating)
+/// - Values >100 pA are non-physiological for point neuron models
+///
+/// # Override
+/// To disable clamping (e.g., for abstract models), modify the
 /// `.clamp()` calls in `step_scalar()` and `step_simd()` methods.
 ///
 /// **Note:** This is a **silent operation** — values outside this range
@@ -93,9 +100,18 @@ impl<M: Model> NeuralPopulation<M> {
         }
     }
 
-    #[inline(always)] pub fn len(&self) -> usize { self.n }
-    #[inline(always)] pub fn capacity(&self) -> usize { self.capacity }
-    #[inline(always)] pub fn is_empty(&self) -> bool { self.n == 0 }
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.n
+    }
+    #[inline(always)]
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
 
     /// Enable pre/post spike buses for STDP/plasticity.
     pub fn enable_buses(&mut self) {
@@ -152,21 +168,31 @@ impl<M: Model> NeuralPopulation<M> {
         &mut self.params.as_mut_slice()[start..start + self.n]
     }
 
-    /// Unsafe mutable pointer to a state column (for internal use).
+    /// Unsafe mutable pointer to a state column (internal use only).
     ///
     /// # Safety
-    /// `col` must be < `M::N_STATE`. Caller must ensure proper alignment
-    /// and that writes don't overflow into adjacent columns (stride = capacity).
-    pub unsafe fn state_ptr_mut(&mut self, col: usize) -> *mut f32 {
+    /// `col` must be < `M::N_STATE`; the returned pointer is valid for
+    /// `self.n` elements and is 32-byte aligned. Writes must stay within the
+    /// column — no adjacent-column overflow (stride = capacity).
+    ///
+    /// Note: unused by the crate today; kept `pub(crate)` (not public) so
+    /// the unsafe surface stays out of the API until a real user needs it.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn state_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.state.as_mut_ptr().add(col * self.capacity)
     }
 
-    /// Unsafe mutable pointer to a param column (for internal use).
+    /// Unsafe mutable pointer to a param column (internal use only).
     ///
     /// # Safety
-    /// `col` must be < `M::N_PARAMS`. Caller must ensure proper alignment
-    /// and that writes don't overflow into adjacent columns (stride = capacity).
-    pub unsafe fn param_ptr_mut(&mut self, col: usize) -> *mut f32 {
+    /// `col` must be < `M::N_PARAMS`; the returned pointer is valid for
+    /// `self.n` elements and is 32-byte aligned. Writes must stay within the
+    /// column — no adjacent-column overflow (stride = capacity).
+    ///
+    /// Note: unused by the crate today; kept `pub(crate)` (not public) so
+    /// the unsafe surface stays out of the API until a real user needs it.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn param_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.params.as_mut_ptr().add(col * self.capacity)
     }
 
@@ -182,29 +208,48 @@ impl<M: Model> NeuralPopulation<M> {
     pub fn step(&mut self, i_in: &[f32], spikes_out: &mut [i32]) {
         assert_eq!(i_in.len(), self.n);
         assert_eq!(spikes_out.len(), self.n);
-        if self.n == 0 { return; }
+        if self.n == 0 {
+            return;
+        }
         if self.n <= 8 {
             self.step_scalar(i_in, spikes_out);
         } else {
-            unsafe { self.step_simd(i_in, spikes_out); }
+            unsafe {
+                self.step_simd(i_in, spikes_out);
+            }
         }
     }
 
     fn step_scalar(&mut self, i_in: &[f32], spikes_out: &mut [i32]) {
         let cap = self.capacity;
+        // SAFETY: `params` is an allocated AlignedVec (never dangling when
+        // n > 0); element 0 is within bounds. This is the broadcast dt used
+        // by `dtf()`/`dt_simd()` — see `SimdContext::dt` for the per-lane
+        // variant that no current model uses.
         let dt = unsafe { *self.params.as_ptr() };
+        // SAFETY: NonNull from a live AlignedVec allocation — infallible;
+        // hoisted out of the loop (it was re-checked on every neuron).
+        let params_ptr = unsafe { NonNull::new_unchecked(self.params.as_ptr() as *mut f32) };
 
         for i in 0..self.n {
             let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
             let sp = self.state.as_ptr();
             let state = load_state_scalar!(sp, cap, i);
 
-            let pre = self.pre_bus.as_ref().map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
-            let post = self.post_bus.as_ref().map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
+            // SAFETY: buses (when enabled) are AlignedVecs of `capacity`;
+            // i < self.n <= capacity.
+            let pre = self
+                .pre_bus
+                .as_ref()
+                .map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
+            let post = self
+                .post_bus
+                .as_ref()
+                .map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
 
             let mut ctx = SimdContext::<f32> {
                 state,
-                params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                params_ptr,
                 n: cap,
                 off: i,
                 i_syn: ii,
@@ -223,9 +268,21 @@ impl<M: Model> NeuralPopulation<M> {
         }
     }
 
+    /// SIMD step for `n > 8`. SAFETY contract (invariants this method relies
+    /// on, all guaranteed by `step()` + `AlignedVec`):
+    /// - `n8 = n & !7` is the largest multiple of 8 ≤ n, so every chunk
+    ///   satisfies `off + 8 ≤ n` — the 8-wide reads of `i_in` stay in bounds;
+    /// - state/params/pre/post buses are padded to `capacity` (multiple of 8),
+    ///   so `off + 7 < capacity` for every lane;
+    /// - column stride is `capacity` in both the SIMD and the scalar tail,
+    ///   so chunk and tail writes never overlap or overflow a column.
     unsafe fn step_simd(&mut self, i_in: &[f32], spikes_out: &mut [i32]) {
         let n8 = self.n & !7;
-        let dt = *self.params.as_ptr();
+        // SAFETY: same as step_scalar — live AlignedVec, element 0 in bounds.
+        let dt = unsafe { *self.params.as_ptr() };
+        // SAFETY: NonNull from a live AlignedVec allocation — infallible;
+        // hoisted once (was rebuilt with `.expect()` on every chunk).
+        let params_ptr = unsafe { NonNull::new_unchecked(self.params.as_ptr() as *mut f32) };
         let cap = self.capacity;
 
         for off in (0..n8).step_by(8) {
@@ -237,19 +294,31 @@ impl<M: Model> NeuralPopulation<M> {
             let sp = self.state.as_ptr();
             let state = load_state_simd!(sp, cap, off, SimdType);
 
-
-            let i_syn = (i_in.as_ptr().add(off) as *const SimdType).read_unaligned()
+            // SAFETY: off + 8 <= n (see contract above); `i_in` may be any
+            // user slice, so read_unaligned is required (i_in is NOT
+            // guaranteed 32-byte aligned).
+            let i_syn = unsafe { (i_in.as_ptr().add(off) as *const SimdType).read_unaligned() }
                 .max(SimdType::splat(I_SYN_CLAMP_RANGE.0))
                 .min(SimdType::splat(I_SYN_CLAMP_RANGE.1));
 
-            let i_pre = self.pre_bus.as_ref().map_or(SimdType::splat(0.0), |b|
-                (b.as_ptr().add(off) as *const SimdType).read_unaligned());
-            let i_post = self.post_bus.as_ref().map_or(SimdType::splat(0.0), |b|
-                (b.as_ptr().add(off) as *const SimdType).read_unaligned());
+            // SAFETY: buses are AlignedVecs of `capacity` — off + 8 <= n8
+            //     <= capacity, so all 8 lanes are within the padded buffer.
+            let i_pre = self
+                .pre_bus
+                .as_ref()
+                .map_or(SimdType::splat(0.0), |b| unsafe {
+                    (b.as_ptr().add(off) as *const SimdType).read_unaligned()
+                });
+            let i_post = self
+                .post_bus
+                .as_ref()
+                .map_or(SimdType::splat(0.0), |b| unsafe {
+                    (b.as_ptr().add(off) as *const SimdType).read_unaligned()
+                });
 
             let mut ctx = SimdContext::<SimdType> {
                 state,
-                params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                params_ptr,
                 n: cap,
                 off,
                 i_syn,
@@ -266,22 +335,32 @@ impl<M: Model> NeuralPopulation<M> {
             save_state_simd!(sm, cap, off, ctx, SimdType);
 
             let m = ctx.spike_mask().move_mask() as u32;
-            for j in 0..8 { spikes_out[off + j] = ((m >> j) & 1) as i32; }
+            for j in 0..8 {
+                spikes_out[off + j] = ((m >> j) & 1) as i32;
+            }
         }
 
-        // Scalar tail (unpadded neurons, n8 < self.n)
+        // Scalar tail (unpadded neurons, n8 < self.n). Identical math to
+        // step_scalar — a fresh scalar context per neuron.
         if n8 < self.n {
             for i in n8..self.n {
                 let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
                 let sp = self.state.as_ptr();
                 let state = load_state_scalar!(sp, cap, i);
 
-                let pre = self.pre_bus.as_ref().map_or(0.0, |b| *b.as_ptr().add(i));
-                let post = self.post_bus.as_ref().map_or(0.0, |b| *b.as_ptr().add(i));
+                // SAFETY: buses are AlignedVecs of `capacity`; i < n <= cap.
+                let pre = self
+                    .pre_bus
+                    .as_ref()
+                    .map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
+                let post = self
+                    .post_bus
+                    .as_ref()
+                    .map_or(0.0, |b| unsafe { *b.as_ptr().add(i) });
 
                 let mut ctx = SimdContext::<f32> {
                     state,
-                    params_ptr: NonNull::new(self.params.as_ptr() as *mut f32).expect("params_ptr must be non-null"),
+                    params_ptr,
                     n: cap,
                     off: i,
                     i_syn: ii,
@@ -306,9 +385,9 @@ impl<M: Model> NeuralPopulation<M> {
 //  Backward-compat re-exports (canonical path: crate::core::runner::run_neuron)
 // ═══════════════════════════════════════════════════════════════
 
-pub use crate::core::runner::{run_neuron, run_neuron_ext};
 #[cfg(feature = "rayon")]
 pub use crate::core::runner::run_neuron_par;
+pub use crate::core::runner::{run_neuron, run_neuron_ext};
 
 // ═══════════════════════════════════════════════════════════════
 //  Tests
@@ -364,21 +443,30 @@ mod tests {
         let i_in = vec![30.0; 10];
         let mut spikes = vec![0i32; 10];
 
-        for _ in 0..20 { pop.step(&i_in, &mut spikes); }
+        for _ in 0..20 {
+            pop.step(&i_in, &mut spikes);
+        }
 
         let v8 = pop.state_slice(0)[8];
         let v0 = pop.state_slice(0)[0];
-        assert!((v8 - v0).abs() < 0.001,
-            "Tail v[8]={:.3} != SIMD v[0]={:.3}", v8, v0);
+        assert!(
+            (v8 - v0).abs() < 0.001,
+            "Tail v[8]={:.3} != SIMD v[0]={:.3}",
+            v8,
+            v0
+        );
     }
 
     #[test]
     fn test_population_buses() {
         let mut pop = NeuralPopulation::<LIFModel>::new(8);
         pop.enable_buses();
-        pop.fill_param(0, 0.5); pop.fill_param(1, 0.1);
-        pop.fill_param(2, -70.0); pop.fill_param(3, -54.0);
-        pop.fill_param(4, -70.0); pop.fill_param(5, 2.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
         pop.fill_state(0, -70.0);
 
         let i_in = vec![30.0; 8];
@@ -386,28 +474,68 @@ mod tests {
         pop.step(&i_in, &mut spikes);
     }
 
+    /// n = 13 (not a multiple of 8): neurons 0..8 run through the SIMD path,
+    /// neurons 8..13 through the scalar tail — they must produce bit-identical
+    /// dynamics (same params, same input, same code). Guards against any
+    /// SIMD/tail divergence sneaking in.
+    #[test]
+    fn test_population_simd_tail_parity() {
+        let mut pop = NeuralPopulation::<LIFModel>::new(13);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
+        pop.fill_state(0, -70.0);
+
+        // Same input for every neuron → v[8] (tail) must equal v[0] (SIMD)
+        // at every step, bit for bit.
+        let i_in = vec![30.0; 13];
+        let mut spikes = vec![0i32; 13];
+        for _ in 0..100 {
+            pop.step(&i_in, &mut spikes);
+            for i in 1..13 {
+                assert_eq!(
+                    pop.state_slice(0)[i].to_bits(),
+                    pop.state_slice(0)[0].to_bits(),
+                    "neuron {i} (SIMD if <8, tail otherwise) diverged from neuron 0"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_population_spike_count() {
         let mut pop = NeuralPopulation::<LIFModel>::new(8);
-        pop.fill_param(0, 0.5); pop.fill_param(1, 0.1);
-        pop.fill_param(2, -70.0); pop.fill_param(3, -54.0);
-        pop.fill_param(4, -70.0); pop.fill_param(5, 2.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
         pop.fill_state(0, -70.0);
 
         let i_strong = vec![100.0; 8];
         let mut spikes = vec![0i32; 8];
         let mut total = 0i32;
 
-        for _ in 0..100 { pop.step(&i_strong, &mut spikes); total += spikes.iter().sum::<i32>(); }
+        for _ in 0..100 {
+            pop.step(&i_strong, &mut spikes);
+            total += spikes.iter().sum::<i32>();
+        }
         assert!(total > 0, "LIF should spike with I=100, got {total}");
     }
 
     #[test]
     fn test_population_stress_silence() {
         let mut pop = NeuralPopulation::<LIFModel>::new(8);
-        pop.fill_param(0, 0.5); pop.fill_param(1, 0.1);
-        pop.fill_param(2, -70.0); pop.fill_param(3, -54.0);
-        pop.fill_param(4, -70.0); pop.fill_param(5, 2.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
         pop.fill_state(0, -70.0);
 
         let i_zero = vec![0.0; 8];
@@ -425,9 +553,12 @@ mod tests {
     #[test]
     fn test_population_stress_explosion() {
         let mut pop = NeuralPopulation::<LIFModel>::new(8);
-        pop.fill_param(0, 0.5); pop.fill_param(1, 0.1);
-        pop.fill_param(2, -70.0); pop.fill_param(3, -54.0);
-        pop.fill_param(4, -70.0); pop.fill_param(5, 2.0);
+        pop.fill_param(0, 0.5);
+        pop.fill_param(1, 0.1);
+        pop.fill_param(2, -70.0);
+        pop.fill_param(3, -54.0);
+        pop.fill_param(4, -70.0);
+        pop.fill_param(5, 2.0);
         pop.fill_state(0, -70.0);
 
         let i_big = vec![1000.0; 8];

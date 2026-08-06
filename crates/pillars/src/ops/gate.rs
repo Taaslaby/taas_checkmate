@@ -81,14 +81,20 @@ mod tests {
     fn test_sigmoid_gate_at_vhalf() {
         let v = f32x8::splat(0.0);
         let s = sigmoid_gate(v, 0.0, 5.0);
-        assert!((s.to_array()[0] - 0.5).abs() < 1e-6, "at V_half, sigmoid=0.5");
+        assert!(
+            (s.to_array()[0] - 0.5).abs() < 1e-6,
+            "at V_half, sigmoid=0.5"
+        );
     }
 
     #[test]
     fn test_sigmoid_gate_saturated() {
         let v = f32x8::splat(100.0);
         let s = sigmoid_gate(v, 0.0, 5.0);
-        assert!((s.to_array()[0] - 1.0).abs() < 0.01, "far above V_half, sigmoid≈1");
+        assert!(
+            (s.to_array()[0] - 1.0).abs() < 0.01,
+            "far above V_half, sigmoid≈1"
+        );
     }
 
     #[test]
@@ -96,7 +102,11 @@ mod tests {
         let v = f32x8::splat(-100.0);
         // Inverted sigmoid (k negative) = activated at hyperpolarization
         let s = sigmoid_gate(v, -75.0, -5.5);
-        assert!(s.to_array()[0] > 0.9, "inverted sigmoid at -100: {:.4}", s.to_array()[0]);
+        assert!(
+            s.to_array()[0] > 0.9,
+            "inverted sigmoid at -100: {:.4}",
+            s.to_array()[0]
+        );
     }
 
     #[test]

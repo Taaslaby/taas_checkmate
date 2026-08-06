@@ -28,8 +28,8 @@
 //! | [`config`] | [`DendriteConfig`], [`DendriteDecayFactors`], [`ActiveDendriteChannels`] |
 //! | [`cable`] | [`CableDendriteState`] — cable_step, conductance setters, getters |
 
-pub mod config;
 pub mod cable;
+pub mod config;
 
-pub use config::{DendriteDecayFactors, DendriteConfig, ActiveDendriteChannels};
 pub use cable::{CableDendriteState, DendriteState};
+pub use config::{ActiveDendriteChannels, DendriteConfig, DendriteDecayFactors};

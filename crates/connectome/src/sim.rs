@@ -100,6 +100,7 @@ pub fn sim_lif(
 /// 4. LIF step
 /// 5. Push spikes to queue
 /// 6. CSR propagate: jump conductances instead of currents
+///
 /// Bridge the two duplicate `SynapticKinetics` implementations: the legacy
 /// `taas_kernels::neuron::synapse` copy and the canonical
 /// `pillars::kernels::synapse` one. Same conductance buffers, two copies.

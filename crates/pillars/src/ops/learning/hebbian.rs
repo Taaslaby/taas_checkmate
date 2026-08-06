@@ -38,6 +38,10 @@ mod tests {
         let post = f32x8::splat(1.0);
         let eta = f32x8::splat(0.01);
         let new = hebbian_correlation(w, pre, post, eta);
-        assert!((new.to_array()[0] - 0.51).abs() < 1e-6, "Hebbian increase: {:.6}", new.to_array()[0]);
+        assert!(
+            (new.to_array()[0] - 0.51).abs() < 1e-6,
+            "Hebbian increase: {:.6}",
+            new.to_array()[0]
+        );
     }
 }

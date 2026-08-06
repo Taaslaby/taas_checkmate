@@ -145,7 +145,14 @@ mod tests {
             let approx = super::fast_exp(x);
             let exact = x.exp();
             let rel_err = ((approx - exact) / exact).abs();
-            assert!(rel_err < 0.01, "fast_exp({}) = {} vs {} (err={})", x, approx, exact, rel_err);
+            assert!(
+                rel_err < 0.01,
+                "fast_exp({}) = {} vs {} (err={})",
+                x,
+                approx,
+                exact,
+                rel_err
+            );
         }
     }
 
@@ -159,8 +166,14 @@ mod tests {
         for i in 0..8 {
             let exact = inputs[i].exp();
             let rel_err = ((arr[i] - exact) / exact).abs();
-            assert!(rel_err < 1e-5, "fast_exp_simd[{}] = {} vs {} (err={})",
-                    i, arr[i], exact, rel_err);
+            assert!(
+                rel_err < 1e-5,
+                "fast_exp_simd[{}] = {} vs {} (err={})",
+                i,
+                arr[i],
+                exact,
+                rel_err
+            );
         }
     }
 
@@ -170,7 +183,14 @@ mod tests {
             let s = super::fast_exp(v);
             let simd = super::fast_exp_simd(f32x8::splat(v)).to_array()[0];
             let diff = (s - simd).abs();
-            assert!(diff < 0.01, "fast_exp({}): scalar {} vs simd {} (diff={})", v, s, simd, diff);
+            assert!(
+                diff < 0.01,
+                "fast_exp({}): scalar {} vs simd {} (diff={})",
+                v,
+                s,
+                simd,
+                diff
+            );
         }
     }
 
@@ -184,13 +204,26 @@ mod tests {
         for i in -8700..=8800 {
             let x = i as f32 / 100.0;
             let exact = x.exp();
-            if !exact.is_finite() || exact == 0.0 { continue; }
+            if !exact.is_finite() || exact == 0.0 {
+                continue;
+            }
             let approx = super::fast_exp_poly_simd(f32x8::splat(x)).to_array()[0];
             let rel = ((approx - exact) / exact).abs();
-            if rel > max_rel { max_rel = rel; worst_x = x; }
+            if rel > max_rel {
+                max_rel = rel;
+                worst_x = x;
+            }
         }
-        eprintln!("fast_exp_poly_simd: max rel err = {:.3e} at x={}", max_rel, worst_x);
-        assert!(max_rel < 1e-4, "max rel err {:.2e} too high at x={}", max_rel, worst_x);
+        eprintln!(
+            "fast_exp_poly_simd: max rel err = {:.3e} at x={}",
+            max_rel, worst_x
+        );
+        assert!(
+            max_rel < 1e-4,
+            "max rel err {:.2e} too high at x={}",
+            max_rel,
+            worst_x
+        );
     }
 
     /// SIMD-полином обязан совпадать со скаляром почти бит-в-бит на всём
@@ -209,19 +242,38 @@ mod tests {
             let x = i as f32 / 100.0;
             let s = super::fast_exp(x);
             let simd = super::fast_exp_poly_simd(f32x8::splat(x)).to_array()[0];
-            let rel = if s != 0.0 { ((s - simd) / s).abs() } else { 0.0 };
-            if rel > max_rel { max_rel = rel; }
-            assert!(rel < 1e-5,
-                "x={}: scalar {} vs simd {} (rel {:.2e})", x, s, simd, rel);
+            let rel = if s != 0.0 {
+                ((s - simd) / s).abs()
+            } else {
+                0.0
+            };
+            if rel > max_rel {
+                max_rel = rel;
+            }
+            assert!(
+                rel < 1e-5,
+                "x={}: scalar {} vs simd {} (rel {:.2e})",
+                x,
+                s,
+                simd,
+                rel
+            );
         }
-        eprintln!("fast_exp_poly_simd: max scalar/simd rel diff = {:.3e}", max_rel);
+        eprintln!(
+            "fast_exp_poly_simd: max scalar/simd rel diff = {:.3e}",
+            max_rel
+        );
     }
 
     /// Поведение на границах: переполнение → inf, андерфлоу → 0.
     #[test]
     fn test_fast_exp_poly_simd_edges() {
         let over = super::fast_exp_poly_simd(f32x8::splat(100.0)).to_array()[0];
-        assert!(over.is_infinite(), "exp(100) should overflow to inf, got {}", over);
+        assert!(
+            over.is_infinite(),
+            "exp(100) should overflow to inf, got {}",
+            over
+        );
         let under = super::fast_exp_poly_simd(f32x8::splat(-100.0)).to_array()[0];
         assert_eq!(under, 0.0, "exp(-100) should underflow to 0, got {}", under);
         let mid = super::fast_exp_poly_simd(f32x8::splat(1.0)).to_array()[0];

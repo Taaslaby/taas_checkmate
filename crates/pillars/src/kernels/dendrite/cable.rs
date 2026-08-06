@@ -60,7 +60,7 @@ const E_NACHR: f32 = 0.0;
 const E_GLUCL: f32 = -70.0; // Drosophila Cl⁻ channel — inhibitory
 const E_MACHR: f32 = -90.0;
 
-use super::config::{DendriteDecayFactors, DendriteConfig, ActiveDendriteChannels};
+use super::config::{ActiveDendriteChannels, DendriteConfig, DendriteDecayFactors};
 
 /// Состояние компартментализованного дендритного кабеля для всей популяции.
 ///
@@ -154,7 +154,11 @@ impl CableDendriteState {
         let dt_s = f32x8::splat(dt);
         let zero = f32x8::splat(0.0);
         let has_axial = k > 1 && R_a > 0.1;
-        let inv_Ra = if has_axial { f32x8::splat(1.0 / R_a) } else { zero };
+        let inv_Ra = if has_axial {
+            f32x8::splat(1.0 / R_a)
+        } else {
+            zero
+        };
 
         let e_ampa = f32x8::splat(E_AMPA);
         let e_nmda = f32x8::splat(E_NMDA);
@@ -274,13 +278,41 @@ impl CableDendriteState {
 
         unsafe {
             for off in (0..n8).step_by(8) {
-                store8(self.g_ampa.as_mut_ptr(), off, load8(self.g_ampa.as_ptr(), off) * d0);
-                store8(self.g_nmda.as_mut_ptr(), off, load8(self.g_nmda.as_ptr(), off) * d1);
-                store8(self.g_gaba_a.as_mut_ptr(), off, load8(self.g_gaba_a.as_ptr(), off) * d2);
-                store8(self.g_gaba_b.as_mut_ptr(), off, load8(self.g_gaba_b.as_ptr(), off) * d3);
-                store8(self.g_nachr.as_mut_ptr(), off, load8(self.g_nachr.as_ptr(), off) * d4);
-                store8(self.g_glucl.as_mut_ptr(), off, load8(self.g_glucl.as_ptr(), off) * d5);
-                store8(self.g_machr.as_mut_ptr(), off, load8(self.g_machr.as_ptr(), off) * d6);
+                store8(
+                    self.g_ampa.as_mut_ptr(),
+                    off,
+                    load8(self.g_ampa.as_ptr(), off) * d0,
+                );
+                store8(
+                    self.g_nmda.as_mut_ptr(),
+                    off,
+                    load8(self.g_nmda.as_ptr(), off) * d1,
+                );
+                store8(
+                    self.g_gaba_a.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_a.as_ptr(), off) * d2,
+                );
+                store8(
+                    self.g_gaba_b.as_mut_ptr(),
+                    off,
+                    load8(self.g_gaba_b.as_ptr(), off) * d3,
+                );
+                store8(
+                    self.g_nachr.as_mut_ptr(),
+                    off,
+                    load8(self.g_nachr.as_ptr(), off) * d4,
+                );
+                store8(
+                    self.g_glucl.as_mut_ptr(),
+                    off,
+                    load8(self.g_glucl.as_ptr(), off) * d5,
+                );
+                store8(
+                    self.g_machr.as_mut_ptr(),
+                    off,
+                    load8(self.g_machr.as_ptr(), off) * d6,
+                );
             }
         }
 
@@ -386,7 +418,11 @@ impl CableDendriteState {
 
     /// Dendritic current of neuron `nrn` (after cable_step).
     pub fn dend_current(&self, nrn: usize) -> f32 {
-        if nrn >= self.n { 0.0 } else { self.I_dend[nrn] }
+        if nrn >= self.n {
+            0.0
+        } else {
+            self.I_dend[nrn]
+        }
     }
 
     /// Set V_dend of a compartment (for tests).
@@ -406,7 +442,12 @@ mod tests {
 
     #[test]
     fn test_dendrite_basic_ampa_epsps() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(8, &config);
         let V_soma = vec![-65.0f32; 8];
         dend.jump_ampa(0, 0, 0.1);
@@ -415,13 +456,22 @@ mod tests {
             dend.decay_conductances(&factors);
             dend.cable_step(&V_soma, 0.5);
         }
-        assert!(dend.dend_current(0) > 0.0, "AMPA should depolarize, got {}", dend.dend_current(0));
+        assert!(
+            dend.dend_current(0) > 0.0,
+            "AMPA should depolarize, got {}",
+            dend.dend_current(0)
+        );
         assert!(dend.dend_current(1).abs() < 1e-4, "no-input neuron ~0");
     }
 
     #[test]
     fn test_dendrite_gaba_shunt() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend_only = CableDendriteState::new(4, &config);
         let mut dend_shunt = CableDendriteState::new(4, &config);
         let V_soma = vec![-65.0f32; 4];
@@ -437,12 +487,20 @@ mod tests {
         }
         let i_only = dend_only.dend_current(0);
         let i_shunt = dend_shunt.dend_current(0);
-        assert!(i_shunt < i_only, "GABA_A should shunt: only={i_only:.6}, shunt={i_shunt:.6}");
+        assert!(
+            i_shunt < i_only,
+            "GABA_A should shunt: only={i_only:.6}, shunt={i_shunt:.6}"
+        );
     }
 
     #[test]
     fn test_dendrite_simd_vs_scalar_tail() {
-        let config = DendriteConfig { n_compartments: 3, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 3,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(9, &config);
         let V_soma = vec![-65.0f32; 9];
         let factors = DendriteDecayFactors::new(0.5);
@@ -458,13 +516,21 @@ mod tests {
         assert!(diff < 1e-5, "SIMD vs scalar tail mismatch: {diff:.10}");
         for comp in 0..3 {
             let vd_diff = (dend.v_dend(0, comp) - dend.v_dend(8, comp)).abs();
-            assert!(vd_diff < 1e-5, "V_dend[comp={comp}] mismatch: {vd_diff:.10}");
+            assert!(
+                vd_diff < 1e-5,
+                "V_dend[comp={comp}] mismatch: {vd_diff:.10}"
+            );
         }
     }
 
     #[test]
     fn test_dendrite_proximal_vs_distal_ampa() {
-        let config = DendriteConfig { n_compartments: 4, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 4,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut prox = CableDendriteState::new(4, &config);
         let mut dist = CableDendriteState::new(4, &config);
         let V_soma = vec![-65.0f32; 4];
@@ -479,24 +545,45 @@ mod tests {
         }
         let i_prox = prox.dend_current(0);
         let i_dist = dist.dend_current(0);
-        assert!(i_prox > i_dist, "Proximal should win: prox={i_prox:.6}, dist={i_dist:.6}");
+        assert!(
+            i_prox > i_dist,
+            "Proximal should win: prox={i_prox:.6}, dist={i_dist:.6}"
+        );
     }
 
     #[test]
     fn test_dendrite_conductance_decay() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         dend.jump_ampa(0, 0, 1.0);
         dend.jump_nmda(1, 0, 1.0);
         let factors = DendriteDecayFactors::new(2.0);
         dend.decay_conductances(&factors);
-        assert!((dend.g_ampa[0] - 0.3679).abs() < 0.001, "AMPA decay: {}", dend.g_ampa[0]);
-        assert!((dend.g_nmda[1] - 0.9608).abs() < 0.001, "NMDA decay: {}", dend.g_nmda[1]);
+        assert!(
+            (dend.g_ampa[0] - 0.3679).abs() < 0.001,
+            "AMPA decay: {}",
+            dend.g_ampa[0]
+        );
+        assert!(
+            (dend.g_nmda[1] - 0.9608).abs() < 0.001,
+            "NMDA decay: {}",
+            dend.g_nmda[1]
+        );
     }
 
     #[test]
     fn test_dendrite_all_7_receptors() {
-        let config = DendriteConfig { n_compartments: 1, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 1,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(8, &config);
         let V_soma = vec![-65.0f32; 8];
         let factors = DendriteDecayFactors::new(0.5);
@@ -512,12 +599,20 @@ mod tests {
             dend.cable_step(&V_soma, 0.5);
         }
         assert!(dend.dend_current(4) > 0.0, "nAChR should be excitatory");
-        assert!(dend.dend_current(3) < 0.0, "GABA_B should be hyperpolarizing");
+        assert!(
+            dend.dend_current(3) < 0.0,
+            "GABA_B should be hyperpolarizing"
+        );
     }
 
     #[test]
     fn test_dendrite_cable_steady_state() {
-        let config = DendriteConfig { n_compartments: 4, R_a: 200.0, R_m: 100.0, C_m: 0.5 };
+        let config = DendriteConfig {
+            n_compartments: 4,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.5,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         let V_soma = vec![-60.0f32; 4];
         let factors = DendriteDecayFactors::new(0.5);
@@ -534,7 +629,12 @@ mod tests {
 
     #[test]
     fn test_dendrite_axial_voltage_gradient() {
-        let config = DendriteConfig { n_compartments: 4, R_a: 500.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 4,
+            R_a: 500.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         let V_soma = vec![-65.0f32; 4];
         let factors = DendriteDecayFactors::new(0.5);
@@ -554,7 +654,12 @@ mod tests {
 
     #[test]
     fn test_dendrite_high_axial_resistance_isolates() {
-        let config = DendriteConfig { n_compartments: 3, R_a: 10000.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 3,
+            R_a: 10000.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         let V_soma = vec![-65.0f32; 4];
         let factors = DendriteDecayFactors::new(0.5);
@@ -565,13 +670,22 @@ mod tests {
         }
         let v0 = dend.v_dend(0, 0);
         let v2 = dend.v_dend(0, 2);
-        assert!((v0 - v2).abs() > 1.0, "High R_a isolates: ΔV={:.4}", (v0 - v2).abs());
+        assert!(
+            (v0 - v2).abs() > 1.0,
+            "High R_a isolates: ΔV={:.4}",
+            (v0 - v2).abs()
+        );
     }
 
     #[test]
     fn test_dendrite_low_axial_resistance_near_equal() {
         let dt = 0.05;
-        let config = DendriteConfig { n_compartments: 3, R_a: 1.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 3,
+            R_a: 1.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         let V_soma = vec![-65.0f32; 4];
         let factors = DendriteDecayFactors::new(dt);
@@ -589,7 +703,12 @@ mod tests {
 
     #[test]
     fn test_dendrite_nmda_mg_block() {
-        let config = DendriteConfig { n_compartments: 1, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 1,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         for i in 0..4 {
             dend.jump_nmda(i, 0, 0.5);
@@ -602,12 +721,20 @@ mod tests {
         }
         let i0 = dend.dend_current(0);
         let i3 = dend.dend_current(3);
-        assert!(i0.abs() < i3.abs() || i0.abs() < 5.0, "NMDA at -80 blocked: {i0:.6}");
+        assert!(
+            i0.abs() < i3.abs() || i0.abs() < 5.0,
+            "NMDA at -80 blocked: {i0:.6}"
+        );
     }
 
     #[test]
     fn test_dendrite_membrane_time_constant() {
-        let config = DendriteConfig { n_compartments: 1, R_a: 200.0, R_m: 100.0, C_m: 1.0 };
+        let config = DendriteConfig {
+            n_compartments: 1,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 1.0,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         let V_soma = vec![-50.0f32; 4];
         let factors = DendriteDecayFactors::new(5.0);
@@ -621,7 +748,12 @@ mod tests {
 
     #[test]
     fn test_dendrite_reset_conductances() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         dend.jump_ampa(0, 0, 0.5);
         dend.jump_nmda(1, 1, 0.3);
@@ -642,18 +774,29 @@ mod tests {
 
     #[test]
     fn test_dendrite_jump_by_index() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 200.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 200.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         dend.jump_by_index(0, 0, 0, 0.5); // AMPA
         dend.jump_by_index(1, 1, 4, 0.3); // nAChR
         dend.jump_by_index(2, 0, 2, 0.2); // GABA_A
         assert!((dend.g_ampa[0] - 0.5).abs() < 1e-6);
-        assert!((dend.g_nachr[dend.n_padded + 1] - 0.3).abs() < 1e-6);          assert!((dend.g_gaba_a[2] - 0.2).abs() < 1e-6);
+        assert!((dend.g_nachr[dend.n_padded + 1] - 0.3).abs() < 1e-6);
+        assert!((dend.g_gaba_a[2] - 0.2).abs() < 1e-6);
     }
 
     #[test]
     fn test_active_dendritic_channels() {
-        let config = DendriteConfig { n_compartments: 2, R_a: 100.0, R_m: 100.0, C_m: 0.1 };
+        let config = DendriteConfig {
+            n_compartments: 2,
+            R_a: 100.0,
+            R_m: 100.0,
+            C_m: 0.1,
+        };
         let mut dend = CableDendriteState::new(4, &config);
         dend.enable_active_channels(10.0, 5.0, 2.0);
         let V_soma = vec![-65.0f32; 4];
@@ -664,7 +807,10 @@ mod tests {
             dend.cable_step(&V_soma, 0.5);
         }
         let v0 = dend.v_dend(0, 0);
-        assert!(v0 > -50.0, "active Na⁺ should boost depolarization: {v0:.2} mV");
+        assert!(
+            v0 > -50.0,
+            "active Na⁺ should boost depolarization: {v0:.2} mV"
+        );
     }
 
     #[test]
@@ -673,6 +819,9 @@ mod tests {
         assert!((config.tau() - 10.0).abs() < 1e-5, "τ = R_m·C_m = 10ms");
         let lambda = config.electrotonic_length();
         assert!(lambda > 0.0 && lambda < 1.0, "λ in (0,1) for finite R_a");
-        assert!(DendriteConfig::compartments_for_length(1.0) >= 10, "≥10 compartments per λ");
+        assert!(
+            DendriteConfig::compartments_for_length(1.0) >= 10,
+            "≥10 compartments per λ"
+        );
     }
 }

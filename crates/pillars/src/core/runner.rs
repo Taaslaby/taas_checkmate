@@ -18,12 +18,12 @@
 //! All functions require valid pointers for `n` elements.
 //! Column stride = `n` (SoA layout: [col0×n] [col1×n] …).
 
-use wide::f32x8;
-use crate::zoo::Model;
-use crate::core::lane::SimdLane;
 use crate::core::context::{SimdContext, MAX_STATES};
+use crate::core::lane::SimdLane;
+use crate::zoo::Model;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+use wide::f32x8;
 
 // Import I_SYN_CLAMP_RANGE from population module
 use super::population::I_SYN_CLAMP_RANGE;
@@ -55,15 +55,47 @@ struct SendablePtrs {
 unsafe impl Send for SendablePtrs {}
 unsafe impl Sync for SendablePtrs {}
 
+// ═══════════════════════════════════════════════════════════════
+//  Memory Overlap Detection (Debug Mode)
+// ═══════════════════════════════════════════════════════════════
+
+#[cfg(debug_assertions)]
+fn check_no_overlap(ranges: &[(usize, usize)]) {
+    for i in 0..ranges.len() {
+        for j in (i + 1)..ranges.len() {
+            let (start_i, end_i) = ranges[i];
+            let (start_j, end_j) = ranges[j];
+            assert!(
+                end_i <= start_j || end_j <= start_i,
+                "Memory overlap detected: range {}=[{}, {}) overlaps with range {}=[{}, {})",
+                i,
+                start_i,
+                end_i,
+                j,
+                start_j,
+                end_j
+            );
+        }
+    }
+}
+
 impl SendablePtrs {
     #[inline(always)]
     unsafe fn new(
-        v: *mut f32, u: *mut f32, h: *mut f32,
-        r: *mut f32, s: *mut f32, t: *mut f32,
-        i_in: *const f32, spikes: *mut i32, params: *const f32,
+        v: *mut f32,
+        u: *mut f32,
+        h: *mut f32,
+        r: *mut f32,
+        s: *mut f32,
+        t: *mut f32,
+        i_in: *const f32,
+        spikes: *mut i32,
+        params: *const f32,
     ) -> Self {
         Self {
-            state: [v as usize, u as usize, h as usize, r as usize, s as usize, t as usize],
+            state: [
+                v as usize, u as usize, h as usize, r as usize, s as usize, t as usize,
+            ],
             i_in: i_in as usize,
             spikes: spikes as usize,
             params: params as usize,
@@ -116,7 +148,9 @@ macro_rules! load_state_scalar {
         // Compile-time guard via inline const block (stable since 1.79):
         // `assert!` inside const context errors at compile time if M::N_STATE
         // exceeds MAX_STATES — zero runtime cost, fully optimized away.
-        const { assert!(M::N_STATE <= $crate::core::context::MAX_STATES); }
+        const {
+            assert!(M::N_STATE <= $crate::core::context::MAX_STATES);
+        }
         unsafe {
             let mut arr = [0.0f32; $crate::core::context::MAX_STATES];
             let mut k = 0usize;
@@ -126,7 +160,7 @@ macro_rules! load_state_scalar {
             }
             arr
         }
-    }}
+    }};
 }
 
 /// Save `M::N_STATE` scalar channels from a `SimdContext<f32>` back to SoA memory.
@@ -135,7 +169,9 @@ macro_rules! load_state_scalar {
 #[macro_export]
 macro_rules! save_state_scalar {
     ($ptr:expr, $cap:expr, $i:expr, $ctx:expr) => {{
-        const { assert!(M::N_STATE <= $crate::core::context::MAX_STATES); }
+        const {
+            assert!(M::N_STATE <= $crate::core::context::MAX_STATES);
+        }
         unsafe {
             let mut k = 0usize;
             while k < M::N_STATE {
@@ -143,7 +179,7 @@ macro_rules! save_state_scalar {
                 k += 1;
             }
         }
-    }}
+    }};
 }
 
 /// Load `M::N_STATE` SIMD channels from SoA memory into `[S; MAX_STATES]`.
@@ -152,7 +188,9 @@ macro_rules! save_state_scalar {
 #[macro_export]
 macro_rules! load_state_simd {
     ($ptr:expr, $cap:expr, $off:expr, $ty:ty) => {{
-        const { assert!(M::N_STATE <= $crate::core::context::MAX_STATES); }
+        const {
+            assert!(M::N_STATE <= $crate::core::context::MAX_STATES);
+        }
         unsafe {
             let mut arr = [<$ty>::splat(0.0); $crate::core::context::MAX_STATES];
             let mut k = 0usize;
@@ -162,7 +200,7 @@ macro_rules! load_state_simd {
             }
             arr
         }
-    }}
+    }};
 }
 
 /// Save `M::N_STATE` SIMD channels from a `SimdContext<$ty>` back to SoA memory.
@@ -171,7 +209,9 @@ macro_rules! load_state_simd {
 #[macro_export]
 macro_rules! save_state_simd {
     ($ptr:expr, $cap:expr, $off:expr, $ctx:expr, $ty:ty) => {{
-        const { assert!(M::N_STATE <= $crate::core::context::MAX_STATES); }
+        const {
+            assert!(M::N_STATE <= $crate::core::context::MAX_STATES);
+        }
         unsafe {
             let mut k = 0usize;
             while k < M::N_STATE {
@@ -179,7 +219,7 @@ macro_rules! save_state_simd {
                 k += 1;
             }
         }
-    }}
+    }};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -198,13 +238,31 @@ macro_rules! save_state_simd {
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn run_neuron<M: Model>(
-    v: *mut f32, u: *mut f32, h: *mut f32,
-    r: *mut f32, s: *mut f32, t: *mut f32,
-    i_in: *const f32, spikes: *mut i32,
-    params: *const f32, n: usize,
+    v: *mut f32,
+    u: *mut f32,
+    h: *mut f32,
+    r: *mut f32,
+    s: *mut f32,
+    t: *mut f32,
+    i_in: *const f32,
+    spikes: *mut i32,
+    params: *const f32,
+    n: usize,
 ) {
-    run_neuron_ext::<M>(v, u, h, r, s, t, i_in, spikes, params, n,
-                        std::ptr::null(), std::ptr::null())
+    run_neuron_ext::<M>(
+        v,
+        u,
+        h,
+        r,
+        s,
+        t,
+        i_in,
+        spikes,
+        params,
+        n,
+        std::ptr::null(),
+        std::ptr::null(),
+    )
 }
 
 /// Legacy extended runner — accepts exactly **6 state pointers** (v,u,h,r,s,t)
@@ -217,15 +275,26 @@ pub unsafe fn run_neuron<M: Model>(
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn run_neuron_ext<M: Model>(
-    v: *mut f32, u: *mut f32, h: *mut f32,
-    r: *mut f32, s: *mut f32, t: *mut f32,
-    i_in: *const f32, spikes: *mut i32,
-    params: *const f32, n: usize,
+    v: *mut f32,
+    u: *mut f32,
+    h: *mut f32,
+    r: *mut f32,
+    s: *mut f32,
+    t: *mut f32,
+    i_in: *const f32,
+    spikes: *mut i32,
+    params: *const f32,
+    n: usize,
     i_pre_in: *const f32,
     i_post_in: *const f32,
 ) {
-    debug_assert!(M::N_STATE <= 6, "run_neuron* accepts at most 6 state channels; use NeuralPopulation for more");
-    if n == 0 { return; }
+    debug_assert!(
+        M::N_STATE <= 6,
+        "run_neuron* accepts at most 6 state channels; use NeuralPopulation for more"
+    );
+    if n == 0 {
+        return;
+    }
     let n8 = n & !7;
     let dt = *params;
     let ptrs = [v, u, h, r, s, t];
@@ -233,7 +302,9 @@ pub unsafe fn run_neuron_ext<M: Model>(
     for off in (0..n8).step_by(8) {
         if off + 64 < n8 {
             crate::core::util::prefetch_read(params, off + 64);
-            if !v.is_null() { crate::core::util::prefetch_read(v, off + 64); }
+            if !v.is_null() {
+                crate::core::util::prefetch_read(v, off + 64);
+            }
         }
 
         // Load first M::N_STATE channels from the six pointers (rest stay zero).
@@ -248,10 +319,16 @@ pub unsafe fn run_neuron_ext<M: Model>(
             .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
             .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
 
-        let i_pre_val = if i_pre_in.is_null() { f32x8::zero() }
-            else { (i_pre_in.add(off) as *const f32x8).read_unaligned() };
-        let i_post_val = if i_post_in.is_null() { f32x8::zero() }
-            else { (i_post_in.add(off) as *const f32x8).read_unaligned() };
+        let i_pre_val = if i_pre_in.is_null() {
+            f32x8::zero()
+        } else {
+            (i_pre_in.add(off) as *const f32x8).read_unaligned()
+        };
+        let i_post_val = if i_post_in.is_null() {
+            f32x8::zero()
+        } else {
+            (i_post_in.add(off) as *const f32x8).read_unaligned()
+        };
 
         let mut ctx = SimdContext::<f32x8> {
             state,
@@ -275,9 +352,13 @@ pub unsafe fn run_neuron_ext<M: Model>(
         if M::HAS_SPIKE {
             let m = ctx.spike_mask().move_mask();
             if m == 0 {
-                for j in 0..8 { *spikes.add(off + j) = 0; }
+                for j in 0..8 {
+                    *spikes.add(off + j) = 0;
+                }
             } else {
-                for j in 0..8 { *spikes.add(off + j) = (m >> j) & 1; }
+                for j in 0..8 {
+                    *spikes.add(off + j) = (m >> j) & 1;
+                }
             }
         }
     }
@@ -285,8 +366,16 @@ pub unsafe fn run_neuron_ext<M: Model>(
     if n8 < n {
         for i in n8..n {
             let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
-            let i_pre = if i_pre_in.is_null() { 0.0 } else { *i_pre_in.add(i) };
-            let i_post = if i_post_in.is_null() { 0.0 } else { *i_post_in.add(i) };
+            let i_pre = if i_pre_in.is_null() {
+                0.0
+            } else {
+                *i_pre_in.add(i)
+            };
+            let i_post = if i_post_in.is_null() {
+                0.0
+            } else {
+                *i_post_in.add(i)
+            };
 
             let mut state = [0.0f32; MAX_STATES];
             for k in 0..M::N_STATE {
@@ -311,7 +400,9 @@ pub unsafe fn run_neuron_ext<M: Model>(
             for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
                 *p.add(i) = ctx.s(k);
             }
-            if M::HAS_SPIKE { *spikes.add(i) = ctx.spike_mask().move_mask() as i32; }
+            if M::HAS_SPIKE {
+                *spikes.add(i) = ctx.spike_mask().move_mask() as i32;
+            }
         }
     }
 }
@@ -326,17 +417,37 @@ pub unsafe fn run_neuron_ext<M: Model>(
 #[cfg(feature = "rayon")]
 #[inline(always)]
 pub unsafe fn run_neuron_par<M: Model>(
-    v: *mut f32, u: *mut f32, h: *mut f32,
-    r: *mut f32, s: *mut f32, t: *mut f32,
-    i_in: *const f32, spikes: *mut i32,
-    params: *const f32, n: usize,
+    v: *mut f32,
+    u: *mut f32,
+    h: *mut f32,
+    r: *mut f32,
+    s: *mut f32,
+    t: *mut f32,
+    i_in: *const f32,
+    spikes: *mut i32,
+    params: *const f32,
+    n: usize,
     chunk_size: usize,
 ) {
     use rayon::prelude::*;
 
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
     let cs = chunk_size.max(64) & !7;
     let nc = n.div_ceil(cs);
+
+    #[cfg(debug_assertions)]
+    {
+        let ranges: Vec<(usize, usize)> = (0..nc)
+            .map(|ci| {
+                let start = ci * cs;
+                let end = (start + cs).min(n);
+                (start, end)
+            })
+            .collect();
+        check_no_overlap(&ranges);
+    }
 
     let ptrs = SendablePtrs::new(v, u, h, r, s, t, i_in, spikes, params);
 
@@ -358,13 +469,15 @@ pub unsafe fn run_neuron_par<M: Model>(
                 state[k] = (p.add(total_off) as *const f32x8).read_unaligned();
             }
 
-            let i_syn = (i_in_ptr.add(total_off) as *const f32x8).read_unaligned()
+            let i_syn = (i_in_ptr.add(total_off) as *const f32x8)
+                .read_unaligned()
                 .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
                 .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
 
             let mut ctx = SimdContext::<f32x8> {
                 state,
-                params_ptr: NonNull::new(params_ptr as *mut f32).expect("params_ptr must be non-null"),
+                params_ptr: NonNull::new(params_ptr as *mut f32)
+                    .expect("params_ptr must be non-null"),
                 n,
                 off: total_off,
                 i_syn,
@@ -384,9 +497,13 @@ pub unsafe fn run_neuron_par<M: Model>(
             if M::HAS_SPIKE {
                 let m = ctx.spike_mask().move_mask();
                 if m == 0 {
-                    for j in 0..8 { *spikes_ptr.add(total_off + j) = 0; }
+                    for j in 0..8 {
+                        *spikes_ptr.add(total_off + j) = 0;
+                    }
                 } else {
-                    for j in 0..8 { *spikes_ptr.add(total_off + j) = (m >> j) & 1; }
+                    for j in 0..8 {
+                        *spikes_ptr.add(total_off + j) = (m >> j) & 1;
+                    }
                 }
             }
         }
@@ -401,7 +518,8 @@ pub unsafe fn run_neuron_par<M: Model>(
                 }
                 let mut ctx = SimdContext::<f32> {
                     state,
-                    params_ptr: NonNull::new(params_ptr as *mut f32).expect("params_ptr must be non-null"),
+                    params_ptr: NonNull::new(params_ptr as *mut f32)
+                        .expect("params_ptr must be non-null"),
                     n,
                     off: idx,
                     i_syn: ii,
@@ -415,7 +533,9 @@ pub unsafe fn run_neuron_par<M: Model>(
                 for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
                     *p.add(idx) = ctx.s(k);
                 }
-                if M::HAS_SPIKE { *spikes_ptr.add(idx) = ctx.spike_mask().move_mask() as i32; }
+                if M::HAS_SPIKE {
+                    *spikes_ptr.add(idx) = ctx.spike_mask().move_mask() as i32;
+                }
             }
         }
     });
@@ -469,10 +589,16 @@ mod tests {
 
         unsafe {
             run_neuron::<LIFModel>(
-                v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                r.as_mut_ptr(), s_ptr, t_ptr,
-                i_in.as_ptr(), spikes.as_mut_ptr(),
-                params.as_ptr(), n,
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                h.as_mut_ptr(),
+                r.as_mut_ptr(),
+                s_ptr,
+                t_ptr,
+                i_in.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
             );
         }
         assert!(v[0] > -70.0, "v should depolarize");
@@ -482,10 +608,16 @@ mod tests {
     fn test_run_neuron_zero_n() {
         unsafe {
             run_neuron::<LIFModel>(
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
-                std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
-                std::ptr::null(), std::ptr::null_mut(),
-                std::ptr::null(), 0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
             );
         }
         // Should not crash with n=0
@@ -506,11 +638,18 @@ mod tests {
 
         unsafe {
             run_neuron_ext::<LIFModel>(
-                v.as_mut_ptr(), u.as_mut_ptr(), h.as_mut_ptr(),
-                r.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut(),
-                i_in.as_ptr(), spikes.as_mut_ptr(),
-                params.as_ptr(), n,
-                i_pre.as_ptr(), i_post.as_ptr(),
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                h.as_mut_ptr(),
+                r.as_mut_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                i_in.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+                i_pre.as_ptr(),
+                i_post.as_ptr(),
             );
         }
         assert!(v[0] > -70.0, "v should depolarize with buses");

@@ -33,8 +33,16 @@ use core::f32::consts::TAU;
 /// scalar tail uses libm — both on wrapped phases.
 pub fn kuramoto_prepare(phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [f32]) {
     let n = phases.len();
-    assert_eq!(cos_out.len(), n, "kuramoto_prepare: cos_out length mismatch");
-    assert_eq!(sin_out.len(), n, "kuramoto_prepare: sin_out length mismatch");
+    assert_eq!(
+        cos_out.len(),
+        n,
+        "kuramoto_prepare: cos_out length mismatch"
+    );
+    assert_eq!(
+        sin_out.len(),
+        n,
+        "kuramoto_prepare: sin_out length mismatch"
+    );
     let tau_s = f32x8::splat(TAU);
     let n8 = n & !7;
 
@@ -61,7 +69,11 @@ pub fn kuramoto_prepare(phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [
 pub fn kuramoto_update(phases: &mut [f32], omegas: &[f32], coupling: &[f32], dt: f32) {
     let n = phases.len();
     assert_eq!(omegas.len(), n, "kuramoto_update: omegas length mismatch");
-    assert_eq!(coupling.len(), n, "kuramoto_update: coupling length mismatch");
+    assert_eq!(
+        coupling.len(),
+        n,
+        "kuramoto_update: coupling length mismatch"
+    );
     let tau_s = f32x8::splat(TAU);
     let dt_s = f32x8::splat(dt);
     let n8 = n & !7;
@@ -90,10 +102,20 @@ pub fn kuramoto_update(phases: &mut [f32], omegas: &[f32], coupling: &[f32], dt:
 /// [`kuramoto_update`].
 ///
 /// Reference: Kuramoto (1984) "Chemical Oscillations, Waves, and Turbulence".
-pub fn kuramoto_update_viscous(phases: &mut [f32], omegas: &[f32], coupling: &[f32], eta: f32, dt: f32) {
+pub fn kuramoto_update_viscous(
+    phases: &mut [f32],
+    omegas: &[f32],
+    coupling: &[f32],
+    eta: f32,
+    dt: f32,
+) {
     let n = phases.len();
     assert_eq!(omegas.len(), n, "kuramoto_viscous: omegas length mismatch");
-    assert_eq!(coupling.len(), n, "kuramoto_viscous: coupling length mismatch");
+    assert_eq!(
+        coupling.len(),
+        n,
+        "kuramoto_viscous: coupling length mismatch"
+    );
 
     if eta <= 0.0 {
         return kuramoto_update(phases, omegas, coupling, dt);
@@ -224,7 +246,11 @@ mod tests {
         let coupling = vec![0.0f32; n];
         kuramoto_update(&mut phases, &omegas, &coupling, 0.01);
         for i in 0..n {
-            assert!((phases[i] - 0.01).abs() < 1e-4, "kuramoto_update[{i}]: {}", phases[i]);
+            assert!(
+                (phases[i] - 0.01).abs() < 1e-4,
+                "kuramoto_update[{i}]: {}",
+                phases[i]
+            );
         }
     }
 
@@ -236,10 +262,23 @@ mod tests {
         let omegas = vec![1.0f32; n];
         let coupling = vec![0.0f32; n];
         let drives = vec![0.0f32; n];
-        t3_update(&mut phases, &mut amps, &omegas, &coupling, &drives, 0.01, 0.0, 1.0, 10.0);
+        t3_update(
+            &mut phases,
+            &mut amps,
+            &omegas,
+            &coupling,
+            &drives,
+            0.01,
+            0.0,
+            1.0,
+            10.0,
+        );
         assert!(phases[0].abs() > 0.001, "t3_update should advance phases");
         for &r in &amps {
-            assert!((0.001..=10.0).contains(&r), "t3_update amp out of range: {r}");
+            assert!(
+                (0.001..=10.0).contains(&r),
+                "t3_update amp out of range: {r}"
+            );
         }
     }
 
@@ -253,7 +292,10 @@ mod tests {
         kuramoto_update(&mut p1, &omegas, &coupling, 0.01);
         kuramoto_update_viscous(&mut p2, &omegas, &coupling, 0.0, 0.01);
         for i in 0..n {
-            assert!((p1[i] - p2[i]).abs() < 1e-6, "eta=0 should match plain update: [{i}]");
+            assert!(
+                (p1[i] - p2[i]).abs() < 1e-6,
+                "eta=0 should match plain update: [{i}]"
+            );
         }
     }
 }

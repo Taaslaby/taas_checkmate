@@ -39,9 +39,13 @@ mod tests {
 
     #[test]
     fn test_hookes_restoring() {
-        let x = f32x8::splat(1.0);  // stretched
+        let x = f32x8::splat(1.0); // stretched
         let k = f32x8::splat(2.0);
         let f = hookes_law(x, k);
-        assert!((f.to_array()[0] - (-2.0)).abs() < 1e-6, "should restore: {:.4}", f.to_array()[0]);
+        assert!(
+            (f.to_array()[0] - (-2.0)).abs() < 1e-6,
+            "should restore: {:.4}",
+            f.to_array()[0]
+        );
     }
 }

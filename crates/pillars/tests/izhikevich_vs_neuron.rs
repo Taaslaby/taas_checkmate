@@ -6,35 +6,78 @@
 //!   IB (Intrinsically Burst): a=0.02, b=0.2,  c=-55, d=4,   I=10 → burst-pause
 //!   CH (Chattering):         a=0.02, b=0.2,  c=-50, d=2,   I=15 → bursts at ~40Hz
 
-use pillars::prelude::IzhikevichModel;
 use pillars::prelude::run_neuron;
+use pillars::prelude::IzhikevichModel;
 
 struct IzhCfg {
     label: &'static str,
-    a: f32, b: f32, c: f32, d: f32,
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
     i_syn: f32,
-    min_spikes: u32,      // minimum spikes in 1000ms
-    max_spikes: u32,      // maximum spikes in 1000ms
-    min_isi_cv: f32,      // minimum ISI coefficient of variation (adaptation)
+    min_spikes: u32, // minimum spikes in 1000ms
+    max_spikes: u32, // maximum spikes in 1000ms
+    min_isi_cv: f32, // minimum ISI coefficient of variation (adaptation)
 }
 
 const CONFIGS: &[IzhCfg] = &[
-    IzhCfg { label: "RS",  a: 0.02, b: 0.2,  c: -65.0, d: 8.0,  i_syn: 10.0, min_spikes: 3,   max_spikes: 10,  min_isi_cv: 0.0 },
-    IzhCfg { label: "FS",  a: 0.1,  b: 0.2,  c: -65.0, d: 2.0,  i_syn: 30.0, min_spikes: 15,  max_spikes: 60,  min_isi_cv: 0.0 },
-    IzhCfg { label: "IB",  a: 0.02, b: 0.2,  c: -55.0, d: 4.0,  i_syn: 10.0, min_spikes: 3,   max_spikes: 20,  min_isi_cv: 0.5 },
-    IzhCfg { label: "CH",  a: 0.02, b: 0.2,  c: -50.0, d: 2.0,  i_syn: 15.0, min_spikes: 5,   max_spikes: 30,  min_isi_cv: 0.3 },
+    IzhCfg {
+        label: "RS",
+        a: 0.02,
+        b: 0.2,
+        c: -65.0,
+        d: 8.0,
+        i_syn: 10.0,
+        min_spikes: 3,
+        max_spikes: 10,
+        min_isi_cv: 0.0,
+    },
+    IzhCfg {
+        label: "FS",
+        a: 0.1,
+        b: 0.2,
+        c: -65.0,
+        d: 2.0,
+        i_syn: 30.0,
+        min_spikes: 15,
+        max_spikes: 60,
+        min_isi_cv: 0.0,
+    },
+    IzhCfg {
+        label: "IB",
+        a: 0.02,
+        b: 0.2,
+        c: -55.0,
+        d: 4.0,
+        i_syn: 10.0,
+        min_spikes: 3,
+        max_spikes: 20,
+        min_isi_cv: 0.5,
+    },
+    IzhCfg {
+        label: "CH",
+        a: 0.02,
+        b: 0.2,
+        c: -50.0,
+        d: 2.0,
+        i_syn: 15.0,
+        min_spikes: 5,
+        max_spikes: 30,
+        min_isi_cv: 0.3,
+    },
 ];
 
 fn make_params(n: usize, a: f32, b: f32, c: f32, d: f32, dt: f32) -> Vec<f32> {
     let mut p = vec![0.0; n * 7];
     for i in 0..n {
-        p[i] = dt;            // dt
-        p[n+i] = a;           // a
-        p[2*n+i] = b;         // b
-        p[3*n+i] = c;         // c (v_reset)
-        p[4*n+i] = d;         // d
-        p[5*n+i] = 2.0;       // tau_ref
-        p[6*n+i] = 30.0;      // v_thresh
+        p[i] = dt; // dt
+        p[n + i] = a; // a
+        p[2 * n + i] = b; // b
+        p[3 * n + i] = c; // c (v_reset)
+        p[4 * n + i] = d; // d
+        p[5 * n + i] = 2.0; // tau_ref
+        p[6 * n + i] = 30.0; // v_thresh
     }
     p
 }
@@ -57,12 +100,23 @@ fn run_izh(cfg: &IzhCfg, n: usize, dt: f32, t_ms: f32) -> (Vec<u32>, f32) {
     let mut first_spike = true;
 
     for step in 0..n_steps {
-        i_arr.fill(if step >= on && step < off { cfg.i_syn } else { 0.0 });
+        i_arr.fill(if step >= on && step < off {
+            cfg.i_syn
+        } else {
+            0.0
+        });
         unsafe {
             run_neuron::<IzhikevichModel>(
-                v.as_mut_ptr(), u.as_mut_ptr(), refr.as_mut_ptr(),
-                dummy.as_mut_ptr(), dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-                i_arr.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
+                v.as_mut_ptr(),
+                u.as_mut_ptr(),
+                refr.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                i_arr.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
             );
         }
         for j in 0..n {
@@ -95,8 +149,10 @@ fn test_izhikevich_patterns_comprehensive() {
     let n = 8;
     let mut report = String::from("\n📊 PILLARS Izhikevich vs STANDARD PARAMETER SETS\n");
     report.push_str(&format!("{:-<72}\n", ""));
-    report.push_str(&format!("{:<8} {:<8} {:<10} {:<10} {:<12} {:<8}\n",
-        "Config", "Spikes", "Range", "ISI_CV", "Status", ""));
+    report.push_str(&format!(
+        "{:<8} {:<8} {:<10} {:<10} {:<12} {:<8}\n",
+        "Config", "Spikes", "Range", "ISI_CV", "Status", ""
+    ));
     report.push_str(&format!("{:-<72}\n", ""));
 
     let mut ok = 0u32;
@@ -138,8 +194,13 @@ fn test_izhikevich_dt_robustness() {
         let (per, _) = run_izh(cfg, n, dt, 1000.0);
         let avg = per.iter().sum::<u32>() as f32 / n as f32;
         if let Some(p) = prev {
-            assert!((avg - p).abs() <= 6.0,
-                "dt={:.2} spike count changed {:.0}→{:.0}", dt, p, avg);
+            assert!(
+                (avg - p).abs() <= 6.0,
+                "dt={:.2} spike count changed {:.0}→{:.0}",
+                dt,
+                p,
+                avg
+            );
         }
         prev = Some(avg);
     }

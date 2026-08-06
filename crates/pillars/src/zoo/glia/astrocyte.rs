@@ -7,14 +7,10 @@
 //! - **Ca²⁺ wave**: dCa/dt = (0.1 − Ca)·inv_tau_ca + α_ca·I
 //! - **Nernst correction**: E_K_eff = E_K + 26.7·ln(K) (K ≥ 0.5)
 
-use pillars_macros::NeuronModel;
-use crate::core::lane::SimdLane;
-use crate::core::compute::{StepContext, ComputeNeuron};
+use crate::core::compute::{ComputeNeuron, StepContext};
 use crate::core::context::SimdContext;
-use std::marker::PhantomData;
-use std::ptr::NonNull;
-
-
+use crate::core::lane::SimdLane;
+use pillars_macros::NeuronModel;
 
 // ═══════════════════════════════════════════════════════════════
 //  ParamIdx Enum (for manual fill_param / slice access)
@@ -23,19 +19,22 @@ use std::ptr::NonNull;
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub enum AstroParamIdx {
-    DT = 0,           // ms
-    Inv_Tau_Ca = 1,   // 1/τ_ca (ms⁻¹)
-    Inv_Tau_Glu = 2,  // 1/τ_glu (ms⁻¹)
-    Inv_Tau_K = 3,    // 1/τ_k (ms⁻¹)
-    Alpha_Ca = 4,     // Ca²⁺ influx per unit input
-    Alpha_Glu = 5,    // Glu influx per unit input
-    Alpha_K = 6,      // K⁺ influx per unit input
-    Mu = 7,           // volume transmission gain factor
-    G_Gap = 8,        // gap junction strength
+    DT = 0,          // ms
+    Inv_Tau_Ca = 1,  // 1/τ_ca (ms⁻¹)
+    Inv_Tau_Glu = 2, // 1/τ_glu (ms⁻¹)
+    Inv_Tau_K = 3,   // 1/τ_k (ms⁻¹)
+    Alpha_Ca = 4,    // Ca²⁺ influx per unit input
+    Alpha_Glu = 5,   // Glu influx per unit input
+    Alpha_K = 6,     // K⁺ influx per unit input
+    Mu = 7,          // volume transmission gain factor
+    G_Gap = 8,       // gap junction strength
 }
 
 impl From<AstroParamIdx> for usize {
-    #[inline(always)] fn from(idx: AstroParamIdx) -> Self { idx as usize }
+    #[inline(always)]
+    fn from(idx: AstroParamIdx) -> Self {
+        idx as usize
+    }
 }
 
 /// Astrocyte: hidden-state glial modulation.
@@ -52,21 +51,34 @@ impl From<AstroParamIdx> for usize {
 #[derive(NeuronModel)]
 #[no_spike]
 pub struct AstrocyteModel {
-    #[state] pub ca: f32,
-    #[state] pub glu: f32,
-    #[state] pub k: f32,
-    #[state] pub gain: f32,
+    #[state]
+    pub ca: f32,
+    #[state]
+    pub glu: f32,
+    #[state]
+    pub k: f32,
+    #[state]
+    pub gain: f32,
 
-    #[param] pub dt: f32,
-    #[param] pub inv_tau_ca: f32,
-    #[param] pub inv_tau_glu: f32,
-    #[param] pub inv_tau_k: f32,
-    #[param] pub alpha_ca: f32,
-    #[param] pub alpha_glu: f32,
-    #[param] pub alpha_k: f32,
-    #[param] pub mu: f32,
+    #[param]
+    pub dt: f32,
+    #[param]
+    pub inv_tau_ca: f32,
+    #[param]
+    pub inv_tau_glu: f32,
+    #[param]
+    pub inv_tau_k: f32,
+    #[param]
+    pub alpha_ca: f32,
+    #[param]
+    pub alpha_glu: f32,
+    #[param]
+    pub alpha_k: f32,
+    #[param]
+    pub mu: f32,
     /// Gap-junction strength — declared for the synaptic engine, unused in step.
-    #[param] pub g_gap: f32,
+    #[param]
+    pub g_gap: f32,
 }
 
 impl ComputeNeuron for AstrocyteModel {
@@ -88,13 +100,18 @@ impl ComputeNeuron for AstrocyteModel {
 
         // Ca²⁺: relaxes to 0.1, driven by input
         let ca_inf = S::splat(0.1);
-        let new_ca = (state.ca + dt * ((ca_inf - state.ca) * params.inv_tau_ca + params.alpha_ca * inp)).clamp01();
+        let new_ca = (state.ca
+            + dt * ((ca_inf - state.ca) * params.inv_tau_ca + params.alpha_ca * inp))
+            .clamp01();
 
         // Glutamate: pure decay + input-driven influx
-        let new_glu = (state.glu + dt * ((-state.glu) * params.inv_tau_glu + params.alpha_glu * inp)).clamp01();
+        let new_glu = (state.glu
+            + dt * ((-state.glu) * params.inv_tau_glu + params.alpha_glu * inp))
+            .clamp01();
 
         // K⁺: pure decay + input-driven influx (unbounded above 0)
-        let new_k = (state.k + dt * ((-state.k) * params.inv_tau_k + params.alpha_k * inp)).max(zero);
+        let new_k =
+            (state.k + dt * ((-state.k) * params.inv_tau_k + params.alpha_k * inp)).max(zero);
 
         // Volume transmission gain: M = 1 + μ·Ca
         let new_gain = one + params.mu * new_ca;
@@ -109,7 +126,9 @@ impl ComputeNeuron for AstrocyteModel {
 impl AstrocyteModel {
     /// Volume transmission gain M = 1 + μ·Ca.
     #[inline(always)]
-    pub fn gain<S: SimdLane>(ctx: &SimdContext<S>) -> S { ctx.s(3) }
+    pub fn gain<S: SimdLane>(ctx: &SimdContext<S>) -> S {
+        ctx.s(3)
+    }
 
     /// Effective K⁺ reversal potential with Nernst correction:
     /// `E_K_eff = E_K + 26.7·ln(K)` — rising K⁺ depolarises the membrane.
@@ -134,6 +153,8 @@ mod tests {
     use super::*;
     use crate::core::context::MAX_STATES;
     use crate::core::population::run_neuron;
+    use std::marker::PhantomData;
+    use std::ptr::NonNull;
 
     fn make_params(n: usize) -> Vec<f32> {
         let inv_tau_ca = 1.0 / 1000.0;
@@ -156,36 +177,66 @@ mod tests {
 
     #[test]
     fn test_astrocyte_ca_wave() {
-        let n = 8; let params = make_params(n);
-        let mut ca = vec![0.0; n]; let mut glu = vec![0.0; n];
-        let mut k = vec![0.0; n]; let mut gain = vec![1.0; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut ca = vec![0.0; n];
+        let mut glu = vec![0.0; n];
+        let mut k = vec![0.0; n];
+        let mut gain = vec![1.0; n];
         let mut dummy = vec![0.0; n];
-        let i_syn = vec![1.0; n]; let mut spikes = vec![0i32; n];
+        let i_syn = vec![1.0; n];
+        let mut spikes = vec![0i32; n];
 
-        unsafe { run_neuron::<AstrocyteModel>(
-            ca.as_mut_ptr(), glu.as_mut_ptr(), k.as_mut_ptr(), gain.as_mut_ptr(),
-            dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-            i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-        ); }
+        unsafe {
+            run_neuron::<AstrocyteModel>(
+                ca.as_mut_ptr(),
+                glu.as_mut_ptr(),
+                k.as_mut_ptr(),
+                gain.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                i_syn.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+            );
+        }
         assert!(ca[0] > 0.0, "Ca should rise with input: {:.4}", ca[0]);
         assert!(gain[0] >= 1.0, "Gain should be ≥ 1.0: {:.4}", gain[0]);
     }
 
     #[test]
     fn test_astrocyte_silent_decay() {
-        let n = 8; let params = make_params(n);
-        let mut ca = vec![0.5; n]; let mut glu = vec![0.5; n];
-        let mut k = vec![0.5; n]; let mut gain = vec![1.25; n];
+        let n = 8;
+        let params = make_params(n);
+        let mut ca = vec![0.5; n];
+        let mut glu = vec![0.5; n];
+        let mut k = vec![0.5; n];
+        let mut gain = vec![1.25; n];
         let mut dummy = vec![0.0; n];
-        let i_syn = vec![0.0; n]; let mut spikes = vec![0i32; n];
+        let i_syn = vec![0.0; n];
+        let mut spikes = vec![0i32; n];
 
-        unsafe { run_neuron::<AstrocyteModel>(
-            ca.as_mut_ptr(), glu.as_mut_ptr(), k.as_mut_ptr(), gain.as_mut_ptr(),
-            dummy.as_mut_ptr(), dummy.as_mut_ptr(),
-            i_syn.as_ptr(), spikes.as_mut_ptr(), params.as_ptr(), n,
-        ); }
+        unsafe {
+            run_neuron::<AstrocyteModel>(
+                ca.as_mut_ptr(),
+                glu.as_mut_ptr(),
+                k.as_mut_ptr(),
+                gain.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                dummy.as_mut_ptr(),
+                i_syn.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+            );
+        }
         assert!(ca[0] < 0.5, "Ca should decay without input: {:.4}", ca[0]);
-        assert!(glu[0] < 0.5, "Glu should decay without input: {:.4}", glu[0]);
+        assert!(
+            glu[0] < 0.5,
+            "Glu should decay without input: {:.4}",
+            glu[0]
+        );
     }
 
     #[test]
@@ -209,7 +260,10 @@ mod tests {
 
         let ek = AstrocyteModel::ek_eff(&ctx, -80.0);
         let val = ek.to_array()[0];
-        assert!((val - (-61.5)).abs() < 1.0,
-            "E_K_eff with K=2.0 should be ≈ -61.5 (depolarised), got {:.2}", val);
+        assert!(
+            (val - (-61.5)).abs() < 1.0,
+            "E_K_eff with K=2.0 should be ≈ -61.5 (depolarised), got {:.2}",
+            val
+        );
     }
 }

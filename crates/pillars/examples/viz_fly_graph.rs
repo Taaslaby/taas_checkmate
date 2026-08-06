@@ -315,7 +315,11 @@ impl FlyData {
                 }
             }
         }
-        edges.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+        edges.sort_by(|a, b| {
+            b.1.abs()
+                .partial_cmp(&a.1.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         edges.truncate(k);
         edges
     }
@@ -558,8 +562,18 @@ impl FlyApp {
         // атлас — текстура всего мозга (уважает фильтры NT/сторона/степень)
         if self.atlas.is_none() {
             // строится заново при смене проекции или фильтров (atlas = None)
-            let px = build_atlas(data, self.proj, ATLAS, &self.show_nt, &self.show_side, self.min_deg);
-            let img = egui::ColorImage { size: [ATLAS, ATLAS], pixels: px };
+            let px = build_atlas(
+                data,
+                self.proj,
+                ATLAS,
+                &self.show_nt,
+                &self.show_side,
+                self.min_deg,
+            );
+            let img = egui::ColorImage {
+                size: [ATLAS, ATLAS],
+                pixels: px,
+            };
             self.atlas = Some(painter.ctx().load_texture(
                 "fly_atlas",
                 img,
@@ -618,12 +632,20 @@ impl FlyApp {
                     continue;
                 }
                 let w = data.world(i, self.proj);
-                if w.x < wr.min.x - pad || w.x > wr.max.x + pad || w.y < wr.min.y - pad || w.y > wr.max.y + pad {
+                if w.x < wr.min.x - pad
+                    || w.x > wr.max.x + pad
+                    || w.y < wr.min.y - pad
+                    || w.y > wr.max.y + pad
+                {
                     continue;
                 }
                 let c = origin + self.to_screen(w);
                 let col = data.nt(i).color();
-                painter.circle_filled(c, r, Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 235));
+                painter.circle_filled(
+                    c,
+                    r,
+                    Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 235),
+                );
             }
         }
 
@@ -631,14 +653,22 @@ impl FlyApp {
         if let Some(h) = self.hover {
             if h < data.n {
                 let c = origin + self.to_screen(data.world(h, self.proj));
-                painter.circle_stroke(c, 6.0 * self.zoom + 2.0, Stroke::new(1.5_f32, Color32::from_rgb(255, 240, 150)));
+                painter.circle_stroke(
+                    c,
+                    6.0 * self.zoom + 2.0,
+                    Stroke::new(1.5_f32, Color32::from_rgb(255, 240, 150)),
+                );
             }
         }
         // выбранный нейрон
         if let Some(sel) = self.selected {
             if sel < data.n {
                 let c = origin + self.to_screen(data.world(sel, self.proj));
-                painter.circle_stroke(c, 8.0, Stroke::new(2.0_f32, Color32::from_rgb(255, 255, 255)));
+                painter.circle_stroke(
+                    c,
+                    8.0,
+                    Stroke::new(2.0_f32, Color32::from_rgb(255, 255, 255)),
+                );
             }
         }
 
@@ -652,27 +682,46 @@ impl FlyApp {
         let mut x = (wr.min.x / GRID).floor() * GRID;
         while x <= wr.max.x {
             let sx = origin.x + self.to_screen(vec2(x, 0.0)).x;
-            painter.line_segment([pos2(sx, origin.y), pos2(sx, origin.y + size.y)], Stroke::new(1.0_f32, color));
+            painter.line_segment(
+                [pos2(sx, origin.y), pos2(sx, origin.y + size.y)],
+                Stroke::new(1.0_f32, color),
+            );
             x += GRID;
         }
         let mut y = (wr.min.y / GRID).floor() * GRID;
         while y <= wr.max.y {
             let sy = origin.y + self.to_screen(vec2(0.0, y)).y;
-            painter.line_segment([pos2(origin.x, sy), pos2(origin.x + size.x, sy)], Stroke::new(1.0_f32, color));
+            painter.line_segment(
+                [pos2(origin.x, sy), pos2(origin.x + size.x, sy)],
+                Stroke::new(1.0_f32, color),
+            );
             y += GRID;
         }
     }
 
     fn minimap_rect(&self, canvas: Vec2) -> Rect {
-        Rect::from_min_size(vec2(canvas.x - MINIMAP.x - 14.0, canvas.y - MINIMAP.y - 14.0).to_pos2(), MINIMAP)
+        Rect::from_min_size(
+            vec2(canvas.x - MINIMAP.x - 14.0, canvas.y - MINIMAP.y - 14.0).to_pos2(),
+            MINIMAP,
+        )
     }
 
     fn draw_minimap(&self, painter: &egui::Painter, origin: Pos2, canvas: Vec2) {
         let mm = self.minimap_rect(canvas);
         let r = Rect::from_min_size(origin + mm.min.to_vec2(), mm.size());
-        painter.rect_filled(r, Rounding::same(5.0), Color32::from_rgba_unmultiplied(12, 12, 22, 220));
-        painter.rect_stroke(r, Rounding::same(5.0), Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(90, 90, 130, 140)));
-        let Some(data) = self.data.as_ref() else { return };
+        painter.rect_filled(
+            r,
+            Rounding::same(5.0),
+            Color32::from_rgba_unmultiplied(12, 12, 22, 220),
+        );
+        painter.rect_stroke(
+            r,
+            Rounding::same(5.0),
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(90, 90, 130, 140)),
+        );
+        let Some(data) = self.data.as_ref() else {
+            return;
+        };
         // точки нейронов (прореженные) — дешёвый обзор
         let step = (data.n / 4000).max(1);
         for i in (0..data.n).step_by(step) {
@@ -685,7 +734,11 @@ impl FlyApp {
         let wr = self.world_rect(canvas);
         let a = r.min + vec2(wr.min.x, wr.min.y).clamp(Vec2::ZERO, vec2(1.0, 1.0)) * mm.size();
         let b = r.min + vec2(wr.max.x, wr.max.y).clamp(Vec2::ZERO, vec2(1.0, 1.0)) * mm.size();
-        painter.rect_stroke(Rect::from_min_max(a, b), Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_rgb(255, 255, 255)));
+        painter.rect_stroke(
+            Rect::from_min_max(a, b),
+            Rounding::ZERO,
+            Stroke::new(1.0_f32, Color32::from_rgb(255, 255, 255)),
+        );
         painter.text(
             r.min + vec2(5.0, 3.0),
             Align2::LEFT_TOP,
@@ -697,7 +750,8 @@ impl FlyApp {
 
     fn minimap_pan(&mut self, canvas: Vec2, pointer_screen: Vec2) {
         let mm = self.minimap_rect(canvas);
-        let wp = ((pointer_screen - mm.min.to_vec2()) / mm.size()).clamp(Vec2::ZERO, vec2(1.0, 1.0));
+        let wp =
+            ((pointer_screen - mm.min.to_vec2()) / mm.size()).clamp(Vec2::ZERO, vec2(1.0, 1.0));
         self.pan = canvas * 0.5 - wp * (self.zoom * BASE);
     }
 
@@ -705,7 +759,11 @@ impl FlyApp {
     fn top_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new("🪰 Fly Brain Atlas — FAFB v783").strong().size(16.0));
+                ui.label(
+                    egui::RichText::new("🪰 Fly Brain Atlas — FAFB v783")
+                        .strong()
+                        .size(16.0),
+                );
                 ui.separator();
                 ui.label(&self.status);
             });
@@ -741,12 +799,19 @@ impl FlyApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                if ui.add(egui::Slider::new(&mut self.min_deg, 0..=200).text("мин. степень")).changed() {
+                if ui
+                    .add(egui::Slider::new(&mut self.min_deg, 0..=200).text("мин. степень"))
+                    .changed()
+                {
                     self.atlas = None;
                 }
                 ui.separator();
                 ui.label("Поиск:");
-                let resp = ui.add(egui::TextEdit::singleline(&mut self.search).desired_width(200.0).hint_text("cell_type / root_id"));
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .desired_width(200.0)
+                        .hint_text("cell_type / root_id"),
+                );
                 let go = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 if go {
                     self.search_neuron();
@@ -767,78 +832,103 @@ impl FlyApp {
     }
 
     fn right_panel(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("inspector").default_width(320.0).show(ctx, |ui| {
-            ui.heading("Inspector");
-            let Some(data) = self.data.as_ref() else {
-                ui.weak("данные не загружены");
-                return;
-            };
-            // собираем все owned-данные панели пока data заимствован, чтобы
-            // в замыкании ScrollArea можно было мутабельно вызвать self.select
-            enum Panel {
-                None,
-                OutOfRange(usize),
-                Info { items: Vec<(usize, String)> },
-            }
-            let panel = match self.selected {
-                Some(i) if i < data.n => {
-                    let mut items = Vec::with_capacity(self.ego.len());
-                    for &(t, w, out) in &self.ego {
-                        if t >= data.n {
-                            continue;
-                        }
-                        let dir = if out { "→" } else { "←" };
-                        let ct = if data.cell_type(t).is_empty() { "?" } else { data.cell_type(t) };
-                        items.push((t, format!("{dir} #{t}  {ct}  w={w:.1}  {}", data.nt(t).name())));
-                    }
-                    Panel::Info { items }
+        egui::SidePanel::right("inspector")
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("Inspector");
+                let Some(data) = self.data.as_ref() else {
+                    ui.weak("данные не загружены");
+                    return;
+                };
+                // собираем все owned-данные панели пока data заимствован, чтобы
+                // в замыкании ScrollArea можно было мутабельно вызвать self.select
+                enum Panel {
+                    None,
+                    OutOfRange(usize),
+                    Info { items: Vec<(usize, String)> },
                 }
-                None => Panel::None,
-                Some(i) => Panel::OutOfRange(i),
-            };
-            match panel {
-                Panel::Info { items } => {
-                    let Some(i) = self.selected else { return };
-                    let Some(data) = self.data.as_ref() else { return };
-                    ui.label(egui::RichText::new(format!("#{i}")).strong().size(18.0));
-                    ui.label(format!("root_id: {}", data.roots[i]));
-                    ui.label(format!("cell_type: {}", if data.cell_type(i).is_empty() { "—" } else { data.cell_type(i) }));
-                    ui.label(format!("NT: {}", data.nt(i).name()));
-                    let side = ["?", "left", "right", "center"][data.side[i].min(3) as usize];
-                    ui.label(format!("side: {side}"));
-                    ui.label(format!("degree (out): {}", data.degree(i)));
-                    ui.separator();
-                    ui.label(egui::RichText::new(format!("Ego-граф ({} связей):", items.len())).strong());
-                    egui::ScrollArea::vertical().max_height(ui.available_height() - 30.0).show(ui, |ui| {
-                        for (t, label) in items {
-                            let sel = self.selected == Some(t);
-                            if ui.selectable_label(sel, label).clicked() {
-                                self.select(t);
+                let panel = match self.selected {
+                    Some(i) if i < data.n => {
+                        let mut items = Vec::with_capacity(self.ego.len());
+                        for &(t, w, out) in &self.ego {
+                            if t >= data.n {
+                                continue;
                             }
+                            let dir = if out { "→" } else { "←" };
+                            let ct = if data.cell_type(t).is_empty() {
+                                "?"
+                            } else {
+                                data.cell_type(t)
+                            };
+                            items.push((
+                                t,
+                                format!("{dir} #{t}  {ct}  w={w:.1}  {}", data.nt(t).name()),
+                            ));
+                        }
+                        Panel::Info { items }
+                    }
+                    None => Panel::None,
+                    Some(i) => Panel::OutOfRange(i),
+                };
+                match panel {
+                    Panel::Info { items } => {
+                        let Some(i) = self.selected else { return };
+                        let Some(data) = self.data.as_ref() else {
+                            return;
+                        };
+                        ui.label(egui::RichText::new(format!("#{i}")).strong().size(18.0));
+                        ui.label(format!("root_id: {}", data.roots[i]));
+                        ui.label(format!(
+                            "cell_type: {}",
+                            if data.cell_type(i).is_empty() {
+                                "—"
+                            } else {
+                                data.cell_type(i)
+                            }
+                        ));
+                        ui.label(format!("NT: {}", data.nt(i).name()));
+                        let side = ["?", "left", "right", "center"][data.side[i].min(3) as usize];
+                        ui.label(format!("side: {side}"));
+                        ui.label(format!("degree (out): {}", data.degree(i)));
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!("Ego-граф ({} связей):", items.len()))
+                                .strong(),
+                        );
+                        egui::ScrollArea::vertical()
+                            .max_height(ui.available_height() - 30.0)
+                            .show(ui, |ui| {
+                                for (t, label) in items {
+                                    let sel = self.selected == Some(t);
+                                    if ui.selectable_label(sel, label).clicked() {
+                                        self.select(t);
+                                    }
+                                }
+                            });
+                    }
+                    Panel::None => {
+                        ui.weak("Кликните по нейрону — увидите его связи (ego-граф).");
+                    }
+                    Panel::OutOfRange(i) => {
+                        ui.weak(format!("#{i} вне диапазона"));
+                    }
+                }
+                ui.separator();
+                egui::CollapsingHeader::new("Легенда")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for nt in 0..7 {
+                            let n = Nt::from_code(nt as u8);
+                            ui.horizontal(|ui| {
+                                let (r, g, b) = (n.color().r(), n.color().g(), n.color().b());
+                                ui.add(egui::Label::new(
+                                    egui::RichText::new("██").color(Color32::from_rgb(r, g, b)),
+                                ));
+                                ui.label(n.name());
+                            });
                         }
                     });
-                }
-                Panel::None => {
-                    ui.weak("Кликните по нейрону — увидите его связи (ego-граф).");
-                }
-                Panel::OutOfRange(i) => {
-                    ui.weak(format!("#{i} вне диапазона"));
-                }
-            }
-            ui.separator();
-            egui::CollapsingHeader::new("Легенда").default_open(true).show(ui, |ui| {
-                for nt in 0..7 {
-                    let n = Nt::from_code(nt as u8);
-                    ui.horizontal(|ui| {
-                        let (r, g, b) = (n.color().r(), n.color().g(), n.color().b());
-                        ui.add(egui::Label::new(
-                            egui::RichText::new("██").color(Color32::from_rgb(r, g, b)),
-                        ));
-                        ui.label(n.name());
-                    });
-                }
             });
-        });
     }
 
     fn bottom_panel(&mut self, ctx: &egui::Context) {
@@ -849,14 +939,20 @@ impl FlyApp {
                         if h < d.n {
                             ui.label(format!(
                                 "#{h} · {} · {} · deg={}",
-                                if d.cell_type(h).is_empty() { "?" } else { d.cell_type(h) },
+                                if d.cell_type(h).is_empty() {
+                                    "?"
+                                } else {
+                                    d.cell_type(h)
+                                },
                                 d.nt(h).name(),
                                 d.degree(h)
                             ));
                         }
                     }
                 } else {
-                    ui.label(egui::RichText::new("scroll = зум · drag = пан · клик = ego-граф").weak());
+                    ui.label(
+                        egui::RichText::new("scroll = зум · drag = пан · клик = ego-граф").weak(),
+                    );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("zoom {:.0}%", self.zoom * 100.0));
@@ -901,7 +997,8 @@ impl eframe::App for FlyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();
             let canvas_h = (avail.y - 60.0).max(200.0);
-            let (resp, painter) = ui.allocate_painter(vec2(avail.x, canvas_h), Sense::click_and_drag());
+            let (resp, painter) =
+                ui.allocate_painter(vec2(avail.x, canvas_h), Sense::click_and_drag());
             let origin = resp.rect.min;
             let size = resp.rect.size();
             let pointer_screen = resp.interact_pointer_pos().map(|p| p - origin);
@@ -942,13 +1039,15 @@ impl eframe::App for FlyApp {
             } else if !over_mm {
                 // pan / drag по канвасу
                 if resp.dragged_by(PointerButton::Primary) {
-                    let drag_on_node = pointer_world
-                        .and_then(|w| self.nearest(w))
-                        .is_some_and(|n| {
-                            let np = self.data.as_ref().unwrap().world(n, self.proj);
-                            let pp = pointer_world.map(|w| self.to_screen(w)).unwrap_or_default();
-                            (self.to_screen(np) - pp).length() < 12.0
-                        });
+                    let drag_on_node =
+                        pointer_world
+                            .and_then(|w| self.nearest(w))
+                            .is_some_and(|n| {
+                                let np = self.data.as_ref().unwrap().world(n, self.proj);
+                                let pp =
+                                    pointer_world.map(|w| self.to_screen(w)).unwrap_or_default();
+                                (self.to_screen(np) - pp).length() < 12.0
+                            });
                     if !drag_on_node {
                         self.pan += resp.drag_delta();
                     }
@@ -976,7 +1075,11 @@ impl eframe::App for FlyApp {
                     if h < d.n {
                         let _ = resp.on_hover_text(format!(
                             "#{h} · {} · {} · deg={}",
-                            if d.cell_type(h).is_empty() { "?" } else { d.cell_type(h) },
+                            if d.cell_type(h).is_empty() {
+                                "?"
+                            } else {
+                                d.cell_type(h)
+                            },
                             d.nt(h).name(),
                             d.degree(h)
                         ));

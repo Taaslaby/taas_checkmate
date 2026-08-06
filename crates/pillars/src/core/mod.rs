@@ -56,29 +56,31 @@
 
 pub mod arch;
 pub mod buf;
-pub mod lane;
-pub mod lane_f32x8;
-pub mod lane_f32;
+pub mod compute;
 pub mod cond;
 pub mod context;
 pub mod context_ops;
-pub mod compute;
+pub mod lane;
+pub mod lane_f32;
+pub mod lane_f32x8;
 pub mod population;
 pub mod runner;
 pub mod util;
 
-pub use arch::{SimdType, LANES, ALIGN, pad_lanes, num_chunks, tail_len, is_aligned, is_slice_aligned};
-pub use buf::{AlignedVec, split_simd, split_simd_ro};
+pub use arch::{
+    is_aligned, is_slice_aligned, num_chunks, pad_lanes, tail_len, SimdType, ALIGN, LANES,
+};
+pub use buf::{split_simd, split_simd_ro, AlignedVec};
 
 // Consistency-тесты «SIMD vs scalar» вынесены из lane.rs в отдельный файл.
 #[cfg(test)]
 mod lane_tests;
 
-pub use lane::SimdLane;
-pub use cond::Cond;
 pub use compute::{ComputeNeuron, StepContext};
+pub use cond::Cond;
 pub use context::SimdContext;
+pub use lane::SimdLane;
 pub use population::NeuralPopulation;
-pub use runner::{run_neuron, run_neuron_ext};
 #[cfg(feature = "rayon")]
 pub use runner::run_neuron_par;
+pub use runner::{run_neuron, run_neuron_ext};

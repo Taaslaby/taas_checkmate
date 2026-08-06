@@ -9,7 +9,12 @@
 
 /// Population rate decoder: average spike count per neuron over a sliding
 /// window. `spike_buffer` layout is `[time × neuron]` — `buffer[t·n + i]`.
-pub fn population_rate_decode(rates_out: &mut [f32], spike_buffer: &[i32], n_neurons: usize, window: usize) {
+pub fn population_rate_decode(
+    rates_out: &mut [f32],
+    spike_buffer: &[i32],
+    n_neurons: usize,
+    window: usize,
+) {
     let n_out = n_neurons.min(rates_out.len());
     let n_steps = window.min(spike_buffer.len() / n_neurons.max(1));
     let divisor = n_steps.max(1) as f32;
@@ -223,7 +228,10 @@ mod tests {
             buf[t * 2] = 1;
         }
         let rates = firing_rates(&buf, 2, 10, 1.0);
-        assert!((rates[0] - 1.0).abs() < 1e-5, "neuron 0: 1 spike/ms → 1 Hz/ms");
+        assert!(
+            (rates[0] - 1.0).abs() < 1e-5,
+            "neuron 0: 1 spike/ms → 1 Hz/ms"
+        );
         assert_eq!(rates[1], 0.0, "neuron 1 silent");
     }
 
@@ -235,7 +243,11 @@ mod tests {
             buf[t] = 1;
         }
         let isi = compute_isi(&buf[..100], 0.001);
-        assert!((isi[0] - 10.0).abs() < 1e-3, "regular ISI should be 10ms, got {}", isi[0]);
+        assert!(
+            (isi[0] - 10.0).abs() < 1e-3,
+            "regular ISI should be 10ms, got {}",
+            isi[0]
+        );
         let cvs = compute_cvs(&buf, 1, 100, 0.001);
         assert!(cvs[0] < 0.05, "regular firing → CV ≈ 0, got {}", cvs[0]);
     }

@@ -27,8 +27,8 @@
 //! - **Scalar**: Single branch (`if |x/y| < ε`)
 //! - Under `fast-exp` feature: uses polynomial exp approximation
 
-use wide::{f32x8, CmpGt};
 use crate::core::lane::SimdLane;
+use wide::{f32x8, CmpGt};
 
 const VTAP_EPS: f32 = 1e-6;
 
@@ -99,7 +99,11 @@ mod tests {
         let x = f32x8::splat(0.0);
         let y = f32x8::splat(10.0);
         let r = super::vtrap(x, y);
-        assert!((r.to_array()[0] - 10.0).abs() < 0.01, "vtrap(0,10) = {}", r.to_array()[0]);
+        assert!(
+            (r.to_array()[0] - 10.0).abs() < 0.01,
+            "vtrap(0,10) = {}",
+            r.to_array()[0]
+        );
     }
 
     #[test]
@@ -108,7 +112,12 @@ mod tests {
         let y = f32x8::splat(1.0);
         let r = super::vtrap(x, y);
         let expected = 10.0 / (10.0_f32.exp() - 1.0);
-        assert!((r.to_array()[0] - expected).abs() < 0.001, "vtrap(10,1) = {} vs {}", r.to_array()[0], expected);
+        assert!(
+            (r.to_array()[0] - expected).abs() < 0.001,
+            "vtrap(10,1) = {} vs {}",
+            r.to_array()[0],
+            expected
+        );
     }
 
     #[test]
@@ -117,7 +126,12 @@ mod tests {
         let y = f32x8::splat(1.0);
         let r = super::vtrap(x, y);
         let expected = -10.0 / ((-10.0_f32).exp() - 1.0);
-        assert!((r.to_array()[0] - expected).abs() < 0.001, "vtrap(-10,1) = {} vs {}", r.to_array()[0], expected);
+        assert!(
+            (r.to_array()[0] - expected).abs() < 0.001,
+            "vtrap(-10,1) = {} vs {}",
+            r.to_array()[0],
+            expected
+        );
     }
 
     #[test]

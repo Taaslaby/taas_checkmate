@@ -1,50 +1,45 @@
 //! Architecture detection — compile-time SIMD width & alignment.
 //!
-//! Selects the optimal SIMD width for the current target architecture
-//! using `#[cfg]` compile-time dispatch (not `cfg!()` runtime).
+//! The whole crate drives SIMD through **one** type, [`SimdType`] = `f32x8`
+//! (from the `wide` crate). All widths/alignments below are *derived* from
+//! that type (`size_of`/`align_of`), so the constants can never drift apart
+//! from the type they describe — see [`LANES`].
 //!
-//! | Architecture | Type | LANES | ALIGN | Notes |
-//! |:------------|:----|:-----|:------|:------|
-//! | x86_64 AVX2 | f32x8 | 8 | 32 | 256-bit, 8 f32/cycle |
-//! | x86_64 SSE  | f32x4 | 4 | 16 | Legacy CPU fallback |
-//! | ARM NEON    | f32x4 | 4 | 16 | aarch64, 128-bit SIMD |
-//! | WASM simd128| f32x4 | 4 | 16 | 128-bit SIMD |
-//! | Fallback    | f32   | 1 | 4  | Any unknown arch |
+//! | Hardware | `SimdType` | `LANES` | `ALIGN` | Notes |
+//! |:---------|:-----------|:--------|:--------|:------|
+//! | x86_64 AVX2 | f32x8 | 8 | 32 | Native 256-bit, 8 f32/cycle |
+//! | x86_64 SSE / ARM NEON / WASM simd128 | f32x8 | 8 | 32 | `wide` emulates 2×128-bit; SIMD code is identical |
+//!
+//! There is intentionally **no per-architecture SIMD type** (no f32x4/NEON
+//! variant): the chunking logic in `population.rs`, `AlignedVec` padding and
+//! `LANES` are all hardcoded against 8-wide `f32x8`. `LANES` is kept as a
+//! symbolic name for `size_of::<SimdType>() / 4` so call sites read
+//! `pad_lanes(n)` instead of magic `n.div_ceil(8) * 8`.
 
 use wide::f32x8;
 
 // ═══════════════════════════════════════════════════════════
-//  1. SIMD WIDTH — compile-time via #[cfg]
-// ═══════════════════════════════════════════════════════════
-
-// `LANES` = hardware SIMD width (8 on AVX2, 4 on NEON/SSE, 1 on scalar).
-// `wide::f32x8` is ALWAYS 8-wide regardless of hardware — NEON emulates 2×128-bit.
-#[cfg(target_feature = "avx2")]
-mod simd_width { pub const LANES: usize = 8; }
-
-#[cfg(not(target_feature = "avx2"))]
-mod simd_width {
-    pub const LANES: usize = if cfg!(any(target_feature = "neon", target_feature = "sse")) { 4 } else { 1 };
-}
-
-pub use simd_width::*;
-
-/// Alignment for `f32x8` — always 32 bytes (`wide::f32x8` guarantees `align(32)`).
-pub const ALIGN: usize = std::mem::align_of::<f32x8>();
-
-/// SIMD register size in bytes (= LANES * 4).
-pub const SIMD_SIZE_BYTES: usize = LANES * 4;
-
-// ═══════════════════════════════════════════════════════════
-//  2. SIMD TYPE (always f32x8)
+//  1. SIMD TYPE & WIDTH — single source of truth
 // ═══════════════════════════════════════════════════════════
 
 /// SIMD type: always `f32x8` (8-wide). Native 256-bit on AVX2,
 /// emulated as 2× f32x4 on NEON/SSE.
 pub type SimdType = f32x8;
 
+/// SIMD width in f32 elements — **derived from [`SimdType`]** so it can
+/// never disagree with the type it describes (a `cfg!`-based constant
+/// previously reported 4 on NEON/SSE while the actual type was 8-wide,
+/// which would silently mis-chunk buffers).
+pub const LANES: usize = std::mem::size_of::<SimdType>() / std::mem::size_of::<f32>();
+
+/// Alignment for [`SimdType`] (`wide::f32x8` guarantees `align(32)`).
+pub const ALIGN: usize = std::mem::align_of::<SimdType>();
+
+/// SIMD register size in bytes (= [`LANES`] * 4 = `size_of::<SimdType>()`).
+pub const SIMD_SIZE_BYTES: usize = std::mem::size_of::<SimdType>();
+
 // ═══════════════════════════════════════════════════════════
-//  3. ALIGNMENT HELPERS
+//  2. ALIGNMENT HELPERS
 // ═══════════════════════════════════════════════════════════
 
 /// Round `n` up to the nearest multiple of SIMD `LANES`.
@@ -92,6 +87,19 @@ mod tests {
     }
 
     #[test]
+    fn test_lanes_consistent_with_simd_type() {
+        // THE invariant: LANES is derived from the SIMD type, so this can
+        // never fail unless SimdType itself changes (in which case every
+        // constant here must change with it). Previously LANES was a
+        // cfg!-guessed constant that reported 4 on NEON/SSE while the real
+        // type was 8-wide — this test would have caught that.
+        const _: () =
+            assert!(LANES == std::mem::size_of::<SimdType>() / std::mem::size_of::<f32>());
+        const _: () = assert!(SIMD_SIZE_BYTES == std::mem::size_of::<SimdType>());
+        const _: () = assert!(SIMD_SIZE_BYTES == LANES * 4);
+    }
+
+    #[test]
     fn test_pad_lanes_basic() {
         // pad_lanes rounds UP to multiple of LANES
         assert_eq!(pad_lanes(0), 0);
@@ -124,8 +132,14 @@ mod tests {
     fn test_is_aligned() {
         // Stack arrays are NOT guaranteed 32-byte aligned — use AlignedVec.
         let av = crate::core::buf::AlignedVec::new(8, 0.0);
-        assert!(is_slice_aligned(av.as_slice()), "AlignedVec should be SIMD-aligned");
-        assert!(is_aligned(av.as_ptr()), "AlignedVec pointer should be SIMD-aligned");
+        assert!(
+            is_slice_aligned(av.as_slice()),
+            "AlignedVec should be SIMD-aligned"
+        );
+        assert!(
+            is_aligned(av.as_ptr()),
+            "AlignedVec pointer should be SIMD-aligned"
+        );
     }
 
     #[test]
@@ -139,7 +153,13 @@ mod tests {
         for n in [0, 1, 3, 7, 13, 100, 1000] {
             let p = pad_lanes(n);
             assert!(p >= n, "pad_lanes({}) = {} < {}", n, p, n);
-            assert!(p.is_multiple_of(LANES), "pad_lanes({}) = {} not multiple of LANES={}", n, p, LANES);
+            assert!(
+                p.is_multiple_of(LANES),
+                "pad_lanes({}) = {} not multiple of LANES={}",
+                n,
+                p,
+                LANES
+            );
         }
     }
 }
