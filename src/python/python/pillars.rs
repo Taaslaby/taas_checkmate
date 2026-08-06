@@ -869,6 +869,104 @@ impl PyConnectomeBrain {
     }
 }
 
+/// Conductance-based connectome brain — LIF population with receptor kinetics
+/// (AMPA/NMDA/GABA) via pillars-connectome `SynapticBrain`.
+///
+/// Receptors per synapse: `0=AMPA, 1=NMDA, 2=GABA_A, 3=GABA_B, 4=nAChR,
+/// 5=GluCl, 6=mAChR` (parallel to `col_idx`).
+///
+/// ```python
+/// from taas_checkmate.pillars import SynapticConnectomeBrain
+/// brain = SynapticConnectomeBrain(
+///     row_ptr, col_idx, weights, delays,
+///     receptor_types, dt=0.5)
+/// brain.step(i_in, spikes)   # i_in = external current, spikes written in-place
+/// ```
+#[pyclass(name = "SynapticConnectomeBrain", module = "taas_checkmate.pillars")]
+pub struct PySynapticConnectomeBrain {
+    inner: pillars_connectome::SynapticBrain<pillars::zoo::LIFModel>,
+    n: usize,
+}
+
+#[pymethods]
+impl PySynapticConnectomeBrain {
+    /// Build from CSR arrays + per-synapse receptor types + dt (ms).
+    #[new]
+    fn new(
+        row_ptr: Vec<u32>,
+        col_idx: Vec<u32>,
+        weights: Vec<f32>,
+        delays: Vec<u8>,
+        receptor_types: Vec<u8>,
+        dt: f32,
+    ) -> Self {
+        let conn = pillars_connectome::ConnectomeData::from_csr(
+            row_ptr, col_idx, weights, delays, receptor_types,
+        );
+        let n = conn.n_neurons();
+        let mut brain =
+            pillars_connectome::SynapticBrain::<pillars::zoo::LIFModel>::from_connectome(&conn, dt);
+        brain.configure(|p| {
+            p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), dt);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), 0.1);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_rest.into(), -70.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_thresh.into(), -54.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_reset.into(), -70.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::tau_ref.into(), 2.0);
+            p.fill_state(pillars::zoo::LIFModelStateIdx::v.into(), -70.0);
+        });
+        Self { inner: brain, n }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), v));
+    }
+    #[setter]
+    fn set_inv_tau_m(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), v));
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::v_thresh.into(), v));
+    }
+
+    /// Run one step: decay conductances, compute I_syn = Σ g·(E_rev−V), step
+    /// neurons, jump post-synaptic conductances on spikes. `i_in` = external
+    /// current, `spikes_out` written in-place.
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        let spikes = self.inner.step(i_ro.as_slice()?);
+        let out = sp_rw.as_slice_mut()?;
+        let n = self.n.min(out.len());
+        out[..n].copy_from_slice(&spikes[..n]);
+        Ok(())
+    }
+
+    /// Membrane potential as numpy array (copy-on-read).
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state(0)))
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.n
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SynapticConnectomeBrain(n={})", self.n)
+    }
+}
+
 /// Register the pillars sub-module in the Python module tree.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "pillars")?;
@@ -879,6 +977,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyRatePopulation>()?;
     sub.add_class::<PyAdExPopulation>()?;
     sub.add_class::<PyConnectomeBrain>()?;
+    sub.add_class::<PySynapticConnectomeBrain>()?;
     m.add_submodule(&sub)?;
     // Also register at root for convenience
     m.add_class::<PyLIFPopulation>()?;
@@ -888,5 +987,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRatePopulation>()?;
     m.add_class::<PyAdExPopulation>()?;
     m.add_class::<PyConnectomeBrain>()?;
+    m.add_class::<PySynapticConnectomeBrain>()?;
     Ok(())
 }
