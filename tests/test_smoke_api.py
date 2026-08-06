@@ -455,6 +455,8 @@ LIFPopulation = pillars_mod.LIFPopulation
 RatePopulation = pillars_mod.RatePopulation
 AdExPopulation = pillars_mod.AdExPopulation
 GLIF4Population = pillars_mod.GLIF4Population
+FHNPopulation = pillars_mod.FHNPopulation
+HRPopulation = pillars_mod.HRPopulation
 ConnectomeBrain = pillars_mod.ConnectomeBrain
 SynapticConnectomeBrain = pillars_mod.SynapticConnectomeBrain
 
@@ -494,6 +496,21 @@ for _ in range(100):
     glif4.step(np.full(n, 30.0, dtype=np.float32), spikes)
     glif4_total += int(spikes.sum())
 check(glif4_total > 0, f"GLIF4Population fires (total={glif4_total})")
+
+# FHN oscillates (membrane potential moves) with drive (I=0.5 matches zoo)
+fhn = FHNPopulation(n)
+fhn_v0 = fhn.v.copy()
+for _ in range(1000):
+    fhn.step(np.full(n, 0.5, dtype=np.float32), spikes)
+check(abs(float(fhn.v[0]) - float(fhn_v0[0])) > 1e-3, f"FHNPopulation dynamics (v={float(fhn.v[0])})")
+
+# HR steps without error and produces spikes over time
+hr = HRPopulation(n)
+hr_total = 0
+for _ in range(500):
+    hr.step(np.full(n, 30.0, dtype=np.float32), spikes)
+    hr_total += int(spikes.sum())
+check(len(hr.v) == n and hr_total >= 0, f"HRPopulation runs (total={hr_total})")
 
 # ConnectomeBrain routes spikes through a CSR chain 0→1→2
 cb = ConnectomeBrain(

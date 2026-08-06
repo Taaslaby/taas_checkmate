@@ -834,6 +834,123 @@ impl PyGLIF4Population {
     }
 }
 
+/// FitzHugh–Nagumo population (2D relaxation oscillator).
+///
+/// Params: `dt`, `inv_tau_w`, `a`, `b`, `v_thresh`. States: `v`, `w`, `was_below`.
+#[pyclass(name = "FHNPopulation", module = "taas_checkmate.pillars")]
+pub struct PyFHNPopulation {
+    inner: NeuralPopulation<pillars::zoo::FHNModel>,
+}
+
+#[pymethods]
+impl PyFHNPopulation {
+    #[new]
+    fn new(n: usize) -> Self {
+        let mut pop = NeuralPopulation::<pillars::zoo::FHNModel>::new(n);
+        // dt=0.01 ms — FHN relaxation is numerically unstable at larger dt.
+        pop.fill_param(pillars::zoo::FHNModelParamIdx::dt.into(), 0.01);
+        pop.fill_param(pillars::zoo::FHNModelParamIdx::inv_tau_w.into(), 1.0 / 10.0);
+        pop.fill_param(pillars::zoo::FHNModelParamIdx::a.into(), 0.7);
+        pop.fill_param(pillars::zoo::FHNModelParamIdx::b.into(), 0.8);
+        pop.fill_param(pillars::zoo::FHNModelParamIdx::v_thresh.into(), 0.5);
+        pop.fill_state(pillars::zoo::FHNModelStateIdx::v.into(), 0.0);
+        pop.fill_state(pillars::zoo::FHNModelStateIdx::w.into(), 0.0);
+        Self { inner: pop }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::FHNModelParamIdx::dt.into(), v);
+    }
+
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state_slice(0)))
+    }
+
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("FHNPopulation(n={})", self.inner.len())
+    }
+}
+
+/// Hindmarsh–Rose population (bursting 3D model).
+///
+/// Params: `dt`, `a`, `b`, `c`, `d`, `r`, `s`, `x_r`, `v_thresh`.
+/// States: `x`, `y`, `z`.
+#[pyclass(name = "HRPopulation", module = "taas_checkmate.pillars")]
+pub struct PyHRPopulation {
+    inner: NeuralPopulation<pillars::zoo::HRModel>,
+}
+
+#[pymethods]
+impl PyHRPopulation {
+    #[new]
+    fn new(n: usize) -> Self {
+        let mut pop = NeuralPopulation::<pillars::zoo::HRModel>::new(n);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::dt.into(), 0.5);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::a.into(), 1.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::b.into(), 3.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::c.into(), 1.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::d.into(), 5.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::r.into(), 0.001);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::s.into(), 4.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::x_r.into(), -1.6);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::v_thresh.into(), 0.0);
+        pop.fill_state(pillars::zoo::HRModelStateIdx::x.into(), -1.0);
+        pop.fill_state(pillars::zoo::HRModelStateIdx::y.into(), 0.0);
+        pop.fill_state(pillars::zoo::HRModelStateIdx::z.into(), 0.0);
+        Self { inner: pop }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .fill_param(pillars::zoo::HRModelParamIdx::dt.into(), v);
+    }
+
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state_slice(0)))
+    }
+
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
+        let i_ro = i_in.readonly();
+        let mut sp_rw = spikes_out.readwrite();
+        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        Ok(())
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("HRPopulation(n={})", self.inner.len())
+    }
+}
+
 /// Connectome brain on the pillars engine — LIF population wired to a CSR
 /// graph, spike-routed with axonal delays.
 ///
@@ -1053,6 +1170,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyRatePopulation>()?;
     sub.add_class::<PyAdExPopulation>()?;
     sub.add_class::<PyGLIF4Population>()?;
+    sub.add_class::<PyFHNPopulation>()?;
+    sub.add_class::<PyHRPopulation>()?;
     sub.add_class::<PyConnectomeBrain>()?;
     sub.add_class::<PySynapticConnectomeBrain>()?;
     m.add_submodule(&sub)?;
@@ -1064,6 +1183,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRatePopulation>()?;
     m.add_class::<PyAdExPopulation>()?;
     m.add_class::<PyGLIF4Population>()?;
+    m.add_class::<PyFHNPopulation>()?;
+    m.add_class::<PyHRPopulation>()?;
     m.add_class::<PyConnectomeBrain>()?;
     m.add_class::<PySynapticConnectomeBrain>()?;
     Ok(())
