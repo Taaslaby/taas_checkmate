@@ -26,7 +26,7 @@ use crate::data::ConnectomeData;
 /// - [`Brain::from_connectome`] — one population for the whole connectome.
 /// - [`Brain::from_groups`] — one population per named group, with
 ///   cross-group spike routing (the "sensory → motor" style orchestration).
-pub struct Brain<M: Model + 'static> {
+pub struct Brain<M: Model + 'static + Send + Sync> {
     net: Network,
     /// Single-population mode: the whole connectome.
     pop: Option<PopulationId>,
@@ -35,7 +35,7 @@ pub struct Brain<M: Model + 'static> {
     _marker: std::marker::PhantomData<M>,
 }
 
-impl<M: Model + 'static> Brain<M> {
+impl<M: Model + 'static + Send + Sync> Brain<M> {
     /// Build a one-population brain: every connectome neuron is an `M` neuron,
     /// wired exactly as the CSR graph says (weights + axonal delays).
     ///

@@ -19,7 +19,7 @@ use crate::data::ConnectomeData;
 /// Same neuron engine as [`Brain`](crate::Brain) (`NeuralPopulation<M>`), but
 /// the step loop owns the receptor kinetics instead of delegating to the
 /// instant-current `api::Network`.
-pub struct SynapticBrain<M: Model + 'static> {
+pub struct SynapticBrain<M: Model + 'static + Send + Sync> {
     pop: NeuralPopulation<M>,
     kinetics: SynapticKinetics,
     factors: DecayFactors,
@@ -29,7 +29,7 @@ pub struct SynapticBrain<M: Model + 'static> {
     n: usize,
 }
 
-impl<M: Model + 'static> SynapticBrain<M> {
+impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
     /// Build from a connectome. `dt` is the simulation time step (ms), used
     /// for the conductance decay factors.
     ///

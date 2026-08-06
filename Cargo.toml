@@ -39,6 +39,7 @@ name = "taas_checkmate"
 [dependencies]
 # Internal crates (always present)
 pillars = { path = "crates/pillars" }
+pillars-connectome = { path = "crates/pillars-connectome", optional = true }
 taas-kernels = { path = "crates/kernels" }
 taas-core = { path = "crates/core" }
 taas-train = { path = "crates/train" }
@@ -103,7 +104,7 @@ cuda = ["t3", "connectome",
         "taas-train/cuda"]
 
 # Python bindings
-python = ["dep:pyo3", "dep:numpy", "connectome", "t3", "taas-train/connectome", "karmac"]
+python = ["dep:pyo3", "dep:numpy", "dep:pillars-connectome", "connectome", "t3", "taas-train/connectome", "karmac"]
 
 # Unity C ABI (inlined in main crate, like python)
 unity = ["connectome"]

@@ -165,7 +165,7 @@ impl Network {
     ///
     /// # Panics
     /// Panics if `build()` has already been called.
-    pub fn add_population<M: Model + 'static>(&mut self, count: usize) -> PopulationId {
+    pub fn add_population<M: Model + 'static + Send + Sync>(&mut self, count: usize) -> PopulationId {
         assert!(self.graph.is_none(), "Cannot add populations after build()");
         let id = self.pops.len();
         let pop = crate::api::NeuralPopulation::<M>::new(count);
@@ -330,7 +330,7 @@ impl Network {
     /// Typed mutable access to a population (safe downcast).
     ///
     /// Returns `None` if `pop` is invalid or the population is not of type `M`.
-    pub fn pop_typed_mut<M: Model + 'static>(
+    pub fn pop_typed_mut<M: Model + 'static + Send + Sync>(
         &mut self,
         pop: PopulationId,
     ) -> Option<&mut crate::api::NeuralPopulation<M>> {
@@ -350,7 +350,7 @@ impl Network {
     /// - If `pop` is out of range
     /// - If the population is **not** of model type `M` (create it with
     ///   [`Network::add_population`] using the same `M`)
-    pub fn configure<M: Model + 'static>(
+    pub fn configure<M: Model + 'static + Send + Sync>(
         &mut self,
         pop: PopulationId,
         f: impl FnOnce(&mut crate::api::NeuralPopulation<M>),

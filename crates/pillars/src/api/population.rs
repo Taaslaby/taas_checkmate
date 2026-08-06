@@ -26,7 +26,7 @@ pub type PopulationId = usize;
 ///
 /// Enables heterogeneous populations (LIF + HH + Izhikevich) in one
 /// [`Network`](crate::api::Network).
-pub trait Population: 'static {
+pub trait Population: 'static + Send + Sync {
     /// Advance one time step.
     ///
     /// `i_in` — input currents, length >= `len()`.
@@ -37,7 +37,9 @@ pub trait Population: 'static {
     fn len(&self) -> usize;
 
     /// Returns `true` if the population has no neurons.
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Read-only access to a state column.
     fn state_slice(&self, col: usize) -> &[f32];
@@ -52,15 +54,16 @@ pub trait Population: 'static {
     fn fill_param(&mut self, col: usize, value: f32);
 
     /// Fill a state column with a value (all neurons).
-    fn fill_state(&mut self, col: usize, value: f32);/// Erase to `dyn Any` for safe typed downcasting.
-///
-/// Required (not defaulted) so the trait stays object-safe and callable
-/// through `&mut dyn Population`. Implementors must erase `self`; without
-/// it, [`Network::pop_typed_mut`](crate::api::Network::pop_typed_mut) silently returns `None`.
+    fn fill_state(&mut self, col: usize, value: f32);
+    /// Erase to `dyn Any` for safe typed downcasting.
+    ///
+    /// Required (not defaulted) so the trait stays object-safe and callable
+    /// through `&mut dyn Population`. Implementors must erase `self`; without
+    /// it, [`Network::pop_typed_mut`](crate::api::Network::pop_typed_mut) silently returns `None`.
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<M: Model + 'static> Population for NeuralPopulation<M> {
+impl<M: Model + 'static + Send + Sync> Population for NeuralPopulation<M> {
     #[inline(always)]
     fn step(&mut self, i_in: &[f32], spikes_out: &mut [i32]) {
         self.step(i_in, spikes_out)

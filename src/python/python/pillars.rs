@@ -663,6 +663,116 @@ impl PyRatePopulation {
     }
 }
 
+/// Connectome brain on the pillars engine — LIF population wired to a CSR
+/// graph, spike-routed with axonal delays.
+///
+/// Build from CSR arrays (the connectome format):
+/// ```python
+/// from taas_checkmate.pillars import ConnectomeBrain
+/// brain = ConnectomeBrain(row_ptr, col_idx, weights, delays)
+/// brain.dt = 0.5
+/// brain.inject([0], [30.0])
+/// brain.step()
+/// spikes = brain.spikes  # numpy (n,)
+/// ```
+#[pyclass(name = "ConnectomeBrain", module = "taas_checkmate.pillars")]
+pub struct PyConnectomeBrain {
+    inner: pillars_connectome::Brain<pillars::zoo::LIFModel>,
+    n: usize,
+}
+
+#[pymethods]
+impl PyConnectomeBrain {
+    /// Build from CSR arrays: row_ptr (u32), col_idx (u32), weights (f32),
+    /// delays (u8, steps). `n_neurons = len(row_ptr) - 1`.
+    #[new]
+    fn new(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: Vec<f32>, delays: Vec<u8>) -> Self {
+        let conn = pillars_connectome::ConnectomeData::from_csr(
+            row_ptr,
+            col_idx,
+            weights,
+            delays,
+            vec![0u8; 0], // receptor types: instant current path
+        );
+        let n = conn.n_neurons();
+        let mut brain =
+            pillars_connectome::Brain::<pillars::zoo::LIFModel>::from_connectome(&conn);
+        brain.configure(|p| {
+            p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), 1.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), 0.1);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_rest.into(), -70.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_thresh.into(), -54.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::v_reset.into(), -70.0);
+            p.fill_param(pillars::zoo::LIFModelParamIdx::tau_ref.into(), 2.0);
+            p.fill_state(pillars::zoo::LIFModelStateIdx::v.into(), -70.0);
+        });
+        Self { inner: brain, n }
+    }
+
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), v));
+    }
+    #[setter]
+    fn set_inv_tau_m(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), v));
+    }
+    #[setter]
+    fn set_v_rest(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::v_rest.into(), v));
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::v_thresh.into(), v));
+    }
+    #[setter]
+    fn set_v_reset(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::v_reset.into(), v));
+    }
+    #[setter]
+    fn set_tau_ref(&mut self, v: f32) {
+        self.inner
+            .configure(|p| p.fill_param(pillars::zoo::LIFModelParamIdx::tau_ref.into(), v));
+    }
+
+    /// Inject external current into specific neurons (arrives next step).
+    fn inject(&mut self, indices: Vec<u32>, values: Vec<f32>) -> PyResult<()> {
+        self.inner.inject(&indices, &values);
+        Ok(())
+    }
+
+    /// Advance one simulation step (all neurons + spike routing).
+    fn step(&mut self) {
+        self.inner.step();
+    }
+
+    /// Current spike mask (0/1 per neuron) after the last step.
+    #[getter]
+    fn spikes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.spikes()))
+    }
+
+    /// Membrane potential as numpy array (copy-on-read).
+    #[getter]
+    fn v<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        Ok(PyArray1::from_slice(py, self.inner.state(0)))
+    }
+
+    #[getter]
+    fn n(&self) -> usize {
+        self.n
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ConnectomeBrain(n={})", self.n)
+    }
+}
+
 /// Register the pillars sub-module in the Python module tree.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "pillars")?;
@@ -671,6 +781,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyHHPopulation>()?;
     sub.add_class::<PyVSNPopulation>()?;
     sub.add_class::<PyRatePopulation>()?;
+    sub.add_class::<PyConnectomeBrain>()?;
     m.add_submodule(&sub)?;
     // Also register at root for convenience
     m.add_class::<PyLIFPopulation>()?;
@@ -678,5 +789,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHHPopulation>()?;
     m.add_class::<PyVSNPopulation>()?;
     m.add_class::<PyRatePopulation>()?;
+    m.add_class::<PyConnectomeBrain>()?;
     Ok(())
 }
