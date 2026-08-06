@@ -446,6 +446,81 @@ if traj:
     check("T2SpikeGradTrajectory" in repr(t), f"traj.__repr__: {repr(t)}")
 
 
+# ─── 19. Pillars populations ───────────────────────────────
+
+section("19. Pillars populations")
+
+from taas_checkmate import pillars as pillars_mod
+LIFPopulation = pillars_mod.LIFPopulation
+RatePopulation = pillars_mod.RatePopulation
+AdExPopulation = pillars_mod.AdExPopulation
+ConnectomeBrain = pillars_mod.ConnectomeBrain
+SynapticConnectomeBrain = pillars_mod.SynapticConnectomeBrain
+
+n = 8
+i_in = np.full(n, 30.0, dtype=np.float32)
+spikes = np.zeros(n, dtype=np.int32)
+
+# LIF fires with drive
+pop = LIFPopulation(n)
+pop.dt = 0.5
+total = 0
+for _ in range(100):
+    pop.step(i_in, spikes)
+    total += int(spikes.sum())
+check(total > 0, f"LIFPopulation fires (total={total})")
+
+# Rate integrates toward input and spikes after crossing 0.5
+rate = RatePopulation(n)
+rate.tau = 0.005
+rate_r = rate.r.copy()
+for _ in range(200):
+    rate.step(np.full(n, 1.0, dtype=np.float32), spikes)
+    rate_r = rate.r
+check(float(rate_r[0]) > 0.99, f"RatePopulation saturates toward 1 (r={float(rate_r[0])})")
+
+# AdEx steps without error
+adex = AdExPopulation(n)
+adex.tau_m = 20.0
+adex.step(i_in, spikes)
+check(len(adex.v) == n, f"AdExPopulation v shape {len(adex.v)}")
+
+# ConnectomeBrain routes spikes through a CSR chain 0→1→2
+cb = ConnectomeBrain(
+    np.array([0, 1, 2, 2], dtype=np.uint32),
+    np.array([1, 2], dtype=np.uint32),
+    np.array([50.0, 50.0], dtype=np.float32),
+    np.array([0, 0], dtype=np.uint8),
+)
+cb.inv_tau_m = 1.0  # fast tau → a single pulse crosses threshold
+cb_n2 = 0
+for _ in range(200):
+    cb.inject(np.array([0], dtype=np.uint32), np.array([50.0], dtype=np.float32))
+    cb.step()
+    cb_n2 += int(cb.spikes[2])
+check(cb_n2 > 0, f"ConnectomeBrain propagates 0→1→2 (neuron2={cb_n2})")
+
+# SynapticConnectomeBrain: AMPA conductance drives post
+scb = SynapticConnectomeBrain(
+    np.array([0, 1, 1], dtype=np.uint32),
+    np.array([1], dtype=np.uint32),
+    np.array([1.0], dtype=np.float32),
+    np.array([0], dtype=np.uint8),
+    np.array([0], dtype=np.uint8),  # AMPA
+    dt=0.5,
+)
+scb.inv_tau_m = 1.0
+scb_n1 = 0
+ext = np.zeros(2, dtype=np.float32)
+out = np.zeros(2, dtype=np.int32)
+for _ in range(200):
+    ext[0] = 50.0
+    scb.step(ext, out)
+    scb_n1 += int(out[1])
+    ext[0] = 0.0
+check(scb_n1 > 0, f"SynapticConnectomeBrain AMPA drives post (neuron1={scb_n1})")
+
+
 # ─── Summary ──────────────────────────────────────────────
 
 section("Summary")

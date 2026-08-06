@@ -783,12 +783,13 @@ impl PyConnectomeBrain {
     /// delays (u8, steps). `n_neurons = len(row_ptr) - 1`.
     #[new]
     fn new(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: Vec<f32>, delays: Vec<u8>) -> Self {
+        let n_syn = weights.len();
         let conn = pillars_connectome::ConnectomeData::from_csr(
             row_ptr,
             col_idx,
             weights,
             delays,
-            vec![0u8; 0], // receptor types: instant current path
+            vec![0u8; n_syn], // receptor types: instant current path
         );
         let n = conn.n_neurons();
         let mut brain =
