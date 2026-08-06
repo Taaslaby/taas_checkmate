@@ -167,7 +167,18 @@ impl PyConnectomeData {
 ///
 /// Supports models: ``"lif"``, ``"izhikevich"``, ``"rate"``, ``"psi"``, ``"hh"``.
 ///
-/// Usage:
+/// > **Deprecated** — the pillars-native path replaces this for the models it
+/// > covers (LIF, Izhikevich, Rate, and conductance-based synapses). Prefer:
+/// > ```python
+/// > from taas_checkmate import pillars
+/// > brain = pillars.ConnectomeBrain(row_ptr, col_idx, weights, delays)   # instant
+/// > brain = pillars.SynapticConnectomeBrain(row_ptr, col_idx, weights,
+/// >                                        delays, receptor_types, dt)   # conductance
+/// > ```
+/// > `BrainSimulator` remains for the models without a pillars equivalent yet
+/// > (``"gco"``, dual-Izhikevich, GPU paths).
+///
+/// Usage (legacy):
 /// ```python
 /// sim = tcm.BrainSimulator(conn.n_neurons, "lif")
 /// spike_buf = sim.step_batch(conn, n_steps=50, dt_ms=0.5, external_I=...)
