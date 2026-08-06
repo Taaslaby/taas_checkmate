@@ -36,20 +36,30 @@ jobs:
       - name: Clippy (no features)
         run: cargo clippy --no-default-features -- -D warnings
 
-      - name: Clippy (all features)
-        run: cargo clippy --all-features 2>&1 | grep -E 'error' | head -10 && exit 1 || echo 'No errors'
+      # Every feature EXCEPT `cuda`/`python`. `cuda` → cuda-kernels → its
+      # build.rs compiles .cu with nvcc and panics "nvcc not found" on runners
+      # without a CUDA toolkit (ubuntu-latest has none). `python` needs numpy
+      # headers at build time — covered by the dedicated `python` job below.
+      # Same strategy as the `windows` job's `--exclude cuda-kernels`.
+      - name: Clippy (all features, no CUDA)
+        run: cargo clippy --features "t3,train,connectome,karmac,unity" -- -D warnings
+
+      # Opt-in precise-exp mode for HH gates — compiled nowhere else, so a
+      # regression here would rot silently. Default build keeps fast_exp.
+      - name: Clippy (hh-precise-gates)
+        run: cargo clippy -p pillars --features hh-precise-gates --lib -- -D warnings
 
       - name: Build (no features)
         run: cargo build --no-default-features
 
-      - name: Build (all features)
-        run: cargo build --all-features
+      - name: Build (all features, no CUDA)
+        run: cargo build --features "t3,train,connectome,karmac,unity"
 
       - name: Run tests (no features)
         run: cargo test --no-default-features
 
-      - name: Run tests (all features)
-        run: cargo test --all-features
+      - name: Run tests (all features, no CUDA)
+        run: cargo test --features "t3,train,connectome,karmac,unity"
 
       - name: Run kernel progonator tests (integration)
         run: cargo test -p taas-kernels --test kernel_progon
