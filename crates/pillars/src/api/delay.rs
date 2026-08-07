@@ -75,8 +75,19 @@ impl DelayBuffer {
     }
 
     /// Add `weight` to neuron `post` in the slot for step `slot`.
+    ///
+    /// # Panics
+    /// If `post >= len()`.
     #[inline(always)]
     pub fn add(&mut self, slot: usize, post: usize, weight: f32) {
+        // Явная проверка вместо голой слайс-паники: logical_len буфера
+        // равен n_neurons, но сообщение «index out of bounds» не говорит,
+        // что именно post-индекс сети невалиден.
+        assert!(
+            post < self.n_neurons,
+            "DelayBuffer::add: post index {post} >= n_neurons {}",
+            self.n_neurons
+        );
         self.slots[slot % MAX_DELAY_SLOTS].as_mut_slice()[post] += weight;
     }
 
@@ -128,5 +139,14 @@ mod tests {
         buf.add(2, 1, 3.0);
         buf.add(2, 1, 4.0);
         assert_eq!(buf.slot(2), &[0.0, 7.0]);
+    }
+
+    /// post за пределами сети — явная ошибка с понятным сообщением
+    /// вместо голой slice-паники «index out of bounds».
+    #[test]
+    #[should_panic(expected = "post index")]
+    fn test_delay_post_out_of_bounds() {
+        let mut buf = DelayBuffer::new(4);
+        buf.add(0, 5, 1.0);
     }
 }

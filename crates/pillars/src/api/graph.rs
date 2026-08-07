@@ -148,11 +148,23 @@ impl SparseGraph {
     ///
     /// # Panics
     /// - If lengths mismatch
+    /// - If `row_ptr` is not monotonically non-decreasing or starts ≠ 0
     /// - If any `col_idx` index >= `n_neurons`
     /// - If `delays` contains values >= `MAX_DELAY_SLOTS`
     pub fn from_csr(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: &[f32], delays: &[u8]) -> Self {
         assert!(!row_ptr.is_empty(), "row_ptr must have at least one entry");
         let n_neurons = row_ptr.len() - 1;
+        assert_eq!(row_ptr[0], 0, "CSR row_ptr must start at 0");
+        // Монотонность: без неё neighbors(i) получает start > end и паникует
+        // (или возвращает мусор) глубоко в симуляции вместо ошибки на загрузке.
+        for w in row_ptr.windows(2) {
+            assert!(
+                w[0] <= w[1],
+                "CSR row_ptr must be monotonically non-decreasing: {} > {}",
+                w[0],
+                w[1]
+            );
+        }
         assert_eq!(
             row_ptr[n_neurons] as usize,
             col_idx.len(),
@@ -313,5 +325,41 @@ mod tests {
     #[should_panic(expected = "delay")]
     fn test_graph_delay_oob() {
         SparseGraph::from_triplets(3, &[0], &[1], &[1.0], &[99]);
+    }
+
+    /// Немонотонный row_ptr должен отклоняться на загрузке, а не паниковать
+    /// позже внутри neighbors() с непонятным slice-индексом.
+    #[test]
+    #[should_panic(expected = "monotonically")]
+    fn test_from_csr_non_monotonic() {
+        // row_ptr = [0, 3, 1, 4] — 3 > 1, невалидный CSR
+        SparseGraph::from_csr(
+            vec![0, 3, 1, 4],
+            vec![0, 1, 2, 0],
+            &[1.0, 1.0, 1.0, 1.0],
+            &[0, 0, 0, 0],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "start at 0")]
+    fn test_from_csr_bad_start() {
+        SparseGraph::from_csr(vec![1, 4], vec![0, 1, 2, 0], &[1.0; 4], &[0; 4]);
+    }
+
+    /// Валидный CSR проходит — проверка не слишком строгая.
+    #[test]
+    fn test_from_csr_valid_roundtrip() {
+        let g = SparseGraph::from_csr(
+            vec![0, 2, 2, 4],
+            vec![1, 2, 0, 1],
+            &[1.0, 2.0, 3.0, 4.0],
+            &[0, 1, 2, 3],
+        );
+        assert_eq!(g.num_neurons(), 3);
+        assert_eq!(g.num_synapses(), 4);
+        assert_eq!(g.degree(0), 2);
+        assert_eq!(g.degree(1), 0); // пустая строка — легальна
+        assert_eq!(g.degree(2), 2);
     }
 }

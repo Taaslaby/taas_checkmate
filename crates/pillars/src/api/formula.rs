@@ -273,6 +273,26 @@ pub fn run_program<S: SimdLane>(program: &[OpNode], regs: &mut [S; N_REGS], dt: 
     spike
 }
 
+/// Number of input pins each opcode actually reads during execution.
+///
+/// `in_regs` — фиксированный `[usize; 4]`, так что чтение лишнего пина не
+/// паникует — но незаполненный пин молча читает дефолтный регистр S0
+/// (мембранный потенциал) вместо ошибки — трудноловимый логический баг.
+/// Редактор графов должен вызывать [`validate_program_arity`] с числом
+/// реально подключённых пинов.
+#[inline]
+pub const fn op_arity(kind: OpKind) -> usize {
+    match kind {
+        OpKind::Leak => 4,
+        OpKind::Ohmic | OpKind::Blend | OpKind::GateStep => 3,
+        OpKind::FireReset | OpKind::RefrClamp => 3,
+        OpKind::Add | OpKind::Mul | OpKind::Div | OpKind::CmpGe | OpKind::CmpGt => 2,
+        OpKind::RefrTimer => 2,
+        OpKind::Sigmoid | OpKind::Exp | OpKind::Scope => 1,
+        OpKind::Const | OpKind::Stimulus | OpKind::State => 0,
+    }
+}
+
 /// Validate a program before execution — every output and input register
 /// must be within `0..N_REGS`.
 ///
@@ -287,13 +307,44 @@ pub fn validate_program(program: &[OpNode]) -> Result<(), String> {
                 op.kind, op.out_reg
             ));
         }
-        for (j, &r) in op.in_regs.iter().enumerate() {
+        // Проверяем только реально читаемые пины: неиспользуемые могут
+        // содержать мусор от редактора — это не ошибка.
+        for (j, &r) in op.in_regs.iter().take(op_arity(op.kind)).enumerate() {
             if r >= N_REGS {
                 return Err(format!(
                     "op {i} ({:?}): in_reg[{j}] {r} >= N_REGS ({N_REGS})",
                     op.kind
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Strict validation for graph editors: additionally checks that the caller
+/// connected at least [`op_arity`] input pins to each node.
+///
+/// `connected_pins[i]` — число пинов, реально подключённых к узлу `i`
+/// (длина должна совпадать с `program.len()`).
+pub fn validate_program_arity(
+    program: &[OpNode],
+    connected_pins: &[usize],
+) -> Result<(), String> {
+    validate_program(program)?;
+    if connected_pins.len() != program.len() {
+        return Err(format!(
+            "connected_pins length {} != program length {}",
+            connected_pins.len(),
+            program.len()
+        ));
+    }
+    for (i, (op, &pins)) in program.iter().zip(connected_pins).enumerate() {
+        let need = op_arity(op.kind);
+        if pins < need {
+            return Err(format!(
+                "op {i} ({:?}): {pins} input pin(s) connected, needs {need}",
+                op.kind
+            ));
         }
     }
     Ok(())
@@ -513,6 +564,32 @@ mod tests {
         let bad_in = vec![OpNode::new(OpKind::Add, t0).with_in(&[t0, N_REGS])];
         let err = validate_program(&bad_in).unwrap_err();
         assert!(err.contains("in_reg"), "{err}");
+    }
+
+    /// Мусор в НЕиспользуемом пине не должен валить валидацию:
+    /// Add читает только пины 0..2, пин 3 интерпретатор не трогает.
+    #[test]
+    fn test_validate_ignores_unused_pins() {
+        let t0 = TEMP0;
+        let mut op = OpNode::new(OpKind::Add, t0).with_in(&[t0, t0]);
+        op.in_regs[3] = usize::MAX; // мусор в неиспользуемом пине
+        assert!(
+            validate_program(&[op]).is_ok(),
+            "unused pin garbage must not fail validation"
+        );
+    }
+
+    /// Строгая арность: редактор сообщает, сколько пинов подключено.
+    #[test]
+    fn test_validate_arity() {
+        let t0 = TEMP0;
+        let prog = vec![OpNode::new(OpKind::Leak, t0).with_in(&[S0, I_SYN, t0, t0])];
+        // Leak требует 4 пина: 4 подключено — ok, 2 — ошибка
+        assert!(validate_program_arity(&prog, &[4]).is_ok());
+        let err = validate_program_arity(&prog, &[2]).unwrap_err();
+        assert!(err.contains("needs 4"), "{err}");
+        // Длины не совпали — тоже ошибка
+        assert!(validate_program_arity(&prog, &[]).is_err());
     }
 
     #[test]
