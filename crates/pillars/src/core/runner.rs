@@ -288,10 +288,15 @@ pub unsafe fn run_neuron_ext<M: Model>(
     i_pre_in: *const f32,
     i_post_in: *const f32,
 ) {
-    debug_assert!(
-        M::N_STATE <= 6,
-        "run_neuron* accepts at most 6 state channels; use NeuralPopulation for more"
-    );
+    // Compile-time guard (вычисляется при мономорфизации): модель с >6
+    // состояниями в legacy-runner читала бы несуществующие указатели.
+    // Раньше был debug_assert — в release проверка исчезала (UB).
+    const {
+        assert!(
+            M::N_STATE <= 6,
+            "run_neuron* accepts at most 6 state channels; use NeuralPopulation for more"
+        );
+    }
     if n == 0 {
         return;
     }

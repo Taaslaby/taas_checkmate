@@ -85,9 +85,16 @@ impl<M: Model> NeuralPopulation<M> {
     /// Create a new population. Memory is padded to 8-wide SIMD alignment.
     #[must_use]
     pub fn new(count: usize) -> Self {
-        let capacity = count.div_ceil(8) * 8;
-        let param_count = capacity * M::N_PARAMS;
-        let state_count = capacity * M::N_STATE;
+        let capacity = count
+            .checked_add(7)
+            .map(|x| x / 8 * 8)
+            .expect("NeuralPopulation: count overflows when rounding to SIMD width");
+        let param_count = capacity
+            .checked_mul(M::N_PARAMS)
+            .expect("NeuralPopulation: params size overflow");
+        let state_count = capacity
+            .checked_mul(M::N_STATE)
+            .expect("NeuralPopulation: state size overflow");
 
         Self {
             params: AlignedVec::new(param_count, 0.0),

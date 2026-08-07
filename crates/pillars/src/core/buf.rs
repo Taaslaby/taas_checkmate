@@ -50,10 +50,14 @@ impl AlignedVec {
     /// Create a new aligned buffer. `len` is rounded up to the next multiple of 8.
     #[must_use]
     pub fn new(len: usize, init: f32) -> Self {
-        // `Layout::array` does the multiplication overflow-checked — a raw
-        // `capacity * 4` could wrap for external `len` near usize::MAX/4 and
-        // allocate too little, letting the init loop write out of bounds.
-        let capacity = len.div_ceil(8) * 8;
+        // Overflow-checked rounding: `div_ceil(8) * 8` без проверки в release
+        // заворачивается при len > usize::MAX − 7 → маленькая capacity →
+        // Layout успешно выделяет мало → init-цикл `0..len` пишет за границу.
+        // (`Layout::array` проверяет только capacity*4, но не это умножение.)
+        let capacity = len
+            .checked_add(7)
+            .map(|x| x / 8 * 8)
+            .expect("AlignedVec: len overflows when rounding to SIMD width");
         if capacity == 0 {
             return Self {
                 ptr: NonNull::dangling(),
@@ -356,6 +360,21 @@ mod tests {
     fn test_aligned_vec_zero() {
         let v = AlignedVec::new(0, 0.0);
         assert_eq!(v.len(), 0);
+    }
+
+    /// len у границы usize должен паниковать при округлении вверх,
+    /// а не заворачиваться в маленькую capacity (OOB-запись в release).
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn test_aligned_vec_len_overflow() {
+        let _ = AlignedVec::new(usize::MAX, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn test_aligned_vec_len_near_max() {
+        // usize::MAX - 3: +7 переполняется в checked_add
+        let _ = AlignedVec::new(usize::MAX - 3, 0.0);
     }
 
     #[test]
