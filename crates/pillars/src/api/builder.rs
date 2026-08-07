@@ -816,99 +816,6 @@ impl ModelBuilder for HAAPBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_izhikevich_builder_rs() {
-        let pop = IzhikevichBuilder::new(100)
-            .dt(0.5)
-            .pattern(IzhPattern::RegularSpiking)
-            .build();
-        assert_eq!(pop.len(), 100);
-    }
-
-    #[test]
-    fn test_izhikevich_builder_fs() {
-        let pop = IzhikevichBuilder::new(50)
-            .pattern(IzhPattern::FastSpiking)
-            .v_thresh(25.0)
-            .build();
-        assert_eq!(pop.len(), 50);
-    }
-
-    #[test]
-    fn test_lif_builder() {
-        let pop = LIFBuilder::new(200)
-            .dt(0.1)
-            .tau_m(15.0)
-            .v_thresh(-50.0)
-            .build();
-        assert_eq!(pop.len(), 200);
-    }
-
-    #[test]
-    fn test_adex_builder() {
-        let pop = AdExBuilder::new(150).dt(0.05).delta_t(3.0).build();
-        assert_eq!(pop.len(), 150);
-    }
-
-    #[test]
-    fn test_hh_builder_preset() {
-        let pop = HHBuilder::new(300)
-            .dt(0.1)
-            .preset(HHPreset::Cortical37C)
-            .build();
-        assert_eq!(pop.len(), 300);
-    }
-
-    #[test]
-    fn test_haap_builder() {
-        let pop = HAAPBuilder::new(80).dt(0.1).tau_u(80.0).build();
-        assert_eq!(pop.len(), 80);
-    }
-
-    #[test]
-    fn test_generic_model_builder_trait() {
-        fn build_any<B: ModelBuilder>(builder: B) -> usize {
-            builder.build().len()
-        }
-
-        assert_eq!(build_any(LIFBuilder::new(10)), 10);
-        assert_eq!(build_any(HHBuilder::new(20)), 20);
-        assert_eq!(build_any(HAAPBuilder::new(30)), 30);
-        assert_eq!(build_any(VSNBuilder::new(40)), 40);
-    }
-
-    #[test]
-    fn test_vsn_builder() {
-        let pop = VSNBuilder::new(120)
-            .dt(0.5)
-            .beta(0.95)
-            .surrogate_gain(15.0)
-            .build();
-        assert_eq!(pop.len(), 120);
-    }
-
-    #[test]
-    fn test_universal_builder() {
-        use crate::zoo::VSNParamIdx;
-
-        let pop = UniversalBuilder::<VSNModel>::new(50)
-            .param(VSNParamIdx::DT, 0.5)
-            .param(VSNParamIdx::Inv_Tau_M, 0.1)
-            .param(VSNParamIdx::V_Rest, -70.0)
-            .param(VSNParamIdx::V_Thresh, -54.0)
-            .param(VSNParamIdx::V_Reset, -70.0)
-            .param(VSNParamIdx::Tau_Ref, 2.0)
-            .param(VSNParamIdx::Beta, 0.9)
-            .param(VSNParamIdx::Surrogate_Gain, 10.0)
-            .state(0usize, -70.0)
-            .build();
-        assert_eq!(pop.len(), 50);
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  Universal Population Builder
@@ -1101,5 +1008,100 @@ impl ModelBuilder for VSNBuilder {
     type Model = VSNModel;
     fn build(self) -> NeuralPopulation<VSNModel> {
         self.build()
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_izhikevich_builder_rs() {
+        let pop = IzhikevichBuilder::new(100)
+            .dt(0.5)
+            .pattern(IzhPattern::RegularSpiking)
+            .build();
+        assert_eq!(pop.len(), 100);
+    }
+
+    #[test]
+    fn test_izhikevich_builder_fs() {
+        let pop = IzhikevichBuilder::new(50)
+            .pattern(IzhPattern::FastSpiking)
+            .v_thresh(25.0)
+            .build();
+        assert_eq!(pop.len(), 50);
+    }
+
+    #[test]
+    fn test_lif_builder() {
+        let pop = LIFBuilder::new(200)
+            .dt(0.1)
+            .tau_m(15.0)
+            .v_thresh(-50.0)
+            .build();
+        assert_eq!(pop.len(), 200);
+    }
+
+    #[test]
+    fn test_adex_builder() {
+        let pop = AdExBuilder::new(150).dt(0.05).delta_t(3.0).build();
+        assert_eq!(pop.len(), 150);
+    }
+
+    #[test]
+    fn test_hh_builder_preset() {
+        let pop = HHBuilder::new(300)
+            .dt(0.1)
+            .preset(HHPreset::Cortical37C)
+            .build();
+        assert_eq!(pop.len(), 300);
+    }
+
+    #[test]
+    fn test_haap_builder() {
+        let pop = HAAPBuilder::new(80).dt(0.1).tau_u(80.0).build();
+        assert_eq!(pop.len(), 80);
+    }
+
+    #[test]
+    fn test_generic_model_builder_trait() {
+        fn build_any<B: ModelBuilder>(builder: B) -> usize {
+            builder.build().len()
+        }
+
+        assert_eq!(build_any(LIFBuilder::new(10)), 10);
+        assert_eq!(build_any(HHBuilder::new(20)), 20);
+        assert_eq!(build_any(HAAPBuilder::new(30)), 30);
+        assert_eq!(build_any(VSNBuilder::new(40)), 40);
+    }
+
+    #[test]
+    fn test_vsn_builder() {
+        let pop = VSNBuilder::new(120)
+            .dt(0.5)
+            .beta(0.95)
+            .surrogate_gain(15.0)
+            .build();
+        assert_eq!(pop.len(), 120);
+    }
+
+    #[test]
+    fn test_universal_builder() {
+        use crate::zoo::VSNParamIdx;
+
+        let pop = UniversalBuilder::<VSNModel>::new(50)
+            .param(VSNParamIdx::DT, 0.5)
+            .param(VSNParamIdx::Inv_Tau_M, 0.1)
+            .param(VSNParamIdx::V_Rest, -70.0)
+            .param(VSNParamIdx::V_Thresh, -54.0)
+            .param(VSNParamIdx::V_Reset, -70.0)
+            .param(VSNParamIdx::Tau_Ref, 2.0)
+            .param(VSNParamIdx::Beta, 0.9)
+            .param(VSNParamIdx::Surrogate_Gain, 10.0)
+            .state(0usize, -70.0)
+            .build();
+        assert_eq!(pop.len(), 50);
     }
 }
