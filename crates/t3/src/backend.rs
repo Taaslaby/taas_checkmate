@@ -204,13 +204,9 @@ impl T3Backend for ScalarBackend {
         lr: f32,
         eps: f32,
     ) {
-        // μ = lr / (||states||² + eps)
-        let norm_sq: f32 = states.iter().map(|&x| x * x).sum();
-        let mu = lr / (norm_sq + eps);
-        for (w, &s) in weights.iter_mut().zip(states.iter()) {
-            *w += mu * error * s;
-        }
-        bias[0] += mu * error;
+        // Single-source: delegates to the consolidated `taas_kernels::safe`
+        // wrapper, which routes to `pillars::kernels::decode::nlms_train`.
+        crate::kernels::nlms_train(weights, bias, states, error, lr, eps);
     }
 
     fn kalman_update(
@@ -221,14 +217,12 @@ impl T3Backend for ScalarBackend {
         error: f32,
         s: f32,
     ) {
-        if s <= 1e-12 {
-            return;
-        }
-        for i in 0..weights.len() {
-            let k = cov[i] * states[i] / s;
-            weights[i] += k * error;
-            cov[i] -= k * cov[i];
-        }
+        // Canonical single-source → `pillars::kernels::decode::kalman_update`.
+        // NOTE: this replaces the legacy scalar tail, which updated cov with
+        // `cov -= k·cov` (missing the ·states· term). Pillars applies the
+        // corrected `cov -= k·states·cov` (floored at 1e-12) asserted by
+        // `kernels/tests/decode_anchor.rs` — a bug fix, not a semantic drift.
+        crate::kernels::kalman_update(weights, cov, states, error, s);
     }
 }
 
