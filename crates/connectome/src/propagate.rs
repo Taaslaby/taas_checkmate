@@ -152,10 +152,27 @@ pub fn csr_propagate_conductance_from_queue(
     kinetics: &mut SynapticKinetics,
     scale: f32,
 ) -> u32 {
-    let max_syn = col_indices
-        .len()
-        .min(values.len())
-        .min(receptor_types.len());
+    // The conductance path requires one receptor type per synapse (built via
+    // `ConnectomeData::build_receptor_types*`). An empty or short array means the
+    // caller followed the instant-current route (`csr_propagate_from_queue`,
+    // nt_types only) but landed here — fail loudly instead of silently dropping
+    // every synapse (old behaviour: `max_syn = min(..)` collapsed to 0).
+    assert_eq!(
+        col_indices.len(),
+        values.len(),
+        "csr_propagate_conductance_from_queue: col_indices.len() ({}·) != values.len() ({}·)",
+        col_indices.len(),
+        values.len()
+    );
+    assert_eq!(
+        col_indices.len(),
+        receptor_types.len(),
+        "csr_propagate_conductance_from_queue: receptor_types must be per-synapse \
+         ({} entries, got {} — call ConnectomeData::build_receptor_types())",
+        col_indices.len(),
+        receptor_types.len()
+    );
+    let max_syn = col_indices.len();
     let mut total = 0u32;
     while let Some(id) = queue.pop() {
         let i = id as usize;

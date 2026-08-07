@@ -32,7 +32,8 @@ pub struct PoissonGenerator {
 }
 
 impl PoissonGenerator {
-    /// Create a generator for `n` neurons with step `dt` (ms).
+    /// Create a generator for `n` neurons with step `dt` (seconds — the spike
+    /// probability is `p = rate[Hz]·dt`, NOT `rate·dt/1000`).
     /// `n` is padded to a multiple of 8 for SIMD-friendly layouts.
     pub fn new(n: usize, dt: f32, seed: u32) -> Self {
         let n_pad = n.div_ceil(8) * 8;

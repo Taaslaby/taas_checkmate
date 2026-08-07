@@ -1295,11 +1295,30 @@ fn transpile_method(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> String {
                     }
                 })
                 .expect("powi::<N> needs integer N");
-            let mut s = format!("({recv})");
-            for _ in 1..n {
-                s = format!("(({s}) * ({recv}))");
+            assert!(
+                n <= 16,
+                "powi::<N>: N must be <= 16 (mirrors the CPU `powi` const-assert)"
+            );
+            match n {
+                // Mirror the CPU `powi_impl` special cases exactly, keeping the
+                // same multiply grouping (bit-identical rounding): 0→1.0f,
+                // 1→x, 2→x², 3→((x·x)·x), 4→s=x·x; s·s (two multiplies).
+                0 => "1.0f".to_string(),
+                1 => format!("({recv})"),
+                2 => format!("(({recv})*({recv}))"),
+                3 => format!("((({recv})*({recv}))*({recv}))"),
+                4 => format!("((({recv})*({recv}))*(({recv})*({recv})))"),
+                // General case (5..=16): repeated multiplication. Semantically
+                // exact; grouping differs from the CPU binary-exponentiation
+                // loop only at last-bit rounding — acceptable for CUDA parity.
+                _ => {
+                    let mut s = format!("({recv})");
+                    for _ in 1..n {
+                        s = format!("(({s}) * ({recv}))");
+                    }
+                    s
+                }
             }
-            s
         }
         "mul_add" => format!(
             "fmaf({recv}, {}, {})",

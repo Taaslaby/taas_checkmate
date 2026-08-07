@@ -7,7 +7,8 @@
 //! ```text
 //! τ_E·dE/dt = -E + σ(w_EE·E - w_EI·I + I_ext)
 //! τ_I·dI/dt = -I + σ(w_IE·E - w_II·I)
-//! σ(x) = 1/(1+exp(-β·x))
+//! σ(x) = 1/(1+exp(-x/β))   (β is a width parameter, not a gain: the code
+//! uses `sigmoid(x, 0, β)`, which divides the input by β)
 //! ```
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.

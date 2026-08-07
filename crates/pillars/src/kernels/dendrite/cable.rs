@@ -188,7 +188,7 @@ impl CableDendriteState {
                         + load8(self.g_glucl.as_ptr(), idx) * (e_glucl - vd)
                         + load8(self.g_machr.as_ptr(), idx) * (e_machr - vd);
 
-                    let mut dV_dt = (vs - vd) * inv_Rm;
+                    let mut dV_dt = (vs - vd) * inv_Rm * inv_Cm;
 
                     if has_axial {
                         if comp > 0 {
@@ -232,7 +232,7 @@ impl CableDendriteState {
                     + self.g_glucl[idx] * (E_GLUCL - vd)
                     + self.g_machr[idx] * (E_MACHR - vd);
 
-                let mut dV_dt = (vs - vd) / R_m + i_syn / C_m;
+                let mut dV_dt = (vs - vd) / R_m / C_m + i_syn / C_m;
 
                 if has_axial {
                     let inv_Ra_scalar = 1.0 / R_a;
@@ -791,25 +791,40 @@ mod tests {
 
     #[test]
     fn test_active_dendritic_channels() {
+        // Under the corrected cable equation (R_m leak divided by C_m) a single
+        // strong AMPA jump is numerically unstable for forward Euler at
+        // C_m=0.1, dt=0.5 (τ_eff = C_m/(1/R_m + g) ≈ 0.07 ms ≪ dt) — the old
+        // "jump once, then decay" setup only "passed" via the ±100 mV clamp
+        // masking the divergence. Use a weak SUSTAINED drive (stable) and drop
+        // the K⁺ channel so Na⁺ genuinely depolarizes: active > passive.
         let config = DendriteConfig {
             n_compartments: 2,
             R_a: 100.0,
             R_m: 100.0,
             C_m: 0.1,
         };
-        let mut dend = CableDendriteState::new(4, &config);
-        dend.enable_active_channels(10.0, 5.0, 2.0);
         let V_soma = vec![-65.0f32; 4];
         let factors = DendriteDecayFactors::new(0.5);
-        dend.jump_ampa(0, 0, 1.5);
-        for _ in 0..10 {
-            dend.decay_conductances(&factors);
-            dend.cable_step(&V_soma, 0.5);
+
+        let mut passive = CableDendriteState::new(4, &config);
+        let mut active = CableDendriteState::new(4, &config);
+        active.enable_active_channels(10.0, 0.0, 2.0); // Na⁺ + Ca²⁺, no K⁺
+
+        for _ in 0..20 {
+            // Sustained weak AMPA drive: stable for forward Euler (τ_eff ≈ 0.9 ms).
+            passive.jump_ampa(0, 0, 0.1);
+            active.jump_ampa(0, 0, 0.1);
+            passive.decay_conductances(&factors);
+            active.decay_conductances(&factors);
+            passive.cable_step(&V_soma, 0.5);
+            active.cable_step(&V_soma, 0.5);
         }
-        let v0 = dend.v_dend(0, 0);
+        let v_passive = passive.v_dend(0, 0);
+        let v_active = active.v_dend(0, 0);
+        eprintln!("active {v_active:.2} mV vs passive {v_passive:.2} mV");
         assert!(
-            v0 > -50.0,
-            "active Na⁺ should boost depolarization: {v0:.2} mV"
+            v_active > v_passive,
+            "active Na⁺ should boost depolarization: passive {v_passive:.2} mV, active {v_active:.2} mV"
         );
     }
 

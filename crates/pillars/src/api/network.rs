@@ -362,9 +362,10 @@ impl Network {
 
     /// Inject external current into specific neurons of a population.
     ///
-    /// The current is added to the delay-buffer slot that the **next**
-    /// [`Network::step`] reads, so it arrives exactly one step later
-    /// (summing with any synaptically-delivered current). This is the safe
+    /// The current is added to the delay-buffer slot `step_counter % MAX_DELAY`
+    /// — the **same** slot the next [`Network::step`] reads, so it drives the
+    /// population in that step (same-step arrival, not one step later),
+    /// summing with any synaptically-delivered current. This is the safe
     /// way to drive populations from the outside — the node editor's
     /// "Stimulus" node and integration tests use it.
     ///

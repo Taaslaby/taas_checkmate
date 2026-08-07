@@ -34,6 +34,142 @@
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use pillars::prelude::*;
+use pillars::zoo::TriangulatedModel;
+
+// ═══════════════════════════════════════════════════════════════
+//  define_population! — shared pyo3 boilerplate for the point-neuron
+//  zoo models. Each model gets the same surface: scalar param setters
+//  (all neurons) + numpy param getters, scalar state setters + numpy
+//  state getters, set_param_array/set_state_array, step(i, spikes),
+//  n and __repr__. Only the param/state column layout and init defaults
+//  differ per model, so they are declared once per model below, keeping
+//  each new wrapper a few lines instead of ~150 lines of near-identical
+//  boilerplate.
+// ═══════════════════════════════════════════════════════════════
+
+macro_rules! define_population {
+    (
+        docs: $docs:literal,
+        class: $class:ident,
+        py_name: $pyname:literal,
+        model: $model:ty,
+        // Each entry: (property_name_as_ident, setter_fn_name, column_idx, default).
+        // The setter name is spelled out because macro_rules cannot splice an
+        // ident into `set_$p` — and pyo3 infers the property name from the
+        // method name verbatim (strips `set_`), so setter must match getter.
+        // Defaults are passed as data (not as a call-site block) because a
+        // `$init:block` metavariable is hygienic: identifiers inside it cannot
+        // see `pop` defined in this macro's expansion.
+        params: [ $( ( $p:ident , $pset:ident , $p_idx:literal , $p_default:expr ) ),* $(,)? ],
+        states: [ $( ( $s:ident , $sset:ident , $s_idx:literal , $s_default:expr ) ),* $(,)? ],
+        // Optional extra methods spliced into the same #[pymethods] block.
+        // pyo3 rejects a second #[pymethods] impl for one class, so anything
+        // model-specific (e.g. Triangulated::calibrate_lif) goes here.
+        extra: { $( $m:item )* }
+    ) => {
+        #[doc = $docs]
+        #[pyclass(name = $pyname, module = "taas_checkmate.pillars")]
+        pub struct $class {
+            inner: NeuralPopulation<$model>,
+        }
+
+        #[pymethods]
+        impl $class {
+            #[new]
+            fn new(n: usize) -> Self {
+                let mut pop = NeuralPopulation::<$model>::new(n);
+                $(
+                    pop.fill_param($p_idx, $p_default);
+                )*
+                $(
+                    pop.fill_state($s_idx, $s_default);
+                )*
+                Self { inner: pop }
+            }
+
+            // ─── Params: getter (numpy) + scalar setter ───
+            $(
+                #[getter]
+                fn $p<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+                    PyArray1::from_slice(py, self.inner.param_slice($p_idx))
+                }
+                #[setter]
+                fn $pset(&mut self, val: f32) { self.inner.fill_param($p_idx, val); }
+            )*
+
+            // ─── States: getter (numpy) + scalar setter ───
+            $(
+                #[getter]
+                fn $s<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+                    PyArray1::from_slice(py, self.inner.state_slice($s_idx))
+                }
+                #[setter]
+                fn $sset(&mut self, val: f32) { self.inner.fill_state($s_idx, val); }
+            )*
+
+            /// Set a param column from a numpy array (per-neuron values).
+            fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+                let ro = array.readonly();
+                let src = ro.as_slice()?;
+                let dest = self.inner.param_slice_mut(col);
+                if src.len() != dest.len() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "set_param_array: expected {} elements (n), got {}",
+                        dest.len(),
+                        src.len()
+                    )));
+                }
+                dest.copy_from_slice(src);
+                Ok(())
+            }
+
+            /// Set a state column from a numpy array (per-neuron values).
+            fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
+                let ro = array.readonly();
+                let src = ro.as_slice()?;
+                let dest = self.inner.state_slice_mut(col);
+                if src.len() != dest.len() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "set_state_array: expected {} elements (n), got {}",
+                        dest.len(),
+                        src.len()
+                    )));
+                }
+                dest.copy_from_slice(src);
+                Ok(())
+            }
+
+            /// Run one simulation step.
+            fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+                let i_ro = i_in.readonly();
+                let mut sp_rw = spikes_out.readwrite();
+                let i = i_ro.as_slice()?;
+                let sp = sp_rw.as_slice_mut()?;
+                let n = self.inner.len();
+                if i.len() != n || sp.len() != n {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                        i.len(),
+                        sp.len()
+                    )));
+                }
+                self.inner.step(i, sp);
+                Ok(())
+            }
+
+            /// Number of neurons.
+            #[getter]
+            fn n(&self) -> usize { self.inner.len() }
+
+            fn __repr__(&self) -> String {
+                format!("{}(n={})", $pyname, self.inner.len())
+            }
+
+            // ─── Model-specific extras ───
+            $( $m )*
+        }
+    };
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  LIFPopulation
@@ -142,8 +278,14 @@ impl PyLIFPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.param_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_param_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -156,8 +298,14 @@ impl PyLIFPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.state_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_state_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -171,7 +319,17 @@ impl PyLIFPopulation {
     fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -266,8 +424,14 @@ impl PyIzhikevichPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.param_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_param_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -275,8 +439,14 @@ impl PyIzhikevichPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.state_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_state_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -285,7 +455,17 @@ impl PyIzhikevichPopulation {
     fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -398,8 +578,14 @@ impl PyHHPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.param_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_param_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -407,8 +593,14 @@ impl PyHHPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.state_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_state_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -417,7 +609,17 @@ impl PyHHPopulation {
     fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -549,8 +751,14 @@ impl PyVSNPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.param_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_param_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -559,8 +767,14 @@ impl PyVSNPopulation {
         let ro = array.readonly();
         let src = ro.as_slice()?;
         let dest = self.inner.state_slice_mut(col);
-        let n = dest.len().min(src.len());
-        dest[..n].copy_from_slice(&src[..n]);
+        if src.len() != dest.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "set_state_array: expected {} elements (n), got {}",
+                dest.len(),
+                src.len()
+            )));
+        }
+        dest.copy_from_slice(src);
         Ok(())
     }
 
@@ -574,7 +788,17 @@ impl PyVSNPopulation {
     fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -649,7 +873,17 @@ impl PyRatePopulation {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -745,7 +979,17 @@ impl PyAdExPopulation {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -820,7 +1064,17 @@ impl PyGLIF4Population {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -876,7 +1130,17 @@ impl PyFHNPopulation {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -937,7 +1201,17 @@ impl PyHRPopulation {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        self.inner.step(i_ro.as_slice()?, sp_rw.as_slice_mut()?);
+        let i = i_ro.as_slice()?;
+        let sp = sp_rw.as_slice_mut()?;
+        let n = self.inner.len();
+        if i.len() != n || sp.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {n}, got {} and {}",
+                i.len(),
+                sp.len()
+            )));
+        }
+        self.inner.step(i, sp);
         Ok(())
     }
 
@@ -949,6 +1223,142 @@ impl PyHRPopulation {
     fn __repr__(&self) -> String {
         format!("HRPopulation(n={})", self.inner.len())
     }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Remaining zoo models — each is a one-line define_population!
+//  (param/state column layout + init defaults). 7 models: GLIF3, HAAP,
+//  Morris-Lecar, SAW, Wilson-Cowan, Triangulated (LUT), Atlas neuromotor.
+// ═══════════════════════════════════════════════════════════════
+
+define_population! {
+    docs: "Generalized LIF with after-spike hyperpolarizing conductance (GLIF3).\n\nParams: dt, g_leak, e_leak, v_thresh, v_reset, inv_tau_ahp, delta_g, e_ahp, tau_ref.\nStates: v, g (ahp conductance), refr.",
+    class: PyGLIF3Population,
+    py_name: "GLIF3Population",
+    model: GLIF3Model,
+    params: [
+        (dt, set_dt, 0, 1.0), (g_leak, set_g_leak, 1, 0.1), (e_leak, set_e_leak, 2, -65.0),
+        (v_thresh, set_v_thresh, 3, -50.0), (v_reset, set_v_reset, 4, -65.0),
+        (inv_tau_ahp, set_inv_tau_ahp, 5, 0.02), (delta_g, set_delta_g, 6, 0.01),
+        (e_ahp, set_e_ahp, 7, -80.0), (tau_ref, set_tau_ref, 8, 2.0)
+    ],
+    states: [(v, set_v, 0, -65.0), (g, set_g, 1, 0.0), (refr, set_refr, 2, 0.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Hawkes-adapted heater-like pacemaker (HAAP) — v, u, h states with spike-frequency adaptation and h-current.",
+    class: PyHAAPPopulation,
+    py_name: "HAAPPopulation",
+    model: HAAPModel,
+    params: [
+        (dt, set_dt, 0, 0.05), (inv_cm, set_inv_cm, 1, 1.0), (g_l, set_g_l, 2, 0.1), (e_l, set_e_l, 3, -65.0),
+        (g_m, set_g_m, 4, 0.5), (e_k, set_e_k, 5, -80.0), (g_h, set_g_h, 6, 0.3), (e_h, set_e_h, 7, -30.0),
+        (inv_tau_u, set_inv_tau_u, 8, 0.01), (inv_tau_h, set_inv_tau_h, 9, 0.005),
+        (v_half_u, set_v_half_u, 10, -35.0), (k_u, set_k_u, 11, 5.0), (v_half_h, set_v_half_h, 12, -75.0),
+        (k_h, set_k_h, 13, 6.0), (v_thresh, set_v_thresh, 14, -40.0), (v_reset, set_v_reset, 15, -55.0),
+        (delta_u, set_delta_u, 16, 0.02)
+    ],
+    states: [(v, set_v, 0, -65.0), (u, set_u, 1, 0.0), (h, set_h, 2, 1.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Morris-Lecar two-dimensional conductance model (v, w) with edge-triggered spiking.",
+    class: PyMorrisLecarPopulation,
+    py_name: "MorrisLecarPopulation",
+    model: MorrisLecarModel,
+    params: [
+        (dt, set_dt, 0, 1.0), (inv_C, set_inv_C, 1, 0.05), (g_L, set_g_L, 2, 2.0), (E_L, set_E_L, 3, -60.0),
+        (g_Ca, set_g_Ca, 4, 4.4), (E_Ca, set_E_Ca, 5, 120.0), (g_K, set_g_K, 6, 8.0), (E_K, set_E_K, 7, -84.0),
+        (V1, set_V1, 8, -1.2), (V2, set_V2, 9, 18.0), (V3, set_V3, 10, 2.0), (V4, set_V4, 11, 30.0),
+        (phi, set_phi, 12, 0.04), (v_thresh, set_v_thresh, 13, 0.0)
+    ],
+    states: [(v, set_v, 0, -60.0), (w, set_w, 1, 0.0), (was_below, set_was_below, 2, 1.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Subthreshold-adaptive with spike trace (SAW) — Izhikevich-like with a synaptic trace.",
+    class: PySAWPopulation,
+    py_name: "SAWPopulation",
+    model: SAWModel,
+    params: [
+        (dt, set_dt, 0, 1.0), (a, set_a, 1, 0.02), (b, set_b, 2, 0.2), (trace_decay, set_trace_decay, 3, 0.01),
+        (noise_amp, set_noise_amp, 4, 0.0), (tau_ref, set_tau_ref, 5, 2.0), (v_thresh, set_v_thresh, 6, 30.0),
+        (v_reset, set_v_reset, 7, -65.0)
+    ],
+    states: [(v, set_v, 0, -65.0), (u, set_u, 1, 0.0), (tr, set_tr, 2, 0.0), (refr, set_refr, 3, 0.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Wilson-Cowan excitatory/inhibitory rate pair (e, i) — no spiking output.",
+    class: PyWCPopulation,
+    py_name: "WCPopulation",
+    model: WCModel,
+    params: [
+        (dt, set_dt, 0, 0.1), (inv_tau_e, set_inv_tau_e, 1, 0.1), (inv_tau_i, set_inv_tau_i, 2, 0.1),
+        (w_ee, set_w_ee, 3, 1.2), (w_ei, set_w_ei, 4, 0.4), (w_ie, set_w_ie, 5, 0.6),
+        (w_ii, set_w_ii, 6, 0.8), (beta, set_beta, 7, 4.0)
+    ],
+    states: [(e, set_e, 0, 0.0), (i, set_i, 1, 0.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Triangulated LUT-based neuron — a lookup table replaces ODE integration. Call TriangulatedPopulation.calibrate_lif() once before step().",
+    class: PyTriangulatedPopulation,
+    py_name: "TriangulatedPopulation",
+    model: TriangulatedModel,
+    params: [(dt, set_dt, 0, 0.5), (v_thresh, set_v_thresh, 1, -54.0), (input_thresh, set_input_thresh, 2, 0.5)],
+    states: [(v, set_v, 0, -70.0), (history, set_history, 1, 0.0)],
+    extra: {
+        /// Calibrate a LIF-referenced LUT and install it as the process-wide
+        /// table. Required before `step()` — without it stepping panics.
+        /// Defaults match the Rust calibration tests (always-on 30.0 input,
+        /// 500k steps) so a plain call produces a spiking table.
+        ///
+        /// Args:
+        ///     v_min, v_max: membrane range for quantization (mV, default -100..60)
+        ///     n_steps: calibration simulation steps (default 500_000)
+        ///     seed: RNG seed for reproducibility (default 42)
+        #[staticmethod]
+        #[pyo3(signature = (v_min=-100.0, v_max=60.0, n_steps=500_000, seed=42))]
+        fn calibrate_lif(v_min: f32, v_max: f32, n_steps: usize, seed: u64) -> PyResult<()> {
+            use pillars::ops::triangulated::{LutBuilder, LutConfig};
+            let cfg = LutConfig {
+                n_steps,
+                input_modes: vec![(1.0, 30.0, 1)],
+                v_min,
+                v_max,
+                dt: 0.5,
+                seed,
+            };
+            // LIF reference params (SoA, n=1): dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref
+            let params = [0.5f32, 0.1, -70.0, -54.0, -70.0, 2.0];
+            let lut = LutBuilder::new(cfg).build::<LIFModel>(&params, &[-70.0, 0.0]);
+            TriangulatedModel::set_lut(lut);
+            Ok(())
+        }
+    }
+}
+
+define_population! {
+    docs: "Atlasov neuromotor model — muscle calcium, tension, length and velocity dynamics driven by spikes.",
+    class: PyAtlasovNeuromotorPopulation,
+    py_name: "AtlasovNeuromotorPopulation",
+    model: AtlasovNeuromotorModel,
+    params: [
+        (dt, set_dt, 0, 1.0), (d_ca, set_d_ca, 1, 0.1), (ca_decay_const, set_ca_decay_const, 2, 0.9),
+        (eta_reset, set_eta_reset, 3, 0.5), (t_max, set_t_max, 4, 1.0), (kd, set_kd, 5, 0.2),
+        (l0, set_l0, 6, 1.0), (inv_vmax, set_inv_vmax, 7, 1.0), (inv_width, set_inv_width, 8, 1.0)
+    ],
+    states: [
+        (ca, set_ca, 0, 0.0), (tension, set_tension, 1, 0.0), (reset_flag, set_reset_flag, 2, 0.0),
+        (length, set_length, 3, 1.0), (velocity, set_velocity, 4, 0.0)
+    ],
+    extra: {}
 }
 
 /// Connectome brain on the pillars engine — LIF population wired to a CSR
@@ -1137,10 +1547,18 @@ impl PySynapticConnectomeBrain {
     ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
-        let spikes = self.inner.step(i_ro.as_slice()?);
+        let i = i_ro.as_slice()?;
         let out = sp_rw.as_slice_mut()?;
-        let n = self.n.min(out.len());
-        out[..n].copy_from_slice(&spikes[..n]);
+        if i.len() != self.n || out.len() != self.n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "step: expected i_in and spikes_out of length {} (n), got {} and {}",
+                self.n,
+                i.len(),
+                out.len()
+            )));
+        }
+        let spikes = self.inner.step(i);
+        out.copy_from_slice(&spikes);
         Ok(())
     }
 
@@ -1172,9 +1590,28 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyGLIF4Population>()?;
     sub.add_class::<PyFHNPopulation>()?;
     sub.add_class::<PyHRPopulation>()?;
+    sub.add_class::<PyGLIF3Population>()?;
+    sub.add_class::<PyHAAPPopulation>()?;
+    sub.add_class::<PyMorrisLecarPopulation>()?;
+    sub.add_class::<PySAWPopulation>()?;
+    sub.add_class::<PyWCPopulation>()?;
+    sub.add_class::<PyTriangulatedPopulation>()?;
+    sub.add_class::<PyAtlasovNeuromotorPopulation>()?;
     sub.add_class::<PyConnectomeBrain>()?;
     sub.add_class::<PySynapticConnectomeBrain>()?;
     m.add_submodule(&sub)?;
+    // Register in sys.modules under the public name so
+    // `from taas_checkmate.pillars import X` works (not just attribute access).
+    // Strip the <pkg>.<ext> suffix from the extension's own __name__ first.
+    let parent_name = m.name()?;
+    let parent_name = parent_name.to_str()?;
+    let public_root = match parent_name.rsplit_once('.') {
+        Some((root, last)) if last == "taas_checkmate" => root,
+        _ => parent_name,
+    };
+    let fq = format!("{public_root}.pillars");
+    sub.setattr("__name__", fq.clone())?;
+    m.py().import("sys")?.getattr("modules")?.set_item(&fq, sub.clone())?;
     // Also register at root for convenience
     m.add_class::<PyLIFPopulation>()?;
     m.add_class::<PyIzhikevichPopulation>()?;
@@ -1185,6 +1622,13 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGLIF4Population>()?;
     m.add_class::<PyFHNPopulation>()?;
     m.add_class::<PyHRPopulation>()?;
+    m.add_class::<PyGLIF3Population>()?;
+    m.add_class::<PyHAAPPopulation>()?;
+    m.add_class::<PyMorrisLecarPopulation>()?;
+    m.add_class::<PySAWPopulation>()?;
+    m.add_class::<PyWCPopulation>()?;
+    m.add_class::<PyTriangulatedPopulation>()?;
+    m.add_class::<PyAtlasovNeuromotorPopulation>()?;
     m.add_class::<PyConnectomeBrain>()?;
     m.add_class::<PySynapticConnectomeBrain>()?;
     Ok(())

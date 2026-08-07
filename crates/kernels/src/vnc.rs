@@ -94,10 +94,11 @@ pub fn vnc_step_mapping(
             continue;
         }
         let avg = (act_drive[l_idx] + act_drive[r_idx]) * 0.5;
-        if avg != 0.0 {
-            act_drive[l_idx] = avg;
-            act_drive[r_idx] = avg;
-        }
+        // Symmetrize unconditionally: an antagonistic pair (±x) averages to 0
+        // and MUST still be forced together — guarding on `avg != 0.0` leaves
+        // them asymmetric.
+        act_drive[l_idx] = avg;
+        act_drive[r_idx] = avg;
     }
 
     // ─── Phase 3: Apply to ctrl_out ───

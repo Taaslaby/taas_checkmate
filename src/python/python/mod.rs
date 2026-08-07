@@ -80,13 +80,33 @@ fn export_fn(
 }
 
 /// Create a sub-module and return it.
+///
+/// Registers the sub-module in `sys.modules` under its *public* name so both
+/// `taas_checkmate.pillars.X` (attribute) and `from taas_checkmate.pillars import X`
+/// (import machinery) work. Without this, pyo3 sub-modules are only reachable as
+/// attributes and `from ... import` raises ModuleNotFoundError.
+///
+/// The public root is the package the user imports. In a normal wheel the
+/// extension's `__name__` is `taas_checkmate`; under an editable install the
+/// shim loads it as `taas_checkmate.taas_checkmate`, so we strip that suffix.
 fn make_sub<'py>(
     py: Python<'py>,
     parent: &Bound<'py, PyModule>,
     name: &str,
 ) -> PyResult<Bound<'py, PyModule>> {
     let sub = PyModule::new(py, name)?;
+    let parent_name = parent.name()?;
+    let parent_name = parent_name.to_str()?;
+    // extension module loaded as <pkg>.<ext>? strip the <ext> suffix
+    let public_root = match parent_name.rsplit_once('.') {
+        Some((root, last)) if last == "taas_checkmate" => root,
+        _ => parent_name,
+    };
+    let fq = format!("{public_root}.{name}");
+    let sysmod = py.import("sys")?;
+    sub.setattr("__name__", fq.clone())?;
     parent.add_submodule(&sub)?;
+    sysmod.getattr("modules")?.set_item(&fq, sub.clone())?;
     Ok(sub)
 }
 

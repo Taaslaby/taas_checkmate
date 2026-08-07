@@ -40,3 +40,6 @@ __pypackages__/
 
 # Editor/tool workspace databases (SQLite)
 .freebuff/
+
+# sardana_flow run outputs (metrics CSVs, connectome checkpoints)
+/output/

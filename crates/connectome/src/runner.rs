@@ -1321,8 +1321,11 @@ impl BrainRunner {
         let inv_decay = 1.0 - decay;
 
         for step in 0..n_steps {
-            // 1. Set I = external + Poisson
-            self.state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+            // 1. Set I = external + Poisson (fresh each step — no stale tail)
+            self.state.I_buf[..n].fill(0.0);
+            for (i, &ext) in external_I.iter().enumerate().take(n) {
+                self.state.I_buf[i] += ext;
+            }
             self.inject_poisson(dt_ms);
 
             // 2. Build spike proxy for CSR: v > 0.5 → "spike"
@@ -1347,10 +1350,9 @@ impl BrainRunner {
                 1.0,
             );
 
-            // 4. Exponential Euler
+            // 4. Exponential Euler (external already in I_buf — do not add again)
             for i in 0..n {
-                let ext = if i < external_I.len() { external_I[i] } else { 0.0 };
-                let input = (self.state.I_buf[i] + ext).clamp(0.0, 1.0);
+                let input = self.state.I_buf[i].clamp(0.0, 1.0);
                 self.state.v[i] = self.state.v[i] * decay + input * inv_decay;
             }
 

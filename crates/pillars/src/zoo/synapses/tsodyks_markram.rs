@@ -305,10 +305,11 @@ mod tests {
         // - u starts at 0.01 (very depressed facilitation)
         // - U=0.2 (moderate), tau_d=10000 (extremely slow depression)
         // - tau_f=20 (moderate facilitation recovery)
-        // With parallel Euler (spike uses PRE-decay u, x):
-        //   Step 1: u=0.01→0.22, x=0.99→0.98, w≈0.21
-        //   Step 2: u=0.22→0.37, x=0.98→0.77, w≈0.29 ← weight INCREASES because
-        //   u grows faster than x drops (spike uses pre-decay x for depression)
+        // Decay runs first; the spike then applies facilitation u+=U(1-u) and
+        // depression x-=u·x using the newly-facilitated (post-spike) u:
+        //   Step 1: u=0.010→0.215, x=0.990→0.777, w≈0.167
+        //   Step 2: u=0.215→0.372, x=0.777→0.488, w≈0.181 ← weight INCREASES
+        //   because u's jump (×~20) outweighs the single x-drop
         let n = 8;
         let mut x = vec![0.99f32; n]; // near-full recovery
         let mut u = vec![0.01f32; n]; // very low facilitation
@@ -351,9 +352,9 @@ mod tests {
         }
         let w2 = w_eff[0];
 
-        // With parallel Euler, spike uses pre-decay u for depression:
-        // w1 = u₁·x₁ ≈ 0.217·0.98 ≈ 0.213
-        // w2 = u₂·x₂ ≈ 0.373·0.77 ≈ 0.286 → should increase
+        // Spike uses post-facilitation u for depression (post-spike semantics):
+        // w1 = u₁·x₁ ≈ 0.215·0.777 ≈ 0.167
+        // w2 = u₂·x₂ ≈ 0.372·0.488 ≈ 0.181 → should increase
         assert!(
             w2 > w1,
             "Facilitation-dominant: weight should increase ({:.4} → {:.4})",

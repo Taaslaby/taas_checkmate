@@ -325,13 +325,18 @@ pub fn sim_izhikevich_dual(
     let padded_c = pad_to(&params.c, n_padded);
     let padded_d = pad_to(&params.d, n_padded);
 
-    for step in 0..n_steps {
-        // 1. Set I = external_I (reset)
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
-        for i in n..state.I_buf.len() {
-            state.I_buf[i] = 0.0;
-        }
+    // I_buf = external initially. Each step the CSR-propagated recurrent
+    // current accumulates on top (step 6/7 below); it is NOT reset before the
+    // izhikevich step, or recurrence would never reach the dynamics.
+    state.I_buf[..n].fill(0.0);
+    for (i, &ext) in external_I.iter().enumerate().take(n) {
+        state.I_buf[i] += ext;
+    }
+    for i in n..state.I_buf.len() {
+        state.I_buf[i] = 0.0;
+    }
 
+    for step in 0..n_steps {
         // 2. Izhikevich dual step (SIMD) — slow state m modulates I
         safe::izhikevich_dual_step(
             &mut state.v,
@@ -373,8 +378,13 @@ pub fn sim_izhikevich_dual(
             );
         }
 
-        // 6. Reset I = external_I
-        state.I_buf[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        // 6. Reset I: wipe the recurrent current consumed by this step's
+        //    izhikevich update, then restore external. Step 7 re-adds recurrent
+        //    for the next iteration.
+        state.I_buf[..n].fill(0.0);
+        for (i, &ext) in external_I.iter().enumerate().take(n) {
+            state.I_buf[i] += ext;
+        }
         for i in n..state.I_buf.len() {
             state.I_buf[i] = 0.0;
         }
@@ -957,8 +967,11 @@ pub fn sim_hh_synaptic_pillars(
         // 1. Decay conductances
         kinetics.decay_all(&factors);
 
-        // 2. Set I = external_I
-        i_in[..n].copy_from_slice(&external_I[..n.min(external_I.len())]);
+        // 2. Set I = external_I (fresh each step — fill first, no stale tail)
+        i_in[..n].fill(0.0);
+        for (i, &ext) in external_I.iter().enumerate().take(n) {
+            i_in[i] += ext;
+        }
 
         // 3. Compute I_syn from conductances and add to I
         kinetics.compute_currents(pop.state_slice(0), &mut i_in);

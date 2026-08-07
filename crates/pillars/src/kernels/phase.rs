@@ -27,7 +27,9 @@ use crate::core::util::{load8, store8};
 use crate::kernels::{fast_sincos_simd, wrap_phase};
 use core::f32::consts::TAU;
 
-/// Wrap phases to [0, 2π) and compute sin/cos in one pass.
+/// Wrap phases to [−π, π) and compute sin/cos in one pass.
+/// (The SIMD wrap `φ − 2π·round(φ/2π)` and the scalar `wrap_phase` both land
+/// in [−π, π) — the same range the Kuramoto steppers below document.)
 ///
 /// SIMD path uses the minimax polynomial `fast_sincos_simd` (~1e-4 accuracy),
 /// scalar tail uses libm — both on wrapped phases.

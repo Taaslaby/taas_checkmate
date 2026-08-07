@@ -15,6 +15,8 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "cuda")]
 use crate::cuda::GpuContext;
+#[cfg(feature = "cuda")]
+use std::sync::Mutex;
 
 
 use crate::core::neuron;
