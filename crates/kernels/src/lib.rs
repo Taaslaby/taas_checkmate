@@ -7,13 +7,11 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::manual_clamp)]
 
-pub mod decode;
 pub mod io;
 pub mod measure;
 pub mod neuron;
 pub mod phase;
 pub mod safe;
-pub mod signal;
 pub mod vnc;
 pub mod ion;
 

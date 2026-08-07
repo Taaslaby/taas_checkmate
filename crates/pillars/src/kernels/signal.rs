@@ -128,7 +128,7 @@ pub fn thalamic_gate(
         }
     }
     for i in n8..n {
-        let sig = sigmoid_poly_s(-gain * (gate_v[i] - threshold));
+        let sig = sigmoid_poly_s(gain * (gate_v[i] - threshold));
         target_i[i] = source_v[i] * sig;
     }
 }
@@ -151,7 +151,7 @@ pub fn sigmoid_gate(output: &mut [f32], input: &[f32], gain: f32, threshold: f32
         }
     }
     for i in n8..n {
-        output[i] = sigmoid_poly_s(-gain * (input[i] - threshold));
+        output[i] = sigmoid_poly_s(gain * (input[i] - threshold));
     }
 }
 
@@ -175,7 +175,7 @@ pub fn phase_gate_apply(output: &mut [f32], input: &[f32], r: &[f32], gain: f32,
         }
     }
     for i in n8..n {
-        let gate = sigmoid_poly_s(-gain * (r[i] - threshold));
+        let gate = sigmoid_poly_s(gain * (r[i] - threshold));
         output[i] = input[i] * gate;
     }
 }

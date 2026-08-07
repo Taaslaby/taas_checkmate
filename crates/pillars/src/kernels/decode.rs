@@ -172,21 +172,22 @@ pub fn kalman_update(weights: &mut [f32], cov: &mut [f32], states: &[f32], error
             let st = load8(states.as_ptr(), off);
             let k = c * st / s2;
             store8(weights.as_mut_ptr(), off, w + k * err_s);
-            store8(cov.as_mut_ptr(), off, (c - k * c).max(f32x8::splat(1e-12)));
+            store8(cov.as_mut_ptr(), off, (c - k * st * c).max(f32x8::splat(1e-12)));
         }
     }
     let s2 = s + 1e-8;
     for i in n8..n {
         let k = cov[i] * states[i] / s2;
         weights[i] += k * error;
-        cov[i] = (cov[i] - k * cov[i]).max(1e-12);
+        cov[i] = (cov[i] - k * states[i] * cov[i]).max(1e-12);
     }
 }
 
 /// Adam training step for decoder weights: `w -= lr·m̂/(√v̂ + eps)`.
 ///
 /// Gradient `g = error·states`; `bc1`, `bc2` are the bias-correction terms
-/// (β₁ᵗ, β₂ᵗ). The scalar tail divides by `bc1` to match the SIMD path.
+/// (β₁ᵗ, β₂ᵗ). Both bias corrections are applied (m̂ = m/bc1, v̂ = v/bc2);
+/// the scalar tail mirrors the SIMD path.
 #[allow(clippy::too_many_arguments)]
 pub fn adam_train(
     weights: &mut [f32],
@@ -198,7 +199,7 @@ pub fn adam_train(
     beta1: f32,
     beta2: f32,
     bc1: f32,
-    _bc2: f32,
+    bc2: f32,
     eps: f32,
 ) {
     let n = weights.len();
@@ -210,6 +211,7 @@ pub fn adam_train(
     let b2 = f32x8::splat(beta2);
     let b2_c = f32x8::splat(1.0 - beta2);
     let lr_s = f32x8::splat(lr / bc1);
+    let bc2_inv_s = f32x8::splat(1.0 / bc2);
     let eps_s = f32x8::splat(eps);
     let err_s = f32x8::splat(error);
     let n8 = n & !7;
@@ -223,7 +225,7 @@ pub fn adam_train(
             mm = b1 * mm + b1_c * g;
             vv = b2 * vv + b2_c * g * g;
             let mut w = load8(weights.as_ptr(), off);
-            w -= lr_s * mm / (vv.sqrt() + eps_s);
+            w -= lr_s * mm / ((vv * bc2_inv_s).sqrt() + eps_s);
             store8(weights.as_mut_ptr(), off, w);
             store8(m.as_mut_ptr(), off, mm);
             store8(v.as_mut_ptr(), off, vv);
@@ -234,7 +236,7 @@ pub fn adam_train(
         let g = error * states[i];
         m[i] = beta1 * m[i] + (1.0 - beta1) * g;
         v[i] = beta2 * v[i] + (1.0 - beta2) * g * g;
-        weights[i] -= lr * m[i] / (v[i].sqrt() + eps) / bc1;
+        weights[i] -= lr * m[i] / ((v[i] / bc2).sqrt() + eps) / bc1;
     }
 }
 

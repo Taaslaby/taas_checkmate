@@ -8,7 +8,7 @@
 use super::neuron::{
     adex, bcm, delay, dendrite, dopamine, fhn, fused, glif, haap, hh, izhikevich, lif, morris_lecar, nmda, saw, stp, tsodyks_markram, wc,
 };
-use super::{decode, measure, phase, signal};
+use super::{measure, phase};
 
 // ═══════════════════════════════════════════════════════════
 //  Pillars bridge (Фаза 2 консолидации)
@@ -91,16 +91,7 @@ pub fn stochastic_encoder(
         "stochastic_encoder: inputs length mismatch"
     );
     assert_eq!(noise.len(), n, "stochastic_encoder: noise length mismatch");
-    unsafe {
-        signal::stochastic_encoder(
-            target_i.as_mut_ptr(),
-            inputs.as_ptr(),
-            noise.as_ptr(),
-            threshold,
-            spike_val,
-            n,
-        )
-    }
+    pillars::kernels::signal::stochastic_encoder(target_i, inputs, noise, threshold, spike_val);
 }
 
 /// Linear readout: `output = W·states + bias`. Uses SIMD `f32x8` for inner dot product.
@@ -120,16 +111,7 @@ pub fn linear_decoder(outputs: &mut [f32], states: &[f32], weights: &[f32], bias
         n_out,
         n_in * n_out
     );
-    unsafe {
-        signal::linear_decoder(
-            outputs.as_mut_ptr(),
-            states.as_ptr(),
-            weights.as_ptr(),
-            biases.as_ptr(),
-            n_in,
-            n_out,
-        )
-    }
+    pillars::kernels::signal::linear_decoder(outputs, states, weights, biases);
 }
 
 /// Thalamic gate: `target = source × sigmoid(gain·(gate − threshold))`.
@@ -143,23 +125,14 @@ pub fn thalamic_gate(
     let n = target_i.len();
     assert_eq!(source_v.len(), n, "thalamic_gate: source_v length mismatch");
     assert_eq!(gate_v.len(), n, "thalamic_gate: gate_v length mismatch");
-    unsafe {
-        signal::thalamic_gate(
-            target_i.as_mut_ptr(),
-            source_v.as_ptr(),
-            gate_v.as_ptr(),
-            threshold,
-            gain,
-            n,
-        )
-    }
+    pillars::kernels::signal::thalamic_gate(target_i, source_v, gate_v, threshold, gain);
 }
 
 /// Elementwise sigmoid: `output = sigmoid(gain·(input − threshold))`.
 pub fn sigmoid_gate(output: &mut [f32], input: &[f32], gain: f32, threshold: f32) {
     let n = output.len();
     assert_eq!(input.len(), n, "sigmoid_gate: input length mismatch");
-    unsafe { signal::sigmoid_gate(output.as_mut_ptr(), input.as_ptr(), gain, threshold, n) }
+    pillars::kernels::signal::sigmoid_gate(output, input, gain, threshold);
 }
 
 /// Phase gate: `output = input × sigmoid(gain·(r − threshold))`.
@@ -167,23 +140,14 @@ pub fn phase_gate_apply(output: &mut [f32], input: &[f32], r: &[f32], gain: f32,
     let n = output.len();
     assert_eq!(input.len(), n, "phase_gate_apply: input length mismatch");
     assert_eq!(r.len(), n, "phase_gate_apply: r length mismatch");
-    unsafe {
-        signal::phase_gate_apply(
-            output.as_mut_ptr(),
-            input.as_ptr(),
-            r.as_ptr(),
-            gain,
-            threshold,
-            n,
-        )
-    }
+    pillars::kernels::signal::phase_gate_apply(output, input, r, gain, threshold);
 }
 
 /// T3 drive encoder: `drives = gain × inputs`.
 pub fn t3_drive_encoder(drives: &mut [f32], inputs: &[f32], gain: f32) {
     let n = drives.len();
     assert_eq!(inputs.len(), n, "t3_drive_encoder: inputs length mismatch");
-    unsafe { signal::t3_drive_encoder(drives.as_mut_ptr(), inputs.as_ptr(), gain, n) }
+    pillars::kernels::signal::t3_drive_encoder(drives, inputs, gain);
 }
 
 /// T3 TACT generator: output 1.0 when all 3 phases exceed threshold, else 0.0.
@@ -198,16 +162,7 @@ pub fn t3_tact_generator(
     assert_eq!(ph1.len(), n, "t3_tact_generator: ph1 length mismatch");
     assert_eq!(ph2.len(), n, "t3_tact_generator: ph2 length mismatch");
     assert_eq!(ph3.len(), n, "t3_tact_generator: ph3 length mismatch");
-    unsafe {
-        signal::t3_tact_generator(
-            pulses.as_mut_ptr(),
-            ph1.as_ptr(),
-            ph2.as_ptr(),
-            ph3.as_ptr(),
-            threshold,
-            n,
-        )
-    }
+    pillars::kernels::signal::t3_tact_generator(pulses, ph1, ph2, ph3, threshold);
 }
 
 /// Echo state tap: read one delay tap from oscillator ring buffer.
@@ -218,15 +173,7 @@ pub fn echo_tap(output: &mut [f32], buffer: &[f32], delay_len: usize, delay_idx:
         n_osc * delay_len,
         "echo_tap: buffer length mismatch"
     );
-    unsafe {
-        signal::echo_tap(
-            output.as_mut_ptr(),
-            buffer.as_ptr(),
-            n_osc,
-            delay_len,
-            delay_idx,
-        )
-    }
+    pillars::kernels::signal::echo_tap(output, buffer, delay_len, delay_idx);
 }
 
 /// T3 inverse Kuramoto: estimate drive from amplitude changes over time.
@@ -251,19 +198,7 @@ pub fn t3_inverse_kuramoto(
         n,
         "t3_inverse_kuramoto: r_prev length mismatch"
     );
-    unsafe {
-        signal::t3_inverse_kuramoto(
-            drive_out.as_mut_ptr(),
-            r.as_ptr(),
-            r_prev.as_ptr(),
-            alpha,
-            gain,
-            eps,
-            decay,
-            dt,
-            n,
-        )
-    }
+    pillars::kernels::signal::t3_inverse_kuramoto(drive_out, r, r_prev, alpha, gain, eps, decay, dt);
 }
 
 /// Hebbian plasticity on CSR weights using slow states.
@@ -310,15 +245,14 @@ pub fn hebbian_csr_step(
 
 /// Elementwise ReLU: `x = max(0, x)` using SIMD `f32x8`.
 pub fn relu_simd(data: &mut [f32]) {
-    let n = data.len();
-    unsafe { signal::relu_simd(data.as_mut_ptr(), n) }
+    pillars::kernels::signal::relu_simd(data);
 }
 
 /// Elementwise add: `a\[i\] += b\[i\]` using SIMD `f32x8`.
 pub fn add_simd(a: &mut [f32], b: &[f32]) {
     let n = a.len();
     assert_eq!(b.len(), n, "add_simd: b length mismatch");
-    unsafe { signal::add_simd(a.as_mut_ptr(), b.as_ptr(), n) }
+    pillars::kernels::signal::add_simd(a, b);
 }
 
 /// SGD optimizer step with momentum: `v = mom·v + (1−mom)·g; w -= lr·v`.
@@ -332,16 +266,7 @@ pub fn sgd_step_simd(
     let n = velocity.len();
     assert_eq!(weight.len(), n, "sgd_step_simd: weight length mismatch");
     assert_eq!(grad.len(), n, "sgd_step_simd: grad length mismatch");
-    unsafe {
-        signal::sgd_step_simd(
-            velocity.as_mut_ptr(),
-            weight.as_mut_ptr(),
-            grad.as_ptr(),
-            lr,
-            momentum,
-            n,
-        )
-    }
+    pillars::kernels::signal::sgd_step_simd(velocity, weight, grad, lr, momentum);
 }
 
 /// Adam optimizer step: `m = β₁·m + (1−β₁)·g; v = β₂·v + (1−β₂)·g²; w -= lr·m̂/(√v̂ + ε)`.
@@ -361,21 +286,18 @@ pub fn adam_step_simd(
     assert_eq!(m.len(), n, "adam_step_simd: m length mismatch");
     assert_eq!(v.len(), n, "adam_step_simd: v length mismatch");
     assert_eq!(grad.len(), n, "adam_step_simd: grad length mismatch");
-    unsafe {
-        signal::adam_step_simd(
-            weight.as_mut_ptr(),
-            m.as_mut_ptr(),
-            v.as_mut_ptr(),
-            grad.as_ptr(),
-            lr,
-            beta1,
-            beta2,
-            eps,
-            beta1_t_corr,
-            beta2_t_corr,
-            n,
-        )
-    }
+    pillars::kernels::signal::adam_step_simd(
+        weight,
+        m,
+        v,
+        grad,
+        lr,
+        beta1,
+        beta2,
+        eps,
+        beta1_t_corr,
+        beta2_t_corr,
+    );
 }
 
 /// Hebbian weight update: `w += lr·cos_diff − decay·w·dt`.
@@ -386,7 +308,7 @@ pub fn hebbian_update(weights: &mut [f32], cos_diff: &[f32], lr: f32, decay: f32
         n,
         "hebbian_update: cos_diff length mismatch"
     );
-    unsafe { signal::hebbian_update(weights.as_mut_ptr(), cos_diff.as_ptr(), lr, decay, dt, n) }
+    pillars::kernels::signal::hebbian_update(weights, cos_diff, lr, decay, dt);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -418,17 +340,7 @@ pub fn t3_complex_decoder(
         n_in * n_out,
         "t3_complex_decoder: weights length mismatch"
     );
-    unsafe {
-        decode::t3_complex_decoder(
-            outputs.as_mut_ptr(),
-            amplitudes.as_ptr(),
-            cos_buf.as_ptr(),
-            weights.as_ptr(),
-            biases.as_ptr(),
-            n_in,
-            n_out,
-        )
-    }
+    pillars::kernels::decode::t3_complex_decoder(outputs, amplitudes, cos_buf, weights, biases);
 }
 
 /// Compute pairwise PST features: `sin(θ₁−θ₂)` and `cos(θ₁−θ₂)`.
@@ -445,16 +357,7 @@ pub fn t3_pst_features(out_sin: &mut [f32], out_cos: &mut [f32], ph1: &[f32], ph
         n1 * n2,
         "t3_pst_features: out_cos length mismatch"
     );
-    unsafe {
-        decode::t3_pst_features(
-            out_sin.as_mut_ptr(),
-            out_cos.as_mut_ptr(),
-            ph1.as_ptr(),
-            ph2.as_ptr(),
-            n1,
-            n2,
-        )
-    }
+    pillars::kernels::decode::t3_pst_features(out_sin, out_cos, ph1, ph2);
 }
 
 /// LMS training step: `w += lr·error·states; bias += lr·error`.
@@ -465,16 +368,7 @@ pub fn t3_lms_train(weights: &mut [f32], bias: &mut [f32], states: &[f32], error
         !bias.is_empty(),
         "t3_lms_train: bias must have at least 1 element"
     );
-    unsafe {
-        decode::t3_lms_train(
-            weights.as_mut_ptr(),
-            bias.as_mut_ptr(),
-            states.as_ptr(),
-            error,
-            lr,
-            n,
-        )
-    }
+    pillars::kernels::decode::t3_lms_train(weights, bias, states, error, lr);
 }
 
 /// NLMS training step: `w += lr·error·states / (‖states‖² + ε)`.
@@ -492,17 +386,7 @@ pub fn nlms_train(
         !bias.is_empty(),
         "nlms_train: bias must have at least 1 element"
     );
-    unsafe {
-        decode::nlms_train(
-            weights.as_mut_ptr(),
-            bias.as_mut_ptr(),
-            states.as_ptr(),
-            error,
-            lr,
-            eps,
-            n,
-        )
-    }
+    pillars::kernels::decode::nlms_train(weights, bias, states, error, lr, eps);
 }
 
 /// Kalman filter update: `w += K·error; cov -= K·states·cov` where `K = cov·states / s`.
@@ -510,16 +394,7 @@ pub fn kalman_update(weights: &mut [f32], cov: &mut [f32], states: &[f32], error
     let n = weights.len();
     assert_eq!(cov.len(), n, "kalman_update: cov length mismatch");
     assert_eq!(states.len(), n, "kalman_update: states length mismatch");
-    unsafe {
-        decode::kalman_update(
-            weights.as_mut_ptr(),
-            cov.as_mut_ptr(),
-            states.as_ptr(),
-            error,
-            s,
-            n,
-        )
-    }
+    pillars::kernels::decode::kalman_update(weights, cov, states, error, s);
 }
 
 /// Adam training step: update decoder weights using Adam optimizer.
@@ -533,29 +408,14 @@ pub fn adam_train(
     beta1: f32,
     beta2: f32,
     bc1: f32,
-    _bc2: f32,
+    bc2: f32,
     eps: f32,
 ) {
     let n = weights.len();
     assert_eq!(m.len(), n, "adam_train: m length mismatch");
     assert_eq!(v.len(), n, "adam_train: v length mismatch");
     assert_eq!(states.len(), n, "adam_train: states length mismatch");
-    unsafe {
-        decode::adam_train(
-            weights.as_mut_ptr(),
-            m.as_mut_ptr(),
-            v.as_mut_ptr(),
-            states.as_ptr(),
-            error,
-            lr,
-            beta1,
-            beta2,
-            bc1,
-            _bc2,
-            eps,
-            n,
-        )
-    }
+    pillars::kernels::decode::adam_train(weights, m, v, states, error, lr, beta1, beta2, bc1, bc2, eps);
 }
 
 /// PST decoder: weighted circular buffer readout.
@@ -571,16 +431,7 @@ pub fn pst_decode(output: &mut [f32], buffer: &[f32], weights: &[f32], l: usize,
         l * feat_dim,
         "pst_decode: weights length mismatch"
     );
-    unsafe {
-        decode::pst_decode(
-            output.as_mut_ptr(),
-            buffer.as_ptr(),
-            weights.as_ptr(),
-            feat_dim,
-            l,
-            pos,
-        )
-    }
+    pillars::kernels::decode::pst_decode(output, buffer, weights, l, pos);
 }
 
 /// Ring synthesis: `output\[i\] = weights\[i\] × amplitudes\[i\] × trig_buf\[i\]`.
@@ -597,15 +448,7 @@ pub fn ring_synthesis(output: &mut [f32], amplitudes: &[f32], trig_buf: &[f32], 
         "ring_synthesis: trig_buf length mismatch"
     );
     assert_eq!(weights.len(), n, "ring_synthesis: weights length mismatch");
-    unsafe {
-        decode::ring_synthesis(
-            output.as_mut_ptr(),
-            amplitudes.as_ptr(),
-            trig_buf.as_ptr(),
-            weights.as_ptr(),
-            n,
-        )
-    }
+    pillars::kernels::decode::ring_synthesis(output, amplitudes, trig_buf, weights);
 }
 
 // ═══════════════════════════════════════════════════════════
