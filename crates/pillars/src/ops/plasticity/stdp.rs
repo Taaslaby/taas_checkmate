@@ -11,7 +11,7 @@
 //!
 //! ## Weight update
 //! ```text
-//! Δw = η · δ · (tr_pre · post_spike + tr_post · pre_spike)
+//! Δw = η · δ · (tr_pre · post_spike − tr_post · pre_spike)
 //! ```
 //! where δ is dopamine concentration (reward-prediction error).
 //!
@@ -50,11 +50,13 @@ pub fn stdp_trace<S: SimdLane>(
 /// Standard STDP weight update (no dopamine modulation).
 ///
 /// ```text
-/// w' = max(w + η · (tr_pre · post_spike + tr_post · pre_spike), 0)
+/// w' = max(w + η · (tr_pre · post_spike − tr_post · pre_spike), 0)
 /// ```
 ///
-/// LTP when pre precedes post (tr_pre is high at post-spike time).
-/// LTD when post precedes pre (tr_post is high at pre-spike time).
+/// LTP when pre precedes post (tr_pre is high at post-spike time) → **+**.
+/// LTD when post precedes pre (tr_post is high at pre-spike time) → **−**.
+/// Совпадает с batch-версией `kernels::learning::stdp_update` и
+/// `kernels::dopamine::dopamine_traces_step` (Izhikevich 2007).
 #[inline(always)]
 pub fn stdp_weight_update<S: SimdLane>(
     w: S,
@@ -66,14 +68,15 @@ pub fn stdp_weight_update<S: SimdLane>(
 ) -> S {
     let pre = spike_to_float(pre_spike);
     let post = spike_to_float(post_spike);
-    let dw = tr_pre * post + tr_post * pre;
+    // LTP: пре-след виден в момент пост-спайка (+); LTD: пост-след в момент пре-спайка (−)
+    let dw = tr_pre * post - tr_post * pre;
     (w + lr * dw).max(S::zero())
 }
 
 /// Dopamine-modulated (3-factor) weight update.
 ///
 /// ```text
-/// w' = clamp(w + η · δ · (tr_pre·post_spike + tr_post·pre_spike), 0, 1)
+/// w' = clamp(w + η · δ · (tr_pre·post_spike − tr_post·pre_spike), 0, 1)
 /// ```
 ///
 /// - `dopamine` (δ): reward-prediction error signal.
@@ -92,7 +95,8 @@ pub fn dopamine_weight_update<S: SimdLane>(
 ) -> S {
     let pre = spike_to_float(pre_spike);
     let post = spike_to_float(post_spike);
-    let dw = dopamine * (tr_pre * post + tr_post * pre);
+    // Тот же знак LTD, что и в kernels::dopamine (e += A_ltp·tr_pre·post − A_ltd·tr_post·pre)
+    let dw = dopamine * (tr_pre * post - tr_post * pre);
     (w + lr * dw).clamp01()
 }
 
@@ -167,8 +171,64 @@ mod tests {
         let dopamine = f32x8::splat(0.5);
         let lr = f32x8::splat(0.01);
         let new_w = dopamine_weight_update(w, tr_pre, tr_post, pre, post, dopamine, lr);
+        // dw = δ·(tr_pre·post − tr_post·pre) = 0.5·(0.1 − 0.05) > 0
         assert!(new_w.to_array()[0] > 0.5, "should increase w");
         assert!(new_w.to_array()[0] <= 1.0, "should be clamped ≤ 1");
+    }
+
+    /// LTD: пост-след высокий, приходит только пре-спайк → вес ДОЛЖЕН падать.
+    /// (Раньше знак был сломан: оба члена складывались с плюсом — веса только росли.)
+    #[test]
+    fn test_stdp_ltd_decreases_weight() {
+        let w = f32x8::splat(0.5);
+        let tr_pre = f32x8::splat(0.0); // пре-следа нет
+        let tr_post = f32x8::splat(0.8); // пост стрелял недавно
+        let pre = f32x8::splat(1.0); // сейчас пришёл пре-спайк (post-→pre порядок)
+        let post = f32x8::splat(0.0);
+        let lr = f32x8::splat(0.1);
+        let new_w = stdp_weight_update(w, tr_pre, tr_post, pre, post, lr);
+        // dw = 0·0 − 0.8·1 = −0.8 → w' = 0.5 − 0.08 = 0.42
+        assert!(
+            (new_w.to_array()[0] - 0.42).abs() < 1e-6,
+            "post→pre pairing must depress: got {:.4}, want 0.42",
+            new_w.to_array()[0]
+        );
+    }
+
+    /// LTP: пре-след высокий, приходит пост-спайк → вес растёт.
+    #[test]
+    fn test_stdp_ltp_increases_weight() {
+        let w = f32x8::splat(0.5);
+        let tr_pre = f32x8::splat(0.8); // пре стрелял недавно
+        let tr_post = f32x8::splat(0.0);
+        let pre = f32x8::splat(0.0);
+        let post = f32x8::splat(1.0); // сейчас пришёл пост-спайк (pre-→post порядок)
+        let lr = f32x8::splat(0.1);
+        let new_w = stdp_weight_update(w, tr_pre, tr_post, pre, post, lr);
+        // dw = 0.8·1 − 0 = 0.8 → w' = 0.58
+        assert!(
+            (new_w.to_array()[0] - 0.58).abs() < 1e-6,
+            "pre→post pairing must potentiate: got {:.4}, want 0.58",
+            new_w.to_array()[0]
+        );
+    }
+
+    /// Отрицательный дофамин инвертирует знак: LTP-пара при δ<0 депрессирует.
+    #[test]
+    fn test_dopamine_negative_reverses() {
+        let w = f32x8::splat(0.5);
+        let tr_pre = f32x8::splat(0.8);
+        let tr_post = f32x8::splat(0.0);
+        let pre = f32x8::splat(0.0);
+        let post = f32x8::splat(1.0);
+        let dopamine = f32x8::splat(-1.0); // наказание
+        let lr = f32x8::splat(0.1);
+        let new_w = dopamine_weight_update(w, tr_pre, tr_post, pre, post, dopamine, lr);
+        assert!(
+            new_w.to_array()[0] < 0.5,
+            "δ<0 must depress coincident pairs: got {:.4}",
+            new_w.to_array()[0]
+        );
     }
 
     #[test]
