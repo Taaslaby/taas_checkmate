@@ -43,3 +43,7 @@ __pypackages__/
 
 # sardana_flow run outputs (metrics CSVs, connectome checkpoints)
 /output/
+
+# Downloaded validation datasets (Zenodo/Figshare archives) - not part of the source tree.
+validation_data/
+!validation_data/human_hand/results.json
