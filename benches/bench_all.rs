@@ -9,6 +9,13 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use taas_checkmate::kernels;
+use taas_checkmate::pillars::core::lane::SimdLane;
+use taas_checkmate::pillars::core::runner::run_neuron;
+use taas_checkmate::pillars::core::util::{load8, load8_i32, store8};
+use taas_checkmate::pillars::ops::plasticity::stp as pillars_stp;
+use taas_checkmate::pillars::zoo::neurons::FHNModel;
+use taas_checkmate::pillars::zoo::Model;
+use wide::f32x8;
 
 // ═══════════════════════════════════════════════════════════
 //  signal kernels
@@ -262,7 +269,7 @@ fn bench_kuramoto_prepare(c: &mut Criterion) {
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| {
         b.iter(|| {
-            kernels::kuramoto_prepare(&mut ph1, &mut c1, &mut s1);
+            kernels::phase::kuramoto_prepare(&mut ph1, &mut c1, &mut s1);
             black_box(());
         })
     });
@@ -272,7 +279,7 @@ fn bench_kuramoto_prepare(c: &mut Criterion) {
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| {
         b.iter(|| {
-            kernels::kuramoto_prepare(&mut ph8, &mut c8, &mut s8);
+            kernels::phase::kuramoto_prepare(&mut ph8, &mut c8, &mut s8);
             black_box(());
         })
     });
@@ -379,7 +386,7 @@ fn bench_stp_step(c: &mut Criterion) {
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| {
         b.iter(|| {
-            kernels::stp_step(&mut x1, &mut u1, &pre1, &td1, &tf1, &u01, &a1, &mut i1, 1.0);
+            stp_run(&mut x1, &mut u1, &pre1, &td1, &tf1, &u01, &a1, &mut i1, 1.0);
             black_box(());
         })
     });
@@ -394,7 +401,7 @@ fn bench_stp_step(c: &mut Criterion) {
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| {
         b.iter(|| {
-            kernels::stp_step(&mut x8, &mut u8, &pre8, &td8, &tf8, &u08, &a8, &mut i8, 1.0);
+            stp_run(&mut x8, &mut u8, &pre8, &td8, &tf8, &u08, &a8, &mut i8, 1.0);
             black_box(());
         })
     });
@@ -466,7 +473,7 @@ fn bench_fhn_step(c: &mut Criterion) {
     g.throughput(Throughput::Elements(1));
     g.bench_function("scalar_n1", |b| {
         b.iter(|| {
-            kernels::fhn_step(&mut v1, &mut w1, &i1, &mut sp1, &p1, None);
+            fhn_run(&mut v1, &mut w1, &i1, &mut sp1, &p1);
             black_box(());
         })
     });
@@ -480,7 +487,7 @@ fn bench_fhn_step(c: &mut Criterion) {
     g.throughput(Throughput::Elements(8));
     g.bench_function("simd_n8", |b| {
         b.iter(|| {
-            kernels::fhn_step(&mut v8, &mut w8, &i8, &mut sp8, &p8, None);
+            fhn_run(&mut v8, &mut w8, &i8, &mut sp8, &p8);
             black_box(());
         })
     });
@@ -553,7 +560,7 @@ fn bench_delay_buffer(c: &mut Criterion) {
 // ═══════════════════════════════════════════════════════════
 
 fn bench_hh_fused_vs_original(c: &mut Criterion) {
-    use taas_kernels::neuron::hh;
+    use pillars::kernels::hh_channels as hh;
 
     let channels = hh::standard_channels();
     let channel_meta = hh::build_channel_meta(&channels);
@@ -652,6 +659,89 @@ fn bench_hh_fused_vs_original(c: &mut Criterion) {
 // ═══════════════════════════════════════════════════════════
 //  Helpers
 // ═══════════════════════════════════════════════════════════
+
+/// Pillars-канон (транш 3e): FHNModel, legacy 4-col → 5-col repacking.
+/// params: [dt, tau_w, a, b] × n; v_thresh = 0.5 (legacy).
+fn fhn_run(v: &mut [f32], w: &mut [f32], i: &[f32], sp: &mut [i32], p: &[f32]) {
+    let n = v.len();
+    let mut params = vec![0.0f32; n * FHNModel::N_PARAMS];
+    let mut was_below = vec![0.0f32; n];
+    for i in 0..n {
+        params[i] = p[i];
+        params[n + i] = if p[n + i] > 0.0 { 1.0 / p[n + i] } else { 0.0 };
+        params[2 * n + i] = p[2 * n + i];
+        params[3 * n + i] = p[3 * n + i];
+        params[4 * n + i] = 0.5;
+        was_below[i] = if v[i] < 0.5 { 1.0 } else { 0.0 };
+    }
+    unsafe {
+        run_neuron::<FHNModel>(
+            v.as_mut_ptr(),
+            w.as_mut_ptr(),
+            was_below.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            i.as_ptr(),
+            sp.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+        );
+    }
+}
+
+/// Pillars-канон (транш 3e): pillars::ops::plasticity::stp (lane-функция),
+/// SIMD-цикл + scalar tail.
+fn stp_run(
+    x: &mut [f32],
+    u: &mut [f32],
+    pre: &[i32],
+    td: &[f32],
+    tf: &[f32],
+    u0: &[f32],
+    a: &[f32],
+    i_out: &mut [f32],
+    dt: f32,
+) {
+    let n = x.len();
+    let n8 = n & !7;
+    let dt_s = f32x8::splat(dt);
+    let zero_s = f32x8::splat(0.0);
+    let one_s = f32x8::splat(1.0);
+    for off in (0..n8).step_by(8) {
+        unsafe {
+            let uu = load8(u.as_ptr(), off);
+            let xx = load8(x.as_ptr(), off);
+            let sp = load8_i32(pre.as_ptr(), off);
+            let tdv = load8(td.as_ptr(), off).max(f32x8::splat(1e-10));
+            let tfv = load8(tf.as_ptr(), off).max(f32x8::splat(1e-10));
+            let u0v = load8(u0.as_ptr(), off);
+            let av = load8(a.as_ptr(), off);
+            let (un, xn) = pillars_stp::stp_step(uu, xx, sp, u0v, one_s / tdv, one_s / tfv, dt_s);
+            let s = sp.cmp_gt(zero_s).blend(one_s, zero_s);
+            let mut io = load8(i_out.as_ptr(), off);
+            io += s * av * un * xn;
+            store8(u.as_mut_ptr(), off, un);
+            store8(x.as_mut_ptr(), off, xn);
+            store8(i_out.as_mut_ptr(), off, io);
+        }
+    }
+    for i in n8..n {
+        let s = if pre[i] != 0 { 1.0f32 } else { 0.0f32 };
+        let (un, xn) = pillars_stp::stp_step(
+            u[i],
+            x[i],
+            s,
+            u0[i],
+            1.0 / td[i].max(1e-10),
+            1.0 / tf[i].max(1e-10),
+            dt,
+        );
+        u[i] = un;
+        x[i] = xn;
+        i_out[i] += s * a[i] * un * xn;
+    }
+}
 
 fn pack_fhn(vals: &[f32]) -> Vec<f32> {
     let mut p = Vec::with_capacity(4);

@@ -158,8 +158,10 @@ fn run_our_hh(
 
 #[test]
 fn verify_vs_neuron() {
-    let ref_path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/resources/data/ground_truth/hh_neuron.ref");
+    let ref_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/data/ground_truth/hh_neuron.ref"
+    );
     let reference = read_ref(ref_path);
 
     assert!((reference.dt - 0.01f32).abs() < 1e-6, "dt mismatch");
@@ -438,7 +440,7 @@ fn run_gpu_hh_trace(
     dt: f32,
     num_steps: usize,
 ) -> Vec<f32> {
-    use cuda_kernels::GpuContext;
+    use pillars_cuda::gpu::GpuContext;
 
     let n = 1usize;
     let n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
@@ -493,8 +495,10 @@ fn verify_vs_neuron_gpu() {
         build_channel_meta, standard_channels, steady_state_gates,
     };
 
-    let ref_path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/resources/data/ground_truth/hh_neuron.ref");
+    let ref_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/data/ground_truth/hh_neuron.ref"
+    );
     let reference = read_ref(ref_path);
     let num_steps = reference.num_steps as usize;
     let dt = reference.dt;

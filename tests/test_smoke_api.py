@@ -334,9 +334,9 @@ if Trainer:
 section("13. Sparse ops — CSR ring")
 
 n = 8
-row_ptr = np.array([0, 1, 2, 3, 3, 3, 3, 3, 3], dtype=np.int32)
-col_indices = np.array([1, 2, 0, 0, 0, 0, 0, 0], dtype=np.int32)
-values = np.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+row_ptr = np.arange(n + 1, dtype=np.int32)
+col_indices = np.array([1, 2, 3, 4, 5, 6, 7, 0], dtype=np.int32)
+values = np.ones(n, dtype=np.float32)
 
 # Hamiltonian: u must be non-zero to get non-zero h_real
 v_sp = np.ones(n, dtype=np.float32)
@@ -451,14 +451,83 @@ if traj:
 section("19. Pillars populations")
 
 from taas_checkmate import pillars as pillars_mod
+
+# The facade is the supported public Python surface. Keep this list explicit:
+# a missing export must fail loudly instead of being silently skipped by an
+# optional getattr() check elsewhere in this legacy-compatible smoke script.
+required_pillars_classes = {
+    "ActorCriticAgent", "AdExPopulation", "AstrocyteState",
+    "AtlasovNeuromotorPopulation", "ConnectomeBrain", "EPropIzhikevichMulti",
+    "EPropLIF", "EPropTrainer", "FHNPopulation", "GLIF3Population",
+    "GLIF4Population", "Glif3State", "Glif4State", "HAAPPopulation",
+    "HHPopulation", "HRPopulation", "HeterogeneousConnectomeBrain",
+    "IzhikevichDualPopulation", "IzhikevichPopulation", "LIFAtPopulation", "LIFPopulation",
+    "LifNeuron", "MorrisLecarPopulation",
+    "PoissonGenerator", "RatePopulation",
+    "SAWPopulation", "ShortTermPlasticity", "SomatoDendriticNeuron",
+    "SornNetwork", "SynapticConnectomeBrain", "TriangulatedPopulation",
+    "TtfsEncoder", "VSNPopulation", "WCPopulation",
+}
+required_pillars_functions = {
+    "adam_train", "apply_stdp_ltd", "band_energy", "batch_coherence_sweep",
+    "bsa_encode", "bsa_kernel_hamming", "compute_cvs", "compute_hamiltonian",
+    "compute_isi", "cpe_phase_coherence", "cpe_stdp_update", "detect_spikes",
+    "dopamine_delta", "dopamine_timing_gate", "echo_tap", "eligibility_update",
+    "eprop_update", "firing_rates", "hebbian_update", "interference",
+    "interference_mean", "intrinsic_plasticity", "kalman_update",
+    "kuramoto_step", "kuramoto_step_sparse", "lazy_sincos_update",
+    "make_brain", "make_population",
+    "lif_sim_cpu_recording", "mean_firing_rate", "nlms_train", "phase_coherence",
+    "phase_encode", "phase_gate_apply", "population_rate_decode", "probe_eprop_fr",
+    "propagate_spikes", "pst_decode", "rate_step", "ring_synthesis", "safety_clamp",
+    "sigmoid_gate", "sim_step", "spike_entropy", "spike_raster_to_csv",
+    "stdp_homeostatic", "stdp_update", "step_adex", "step_atlasov_neuromotor",
+    "step_eprop", "step_fhn", "step_gco", "step_gco_full", "step_haap", "step_hr",
+    "step_izhikevich", "step_lif", "step_nmda", "step_saw", "step_wc",
+    "stochastic_encoder", "suggest_eprop_config", "surrogate_gradient",
+    "synaptic_normalization", "t3_complex_decoder", "t3_drive_encoder",
+    "t3_inverse_kuramoto", "t3_pst_features", "t3_step_sparse", "t3_tact_generator",
+    "thalamic_gate", "vnc_step", "winding_matrix",
+}
+for name in sorted(required_pillars_classes):
+    check(hasattr(pillars_mod, name), f"pillars class export: {name}")
+for name in sorted(required_pillars_functions):
+    check(hasattr(pillars_mod, name), f"pillars function export: {name}")
+
 LIFPopulation = pillars_mod.LIFPopulation
 RatePopulation = pillars_mod.RatePopulation
 AdExPopulation = pillars_mod.AdExPopulation
 GLIF4Population = pillars_mod.GLIF4Population
 FHNPopulation = pillars_mod.FHNPopulation
 HRPopulation = pillars_mod.HRPopulation
+HHPopulation = pillars_mod.HHPopulation
+TriangulatedPopulation = pillars_mod.TriangulatedPopulation
 ConnectomeBrain = pillars_mod.ConnectomeBrain
 SynapticConnectomeBrain = pillars_mod.SynapticConnectomeBrain
+
+# Invalid user indices and shapes must be Python exceptions, not Rust panics.
+_contract_pop = LIFPopulation(8)
+for bad_col in (6, 999):
+    try:
+        _contract_pop.set_param_array(bad_col, np.zeros(8, dtype=np.float32))
+        check(False, f"invalid param column {bad_col} rejected")
+    except ValueError:
+        check(True, f"invalid param column {bad_col} rejected with ValueError")
+    try:
+        _contract_pop.set_state_array(bad_col, np.zeros(8, dtype=np.float32))
+        check(False, f"invalid state column {bad_col} rejected")
+    except ValueError:
+        check(True, f"invalid state column {bad_col} rejected with ValueError")
+try:
+    _contract_pop.set_param_array(0, np.zeros(7, dtype=np.float32))
+    check(False, "wrong parameter array length rejected")
+except ValueError:
+    check(True, "wrong parameter array length rejected with ValueError")
+try:
+    _contract_pop.step(np.zeros(7, dtype=np.float32), np.zeros(8, dtype=np.int32))
+    check(False, "wrong step input length rejected")
+except ValueError:
+    check(True, "wrong step input length rejected with ValueError")
 
 n = 8
 i_in = np.full(n, 30.0, dtype=np.float32)
@@ -497,20 +566,174 @@ for _ in range(100):
     glif4_total += int(spikes.sum())
 check(glif4_total > 0, f"GLIF4Population fires (total={glif4_total})")
 
-# FHN oscillates (membrane potential moves) with drive (I=0.5 matches zoo)
+# FHN fires edge-triggered with drive (I=0.5 matches zoo). Factory defaults
+# must include was_below=1.0, otherwise the first crossing through v_thresh
+# is missed and (in the excitable regime) the neuron stays silent.
 fhn = FHNPopulation(n)
-fhn_v0 = fhn.v.copy()
+fhn_total = 0
 for _ in range(1000):
     fhn.step(np.full(n, 0.5, dtype=np.float32), spikes)
-check(abs(float(fhn.v[0]) - float(fhn_v0[0])) > 1e-3, f"FHNPopulation dynamics (v={float(fhn.v[0])})")
+    fhn_total += int(spikes.sum())
+check(fhn_total > 0, f"FHNPopulation fires (total={fhn_total})")
 
-# HR steps without error and produces spikes over time
+# HH with canonical drive (I=15, dt=0.01) must spike and stay finite. Factory
+# state layout is v,m,h,n,c,was_below: c = CaV-T gate (0.19) and was_below=1.0
+# — a state-index slip (c=1.0 / was_below=0) silently breaks edge spiking.
+hh = HHPopulation(n)
+hh.dt = 0.01
+hh_total = 0
+for _ in range(3000):
+    hh.step(np.full(n, 15.0, dtype=np.float32), spikes)
+    hh_total += int(spikes.sum())
+check(
+    hh_total > n and np.isfinite(hh.v).all(),
+    f"HHPopulation fires, finite (total={hh_total})",
+)
+
+# Edge-triggered spike contract: the FIRST rising edge through v_thresh must
+# fire. This is the regression for the factory state-index slip (the 4th and
+# 5th states are c / was_below): was_below must start at 1.0.
+hh1 = HHPopulation(1)
+hh1.dt = 0.01
+spikes1 = np.zeros(1, dtype=np.int32)
+v_prev = float(np.asarray(hh1.v)[0])
+first_edge_fires = False
+for _ in range(3000):
+    hh1.step(np.full(1, 15.0, dtype=np.float32), spikes1)
+    v_now = float(np.asarray(hh1.v)[0])
+    if v_prev < 0.0 <= v_now:
+        first_edge_fires = bool(spikes1[0] == 1)
+        break
+    v_prev = v_now
+check(first_edge_fires, "HHPopulation first rising edge fires (was_below=1.0)")
+
+# HR with factory defaults (dt=0.01, r=0.006, v_thresh=1.0, x=-1.6, y=-12.0)
+# must burst with drive and stay finite — old defaults (dt=0.5, y=0.0) gave NaN.
 hr = HRPopulation(n)
 hr_total = 0
 for _ in range(500):
     hr.step(np.full(n, 30.0, dtype=np.float32), spikes)
     hr_total += int(spikes.sum())
-check(len(hr.v) == n and hr_total >= 0, f"HRPopulation runs (total={hr_total})")
+check(
+    len(hr.v) == n and hr_total > 0 and np.isfinite(hr.v).all(),
+    f"HRPopulation bursts without NaN (total={hr_total})",
+)
+
+# Triangulated: step() before calibrate_lif() must raise (no LUT installed),
+# and after calibration the LUT neuron must fire with drive.
+tri = TriangulatedPopulation(n)
+try:
+    tri.step(np.zeros(n, dtype=np.float32), spikes)
+    check(False, "TriangulatedPopulation pre-calibrate step rejected")
+except BaseException:
+    check(True, "TriangulatedPopulation pre-calibrate step raises")
+tri.calibrate_lif(n_steps=10_000)
+tri_total = 0
+for _ in range(1000):
+    tri.step(np.full(n, 30.0, dtype=np.float32), spikes)
+    tri_total += int(spikes.sum())
+check(tri_total > 0, f"TriangulatedPopulation fires after calibrate (total={tri_total})")
+
+# Runtime factory: make_population(name, n) returns the concrete class by name
+pop_lif = pillars_mod.make_population("lif", 8)
+pop_hh = pillars_mod.make_population("HHPopulation", 8)
+pop_dual = pillars_mod.make_population("izhikevich_dual", 8)
+pop_lifat = pillars_mod.make_population("lif_at", 8)
+check(pop_lif.n == 8 and pop_hh.n == 8, "make_population accepts short and class-style names")
+check(type(pop_hh).__name__ == "HHPopulation", f"make_population('HHPopulation') -> {type(pop_hh).__name__}")
+# camelCase class-style forms resolve too (camel→snake normalization)
+pop_ml = pillars_mod.make_population("MorrisLecarPopulation", 8)
+pop_att = pillars_mod.make_population("AtlasovNeuromotorPopulation", 8)
+check(
+    type(pop_ml).__name__ == "MorrisLecarPopulation"
+    and type(pop_att).__name__ == "AtlasovNeuromotorPopulation",
+    "make_population resolves multi-word camelCase class names",
+)
+check(type(pop_dual).__name__ == "IzhikevichDualPopulation", "make_population('izhikevich_dual') class")
+check(type(pop_lifat).__name__ == "LIFAtPopulation", "make_population('lif_at') class")
+# duck-typed surface: step(i, spikes) works on the factory-created population
+# (same tuned config as the direct LIFPopulation check above: dt=0.5, I=30)
+pop_lif.dt = 0.5
+sp = np.zeros(8, dtype=np.int32)
+factory_total = 0
+for _ in range(100):
+    pop_lif.step(np.full(8, 30.0, dtype=np.float32), sp)
+    factory_total += int(sp.sum())
+check(factory_total > 0, f"make_population('lif') steps and fires (total={factory_total})")
+try:
+    pillars_mod.make_population("bogus", 8)
+    check(False, "make_population('bogus') rejected")
+except ValueError:
+    check(True, "make_population('bogus') raises ValueError")
+
+# Heterogeneous factory coverage: every ordinary zoo model must build and
+# take a finite zero-input step. Triangulated is intentionally separate because
+# its LUT is process-wide and requires calibration before construction.
+hetero_model_names = [
+    "lif", "izhikevich", "izhikevich_dual", "hh", "vsn", "rate", "adex",
+    "glif3", "glif4", "fhn", "hr", "haap", "morris_lecar", "saw", "wc",
+    "lifat", "atlasov_neuromotor",
+]
+for _model_name in hetero_model_names:
+    _assembly = pillars_mod.make_brain([(_model_name, 4)], [[0.0]])
+    _out = _assembly.step()
+    check(
+        len(_out) == 1 and _out[0].shape == (4,) and np.isfinite(_assembly.v[0]).all(),
+        f"make_brain builds/steps {_model_name}",
+    )
+try:
+    pillars_mod.make_brain([("triangulated", 4)], [[0.0]])
+    check(False, "make_brain rejects LUT-only triangulated")
+except ValueError:
+    check(True, "make_brain rejects LUT-only triangulated")
+
+# Heterogeneous multi-population assembly: block connectivity is indexed
+# [post][pre], so [[0, 1], [1, 0]] makes a bidirectional HH↔LIF graph.
+hetero = pillars_mod.make_brain(
+    [("hh", 64), ("lif", 32)],
+    [[0.0, 1.0], [1.0, 0.0]],
+)
+check(type(hetero).__name__ == "HeterogeneousConnectomeBrain", "make_brain returns heterogeneous brain")
+check(hetero.n_populations == 2, f"make_brain population count={hetero.n_populations}")
+check(hetero.population_sizes == [64, 32], f"make_brain population sizes={hetero.population_sizes}")
+hetero.inject(0, [0], [15.0])
+hetero_spikes = hetero.step()
+check(
+    isinstance(hetero_spikes, list)
+    and len(hetero_spikes) == 2
+    and hetero_spikes[0].shape == (64,)
+    and hetero_spikes[1].shape == (32,),
+    "make_brain step returns one spike array per population",
+)
+check(hetero.spikes[0].shape == (64,) and hetero.v[1].shape == (32,), "heterogeneous brain state facade")
+hetero.inject_array(1, np.zeros(32, dtype=np.float32))
+check(True, "heterogeneous brain bulk input")
+
+# Asymmetric orientation regression: connectivity is [post][pre]. A block
+# only at [1][0] routes population 0 into population 1, never the reverse.
+one_way = pillars_mod.make_brain(
+    [("lif", 4), ("lif", 4)],
+    [[0.0, 0.0], [2.0, 0.0]],
+)
+for _ in range(200):
+    # Keep the source driven until it spikes; the [1][0] block then routes
+    # source spikes into population 1 on the following step.
+    one_way.inject_array(0, np.full(4, 30.0, dtype=np.float32))
+    one_way.step()
+check(
+    float(np.asarray(one_way.v[1])[0]) > -70.0,
+    "heterogeneous connectivity uses [post][pre] orientation",
+)
+try:
+    pillars_mod.make_brain([("lif", 4)], [[0.0, 1.0], [1.0, 0.0]])
+    check(False, "make_brain rejects non-square connectivity")
+except ValueError:
+    check(True, "make_brain rejects non-square connectivity")
+try:
+    pillars_mod.make_brain([("lif", 4), ("bogus", 4)], [[0.0, 0.0], [0.0, 0.0]])
+    check(False, "make_brain rejects unsupported model")
+except ValueError:
+    check(True, "make_brain rejects unsupported model")
 
 # ConnectomeBrain routes spikes through a CSR chain 0→1→2
 cb = ConnectomeBrain(

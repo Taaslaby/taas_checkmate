@@ -963,8 +963,8 @@ fn test_eprop_multi_eligibility_per_synapse() {
 
     eprop.step(&weights, &z_pre, &I_ext, &mut spikes);
 
-// e[j] — eligibility for synapse 0 → should be non-zero
-// e[n_post + j] — eligibility for synapse 1 → should be 0 (no pre-spike)
+    // e[j] — eligibility for synapse 0 → should be non-zero
+    // e[n_post + j] — eligibility for synapse 1 → should be 0 (no pre-spike)
     for j in 0..n_post {
         let e0 = eprop.e[j];
         let e1 = eprop.e[n_post + j];
@@ -1687,11 +1687,10 @@ fn test_ttfs_cycle() {
     // Let's just verify we reach the spike
     let mut found_spike = false;
     for _ in 0..12 {
-        if ttfs.encode_step(&values, &mut spikes)
-            && spikes.iter().any(|&s| s != 0) {
-                found_spike = true;
-                break;
-            }
+        if ttfs.encode_step(&values, &mut spikes) && spikes.iter().any(|&s| s != 0) {
+            found_spike = true;
+            break;
+        }
     }
     assert!(found_spike, "TTFS should spike after max_delay steps");
 }
@@ -2429,25 +2428,25 @@ fn test_stp_simd_vs_scalar_tail() {
 
 #[test]
 fn test_hh_spike_detection_reverse_crossing() {
-    use taas_checkmate::HHModel;
     use taas_checkmate::run_neuron;
+    use taas_checkmate::HHModel;
 
     // Params (12 на нейрон): dt, g_Na, E_Na, g_K, E_K, g_leak, E_leak,
     // q10, v_thresh, inv_C_m, g_CaT, E_CaT
     let make_params = |dt: f32| -> Vec<f32> {
         let mut p = vec![0.0f32; 12];
-        p[0] = dt;        // dt (ms)
-        p[1] = 120.0;     // g_Na
-        p[2] = 50.0;      // E_Na
-        p[3] = 36.0;      // g_K
-        p[4] = -77.0;     // E_K
-        p[5] = 0.3;       // g_leak
-        p[6] = -54.387;   // E_leak
-        p[7] = 1.0;       // q10 (6.3°C)
-        p[8] = 0.0;       // v_thresh
-        p[9] = 1.0;       // inv_C_m
-        p[10] = 0.0;      // g_CaT (standard HH: нет CaV-T тока)
-        p[11] = 120.0;    // E_CaT
+        p[0] = dt; // dt (ms)
+        p[1] = 120.0; // g_Na
+        p[2] = 50.0; // E_Na
+        p[3] = 36.0; // g_K
+        p[4] = -77.0; // E_K
+        p[5] = 0.3; // g_leak
+        p[6] = -54.387; // E_leak
+        p[7] = 1.0; // q10 (6.3°C)
+        p[8] = 0.0; // v_thresh
+        p[9] = 1.0; // inv_C_m
+        p[10] = 0.0; // g_CaT (standard HH: нет CaV-T тока)
+        p[11] = 120.0; // E_CaT
         p
     };
 
@@ -2466,10 +2465,16 @@ fn test_hh_spike_detection_reverse_crossing() {
         for _ in 0..n_steps {
             unsafe {
                 run_neuron::<HHModel>(
-                    &mut v as *mut f32, &mut m as *mut f32, &mut h as *mut f32,
-                    &mut n_gate as *mut f32, &mut caT as *mut f32, &mut was_below as *mut f32,
-                    &i_syn as *const f32, &mut spikes as *mut i32,
-                    params.as_ptr(), 1,
+                    &mut v as *mut f32,
+                    &mut m as *mut f32,
+                    &mut h as *mut f32,
+                    &mut n_gate as *mut f32,
+                    &mut caT as *mut f32,
+                    &mut was_below as *mut f32,
+                    &i_syn as *const f32,
+                    &mut spikes as *mut i32,
+                    params.as_ptr(),
+                    1,
                 );
             }
             total += spikes[0] as u32;
@@ -2572,8 +2577,8 @@ fn test_fused_sparse_consistency() {
                 sp_ref[j] = 0;
                 continue;
             }
-            let dv = (0.04f32.mul_add(v_ref[j], 5.0)).mul_add(v_ref[j], 140.0)
-                - u_ref[j] + I_ref[j];
+            let dv =
+                (0.04f32.mul_add(v_ref[j], 5.0)).mul_add(v_ref[j], 140.0) - u_ref[j] + I_ref[j];
             let du = a[j] * (b[j] * v_ref[j] - u_ref[j]);
             v_ref[j] += dt * dv;
             u_ref[j] += dt * du;

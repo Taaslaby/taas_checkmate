@@ -4,15 +4,23 @@
 use std::time::Instant;
 
 fn format_bytes(b: usize) -> String {
-    if b > 1_000_000_000 { format!("{:.1} GB", b as f64 / 1e9) }
-    else if b > 1_000_000 { format!("{:.1} MB", b as f64 / 1e6) }
-    else { format!("{b} B") }
+    if b > 1_000_000_000 {
+        format!("{:.1} GB", b as f64 / 1e9)
+    } else if b > 1_000_000 {
+        format!("{:.1} MB", b as f64 / 1e6)
+    } else {
+        format!("{b} B")
+    }
 }
 
 fn mb_allocated() -> usize {
     let mut rss = 0;
     if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
-        let pages: usize = statm.split_whitespace().next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let pages: usize = statm
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         rss = pages * 4096;
     }
     rss
@@ -54,7 +62,11 @@ fn bench_200m_neurons() {
 
     let mem_after = mb_allocated();
     println!("Alloc time: {:.2}s", t_alloc.as_secs_f64());
-    println!("RSS after:  {} (Δ = {})", format_bytes(mem_after), format_bytes(mem_after - mem_before));
+    println!(
+        "RSS after:  {} (Δ = {})",
+        format_bytes(mem_after),
+        format_bytes(mem_after - mem_before)
+    );
 
     // ── Build channel meta ──
     let channels = taas_checkmate::kernels::neuron::hh::standard_channels();
@@ -80,9 +92,11 @@ fn bench_200m_neurons() {
     }
     let t_step = t_step.elapsed();
 
-    println!("Step time:  {:.4}s ({:.1} ns/neuron)",
+    println!(
+        "Step time:  {:.4}s ({:.1} ns/neuron)",
         t_step.as_secs_f64(),
-        t_step.as_nanos() as f64 / n as f64);
+        t_step.as_nanos() as f64 / n as f64
+    );
 
     // ── Verify no crash ──
     assert!(!v[0].is_nan());
@@ -90,18 +104,30 @@ fn bench_200m_neurons() {
     // Sample a few values to verify computation happened
     let sample = v[n / 2];
     assert!(sample.is_finite());
-    println!("\n✓ 200M neurons: 1 step in {:.3}s, RSS ≈ {}",
-        t_step.as_secs_f64(), format_bytes(mem_after - mem_before));
+    println!(
+        "\n✓ 200M neurons: 1 step in {:.3}s, RSS ≈ {}",
+        t_step.as_secs_f64(),
+        format_bytes(mem_after - mem_before)
+    );
 
     // Estimate for 1B
     let ratio = 1_000_000_000.0 / n as f64;
-    println!("→ 1B HH estimate: {:.1}s/step, ~{} RSS",
+    println!(
+        "→ 1B HH estimate: {:.1}s/step, ~{} RSS",
         t_step.as_secs_f64() * ratio,
-        format_bytes(((mem_after - mem_before) as f64 * ratio) as usize));
+        format_bytes(((mem_after - mem_before) as f64 * ratio) as usize)
+    );
 
     // ── Clean up HH allocs ──
-    drop(v); drop(gates); drop(i_ext); drop(g_leak); drop(e_leak); drop(c_m); drop(g_max);
-    drop(channels); drop(channel_meta);
+    drop(v);
+    drop(gates);
+    drop(i_ext);
+    drop(g_leak);
+    drop(e_leak);
+    drop(c_m);
+    drop(g_max);
+    drop(channels);
+    drop(channel_meta);
 
     // ═══════════════════════════════════════════════════════
     //  LIF comparison
@@ -112,49 +138,67 @@ fn bench_200m_neurons() {
     let t_lif_alloc = Instant::now();
 
     let mut v_lif = vec![-65.0f32; n];
-    let mut i_ext_lif = vec![10.0f32; n];
+    let i_ext_lif = vec![10.0f32; n];
     let mut spikes_lif = vec![0i32; n];
-    let mut params_lif = Vec::with_capacity(n * 5);
+    // Pillars LIFModel 6-col [dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref]
+    let mut params_lif = Vec::with_capacity(n * 6);
     for _ in 0..n {
-        params_lif.push(dt);       // dt
-        params_lif.push(10.0);     // tau_m
-        params_lif.push(-65.0);    // v_rest
-        params_lif.push(-50.0);    // v_thresh
-        params_lif.push(-70.0);    // v_reset
+        params_lif.push(dt); // dt
+        params_lif.push(0.1); // inv_tau_m = 1/10.0
+        params_lif.push(-65.0); // v_rest
+        params_lif.push(-50.0); // v_thresh
+        params_lif.push(-70.0); // v_reset
+        params_lif.push(2.0); // tau_ref
     }
     let mut refractory_lif = vec![0.0f32; n];
-    let tau_ref_lif = 2.0f32;
 
     let t_lif_alloc = t_lif_alloc.elapsed();
     let mem_lif_after = mb_allocated();
     println!("Alloc time: {:.2}s", t_lif_alloc.as_secs_f64());
-    println!("RSS after:  {} (Δ = {})",
-        format_bytes(mem_lif_after), format_bytes(mem_lif_after - mem_lif_before));
+    println!(
+        "RSS after:  {} (Δ = {})",
+        format_bytes(mem_lif_after),
+        format_bytes(mem_lif_after - mem_lif_before)
+    );
 
     println!("\nRunning 1 LIF step...");
     let t_lif_step = Instant::now();
-    taas_checkmate::kernels::lif_step(
-        &mut v_lif,
-        &mut i_ext_lif,
-        &mut spikes_lif,
-        &params_lif,
-        &mut refractory_lif,
-        tau_ref_lif,
-        None,
-    );
+    unsafe {
+        taas_checkmate::pillars::core::runner::run_neuron::<
+            taas_checkmate::pillars::zoo::neurons::LIFModel,
+        >(
+            v_lif.as_mut_ptr(),
+            refractory_lif.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            i_ext_lif.as_ptr(),
+            spikes_lif.as_mut_ptr(),
+            params_lif.as_ptr(),
+            n,
+        );
+    }
     let t_lif_step = t_lif_step.elapsed();
 
-    println!("Step time:  {:.6}s ({:.3} ns/neuron)",
+    println!(
+        "Step time:  {:.6}s ({:.3} ns/neuron)",
         t_lif_step.as_secs_f64(),
-        t_lif_step.as_nanos() as f64 / n as f64);
+        t_lif_step.as_nanos() as f64 / n as f64
+    );
 
     assert!(spikes_lif[0] == 1 || spikes_lif[0] == 0);
     assert!(!v_lif[0].is_nan());
 
-    println!("\n✓ 200M LIF: 1 step in {:.4}s, RSS ≈ {}",
-        t_lif_step.as_secs_f64(), format_bytes(mem_lif_after - mem_lif_before));
-    println!("→ 1B LIF estimate: {:.2}s/step",
-        t_lif_step.as_secs_f64() * 1_000_000_000.0 / n as f64);
+    println!(
+        "\n✓ 200M LIF: 1 step in {:.4}s, RSS ≈ {}",
+        t_lif_step.as_secs_f64(),
+        format_bytes(mem_lif_after - mem_lif_before)
+    );
+    println!(
+        "→ 1B LIF estimate: {:.2}s/step",
+        t_lif_step.as_secs_f64() * 1_000_000_000.0 / n as f64
+    );
 }
 
 #[test]
@@ -162,7 +206,7 @@ fn bench_1b_lif_alloc() {
     let n = 1_000_000_000usize;
     let dt = 0.01f32;
     println!("\n═══ 1B Neuron LIF Alloc Bench ═══");
-    println!("Estimated: 6 arrays × 4 GB ≈ 36 GB RSS");
+    println!("Estimated: v/i_ext/spikes/refr 4×4 GB + params 6-col 24 GB ≈ 40 GB RSS");
 
     let mem_before = mb_allocated();
     let t_all = Instant::now();
@@ -170,18 +214,18 @@ fn bench_1b_lif_alloc() {
     // Allocate using fill (touches pages on write)
     // v, I, spikes, refractory are 4 GB each = 16 GB
     let mut v = vec![-65.0f32; n];
-    let mut i_ext = vec![10.0f32; n];
+    let i_ext = vec![10.0f32; n];
     let mut spikes = vec![0i32; n];
     let mut refractory = vec![0.0f32; n];
 
-    // Params: 5 × n = 20 GB. Fill in 5 slices to avoid per-element loop.
-    let mut params = vec![0.0f32; n * 5];
+    // Params: 6 × n = 24 GB (pillars LIFModel: dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref).
+    let mut params = vec![0.0f32; n * 6];
     // Fill dt section: params[0..n]
     let (dt_slice, rest) = params.split_at_mut(n);
     dt_slice.fill(dt);
-    // Fill tau_m: params[n..2n]
+    // Fill inv_tau_m: params[n..2n] = 1/10.0
     let (tm_slice, rest) = rest.split_at_mut(n);
-    tm_slice.fill(10.0);
+    tm_slice.fill(0.1);
     // Fill v_rest: params[2n..3n]
     let (vr_slice, rest) = rest.split_at_mut(n);
     vr_slice.fill(-65.0);
@@ -189,28 +233,51 @@ fn bench_1b_lif_alloc() {
     let (vt_slice, rest) = rest.split_at_mut(n);
     vt_slice.fill(-50.0);
     // Fill v_reset: params[4n..5n]
-    let (vres_slice, _) = rest.split_at_mut(n);
+    let (vres_slice, rest) = rest.split_at_mut(n);
     vres_slice.fill(-70.0);
+    // Fill tau_ref: params[5n..6n]
+    let (tr_slice, _) = rest.split_at_mut(n);
+    tr_slice.fill(2.0);
 
     let mem_after = mb_allocated();
-    println!("Alloc + fill OK! Time: {:.1}s, RSS: {} (Δ = {})",
+    println!(
+        "Alloc + fill OK! Time: {:.1}s, RSS: {} (Δ = {})",
         t_all.elapsed().as_secs_f64(),
         format_bytes(mem_after),
-        format_bytes(mem_after - mem_before));
+        format_bytes(mem_after - mem_before)
+    );
 
     // ── 1 step ──
     println!("Running 1 LIF step...");
     let t_step = Instant::now();
-    taas_checkmate::kernels::lif_step(
-        &mut v, &mut i_ext, &mut spikes, &params, &mut refractory, 2.0, None,
-    );
+    unsafe {
+        taas_checkmate::pillars::core::runner::run_neuron::<
+            taas_checkmate::pillars::zoo::neurons::LIFModel,
+        >(
+            v.as_mut_ptr(),
+            refractory.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            i_ext.as_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+        );
+    }
     let t_step = t_step.elapsed();
 
-    println!("Step: {:.3}s ({:.3} ns/neuron)",
+    println!(
+        "Step: {:.3}s ({:.3} ns/neuron)",
         t_step.as_secs_f64(),
-        t_step.as_nanos() as f64 / n as f64);
+        t_step.as_nanos() as f64 / n as f64
+    );
     assert!(v[n - 1].is_finite());
-    println!("\n✓ 1B LIF survived! RSS ≈ {}", format_bytes(mem_after - mem_before));
+    println!(
+        "\n✓ 1B LIF survived! RSS ≈ {}",
+        format_bytes(mem_after - mem_before)
+    );
 
     // Estimate for HH
     let hh_est = n as f64 * 26.1e-9;
