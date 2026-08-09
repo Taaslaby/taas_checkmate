@@ -1,5 +1,5 @@
-use crate::device::ok_or;
-use crate::ffi::*;
+use crate::gpu::device::ok_or;
+use crate::gpu::ffi::*;
 use std::ffi::c_int;
 pub fn step_izhikevich(
     v: &mut [f32],

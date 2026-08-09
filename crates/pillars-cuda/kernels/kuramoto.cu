@@ -104,9 +104,24 @@ extern "C" __global__ void batch_coherence_sweep_kernel(
 
 extern "C" int cuda_kuramoto_prepare(
     const float* phases, float* cos_out, float* sin_out, int n) {
+    // Host → device → host round-trip (phases/cos_out/sin_out are HOST buffers).
     int bs = 256, gs = (n+bs-1)/bs;
-    kuramoto_prepare_kernel<<<gs, bs>>>(phases, cos_out, sin_out, n);
-    cudaDeviceSynchronize(); return 0;
+    float* d_phases = NULL; float* d_cos = NULL; float* d_sin = NULL;
+    cudaError_t e = cudaMalloc(&d_phases, (size_t)n * sizeof(float));
+    if (e) return (int)e;
+    e = cudaMalloc(&d_cos, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_phases); return (int)e; }
+    e = cudaMalloc(&d_sin, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_phases); cudaFree(d_cos); return (int)e; }
+    if ((e = cudaMemcpy(d_phases, phases, (size_t)n * sizeof(float), cudaMemcpyHostToDevice))) {
+        cudaFree(d_phases); cudaFree(d_cos); cudaFree(d_sin); return (int)e;
+    }
+    kuramoto_prepare_kernel<<<gs, bs>>>(d_phases, d_cos, d_sin, n);
+    e = cudaDeviceSynchronize();
+    if (!e) e = cudaMemcpy(cos_out, d_cos, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+    if (!e) e = cudaMemcpy(sin_out, d_sin, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_phases); cudaFree(d_cos); cudaFree(d_sin);
+    return (int)e;
 }
 
 extern "C" int cuda_kuramoto_update(

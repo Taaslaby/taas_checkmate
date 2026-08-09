@@ -1,6 +1,6 @@
 //! Raw C/CUDA FFI bindings.
 
-use crate::context::GpuCtx;
+use crate::gpu::context::GpuCtx;
 use std::ffi::{c_float, c_int, c_void};
 
 extern "C" {

@@ -1,8 +1,8 @@
 //! CUDA kernels for neuron-engine — GPU routines.
-use crate::context::GpuCtx;
-use crate::device::ok_or;
-use crate::ffi::*;
-use crate::ptr::DevicePtr;
+use crate::gpu::context::GpuCtx;
+use crate::gpu::device::ok_or;
+use crate::gpu::ffi::*;
+use crate::gpu::ptr::DevicePtr;
 use std::ffi::{c_float, c_int, c_void};
 // ═══════════════════════════════════════════════════════════
 //  Legacy individual kernel calls (kept for compat)
@@ -1580,8 +1580,50 @@ pub fn snn_population_rate_decode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{get_device_count, set_device, stdp_update, GpuContext};
+    use crate::gpu::{get_device_count, set_device, stdp_update, GpuContext};
     use serial_test::serial;
+
+    /// Pillars-мост LIF-AT (транш 3e: `safe::lif_at_step` удалён): легаси
+    /// 7-col `[dt, tau_m, v_rest, v_thresh, v_reset, tau_theta, beta]` →
+    /// `run_neuron::<LIFAtModel>` 8-col repacking (θ→slot1, refr→slot2).
+    fn lif_at_pillars(
+        v: &mut [f32],
+        theta: &mut [f32],
+        ii: &mut [f32],
+        spikes: &mut [i32],
+        params: &[f32],
+        refractory: &mut [f32],
+        tau_ref: f32,
+    ) {
+        let n = v.len();
+        let mut p = vec![0.0f32; n * 8];
+        for i in 0..n {
+            p[i] = params[i];
+            let tm = params[n + i];
+            p[n + i] = if tm > 0.0 { 1.0 / tm } else { 0.0 };
+            p[2 * n + i] = params[2 * n + i];
+            p[3 * n + i] = params[3 * n + i];
+            p[4 * n + i] = params[4 * n + i];
+            let tt = params[5 * n + i];
+            p[5 * n + i] = if tt > 0.0 { 1.0 / tt } else { 1e9 };
+            p[6 * n + i] = params[6 * n + i];
+            p[7 * n + i] = tau_ref;
+        }
+        unsafe {
+            pillars::core::runner::run_neuron::<pillars::zoo::neurons::LIFAtModel>(
+                v.as_mut_ptr(),
+                theta.as_mut_ptr(),
+                refractory.as_mut_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                ii.as_ptr(),
+                spikes.as_mut_ptr(),
+                p.as_ptr(),
+                n,
+            );
+        }
+    }
 
     macro_rules! check_gpu {
         () => {
@@ -2028,8 +2070,9 @@ mod tests {
             ctx.lif_at_step(dt, &tau_m, &v_rest, &v_thresh, &v_reset, &tau_theta, &beta)
                 .unwrap();
 
-            // CPU step (SIMD reference, same I value)
-            taas_kernels::safe::lif_at_step(
+            // CPU step (SIMD reference, same I value) — pillars-канон
+            // (транш 3e: safe.rs удалён; мост переупаковки — локальный).
+            lif_at_pillars(
                 &mut v_cpu,
                 &mut theta_cpu,
                 &mut I_cpu,
@@ -2037,7 +2080,6 @@ mod tests {
                 &cpu_params,
                 &mut refractory_cpu,
                 tau_ref,
-                None,
             );
 
             // GPU kernel resets I to 0 after each step — match on CPU side

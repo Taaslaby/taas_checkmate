@@ -70,9 +70,25 @@ extern "C" __global__ void winding_matrix_kernel(
 // ─── Host wrappers ───────────────────────────────────────
 
 extern "C" int cuda_interference(float* out, const float* pa, const float* pb, int na, int nb) {
+    // Host → device → host round-trip (out/pa/pb are HOST buffers).
+    size_t o_bytes = (size_t)na * (size_t)nb * sizeof(float);
+    float* d_out = NULL; float* d_pa = NULL; float* d_pb = NULL;
+    cudaError_t e = cudaMalloc(&d_out, o_bytes);
+    if (e) return (int)e;
+    e = cudaMalloc(&d_pa, (size_t)na * sizeof(float));
+    if (e) { cudaFree(d_out); return (int)e; }
+    e = cudaMalloc(&d_pb, (size_t)nb * sizeof(float));
+    if (e) { cudaFree(d_out); cudaFree(d_pa); return (int)e; }
+    if ((e = cudaMemcpy(d_pa, pa, (size_t)na * sizeof(float), cudaMemcpyHostToDevice)) ||
+        (e = cudaMemcpy(d_pb, pb, (size_t)nb * sizeof(float), cudaMemcpyHostToDevice))) {
+        cudaFree(d_out); cudaFree(d_pa); cudaFree(d_pb); return (int)e;
+    }
     dim3 grid(1, na);
-    interference_kernel<<<grid, nb>>>(out, pa, pb, na, nb);
-    cudaDeviceSynchronize(); return 0;
+    interference_kernel<<<grid, nb>>>(d_out, d_pa, d_pb, na, nb);
+    e = cudaDeviceSynchronize();
+    if (!e) e = cudaMemcpy(out, d_out, o_bytes, cudaMemcpyDeviceToHost);
+    cudaFree(d_out); cudaFree(d_pa); cudaFree(d_pb);
+    return (int)e;
 }
 
 extern "C" int cuda_interference_mean(float* out, const float* pa, const float* pb, int n) {
@@ -88,8 +104,26 @@ extern "C" int cuda_phase_coherence(float* out, const float* sb, const float* cb
 }
 
 extern "C" int cuda_band_energy(float* be, const float* a, const float* om, const float* ed, int nb, int n) {
-    band_energy_kernel<<<nb, 256, 256*sizeof(float)>>>(be, a, om, ed, nb, n);
-    cudaDeviceSynchronize(); return 0;
+    // Host → device → host round-trip (be/a/om/ed are HOST buffers).
+    float* d_be = NULL; float* d_a = NULL; float* d_om = NULL; float* d_ed = NULL;
+    cudaError_t e = cudaMalloc(&d_be, (size_t)nb * sizeof(float));
+    if (e) return (int)e;
+    e = cudaMalloc(&d_a, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_be); return (int)e; }
+    e = cudaMalloc(&d_om, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_be); cudaFree(d_a); return (int)e; }
+    e = cudaMalloc(&d_ed, (size_t)nb * sizeof(float));
+    if (e) { cudaFree(d_be); cudaFree(d_a); cudaFree(d_om); return (int)e; }
+    if ((e = cudaMemcpy(d_a, a, (size_t)n * sizeof(float), cudaMemcpyHostToDevice)) ||
+        (e = cudaMemcpy(d_om, om, (size_t)n * sizeof(float), cudaMemcpyHostToDevice)) ||
+        (e = cudaMemcpy(d_ed, ed, (size_t)nb * sizeof(float), cudaMemcpyHostToDevice))) {
+        cudaFree(d_be); cudaFree(d_a); cudaFree(d_om); cudaFree(d_ed); return (int)e;
+    }
+    band_energy_kernel<<<nb, 256, 256*sizeof(float)>>>(d_be, d_a, d_om, d_ed, nb, n);
+    e = cudaDeviceSynchronize();
+    if (!e) e = cudaMemcpy(be, d_be, (size_t)nb * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_be); cudaFree(d_a); cudaFree(d_om); cudaFree(d_ed);
+    return (int)e;
 }
 
 extern "C" int cuda_winding_matrix(float* out, const float* pa, const float* pb, int na, int nb) {

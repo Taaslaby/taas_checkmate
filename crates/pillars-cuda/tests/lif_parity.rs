@@ -14,6 +14,15 @@ const DT: f32 = 0.1;
 const N_STEPS: usize = 500;
 
 #[test]
+fn lif_cuda_source_contains_dt_bridge() {
+    // `ctx.dt()` is the public authoring spelling; the transpiler must lower
+    // it to the same runner-supplied DT used by the CUDA kernel.
+    assert!(LIF_CUDA_SOURCE.contains("float DT"));
+    assert!(LIF_CUDA_SOURCE.contains("* DT"));
+    assert!(LIF_CUDA_SOURCE.contains("__global__ void lif_kernel"));
+}
+
+#[test]
 fn lif_cpu_simd_vs_cuda_bitwise() {
     let ns = LIFModel::N_STATE; // 2: v, refr
     let np = LIFModel::N_PARAMS; // 6: dt, inv_tau_m, v_rest, v_thresh, v_reset, tau_ref

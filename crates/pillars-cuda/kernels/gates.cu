@@ -93,8 +93,17 @@ extern "C" __global__ void t3_tact_generator_kernel(
 } while(0)
 
 extern "C" int cuda_safety_clamp(float* data, float min_val, float max_val, int n) {
-    LAUNCH(safety_clamp, data, min_val, max_val);
-    return 0;
+    // Host → device → host round-trip (data is a HOST buffer).
+    float* d_data = NULL;
+    cudaError_t e = cudaMalloc(&d_data, (size_t)n * sizeof(float));
+    if (e) return (int)e;
+    e = cudaMemcpy(d_data, data, (size_t)n * sizeof(float), cudaMemcpyHostToDevice);
+    if (e) { cudaFree(d_data); return (int)e; }
+    LAUNCH(safety_clamp, d_data, min_val, max_val);
+    e = cudaGetLastError();
+    if (!e) e = cudaMemcpy(data, d_data, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_data);
+    return (int)e;
 }
 
 // ─── Async stream-based launches ──────────────────────────
@@ -132,6 +141,25 @@ extern "C" int cuda_t3_inverse_kuramoto(float* dout, const float* r, const float
     return 0;
 }
 extern "C" int cuda_t3_tact_generator(float* p, const float* p1, const float* p2, const float* p3, float th, int n) {
-    LAUNCH(t3_tact_generator, p, p1, p2, p3, th);
-    return 0;
+    // Host → device → host round-trip (p/p1/p2/p3 are HOST buffers).
+    int bs = 256, gs = (n + bs - 1) / bs;
+    float* d_p = NULL; float* d_p1 = NULL; float* d_p2 = NULL; float* d_p3 = NULL;
+    cudaError_t e = cudaMalloc(&d_p, (size_t)n * sizeof(float));
+    if (e) return (int)e;
+    e = cudaMalloc(&d_p1, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_p); return (int)e; }
+    e = cudaMalloc(&d_p2, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_p); cudaFree(d_p1); return (int)e; }
+    e = cudaMalloc(&d_p3, (size_t)n * sizeof(float));
+    if (e) { cudaFree(d_p); cudaFree(d_p1); cudaFree(d_p2); return (int)e; }
+    if ((e = cudaMemcpy(d_p1, p1, (size_t)n * sizeof(float), cudaMemcpyHostToDevice)) ||
+        (e = cudaMemcpy(d_p2, p2, (size_t)n * sizeof(float), cudaMemcpyHostToDevice)) ||
+        (e = cudaMemcpy(d_p3, p3, (size_t)n * sizeof(float), cudaMemcpyHostToDevice))) {
+        cudaFree(d_p); cudaFree(d_p1); cudaFree(d_p2); cudaFree(d_p3); return (int)e;
+    }
+    t3_tact_generator_kernel<<<gs, bs>>>(d_p, d_p1, d_p2, d_p3, th, n);
+    e = cudaDeviceSynchronize();
+    if (!e) e = cudaMemcpy(p, d_p, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_p); cudaFree(d_p1); cudaFree(d_p2); cudaFree(d_p3);
+    return (int)e;
 }

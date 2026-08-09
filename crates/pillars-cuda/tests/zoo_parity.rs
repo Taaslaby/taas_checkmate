@@ -11,7 +11,8 @@ use pillars::zoo::Model;
 use pillars_cuda::{
     CompiledModel, ADEX_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, FHN_CUDA_SOURCE,
     GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HR_CUDA_SOURCE,
-    MORRIS_LECAR_CUDA_SOURCE, RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
+    IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE, RATE_CUDA_SOURCE,
+    SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };
 
 const N: usize = 64; // multiple of 8 → capacity == n, stride == n
@@ -145,6 +146,42 @@ fn glif3_parity() {
     );
     assert!(spikes > 0, "glif3 must spike at I=30, got {spikes}");
     eprintln!("[parity] glif3: spikes={spikes} max bits={bits}");
+}
+
+#[test]
+fn izhikevich_dual_parity() {
+    // Izhikevich Dual Memory (Sun et al. 2026): fast Izh + slow state m.
+    // Same params as `crates/kernels/tests/izhikevich_dual_parity.rs`.
+    let (spikes, bits) = run_parity::<pillars_cuda::IzhikevichDualModel>(
+        "izhikevichdual_kernel",
+        IZHIKEVICH_DUAL_CUDA_SOURCE,
+        &[(0, -65.0), (1, -13.0), (2, 0.0), (3, 0.0), (4, 0.5)], // v, u, refr, trace, m
+        &[1.0, 0.02, 0.2, -65.0, 8.0, 3.0, 30.0, 0.5, 0.99, 5.0], // dt, a, b, c, d, tau_ref, v_thresh, trace_decay, tau_m, w_m
+        1.0,
+        10.0,
+        500,
+        1e-2, // nvcc FMA-contraction vs CPU non-fused accumulates through spikes
+    );
+    assert!(spikes > 0, "dual Izh must spike at I=10, got {spikes}");
+    eprintln!("[parity] izhikevich_dual: spikes={spikes} max bits={bits}");
+}
+
+#[test]
+fn lifat_parity() {
+    // LIF-AT (GLIF2): adaptive threshold θ with exponential decay.
+    // Same params as `crates/kernels/tests/lifat_parity.rs`.
+    let (spikes, bits) = run_parity::<pillars_cuda::LIFAtModel>(
+        "lifat_kernel",
+        LIFAT_CUDA_SOURCE,
+        &[(0, -70.0), (1, 10.0), (2, 0.0)], // v, theta (elevated), refr
+        &[0.5, 0.1, -70.0, -54.0, -70.0, 0.05, 5.0, 3.0], // dt, inv_tau_m, v_rest, v_thresh, v_reset, inv_tau_theta, beta, tau_ref
+        0.5,
+        40.0,
+        1000,
+        1e-2, // exp vs expf: spike-timing can shift by one step (θ decays on spike)
+    );
+    assert!(spikes > 0, "lifat must spike at I=40, got {spikes}");
+    eprintln!("[parity] lifat: spikes={spikes} max bits={bits}");
 }
 
 #[test]
@@ -323,6 +360,12 @@ fn zoo_sources_are_self_contained() {
         ("adex_kernel", "adex_step", ADEX_CUDA_SOURCE),
         ("glif3_kernel", "glif3_step", GLIF3_CUDA_SOURCE),
         ("glif4_kernel", "glif4_step", GLIF4_CUDA_SOURCE),
+        ("lifat_kernel", "lifat_step", LIFAT_CUDA_SOURCE),
+        (
+            "izhikevichdual_kernel",
+            "izhikevichdual_step",
+            IZHIKEVICH_DUAL_CUDA_SOURCE,
+        ),
         ("haap_kernel", "haap_step", HAAP_CUDA_SOURCE),
         ("saw_kernel", "saw_step", SAW_CUDA_SOURCE),
         ("vsn_kernel", "vsn_step", VSN_CUDA_SOURCE),

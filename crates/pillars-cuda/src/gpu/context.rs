@@ -1,6 +1,6 @@
-use crate::device::ok_or;
-use crate::ffi::*;
-use crate::ptr::*;
+use crate::gpu::device::ok_or;
+use crate::gpu::ffi::*;
+use crate::gpu::ptr::*;
 use std::ffi::{c_float, c_int, c_void};
 // ═══════════════════════════════════════════════════════════
 
@@ -223,8 +223,6 @@ extern "C" {
     fn gpu_graph_replay(ctx: *mut GpuCtx) -> c_int;
     fn gpu_graph_is_captured(ctx: *mut GpuCtx) -> c_int;
     // GCO CUDA Graph
-    fn gpu_gco_graph_replay(ctx: *mut GpuCtx, dt: c_float, tau: c_float) -> c_int;
-    fn gpu_gco_graph_invalidate(ctx: *mut GpuCtx) -> c_int;
 }
 
 /// Persistent GPU state — keeps everything on device between steps.
@@ -1435,25 +1433,6 @@ impl GpuContext {
     /// Synchronize stream.
     pub fn sync(&self) -> Result<(), String> {
         ok_or(unsafe { gpu_context_sync(self.ctx) }, "sync")
-    }
-
-    // ─── GCO CUDA Graph ───────────────────────────────────
-
-    /// Replay GCO CUDA Graph. Captures automatically on first call
-    /// or when dt/tau change. Subsequent replays skip host-side launch.
-    pub fn gco_graph_replay(&self, dt: f32, tau: f32) -> Result<(), String> {
-        ok_or(
-            unsafe { gpu_gco_graph_replay(self.ctx, dt, tau) },
-            "gco_graph_replay",
-        )
-    }
-
-    /// Invalidate GCO CUDA Graph so next replay re-captures.
-    pub fn gco_graph_invalidate(&self) -> Result<(), String> {
-        ok_or(
-            unsafe { gpu_gco_graph_invalidate(self.ctx) },
-            "gco_graph_invalidate",
-        )
     }
 
     // ─── CUDA Graph API ─────────────────────────────────
