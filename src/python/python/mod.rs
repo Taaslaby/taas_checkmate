@@ -15,7 +15,7 @@
 //! ## Namespaced sub-modules (kept for specific use)
 //! | Sub-module | Contents |
 //! |------------|----------|
-//! | `pillars` | SIMD neuron populations (LIF/Izh/HH/VSN/Rate) |
+//! | `pillars` | **единый фасад**: Population-классы + все функции/классы подмодулей (Фаза 9) |
 //! | `neurons` | raw per-model step functions (legacy low-level) |
 //! | `connectome` / `connectome_brain` / `lif_connectome` | connectome data + brain sim |
 //! | `t3` | T3 oscillators + decoders + spigrad |
@@ -38,13 +38,16 @@ pub mod connectome;
 pub mod connectome_brain;
 pub mod cpe;
 pub mod eprop;
+pub mod hetero_brain;
 pub mod hh;
 #[cfg(feature = "cuda")]
 pub mod hh_gpu;
 pub mod io;
+pub mod karmac;
 pub mod kuramoto;
 pub mod lif_connectome;
 pub mod neuron;
+pub mod pillars;
 pub mod poisson_stp;
 pub mod rl_agent;
 pub mod snn;
@@ -53,9 +56,6 @@ pub mod t3;
 pub mod taas_format;
 pub mod trainer;
 pub mod vnc;
-pub mod pillars;
-// pub mod depth_wave;
-pub mod karmac;
 // pub mod iit;
 #[cfg(feature = "cuda")]
 pub mod gpu_refiner;
@@ -79,6 +79,13 @@ fn export_fn(
     Ok(())
 }
 
+/// Helper: add a function ONLY to the facade sub-module (pillars) — no root
+/// re-export (эти функции уже на root через свои подмодули).
+fn export_fn_facade(sub: &Bound<'_, PyModule>, func: &Bound<'_, PyCFunction>) -> PyResult<()> {
+    sub.add_function(func.clone())?;
+    Ok(())
+}
+
 /// Create a sub-module and return it.
 ///
 /// Registers the sub-module in `sys.modules` under its *public* name so both
@@ -99,12 +106,16 @@ fn make_sub<'py>(
     let parent_name = parent_name.to_str()?;
     // extension module loaded as <pkg>.<ext>? strip the <ext> suffix
     let public_root = match parent_name.rsplit_once('.') {
-        Some((root, last)) if last == "taas_checkmate" => root,
+        Some((root, "taas_checkmate")) => root,
         _ => parent_name,
     };
     let fq = format!("{public_root}.{name}");
     let sysmod = py.import("sys")?;
     sub.setattr("__name__", fq.clone())?;
+    // Атрибут на родителе: `taas_checkmate.autotune`, `taas_checkmate.neurons`,
+    // `taas_checkmate.kuramoto` … (add_submodule регистрирует только в sys.modules
+    // и НЕ вешает атрибут — без этого `tcm.autotune` падал с AttributeError).
+    parent.add(name, &sub)?;
     parent.add_submodule(&sub)?;
     sysmod.getattr("modules")?.set_item(&fq, sub.clone())?;
     Ok(sub)
@@ -123,7 +134,6 @@ macro_rules! export_class {
 /// taas-checkmate Python module — zero-copy numpy bindings.
 #[pymodule]
 fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
-
     // ─── neurons ──────────────────────────────────────
     let neurons = make_sub(m.py(), m, "neurons")?;
     macro_rules! add_fn {
@@ -132,7 +142,6 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
             export_fn(m, &$mod, &__f)?;
         };
     }
-
 
     add_fn!(neurons, neuron::py_step_izhikevich);
     add_fn!(neurons, neuron::py_step_saw);
@@ -155,8 +164,6 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, neurons, neuron::PySomatoDendriticNeuron);
     export_class!(m, neurons, neuron::PyGlif3State);
     export_class!(m, neurons, neuron::PyGlif4State);
-    // export_class!(m, neurons, depth_wave::PyDepthWave);
-
     // ─── karmac ────────────────────────────────────────
     let karmac_sub = make_sub(m.py(), m, "karmac")?;
     export_class!(m, karmac_sub, karmac::PyCarmackBsp);
@@ -212,7 +219,6 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(sparse, sparse::py_sim_step);
     add_fn!(sparse, sparse::py_rate_step);
     add_fn!(sparse, sparse::py_apply_stdp_ltd);
-
 
     // ─── t3 ────────────────────────────────────────────
     let t3 = make_sub(m.py(), m, "t3")?;
@@ -294,7 +300,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, stp, poisson_stp::PyPoissonGenerator);
     export_class!(m, stp, poisson_stp::PyShortTermPlasticity);
     add_fn!(stp, poisson_stp::py_compute_lfp);
-    export_class!(m, neurons, neuron::PyAstrocyteState);  // 🧫 Astrocyte + Gap Junctions
+    export_class!(m, neurons, neuron::PyAstrocyteState); // 🧫 Astrocyte + Gap Junctions
 
     // ─── rl ────────────────────────────────────────────
     let rl = make_sub(m.py(), m, "rl")?;
@@ -342,8 +348,114 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "cuda")]
     export_class!(m, hh, hh_gpu::PyGpuHhLut);
 
-    // ─── pillars ─────────────────────────────────────────
-    pillars::register(m)?;
+    // ─── pillars — единый фасад (Фаза 9) ──────────────────
+    let pillars = pillars::register(m)?;
+    // Единый фасад: каждый публичный символ подмодулей также доступен через
+    // `taas_checkmate.pillars` (без повторного root-экспорта — он уже есть).
+    macro_rules! add_fn_facade {
+        ($mod:expr, $func:path) => {
+            let __f = wrap_pyfunction!($func, &$mod)?;
+            export_fn_facade(&$mod, &__f)?;
+        };
+    }
+    macro_rules! export_class_facade {
+        ($sub:expr, $cls:ty) => {{
+            let sub_ref: &Bound<'_, PyModule> = &$sub;
+            sub_ref.add_class::<$cls>()?;
+        }};
+    }
+    add_fn_facade!(pillars, neuron::py_step_izhikevich);
+    add_fn_facade!(pillars, neuron::py_step_saw);
+    add_fn_facade!(pillars, neuron::py_step_gco);
+    add_fn_facade!(pillars, neuron::py_step_lif);
+    add_fn_facade!(pillars, neuron::py_step_adex);
+    add_fn_facade!(pillars, neuron::py_step_fhn);
+    add_fn_facade!(pillars, neuron::py_step_haap);
+    add_fn_facade!(pillars, neuron::py_step_nmda);
+    add_fn_facade!(pillars, neuron::py_step_hr);
+    add_fn_facade!(pillars, neuron::py_step_wc);
+    add_fn_facade!(pillars, neuron::py_step_atlasov_neuromotor);
+    add_fn_facade!(pillars, neuron::py_stdp_update);
+    add_fn_facade!(pillars, neuron::py_stdp_homeostatic);
+    add_fn_facade!(pillars, neuron::py_firing_rates);
+    add_fn_facade!(pillars, neuron::py_mean_firing_rate);
+    add_fn_facade!(pillars, neuron::py_compute_isi);
+    add_fn_facade!(pillars, neuron::py_compute_cvs);
+    add_fn_facade!(pillars, neuron::step_eprop);
+    add_fn_facade!(pillars, kuramoto::py_kuramoto_step_sparse);
+    add_fn_facade!(pillars, kuramoto::py_t3_step_sparse);
+    add_fn_facade!(pillars, kuramoto::py_interference);
+    add_fn_facade!(pillars, kuramoto::py_interference_mean);
+    add_fn_facade!(pillars, kuramoto::py_batch_coherence_sweep);
+    add_fn_facade!(pillars, kuramoto::py_phase_coherence);
+    add_fn_facade!(pillars, kuramoto::py_band_energy);
+    add_fn_facade!(pillars, kuramoto::py_lazy_sincos_update);
+    add_fn_facade!(pillars, kuramoto::py_kalman_update);
+    add_fn_facade!(pillars, kuramoto::py_adam_train);
+    add_fn_facade!(pillars, kuramoto::py_nlms_train);
+    add_fn_facade!(pillars, kuramoto::py_pst_decode);
+    add_fn_facade!(pillars, kuramoto::py_ring_synthesis);
+    add_fn_facade!(pillars, kuramoto::py_winding_matrix);
+    add_fn_facade!(pillars, io::py_safety_clamp);
+    add_fn_facade!(pillars, io::py_sigmoid_gate);
+    add_fn_facade!(pillars, io::py_phase_gate_apply);
+    add_fn_facade!(pillars, io::py_stochastic_encoder);
+    add_fn_facade!(pillars, io::py_thalamic_gate);
+    add_fn_facade!(pillars, io::py_hebbian_update);
+    add_fn_facade!(pillars, io::py_echo_tap);
+    add_fn_facade!(pillars, io::py_t3_drive_encoder);
+    add_fn_facade!(pillars, io::py_t3_complex_decoder);
+    add_fn_facade!(pillars, io::py_t3_inverse_kuramoto);
+    add_fn_facade!(pillars, io::py_t3_pst_features);
+    add_fn_facade!(pillars, io::py_t3_tact_generator);
+    add_fn_facade!(pillars, sparse::py_compute_hamiltonian);
+    add_fn_facade!(pillars, sparse::py_step_gco_full);
+    add_fn_facade!(pillars, sparse::py_propagate_spikes);
+    add_fn_facade!(pillars, sparse::py_sim_step);
+    add_fn_facade!(pillars, sparse::py_rate_step);
+    add_fn_facade!(pillars, sparse::py_apply_stdp_ltd);
+    add_fn_facade!(pillars, snn::py_intrinsic_plasticity);
+    add_fn_facade!(pillars, snn::py_synaptic_normalization);
+    add_fn_facade!(pillars, snn::py_bsa_encode);
+    add_fn_facade!(pillars, snn::py_phase_encode);
+    add_fn_facade!(pillars, snn::py_bsa_kernel_hamming);
+    add_fn_facade!(pillars, snn::py_population_rate_decode);
+    add_fn_facade!(pillars, snn::py_spike_raster_to_csv);
+    add_fn_facade!(pillars, eprop::py_surrogate_gradient);
+    add_fn_facade!(pillars, eprop::py_eprop_update);
+    add_fn_facade!(pillars, autotune::probe_eprop_fr);
+    add_fn_facade!(pillars, autotune::suggest_eprop_config);
+    add_fn_facade!(pillars, cpe::py_cpe_kuramoto_step);
+    add_fn_facade!(pillars, cpe::py_cpe_phase_coherence);
+    add_fn_facade!(pillars, cpe::py_cpe_spike_entropy);
+    add_fn_facade!(pillars, cpe::py_cpe_detect_spikes);
+    add_fn_facade!(pillars, cpe::py_cpe_dopamine_delta);
+    add_fn_facade!(pillars, cpe::py_cpe_dopamine_timing_gate);
+    add_fn_facade!(pillars, cpe::py_cpe_eligibility_update);
+    add_fn_facade!(pillars, cpe::py_cpe_stdp_update);
+    add_fn_facade!(pillars, vnc::py_vnc_step);
+    add_fn_facade!(pillars, lif_connectome::py_lif_sim_cpu_recording);
+    #[cfg(feature = "cuda")]
+    add_fn_facade!(pillars, lif_connectome::py_lif_sim_gpu_recording);
+    #[cfg(feature = "cuda")]
+    {
+        add_fn_facade!(pillars, kuramoto::py_ring_synthesis_cuda);
+        add_fn_facade!(pillars, kuramoto::py_interference_matrix_cuda);
+        add_fn_facade!(pillars, kuramoto::py_band_energy_cuda);
+    }
+    export_class_facade!(pillars, eprop::PyEPropLIF);
+    export_class_facade!(pillars, eprop::PyEPropIzhikevichMulti);
+    export_class_facade!(pillars, snn::PySornNetwork);
+    export_class_facade!(pillars, snn::PyTtfsEncoder);
+    export_class_facade!(pillars, snn::PyLifNeuron);
+    export_class_facade!(pillars, poisson_stp::PyPoissonGenerator);
+    export_class_facade!(pillars, poisson_stp::PyShortTermPlasticity);
+    export_class_facade!(pillars, neuron::PyGlif3State);
+    export_class_facade!(pillars, neuron::PyGlif4State);
+    export_class_facade!(pillars, neuron::PySomatoDendriticNeuron);
+    export_class_facade!(pillars, neuron::PyAstrocyteState);
+    export_class_facade!(pillars, trainer::PyEPropTrainer);
+    export_class_facade!(pillars, rl_agent::PyActorCriticAgent);
 
     // ─── hologram ─────────────────────────────────────────
     let hologram = make_sub(m.py(), m, "hologram")?;

@@ -10,10 +10,10 @@ use std::ffi::{c_float, c_int};
 use crate::karmac::gnw::GlobalWorkspace;
 use crate::karmac::semantic_pointer::SemanticPointer;
 use crate::karmac::working_memory::WorkingMemory;
-use taas_connectome::ConnectomeData;
+use pillars_connectome::ConnectomeData;
 use taas_format::{load_connectome, TaasReader};
 
-use cuda_kernels::{csr_spmv_tanh as cuda_csr_spmv_tanh, csr_stdp_dopamine_devptr, DevicePtr};
+use pillars_cuda::gpu::{csr_spmv_tanh as cuda_csr_spmv_tanh, csr_stdp_dopamine_devptr, DevicePtr};
 
 /// GPU SPAUN pipeline: 1M+ нейронов на CUDA.
 #[pyclass(name = "SpaunPipelineGPU", module = "taas_checkmate.spaun_gpu")]

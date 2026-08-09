@@ -291,14 +291,23 @@ impl BasalGanglia {
             return;
         }
 
-        let state_max = self.state.iter().cloned().fold(f32::NEG_INFINITY, f32::max).max(1e-5);
+        let state_max = self
+            .state
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max)
+            .max(1e-5);
 
         for a in 0..n_a {
             let row_start = a * n_c;
             for j in 0..n_c {
                 let norm_s = self.state[j] / state_max;
                 let dw = if a == target_action {
-                    if dopamine > 0.0 { lr * norm_s * 2.0 } else { lr * norm_s * 3.0 }
+                    if dopamine > 0.0 {
+                        lr * norm_s * 2.0
+                    } else {
+                        lr * norm_s * 3.0
+                    }
                 } else {
                     -lr * norm_s * 1.5
                 };
@@ -308,8 +317,6 @@ impl BasalGanglia {
         }
     }
 
-
-
     pub fn n_cortical(&self) -> usize {
         self.config.n_cortical
     }
@@ -317,7 +324,6 @@ impl BasalGanglia {
         self.config.n_actions
     }
 }
-
 
 #[cfg(test)]
 mod tests {

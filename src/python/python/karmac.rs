@@ -185,7 +185,9 @@ impl PyMinBrain {
 
     pub fn step(&mut self, sensory_input: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
         let slice = sensory_input.readonly();
-        let s = slice.as_slice().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        let s = slice
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("{e}")))?;
         Ok(self.inner.step(s))
     }
 
@@ -237,7 +239,9 @@ impl PyBasalGanglia {
     ///     int: selected action index (0..n_actions-1)
     pub fn step(&mut self, cortex_input: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
         let ro = cortex_input.readonly();
-        let slice = ro.as_slice().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("{e}")))?;
         Ok(self.inner.step(slice))
     }
 
@@ -262,11 +266,15 @@ impl PyBasalGanglia {
 
     /// Number of cortical input channels.
     #[getter]
-    pub fn n_cortical(&self) -> usize { self.inner.config.n_cortical }
+    pub fn n_cortical(&self) -> usize {
+        self.inner.config.n_cortical
+    }
 
     /// Number of competing actions.
     #[getter]
-    pub fn n_actions(&self) -> usize { self.inner.config.n_actions }
+    pub fn n_actions(&self) -> usize {
+        self.inner.config.n_actions
+    }
 
     fn __repr__(&self) -> String {
         format!(
@@ -318,7 +326,9 @@ impl PyGlobalWorkspace {
     ///     cortex: float32 numpy array of neuron activations (length n_neurons, modified in-place)
     pub fn forward(&mut self, cortex: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
         let mut rw = cortex.readwrite();
-        let slice = rw.as_slice_mut().map_err(|e| PyValueError::new_err(format!("{e}")))?;
+        let slice = rw
+            .as_slice_mut()
+            .map_err(|e| PyValueError::new_err(format!("{e}")))?;
         self.inner.forward(slice);
         Ok(())
     }
@@ -327,4 +337,3 @@ impl PyGlobalWorkspace {
         format!("GlobalWorkspace(n={}, ws={})", self.inner.n, self.inner.ws)
     }
 }
-

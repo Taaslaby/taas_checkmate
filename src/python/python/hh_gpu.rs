@@ -46,7 +46,9 @@ struct CpuHhInit {
 
 #[cfg(feature = "cuda")]
 fn cpu_hh_init(n: usize, pacemaking: bool) -> CpuHhInit {
-    use crate::kernels::neuron::hh::{pacemaking_channels, standard_channels, steady_state_gates};
+    use pillars::kernels::hh_channels::{
+        pacemaking_channels, standard_channels, steady_state_gates,
+    };
     let channels = if pacemaking {
         pacemaking_channels()
     } else {
@@ -70,7 +72,10 @@ fn cpu_hh_init(n: usize, pacemaking: bool) -> CpuHhInit {
         n_channels,
         E_rev_arr: channels.iter().map(|c| c.E_rev).collect(),
         per_ch_gmax: channels.iter().map(|c| c.g_max).collect(),
-        powers: channels.iter().flat_map(|c| c.gates.iter().map(|g| g.power)).collect(),
+        powers: channels
+            .iter()
+            .flat_map(|c| c.gates.iter().map(|g| g.power))
+            .collect(),
         n_gates_per_ch: channels.iter().map(|c| c.gates.len() as i32).collect(),
     }
 }

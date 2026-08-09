@@ -5,8 +5,8 @@
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 
-use crate::core::neuron;
-use crate::core::sparse;
+use pillars::api::neurons as neuron;
+use pillars::kernels::csr as sparse;
 
 // ─── Sparse bindings ────────────────────────────────────
 

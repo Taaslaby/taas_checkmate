@@ -6,9 +6,8 @@
 #![allow(non_snake_case)]
 
 use numpy::{PyArray1, PyArrayMethods};
+use pillars::kernels::vnc;
 use pyo3::prelude::*;
-
-use crate::kernels::vnc;
 
 /// VNC MN→actuator step: вычисляет actuator drive из MN rates (Rust).
 ///

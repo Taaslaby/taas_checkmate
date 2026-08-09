@@ -1,5 +1,10 @@
 //! PyO3 bindings for neuron step functions.
-//! Все array параметры — numpy arrays (zero-copy).
+//!
+//! Параметры нейронов (`tau_m`, `v_rest`, `a`, `b`, `c`, …) принимают
+//! **скаляр или массив**: float → бродкаст на всех нейронов, np.ndarray[n]
+//! → per-neuron значения, np.ndarray[1] → бродкаст. Все state-массивы
+//! (v, u, I, spikes, …) — numpy arrays (zero-copy).
+//! step_* возвращают массив спайков (int32) для удобного chaining.
 
 #![allow(non_snake_case)]
 
@@ -7,8 +12,8 @@ use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use std::cell::RefCell;
 
-use crate::core::neuron;
-use crate::core::neuron::soma_dendrite::{DendriteConfig, SomatoDendriticNeuron};
+use pillars::api::neurons as neuron;
+use pillars::api::neurons::{DendriteConfig, SomatoDendriticNeuron};
 
 thread_local! {
     static REFRACTORY_BUF: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
@@ -30,71 +35,137 @@ fn return_refractory(mut buf: Vec<f32>) {
     });
 }
 
+/// Параметр «скаляр или массив» — принимает numpy-массив/список длины `n`,
+/// длины 1 (бродкаст на всех нейронов) или обычный скаляр (бродкаст).
+/// Принимает и float32, и float64 (numpy-дефолт) — f64 кастуется в f32.
+/// `None` → `default` для всех нейронов (дефолт сигнатуры).
+/// Возвращает owned `Vec<f32>` длины `n`.
+fn param_f32(
+    obj: Option<&Bound<'_, PyAny>>,
+    n: usize,
+    name: &str,
+    default: f32,
+) -> PyResult<Vec<f32>> {
+    let obj = match obj {
+        Some(o) => o,
+        None => return Ok(vec![default; n]),
+    };
+    // Точный float32 массив/список.
+    if let Ok(v) = obj.extract::<Vec<f32>>() {
+        if v.len() == n {
+            return Ok(v);
+        }
+        if v.len() == 1 {
+            return Ok(vec![v[0]; n]);
+        }
+        return Err(len_err(name, n, v.len()));
+    }
+    // float64 массив/список (numpy-дефолт) — кастуем в f32.
+    if let Ok(v) = obj.extract::<Vec<f64>>() {
+        if v.len() == n {
+            return Ok(v.into_iter().map(|x| x as f32).collect());
+        }
+        if v.len() == 1 {
+            return Ok(vec![v[0] as f32; n]);
+        }
+        return Err(len_err(name, n, v.len()));
+    }
+    if let Ok(s) = obj.extract::<f32>() {
+        return Ok(vec![s; n]);
+    }
+    if let Ok(s) = obj.extract::<f64>() {
+        return Ok(vec![s as f32; n]);
+    }
+    Err(pyo3::exceptions::PyValueError::new_err(format!(
+        "{name}: expected np.ndarray of length {n} (float32/float64), a length-1 array, or a scalar"
+    )))
+}
+
+fn len_err(name: &str, n: usize, got: usize) -> pyo3::PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "{name}: expected array of length {n} (or 1 to broadcast, or a scalar), got {got}"
+    ))
+}
+
+/// SIMD-кернелы pillars требуют длину популяции, кратную 8 (LANES).
+/// Вместо паники в assert — понятная PyValueError.
+fn check_lanes(n: usize, fname: &str) -> PyResult<()> {
+    if !n.is_multiple_of(8) {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{fname}: population size {n} must be a multiple of 8 (SIMD lanes); pad with zeros or use a multiple of 8"
+        )));
+    }
+    Ok(())
+}
+
 // ─── Neuron bindings ─────────────────────────────────────
 
 /// Izhikevich neuron — один шаг симуляции.
 ///
-/// Модифицирует входящие numpy массивы in-place.
+/// Модифицирует входящие numpy массивы in-place и возвращает спайки.
 ///
 /// Args:
 ///     v: мембранный потенциал [n]
 ///     u: recovery variable [n]
 ///     trace: след для STDP [n]
-///     a: timescale recovery [n]
-///     b: sensitivity recovery [n]
+///     a: timescale recovery — скаляр или массив [n]
+///     b: sensitivity recovery — скаляр или массив [n]
 ///     I: ток [n] (будет изменён!)
 ///     dt: шаг по времени
 ///     trace_decay: коэффициент затухания следа
 ///     spikes: спайки (int32, будет заполнен 0/1) [n]
-///     c: потенциал после спайка [n]
-///     d: recovery после спайка [n]
+///     c: потенциал после спайка — скаляр или массив [n]
+///     d: recovery после спайка — скаляр или массив [n]
 ///
-/// Returns: None. Все изменения in-place.
+/// Returns: спайки (int32) [n]. Все изменения state-массивов in-place.
 #[pyfunction]
 #[pyo3(name = "step_izhikevich")]
-pub fn py_step_izhikevich(
+#[pyo3(signature = (v, u, trace, a, b, I, dt, trace_decay, spikes, c=None, d=None))]
+pub fn py_step_izhikevich<'py>(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     trace: Bound<'_, PyArray1<f32>>,
-    a: Bound<'_, PyArray1<f32>>,
-    b: Bound<'_, PyArray1<f32>>,
+    a: Option<Bound<'_, PyAny>>,
+    b: Option<Bound<'_, PyAny>>,
     I: Bound<'_, PyArray1<f32>>,
     dt: f32,
     trace_decay: f32,
-    spikes: Bound<'_, PyArray1<i32>>,
-    c: Bound<'_, PyArray1<f32>>,
-    d: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+    spikes: Bound<'py, PyArray1<i32>>,
+    c: Option<Bound<'_, PyAny>>,
+    d: Option<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
     let mut trace = trace.readwrite();
-    let a = a.readonly();
-    let b = b.readonly();
     let mut I = I.readwrite();
-    let mut spikes = spikes.readwrite();
-    let c = c.readonly();
-    let d = d.readonly();
+    let mut spikes_rw = spikes.readwrite();
 
     let n = v.len()?;
+    check_lanes(n, "step_izhikevich")?;
+    let a = param_f32(a.as_ref(), n, "a", 0.02)?;
+    let b = param_f32(b.as_ref(), n, "b", 0.2)?;
+    let c = param_f32(c.as_ref(), n, "c", -65.0)?;
+    let d = param_f32(d.as_ref(), n, "d", 8.0)?;
     let mut refractory = with_refractory(n);
 
     neuron::step_izhikevich(
         v.as_slice_mut()?,
         u.as_slice_mut()?,
         trace.as_slice_mut()?,
-        a.as_slice()?,
-        b.as_slice()?,
+        &a,
+        &b,
         I.as_slice_mut()?,
         dt,
         trace_decay,
-        spikes.as_slice_mut()?,
-        c.as_slice()?,
-        d.as_slice()?,
+        spikes_rw.as_slice_mut()?,
+        &c,
+        &d,
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
     return_refractory(refractory);
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 /// SAW (Sine-Adaptive-Wave) neuron — один шаг симуляции.
@@ -112,45 +183,48 @@ pub fn py_step_izhikevich(
 ///     spikes: спайки (int32, будет заполнен) [n]
 #[pyfunction]
 #[pyo3(name = "step_saw")]
-pub fn py_step_saw(
+#[pyo3(signature = (v, u, trace, a, b, I, dt, trace_decay, noise_amp, spikes))]
+pub fn py_step_saw<'py>(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     trace: Bound<'_, PyArray1<f32>>,
-    a: Bound<'_, PyArray1<f32>>,
-    b: Bound<'_, PyArray1<f32>>,
+    a: Option<Bound<'_, PyAny>>,
+    b: Option<Bound<'_, PyAny>>,
     I: Bound<'_, PyArray1<f32>>,
     dt: f32,
     trace_decay: f32,
     noise_amp: f32,
-    spikes: Bound<'_, PyArray1<i32>>,
-) -> PyResult<()> {
+    spikes: Bound<'py, PyArray1<i32>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
     let mut trace = trace.readwrite();
-    let a = a.readonly();
-    let b = b.readonly();
     let I = I.readonly();
-    let mut spikes = spikes.readwrite();
+    let mut spikes_rw = spikes.readwrite();
 
     let n = v.len()?;
+    check_lanes(n, "step_saw")?;
+    let a = param_f32(a.as_ref(), n, "a", 0.02)?;
+    let b = param_f32(b.as_ref(), n, "b", 0.2)?;
     let mut refractory = with_refractory(n);
 
     neuron::step_saw(
         v.as_slice_mut()?,
         u.as_slice_mut()?,
         trace.as_slice_mut()?,
-        a.as_slice()?,
-        b.as_slice()?,
+        &a,
+        &b,
         I.as_slice()?,
         dt,
         trace_decay,
         noise_amp,
-        spikes.as_slice_mut()?,
+        spikes_rw.as_slice_mut()?,
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
     return_refractory(refractory);
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 /// GCO (Graph-Coupled Oscillator) — один шаг.
@@ -168,30 +242,34 @@ pub fn py_step_saw(
 ///     dt: шаг по времени
 #[pyfunction]
 #[pyo3(name = "step_gco")]
+#[pyo3(signature = (v, u, h_real, h_imag, I_ext, speed, dt, _tau))]
 pub fn py_step_gco(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
-    h_real: Bound<'_, PyArray1<f32>>,
-    h_imag: Bound<'_, PyArray1<f32>>,
-    I_ext: Bound<'_, PyArray1<f32>>,
-    speed: Bound<'_, PyArray1<f32>>,
+    h_real: Option<Bound<'_, PyAny>>,
+    h_imag: Option<Bound<'_, PyAny>>,
+    I_ext: Option<Bound<'_, PyAny>>,
+    speed: Option<Bound<'_, PyAny>>,
     dt: f32,
     _tau: f32,
 ) -> PyResult<()> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
-    let mut h_real = h_real.readwrite();
-    let mut h_imag = h_imag.readwrite();
-    let mut I_ext = I_ext.readwrite();
-    let mut speed = speed.readwrite();
 
-    neuron::step_gco(
+    let n = v.len()?;
+    check_lanes(n, "step_gco")?;
+    let h_real = param_f32(h_real.as_ref(), n, "h_real", 0.0)?;
+    let h_imag = param_f32(h_imag.as_ref(), n, "h_imag", 0.0)?;
+    let I_ext = param_f32(I_ext.as_ref(), n, "I_ext", 0.0)?;
+    let speed = param_f32(speed.as_ref(), n, "speed", 0.0)?;
+
+    pillars::kernels::phase::gco_step(
         v.as_slice_mut()?,
         u.as_slice_mut()?,
-        h_real.as_slice_mut()?,
-        h_imag.as_slice_mut()?,
-        I_ext.as_slice_mut()?,
-        speed.as_slice_mut()?,
+        &h_real,
+        &h_imag,
+        &I_ext,
+        &speed,
         dt,
     );
     Ok(())
@@ -206,47 +284,54 @@ pub fn py_step_gco(
 ///     I: ток [n]
 ///     spikes: спайки (int32) [n]
 ///     dt: шаг по времени
-///     tau_m: мембранная постоянная [n]
-///     v_rest: потенциал покоя [n]
-///     v_thresh: порог спайка [n]
-///     v_reset: потенциал после спайка [n]
+///     tau_m: мембранная постоянная — скаляр или массив [n] (default 10.0)
+///     v_rest: потенциал покоя — скаляр или массив [n] (default -70.0)
+///     v_thresh: порог спайка — скаляр или массив [n] (default -55.0)
+///     v_reset: потенциал после спайка — скаляр или массив [n] (default -75.0)
+///
+/// Returns: спайки (int32) [n]. Все изменения state-массивов in-place.
+///
+/// Пример: `step_lif(v, I, spikes, dt=1.0, tau_m=10.0)` — tau_m бродкастится.
 #[pyfunction]
 #[pyo3(name = "step_lif")]
-pub fn py_step_lif(
+#[pyo3(signature = (v, I, spikes, dt=1.0, tau_m=None, v_rest=None, v_thresh=None, v_reset=None))]
+pub fn py_step_lif<'py>(
     v: Bound<'_, PyArray1<f32>>,
     I: Bound<'_, PyArray1<f32>>,
-    spikes: Bound<'_, PyArray1<i32>>,
+    spikes: Bound<'py, PyArray1<i32>>,
     dt: f32,
-    tau_m: Bound<'_, PyArray1<f32>>,
-    v_rest: Bound<'_, PyArray1<f32>>,
-    v_thresh: Bound<'_, PyArray1<f32>>,
-    v_reset: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+    tau_m: Option<Bound<'_, PyAny>>,
+    v_rest: Option<Bound<'_, PyAny>>,
+    v_thresh: Option<Bound<'_, PyAny>>,
+    v_reset: Option<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut v = v.readwrite();
     let mut I = I.readwrite();
-    let mut spikes = spikes.readwrite();
-    let tau_m = tau_m.readonly();
-    let v_rest = v_rest.readonly();
-    let v_thresh = v_thresh.readonly();
-    let v_reset = v_reset.readonly();
+    let mut spikes_rw = spikes.readwrite();
 
     let n = v.len()?;
+    check_lanes(n, "step_lif")?;
+    let tau_m = param_f32(tau_m.as_ref(), n, "tau_m", 10.0)?;
+    let v_rest = param_f32(v_rest.as_ref(), n, "v_rest", -70.0)?;
+    let v_thresh = param_f32(v_thresh.as_ref(), n, "v_thresh", -55.0)?;
+    let v_reset = param_f32(v_reset.as_ref(), n, "v_reset", -75.0)?;
     let mut refractory = with_refractory(n);
 
     neuron::step_lif(
         v.as_slice_mut()?,
         I.as_slice_mut()?,
-        spikes.as_slice_mut()?,
+        spikes_rw.as_slice_mut()?,
         dt,
-        tau_m.as_slice()?,
-        v_rest.as_slice()?,
-        v_thresh.as_slice()?,
-        v_reset.as_slice()?,
+        &tau_m,
+        &v_rest,
+        &v_thresh,
+        &v_reset,
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
     return_refractory(refractory);
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 /// AdEx (Adaptive Exponential) — один шаг симуляции.
@@ -270,56 +355,59 @@ pub fn py_step_lif(
 ///     b: сила адаптации [n]
 #[pyfunction]
 #[pyo3(name = "step_adex")]
-pub fn py_step_adex(
+#[pyo3(signature = (v, u, I, spikes, dt=1.0, tau_m=None, tau_w=None, v_rest=None, v_thresh=None, v_reset=None, delta_t=None, a=None, b=None))]
+pub fn py_step_adex<'py>(
     v: Bound<'_, PyArray1<f32>>,
     u: Bound<'_, PyArray1<f32>>,
     I: Bound<'_, PyArray1<f32>>,
-    spikes: Bound<'_, PyArray1<i32>>,
+    spikes: Bound<'py, PyArray1<i32>>,
     dt: f32,
-    tau_m: Bound<'_, PyArray1<f32>>,
-    tau_w: Bound<'_, PyArray1<f32>>,
-    v_rest: Bound<'_, PyArray1<f32>>,
-    v_thresh: Bound<'_, PyArray1<f32>>,
-    v_reset: Bound<'_, PyArray1<f32>>,
-    delta_t: Bound<'_, PyArray1<f32>>,
-    a: Bound<'_, PyArray1<f32>>,
-    b: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+    tau_m: Option<Bound<'_, PyAny>>,
+    tau_w: Option<Bound<'_, PyAny>>,
+    v_rest: Option<Bound<'_, PyAny>>,
+    v_thresh: Option<Bound<'_, PyAny>>,
+    v_reset: Option<Bound<'_, PyAny>>,
+    delta_t: Option<Bound<'_, PyAny>>,
+    a: Option<Bound<'_, PyAny>>,
+    b: Option<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut v = v.readwrite();
     let mut u = u.readwrite();
     let mut I = I.readwrite();
-    let mut spikes = spikes.readwrite();
-    let tau_m = tau_m.readonly();
-    let tau_w = tau_w.readonly();
-    let v_rest = v_rest.readonly();
-    let v_thresh = v_thresh.readonly();
-    let v_reset = v_reset.readonly();
-    let delta_t = delta_t.readonly();
-    let a = a.readonly();
-    let b = b.readonly();
+    let mut spikes_rw = spikes.readwrite();
 
     let n = v.len()?;
+    check_lanes(n, "step_adex")?;
+    let tau_m = param_f32(tau_m.as_ref(), n, "tau_m", 20.0)?;
+    let tau_w = param_f32(tau_w.as_ref(), n, "tau_w", 100.0)?;
+    let v_rest = param_f32(v_rest.as_ref(), n, "v_rest", -65.0)?;
+    let v_thresh = param_f32(v_thresh.as_ref(), n, "v_thresh", -50.0)?;
+    let v_reset = param_f32(v_reset.as_ref(), n, "v_reset", -65.0)?;
+    let delta_t = param_f32(delta_t.as_ref(), n, "delta_t", 2.0)?;
+    let a = param_f32(a.as_ref(), n, "a", 0.002)?;
+    let b = param_f32(b.as_ref(), n, "b", 0.05)?;
     let mut refractory = with_refractory(n);
 
     neuron::step_adex(
         v.as_slice_mut()?,
         u.as_slice_mut()?,
         I.as_slice_mut()?,
-        spikes.as_slice_mut()?,
+        spikes_rw.as_slice_mut()?,
         dt,
-        tau_m.as_slice()?,
-        tau_w.as_slice()?,
-        v_rest.as_slice()?,
-        v_thresh.as_slice()?,
-        v_reset.as_slice()?,
-        delta_t.as_slice()?,
-        a.as_slice()?,
-        b.as_slice()?,
+        &tau_m,
+        &tau_w,
+        &v_rest,
+        &v_thresh,
+        &v_reset,
+        &delta_t,
+        &a,
+        &b,
         &mut refractory,
         neuron::DEFAULT_TAU_REF,
     );
     return_refractory(refractory);
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 /// STDP (Spike-Timing-Dependent Plasticity) — обновление весов.
@@ -350,7 +438,7 @@ pub fn py_stdp_update(
     let traces_pre = traces_pre.readonly();
     let traces_post = traces_post.readonly();
 
-    neuron::stdp_update(
+    pillars::kernels::learning::stdp_update(
         weights.as_slice_mut()?,
         traces_pre.as_slice()?,
         traces_post.as_slice()?,
@@ -387,7 +475,7 @@ pub fn py_stdp_homeostatic(
     let traces_pre = traces_pre.readonly();
     let traces_post = traces_post.readonly();
 
-    neuron::stdp_homeostatic(
+    pillars::kernels::learning::stdp_homeostatic(
         weights.as_slice_mut()?,
         traces_pre.as_slice()?,
         traces_post.as_slice()?,
@@ -420,35 +508,40 @@ pub fn py_stdp_homeostatic(
 /// Returns: None. Все изменения in-place.
 #[pyfunction]
 #[pyo3(name = "step_fhn")]
-pub fn py_step_fhn(
+#[pyo3(signature = (v, w, I, dt, tau_w, a, b, spikes))]
+pub fn py_step_fhn<'py>(
     v: Bound<'_, PyArray1<f32>>,
     w: Bound<'_, PyArray1<f32>>,
     I: Bound<'_, PyArray1<f32>>,
     dt: f32,
-    tau_w: Bound<'_, PyArray1<f32>>,
-    a: Bound<'_, PyArray1<f32>>,
-    b: Bound<'_, PyArray1<f32>>,
-    spikes: Bound<'_, PyArray1<i32>>,
-) -> PyResult<()> {
+    tau_w: Option<Bound<'_, PyAny>>,
+    a: Option<Bound<'_, PyAny>>,
+    b: Option<Bound<'_, PyAny>>,
+    spikes: Bound<'py, PyArray1<i32>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut v = v.readwrite();
     let mut w = w.readwrite();
     let I = I.readonly();
-    let tau_w = tau_w.readonly();
-    let a = a.readonly();
-    let b = b.readonly();
-    let mut spikes = spikes.readwrite();
+    let mut spikes_rw = spikes.readwrite();
+
+    let n = v.len()?;
+    check_lanes(n, "step_fhn")?;
+    let tau_w = param_f32(tau_w.as_ref(), n, "tau_w", 14.0)?;
+    let a = param_f32(a.as_ref(), n, "a", 0.7)?;
+    let b = param_f32(b.as_ref(), n, "b", 0.8)?;
 
     neuron::step_fhn(
         v.as_slice_mut()?,
         w.as_slice_mut()?,
         I.as_slice()?,
-        spikes.as_slice_mut()?,
+        spikes_rw.as_slice_mut()?,
         dt,
-        tau_w.as_slice()?,
-        a.as_slice()?,
-        b.as_slice()?,
+        &tau_w,
+        &a,
+        &b,
     );
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 // ─── Wilson-Cowan ─────────────────────────────────────────
@@ -480,51 +573,55 @@ pub fn py_step_fhn(
 /// Returns: None. Все изменения in-place.
 #[pyfunction]
 #[pyo3(name = "step_wc")]
+#[pyo3(signature = (e, i, i_e, i_i, dt, tau_E, tau_I, w_EE, w_EI, w_IE, w_II, beta, spikes_e, spikes_i))]
 pub fn py_step_wc(
     e: Bound<'_, PyArray1<f32>>,
     i: Bound<'_, PyArray1<f32>>,
-    i_e: Bound<'_, PyArray1<f32>>,
-    i_i: Bound<'_, PyArray1<f32>>,
+    i_e: Option<Bound<'_, PyAny>>,
+    i_i: Option<Bound<'_, PyAny>>,
     dt: f32,
-    tau_E: Bound<'_, PyArray1<f32>>,
-    tau_I: Bound<'_, PyArray1<f32>>,
-    w_EE: Bound<'_, PyArray1<f32>>,
-    w_EI: Bound<'_, PyArray1<f32>>,
-    w_IE: Bound<'_, PyArray1<f32>>,
-    w_II: Bound<'_, PyArray1<f32>>,
-    beta: Bound<'_, PyArray1<f32>>,
+    tau_E: Option<Bound<'_, PyAny>>,
+    tau_I: Option<Bound<'_, PyAny>>,
+    w_EE: Option<Bound<'_, PyAny>>,
+    w_EI: Option<Bound<'_, PyAny>>,
+    w_IE: Option<Bound<'_, PyAny>>,
+    w_II: Option<Bound<'_, PyAny>>,
+    beta: Option<Bound<'_, PyAny>>,
     spikes_e: Bound<'_, PyArray1<f32>>,
     spikes_i: Bound<'_, PyArray1<f32>>,
 ) -> PyResult<()> {
     let mut e = e.readwrite();
     let mut i = i.readwrite();
-    let i_e = i_e.readonly();
-    let i_i = i_i.readonly();
-    let tau_E = tau_E.readonly();
-    let tau_I = tau_I.readonly();
-    let w_EE = w_EE.readonly();
-    let w_EI = w_EI.readonly();
-    let w_IE = w_IE.readonly();
-    let w_II = w_II.readonly();
-    let beta = beta.readonly();
     let mut spikes_e = spikes_e.readwrite();
     let mut spikes_i = spikes_i.readwrite();
+
+    let n = e.len()?;
+    check_lanes(n, "step_wc")?;
+    let i_e = param_f32(i_e.as_ref(), n, "i_e", 0.0)?;
+    let i_i = param_f32(i_i.as_ref(), n, "i_i", 0.0)?;
+    let tau_E = param_f32(tau_E.as_ref(), n, "tau_E", 10.0)?;
+    let tau_I = param_f32(tau_I.as_ref(), n, "tau_I", 10.0)?;
+    let w_EE = param_f32(w_EE.as_ref(), n, "w_EE", 12.0)?;
+    let w_EI = param_f32(w_EI.as_ref(), n, "w_EI", 4.0)?;
+    let w_IE = param_f32(w_IE.as_ref(), n, "w_IE", 13.0)?;
+    let w_II = param_f32(w_II.as_ref(), n, "w_II", 11.0)?;
+    let beta = param_f32(beta.as_ref(), n, "beta", 1.0)?;
 
     neuron::step_wc(
         e.as_slice_mut()?,
         i.as_slice_mut()?,
-        i_e.as_slice()?,
-        i_i.as_slice()?,
+        &i_e,
+        &i_i,
         spikes_e.as_slice_mut()?,
         spikes_i.as_slice_mut()?,
         dt,
-        tau_E.as_slice()?,
-        tau_I.as_slice()?,
-        w_EE.as_slice()?,
-        w_EI.as_slice()?,
-        w_IE.as_slice()?,
-        w_II.as_slice()?,
-        beta.as_slice()?,
+        &tau_E,
+        &tau_I,
+        &w_EE,
+        &w_EI,
+        &w_IE,
+        &w_II,
+        &beta,
     );
     Ok(())
 }
@@ -770,7 +867,11 @@ pub fn py_step_haap(
     assert_eq!(h_state.len()?, n, "h_state length mismatch");
     assert_eq!(I.len()?, n, "I length mismatch");
     assert_eq!(spikes.len()?, n, "spikes length mismatch");
-    assert_eq!(params.len()?, n * 17, "params length mismatch: expected {n}*17");
+    assert_eq!(
+        params.len()?,
+        n * 17,
+        "params length mismatch: expected {n}*17"
+    );
 
     neuron::step_haap(
         v.as_slice_mut()?,
@@ -919,7 +1020,12 @@ pub fn py_mean_firing_rate(
     dt: f32,
 ) -> PyResult<f32> {
     let spike_buffer = spike_buffer.readonly();
-    Ok(neuron::mean_firing_rate(spike_buffer.as_slice()?, n_neurons, n_steps, dt))
+    Ok(neuron::mean_firing_rate(
+        spike_buffer.as_slice()?,
+        n_neurons,
+        n_steps,
+        dt,
+    ))
 }
 
 /// Вычислить межспайковые интервалы (ISI) для одного нейрона.
@@ -978,7 +1084,7 @@ pub fn py_compute_cvs<'py>(
 /// The full model runs in Rust SIMD via `crates/kernels/src/neuron/astrocyte.rs`.
 #[pyclass(name = "AstrocyteState", module = "taas_checkmate.neurons")]
 pub struct PyAstrocyteState {
-    inner: std::sync::Mutex<neuron::astrocyte::AstrocyteState>,
+    inner: std::sync::Mutex<neuron::AstrocyteState>,
 }
 
 #[pymethods]
@@ -993,7 +1099,7 @@ impl PyAstrocyteState {
     #[pyo3(signature = (n, tau_astro=1000.0, alpha=0.1))]
     pub fn new(n: usize, tau_astro: f32, alpha: f32) -> Self {
         Self {
-            inner: std::sync::Mutex::new(neuron::astrocyte::AstrocyteState::new(n, tau_astro, alpha)),
+            inner: std::sync::Mutex::new(neuron::AstrocyteState::new(n, tau_astro, alpha)),
         }
     }
 
@@ -1064,8 +1170,8 @@ impl PyAstrocyteState {
         let mut a_machr = g_machr.readwrite();
 
         let inner = self.inner.lock().unwrap();
-        let kin = &mut crate::kernels::neuron::synapse::SynapticKinetics::new(inner.n);
-        
+        let kin = &mut pillars::kernels::synapse::SynapticKinetics::new(inner.n);
+
         // Copy Python arrays into kinetics buffers
         let n = inner.n.min(a_ampa.len()?);
         kin.g_ampa[..n].copy_from_slice(&a_ampa.as_slice()?[..n]);
@@ -1187,39 +1293,46 @@ impl PyAstrocyteState {
 ///     mg_conc: концентрация Mg²⁺ (mM, default 1.0) [n]
 #[pyfunction]
 #[pyo3(name = "step_nmda")]
-pub fn py_step_nmda(
+#[pyo3(signature = (v, g_act, i_out, g_nmda=None, E_syn=None, mg_conc=None))]
+pub fn py_step_nmda<'py>(
     v: Bound<'_, PyArray1<f32>>,
     g_act: Bound<'_, PyArray1<f32>>,
-    i_out: Bound<'_, PyArray1<f32>>,
-    g_nmda: Bound<'_, PyArray1<f32>>,
-    E_syn: Bound<'_, PyArray1<f32>>,
-    mg_conc: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+    i_out: Bound<'py, PyArray1<f32>>,
+    g_nmda: Option<Bound<'_, PyAny>>,
+    E_syn: Option<Bound<'_, PyAny>>,
+    mg_conc: Option<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
     let v_ro = v.readonly();
     let g_act_ro = g_act.readonly();
     let mut i_out_rw = i_out.readwrite();
-    let g_nmda_ro = g_nmda.readonly();
-    let E_syn_ro = E_syn.readonly();
-    let mg_conc_ro = mg_conc.readonly();
 
     let n = v.len()?;
     let v_slice = v_ro.as_slice()?;
     let g_act_slice = g_act_ro.as_slice()?;
     let i_out_slice = i_out_rw.as_slice_mut()?;
-    let g_nmda_slice = g_nmda_ro.as_slice()?;
-    let e_syn_slice = E_syn_ro.as_slice()?;
-    let mg_slice = mg_conc_ro.as_slice()?;
+    let g_nmda = param_f32(g_nmda.as_ref(), n, "g_nmda", 1.0)?;
+    let e_syn = param_f32(E_syn.as_ref(), n, "E_syn", 0.0)?;
+    let mg_conc = param_f32(mg_conc.as_ref(), n, "mg_conc", 1.0)?;
 
     // Params layout [4 × n]: [g_nmda, E_syn, mg_conc, _pad]
     let mut params = vec![0.0f32; n * 4];
     for i in 0..n {
-        params[i * 4] = g_nmda_slice[i];
-        params[i * 4 + 1] = e_syn_slice[i];
-        params[i * 4 + 2] = mg_slice[i];
+        params[i * 4] = g_nmda[i];
+        params[i * 4 + 1] = e_syn[i];
+        params[i * 4 + 2] = mg_conc[i];
     }
 
-    crate::kernels::nmda_mg_block_step(v_slice, g_act_slice, i_out_slice, &params);
-    Ok(())
+    unsafe {
+        pillars::zoo::synapses::nmda_mg_block_step(
+            v_slice.as_ptr(),
+            g_act_slice.as_ptr(),
+            i_out_slice.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+        );
+    }
+    drop(i_out_rw);
+    Ok(i_out)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1242,7 +1355,7 @@ pub fn py_step_nmda(
 ///     spikes = glif.spikes
 #[pyclass(name = "Glif3State", module = "taas_checkmate.neurons")]
 pub struct PyGlif3State {
-    inner: std::sync::Mutex<neuron::glif::Glif3State>,
+    inner: std::sync::Mutex<neuron::Glif3State>,
 }
 
 #[pymethods]
@@ -1251,16 +1364,30 @@ impl PyGlif3State {
     #[pyo3(signature = (n, dt=1.0, g_leak=0.1, E_leak=-65.0, v_thresh=-50.0, v_reset=-65.0,
         tau_ahp=30.0, delta_g_ahp=0.01, E_ahp=-80.0, tau_ref=2.0))]
     fn new(
-        n: usize, dt: f32, g_leak: f32, E_leak: f32, v_thresh: f32, v_reset: f32,
-        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32, tau_ref: f32,
+        n: usize,
+        dt: f32,
+        g_leak: f32,
+        E_leak: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_ahp: f32,
+        delta_g_ahp: f32,
+        E_ahp: f32,
+        tau_ref: f32,
     ) -> Self {
         Self {
-            inner: std::sync::Mutex::new(
-                neuron::glif::Glif3State::new(
-                    n, dt, g_leak, E_leak, v_thresh, v_reset,
-                    tau_ahp, delta_g_ahp, E_ahp, tau_ref,
-                ),
-            ),
+            inner: std::sync::Mutex::new(neuron::Glif3State::new(
+                n,
+                dt,
+                g_leak,
+                E_leak,
+                v_thresh,
+                v_reset,
+                tau_ahp,
+                delta_g_ahp,
+                E_ahp,
+                tau_ref,
+            )),
         }
     }
 
@@ -1280,11 +1407,25 @@ impl PyGlif3State {
     /// Настройка параметров конкретного нейрона.
     #[pyo3(signature = (idx, g_leak, E_leak, v_thresh, v_reset, tau_ahp, delta_g_ahp, E_ahp))]
     fn set_params(
-        &self, idx: usize, g_leak: f32, E_leak: f32, v_thresh: f32, v_reset: f32,
-        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32,
+        &self,
+        idx: usize,
+        g_leak: f32,
+        E_leak: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_ahp: f32,
+        delta_g_ahp: f32,
+        E_ahp: f32,
     ) {
         self.inner.lock().unwrap().set_params(
-            idx, g_leak, E_leak, v_thresh, v_reset, tau_ahp, delta_g_ahp, E_ahp,
+            idx,
+            g_leak,
+            E_leak,
+            v_thresh,
+            v_reset,
+            tau_ahp,
+            delta_g_ahp,
+            E_ahp,
         );
     }
 
@@ -1334,7 +1475,7 @@ impl PyGlif3State {
 ///   On spike: v = v_reset, g_ahp += Δg_ahp, θ += Δθ
 #[pyclass(name = "Glif4State", module = "taas_checkmate.neurons")]
 pub struct PyGlif4State {
-    inner: std::sync::Mutex<neuron::glif::Glif4State>,
+    inner: std::sync::Mutex<neuron::Glif4State>,
 }
 
 #[pymethods]
@@ -1343,16 +1484,34 @@ impl PyGlif4State {
     #[pyo3(signature = (n, dt=1.0, g_leak=0.1, E_leak=-65.0, v_thresh_0=-50.0, v_reset=-65.0,
         tau_ahp=30.0, delta_g_ahp=0.01, E_ahp=-80.0, tau_theta=20.0, delta_theta=3.0, tau_ref=2.0))]
     fn new(
-        n: usize, dt: f32, g_leak: f32, E_leak: f32, v_thresh_0: f32, v_reset: f32,
-        tau_ahp: f32, delta_g_ahp: f32, E_ahp: f32, tau_theta: f32, delta_theta: f32, tau_ref: f32,
+        n: usize,
+        dt: f32,
+        g_leak: f32,
+        E_leak: f32,
+        v_thresh_0: f32,
+        v_reset: f32,
+        tau_ahp: f32,
+        delta_g_ahp: f32,
+        E_ahp: f32,
+        tau_theta: f32,
+        delta_theta: f32,
+        tau_ref: f32,
     ) -> Self {
         Self {
-            inner: std::sync::Mutex::new(
-                neuron::glif::Glif4State::new(
-                    n, dt, g_leak, E_leak, v_thresh_0, v_reset,
-                    tau_ahp, delta_g_ahp, E_ahp, tau_theta, delta_theta, tau_ref,
-                ),
-            ),
+            inner: std::sync::Mutex::new(neuron::Glif4State::new(
+                n,
+                dt,
+                g_leak,
+                E_leak,
+                v_thresh_0,
+                v_reset,
+                tau_ahp,
+                delta_g_ahp,
+                E_ahp,
+                tau_theta,
+                delta_theta,
+                tau_ref,
+            )),
         }
     }
 
@@ -1429,33 +1588,37 @@ impl PyGlif4State {
 ///     a, b, c, d, r, s, xr: параметры модели [n]
 #[pyfunction]
 #[pyo3(name = "step_hr")]
-pub fn py_step_hr(
+#[pyo3(signature = (x, y, z, I, spikes, dt=0.01, a=None, b=None, c=None, d=None, r=None, s=None, xr=None))]
+pub fn py_step_hr<'py>(
     x: Bound<'_, PyArray1<f32>>,
     y: Bound<'_, PyArray1<f32>>,
     z: Bound<'_, PyArray1<f32>>,
     I: Bound<'_, PyArray1<f32>>,
-    spikes: Bound<'_, PyArray1<i32>>,
+    spikes: Bound<'py, PyArray1<i32>>,
     dt: f32,
-    a: Bound<'_, PyArray1<f32>>,
-    b: Bound<'_, PyArray1<f32>>,
-    c: Bound<'_, PyArray1<f32>>,
-    d: Bound<'_, PyArray1<f32>>,
-    r: Bound<'_, PyArray1<f32>>,
-    s: Bound<'_, PyArray1<f32>>,
-    xr: Bound<'_, PyArray1<f32>>,
-) -> PyResult<()> {
+    a: Option<Bound<'_, PyAny>>,
+    b: Option<Bound<'_, PyAny>>,
+    c: Option<Bound<'_, PyAny>>,
+    d: Option<Bound<'_, PyAny>>,
+    r: Option<Bound<'_, PyAny>>,
+    s: Option<Bound<'_, PyAny>>,
+    xr: Option<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyArray1<i32>>> {
     let mut x_rw = x.readwrite();
     let mut y_rw = y.readwrite();
     let mut z_rw = z.readwrite();
     let I_ro = I.readonly();
     let mut spikes_rw = spikes.readwrite();
-    let a_ro = a.readonly();
-    let b_ro = b.readonly();
-    let c_ro = c.readonly();
-    let d_ro = d.readonly();
-    let r_ro = r.readonly();
-    let s_ro = s.readonly();
-    let xr_ro = xr.readonly();
+
+    let n = x.len()?;
+    check_lanes(n, "step_hr")?;
+    let a = param_f32(a.as_ref(), n, "a", 1.0)?;
+    let b = param_f32(b.as_ref(), n, "b", 3.0)?;
+    let c = param_f32(c.as_ref(), n, "c", 1.0)?;
+    let d = param_f32(d.as_ref(), n, "d", 5.0)?;
+    let r = param_f32(r.as_ref(), n, "r", 0.006)?;
+    let s = param_f32(s.as_ref(), n, "s", 4.0)?;
+    let xr = param_f32(xr.as_ref(), n, "xr", -1.6)?;
 
     neuron::step_hr(
         x_rw.as_slice_mut()?,
@@ -1464,15 +1627,16 @@ pub fn py_step_hr(
         I_ro.as_slice()?,
         spikes_rw.as_slice_mut()?,
         dt,
-        a_ro.as_slice()?,
-        b_ro.as_slice()?,
-        c_ro.as_slice()?,
-        d_ro.as_slice()?,
-        r_ro.as_slice()?,
-        s_ro.as_slice()?,
-        xr_ro.as_slice()?,
+        &a,
+        &b,
+        &c,
+        &d,
+        &r,
+        &s,
+        &xr,
     );
-    Ok(())
+    drop(spikes_rw);
+    Ok(spikes)
 }
 
 // ═══════════════════════════════════════════════════════════

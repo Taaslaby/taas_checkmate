@@ -31,10 +31,65 @@
 
 #![allow(non_snake_case)]
 
+use super::hetero_brain::{make_brain, PyHeterogeneousConnectomeBrain};
 use numpy::{PyArray1, PyArrayMethods};
-use pyo3::prelude::*;
 use pillars::prelude::*;
-use pillars::zoo::TriangulatedModel;
+use pillars::zoo::{IzhikevichDualModel, LIFAtModel, TriangulatedModel};
+use pyo3::prelude::*;
+
+/// Copy one NumPy column into the canonical population storage.
+///
+/// The Rust population API intentionally panics on an invalid column because
+/// its callers are compile-time model code. Python is a different boundary:
+/// user-provided indices must become `ValueError`, never a Rust panic.
+fn set_param_column<M: Model>(
+    pop: &mut NeuralPopulation<M>,
+    col: usize,
+    array: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    if col >= M::N_PARAMS {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "set_param_array: column {col} out of range (model has {} params)",
+            M::N_PARAMS
+        )));
+    }
+    let src = array.readonly().as_slice()?.to_vec();
+    let dest = pop.param_slice_mut(col);
+    if src.len() != dest.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "set_param_array: expected {} elements (n), got {}",
+            dest.len(),
+            src.len()
+        )));
+    }
+    dest.copy_from_slice(&src);
+    Ok(())
+}
+
+/// Copy one NumPy state column into the canonical population storage.
+fn set_state_column<M: Model>(
+    pop: &mut NeuralPopulation<M>,
+    col: usize,
+    array: Bound<'_, PyArray1<f32>>,
+) -> PyResult<()> {
+    if col >= M::N_STATE {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "set_state_array: column {col} out of range (model has {} states)",
+            M::N_STATE
+        )));
+    }
+    let src = array.readonly().as_slice()?.to_vec();
+    let dest = pop.state_slice_mut(col);
+    if src.len() != dest.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "set_state_array: expected {} elements (n), got {}",
+            dest.len(),
+            src.len()
+        )));
+    }
+    dest.copy_from_slice(&src);
+    Ok(())
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  define_population! — shared pyo3 boilerplate for the point-neuron
@@ -109,34 +164,12 @@ macro_rules! define_population {
 
             /// Set a param column from a numpy array (per-neuron values).
             fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-                let ro = array.readonly();
-                let src = ro.as_slice()?;
-                let dest = self.inner.param_slice_mut(col);
-                if src.len() != dest.len() {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "set_param_array: expected {} elements (n), got {}",
-                        dest.len(),
-                        src.len()
-                    )));
-                }
-                dest.copy_from_slice(src);
-                Ok(())
+                set_param_column(&mut self.inner, col, array)
             }
 
             /// Set a state column from a numpy array (per-neuron values).
             fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-                let ro = array.readonly();
-                let src = ro.as_slice()?;
-                let dest = self.inner.state_slice_mut(col);
-                if src.len() != dest.len() {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "set_state_array: expected {} elements (n), got {}",
-                        dest.len(),
-                        src.len()
-                    )));
-                }
-                dest.copy_from_slice(src);
-                Ok(())
+                set_state_column(&mut self.inner, col, array)
             }
 
             /// Run one simulation step.
@@ -204,30 +237,42 @@ impl PyLIFPopulation {
     fn new(n: usize) -> Self {
         let mut pop = NeuralPopulation::<LIFModel>::new(n);
         // Set defaults
-        pop.fill_param(0, 1.0);     // dt
-        pop.fill_param(1, 0.1);     // inv_tau_m
-        pop.fill_param(2, -70.0);   // v_rest
-        pop.fill_param(3, -54.0);   // v_thresh
-        pop.fill_param(4, -70.0);   // v_reset
-        pop.fill_param(5, 2.0);     // tau_ref
-        pop.fill_state(0, -70.0);   // v
+        pop.fill_param(0, 1.0); // dt
+        pop.fill_param(1, 0.1); // inv_tau_m
+        pop.fill_param(2, -70.0); // v_rest
+        pop.fill_param(3, -54.0); // v_thresh
+        pop.fill_param(4, -70.0); // v_reset
+        pop.fill_param(5, 2.0); // tau_ref
+        pop.fill_state(0, -70.0); // v
         Self { inner: pop }
     }
 
     // ─── Params ─────────────────────────────────────────────
 
     #[setter]
-    fn set_dt(&mut self, val: f32) { self.inner.fill_param(0, val); }
+    fn set_dt(&mut self, val: f32) {
+        self.inner.fill_param(0, val);
+    }
     #[setter]
-    fn set_inv_tau_m(&mut self, val: f32) { self.inner.fill_param(1, val); }
+    fn set_inv_tau_m(&mut self, val: f32) {
+        self.inner.fill_param(1, val);
+    }
     #[setter]
-    fn set_v_rest(&mut self, val: f32) { self.inner.fill_param(2, val); }
+    fn set_v_rest(&mut self, val: f32) {
+        self.inner.fill_param(2, val);
+    }
     #[setter]
-    fn set_v_thresh(&mut self, val: f32) { self.inner.fill_param(3, val); }
+    fn set_v_thresh(&mut self, val: f32) {
+        self.inner.fill_param(3, val);
+    }
     #[setter]
-    fn set_v_reset(&mut self, val: f32) { self.inner.fill_param(4, val); }
+    fn set_v_reset(&mut self, val: f32) {
+        self.inner.fill_param(4, val);
+    }
     #[setter]
-    fn set_tau_ref(&mut self, val: f32) { self.inner.fill_param(5, val); }
+    fn set_tau_ref(&mut self, val: f32) {
+        self.inner.fill_param(5, val);
+    }
 
     // ─── State getters ──────────────────────────────────────
 
@@ -248,9 +293,13 @@ impl PyLIFPopulation {
     // ─── State setter (scalar → all neurons) ────────────────
 
     #[setter]
-    fn set_v(&mut self, val: f32) { self.inner.fill_state(0, val); }
+    fn set_v(&mut self, val: f32) {
+        self.inner.fill_state(0, val);
+    }
     #[setter]
-    fn set_refr(&mut self, val: f32) { self.inner.fill_state(1, val); }
+    fn set_refr(&mut self, val: f32) {
+        self.inner.fill_state(1, val);
+    }
 
     // ─── Param getters (for introspection) ──────────────────
 
@@ -275,18 +324,7 @@ impl PyLIFPopulation {
     ///     col: param index (0=dt, 1=inv_tau_m, 2=v_rest, 3=v_thresh, 4=v_reset, 5=tau_ref)
     ///     array: float32 numpy array of length n
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.param_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_param_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_param_column(&mut self.inner, col, array)
     }
 
     /// Set a state column from a numpy array (per-neuron values).
@@ -295,18 +333,7 @@ impl PyLIFPopulation {
     ///     col: state index (0=v, 1=refr)
     ///     array: float32 numpy array of length n
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.state_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_state_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_state_column(&mut self.inner, col, array)
     }
 
     // ─── Step ───────────────────────────────────────────────
@@ -316,7 +343,11 @@ impl PyLIFPopulation {
     /// Args:
     ///     i_in: input current (float32 numpy array, length n)
     ///     spikes_out: output spikes (int32 numpy array, length n, modified in-place)
-    fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
         let i = i_ro.as_slice()?;
@@ -335,7 +366,9 @@ impl PyLIFPopulation {
 
     /// Number of neurons.
     #[getter]
-    fn n(&self) -> usize { self.inner.len() }
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
 
     fn __repr__(&self) -> String {
         format!("LIFPopulation(n={})", self.inner.len())
@@ -375,27 +408,48 @@ impl PyIzhikevichPopulation {
     #[new]
     fn new(n: usize) -> Self {
         let mut pop = NeuralPopulation::<IzhikevichModel>::new(n);
-        pop.fill_param(0, 0.5);     // dt
-        pop.fill_param(1, 0.02);    // a
-        pop.fill_param(2, 0.2);     // b
-        pop.fill_param(3, -65.0);   // c
-        pop.fill_param(4, 8.0);     // d
-        pop.fill_param(5, 2.0);     // tau_ref
-        pop.fill_param(6, 30.0);    // v_thresh
-        pop.fill_state(0, -65.0);   // v
+        pop.fill_param(0, 0.5); // dt
+        pop.fill_param(1, 0.02); // a
+        pop.fill_param(2, 0.2); // b
+        pop.fill_param(3, -65.0); // c
+        pop.fill_param(4, 8.0); // d
+        pop.fill_param(5, 2.0); // tau_ref
+        pop.fill_param(6, 30.0); // v_thresh
+        pop.fill_state(0, -65.0); // v
         pop.fill_state(1, 0.2 * -65.0); // u ≈ b*v
         Self { inner: pop }
     }
 
     // ─── Params ─────────────────────────────────────────────
 
-    #[setter] fn set_dt(&mut self, val: f32) { self.inner.fill_param(0, val); }
-    #[setter] fn set_a(&mut self, val: f32) { self.inner.fill_param(1, val); }
-    #[setter] fn set_b(&mut self, val: f32) { self.inner.fill_param(2, val); }
-    #[setter] fn set_c(&mut self, val: f32) { self.inner.fill_param(3, val); }
-    #[setter] fn set_d(&mut self, val: f32) { self.inner.fill_param(4, val); }
-    #[setter] fn set_tau_ref(&mut self, val: f32) { self.inner.fill_param(5, val); }
-    #[setter] fn set_v_thresh(&mut self, val: f32) { self.inner.fill_param(6, val); }
+    #[setter]
+    fn set_dt(&mut self, val: f32) {
+        self.inner.fill_param(0, val);
+    }
+    #[setter]
+    fn set_a(&mut self, val: f32) {
+        self.inner.fill_param(1, val);
+    }
+    #[setter]
+    fn set_b(&mut self, val: f32) {
+        self.inner.fill_param(2, val);
+    }
+    #[setter]
+    fn set_c(&mut self, val: f32) {
+        self.inner.fill_param(3, val);
+    }
+    #[setter]
+    fn set_d(&mut self, val: f32) {
+        self.inner.fill_param(4, val);
+    }
+    #[setter]
+    fn set_tau_ref(&mut self, val: f32) {
+        self.inner.fill_param(5, val);
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, val: f32) {
+        self.inner.fill_param(6, val);
+    }
 
     // ─── State getters ──────────────────────────────────────
 
@@ -414,45 +468,36 @@ impl PyIzhikevichPopulation {
 
     // ─── State setters ──────────────────────────────────────
 
-    #[setter] fn set_v(&mut self, val: f32) { self.inner.fill_state(0, val); }
-    #[setter] fn set_u(&mut self, val: f32) { self.inner.fill_state(1, val); }
-    #[setter] fn set_refr(&mut self, val: f32) { self.inner.fill_state(2, val); }
+    #[setter]
+    fn set_v(&mut self, val: f32) {
+        self.inner.fill_state(0, val);
+    }
+    #[setter]
+    fn set_u(&mut self, val: f32) {
+        self.inner.fill_state(1, val);
+    }
+    #[setter]
+    fn set_refr(&mut self, val: f32) {
+        self.inner.fill_state(2, val);
+    }
 
     // ─── Per-neuron arrays ──────────────────────────────────
 
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.param_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_param_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_param_column(&mut self.inner, col, array)
     }
 
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.state_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_state_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_state_column(&mut self.inner, col, array)
     }
 
     // ─── Step ───────────────────────────────────────────────
 
-    fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
         let i = i_ro.as_slice()?;
@@ -470,7 +515,9 @@ impl PyIzhikevichPopulation {
     }
 
     #[getter]
-    fn n(&self) -> usize { self.inner.len() }
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
 
     fn __repr__(&self) -> String {
         format!("IzhikevichPopulation(n={})", self.inner.len())
@@ -515,36 +562,69 @@ impl PyHHPopulation {
     #[new]
     fn new(n: usize) -> Self {
         let mut pop = NeuralPopulation::<HHModel>::new(n);
-        pop.fill_param(0, 0.01);       // dt
-        pop.fill_param(1, 120.0);      // g_na
-        pop.fill_param(2, 50.0);       // e_na
-        pop.fill_param(3, 36.0);       // g_k
-        pop.fill_param(4, -77.0);      // e_k
-        pop.fill_param(5, 0.3);        // g_leak
-        pop.fill_param(6, -54.387);    // e_leak
-        pop.fill_param(7, 1.0);        // q10 (6.3°C → 1.0)
-        pop.fill_param(8, 0.0);        // v_thresh
-        pop.fill_param(9, 1.0);        // inv_cm (C_m=1.0)
-        pop.fill_state(0, -65.0);      // v
-        pop.fill_state(1, 0.05);       // m (steady-state at -65mV)
-        pop.fill_state(2, 0.6);        // h
-        pop.fill_state(3, 0.32);       // n
-        pop.fill_state(4, 1.0);        // was_below (below threshold)
+        pop.fill_param(0, 0.01); // dt
+        pop.fill_param(1, 120.0); // g_na
+        pop.fill_param(2, 50.0); // e_na
+        pop.fill_param(3, 36.0); // g_k
+        pop.fill_param(4, -77.0); // e_k
+        pop.fill_param(5, 0.3); // g_leak
+        pop.fill_param(6, -54.387); // e_leak
+        pop.fill_param(7, 1.0); // q10 (6.3°C → 1.0)
+        pop.fill_param(8, 0.0); // v_thresh
+        pop.fill_param(9, 1.0); // inv_cm (C_m=1.0)
+        pop.fill_param(10, 0.0); // g_caT (standard HH: no Ca²⁺ current)
+        pop.fill_param(11, 120.0); // e_caT (canonical, inert while g_caT=0)
+        pop.fill_state(0, -65.0); // v
+        pop.fill_state(1, 0.05); // m (steady-state at -65mV)
+        pop.fill_state(2, 0.6); // h
+        pop.fill_state(3, 0.32); // n
+        pop.fill_state(4, 0.19); // c — CaV-T gate (steady-state ~0.19 at rest)
+        pop.fill_state(5, 1.0); // was_below — start below threshold (edge-triggered spike)
         Self { inner: pop }
     }
 
     // ─── Params ─────────────────────────────────────────────
 
-    #[setter] fn set_dt(&mut self, val: f32) { self.inner.fill_param(0, val); }
-    #[setter] fn set_g_na(&mut self, val: f32) { self.inner.fill_param(1, val); }
-    #[setter] fn set_e_na(&mut self, val: f32) { self.inner.fill_param(2, val); }
-    #[setter] fn set_g_k(&mut self, val: f32) { self.inner.fill_param(3, val); }
-    #[setter] fn set_e_k(&mut self, val: f32) { self.inner.fill_param(4, val); }
-    #[setter] fn set_g_leak(&mut self, val: f32) { self.inner.fill_param(5, val); }
-    #[setter] fn set_e_leak(&mut self, val: f32) { self.inner.fill_param(6, val); }
-    #[setter] fn set_q10(&mut self, val: f32) { self.inner.fill_param(7, val); }
-    #[setter] fn set_v_thresh(&mut self, val: f32) { self.inner.fill_param(8, val); }
-    #[setter] fn set_inv_cm(&mut self, val: f32) { self.inner.fill_param(9, val); }
+    #[setter]
+    fn set_dt(&mut self, val: f32) {
+        self.inner.fill_param(0, val);
+    }
+    #[setter]
+    fn set_g_na(&mut self, val: f32) {
+        self.inner.fill_param(1, val);
+    }
+    #[setter]
+    fn set_e_na(&mut self, val: f32) {
+        self.inner.fill_param(2, val);
+    }
+    #[setter]
+    fn set_g_k(&mut self, val: f32) {
+        self.inner.fill_param(3, val);
+    }
+    #[setter]
+    fn set_e_k(&mut self, val: f32) {
+        self.inner.fill_param(4, val);
+    }
+    #[setter]
+    fn set_g_leak(&mut self, val: f32) {
+        self.inner.fill_param(5, val);
+    }
+    #[setter]
+    fn set_e_leak(&mut self, val: f32) {
+        self.inner.fill_param(6, val);
+    }
+    #[setter]
+    fn set_q10(&mut self, val: f32) {
+        self.inner.fill_param(7, val);
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, val: f32) {
+        self.inner.fill_param(8, val);
+    }
+    #[setter]
+    fn set_inv_cm(&mut self, val: f32) {
+        self.inner.fill_param(9, val);
+    }
 
     // ─── State getters ──────────────────────────────────────
 
@@ -567,46 +647,40 @@ impl PyHHPopulation {
 
     // ─── State setters ──────────────────────────────────────
 
-    #[setter] fn set_v(&mut self, val: f32) { self.inner.fill_state(0, val); }
-    #[setter] fn set_m(&mut self, val: f32) { self.inner.fill_state(1, val); }
-    #[setter] fn set_h(&mut self, val: f32) { self.inner.fill_state(2, val); }
-    #[setter] fn set_n_gate(&mut self, val: f32) { self.inner.fill_state(3, val); }
+    #[setter]
+    fn set_v(&mut self, val: f32) {
+        self.inner.fill_state(0, val);
+    }
+    #[setter]
+    fn set_m(&mut self, val: f32) {
+        self.inner.fill_state(1, val);
+    }
+    #[setter]
+    fn set_h(&mut self, val: f32) {
+        self.inner.fill_state(2, val);
+    }
+    #[setter]
+    fn set_n_gate(&mut self, val: f32) {
+        self.inner.fill_state(3, val);
+    }
 
     // ─── Per-neuron arrays ──────────────────────────────────
 
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.param_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_param_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_param_column(&mut self.inner, col, array)
     }
 
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.state_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_state_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_state_column(&mut self.inner, col, array)
     }
 
     // ─── Step ───────────────────────────────────────────────
 
-    fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
         let i = i_ro.as_slice()?;
@@ -624,7 +698,9 @@ impl PyHHPopulation {
     }
 
     #[getter]
-    fn n(&self) -> usize { self.inner.len() }
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
 
     fn __repr__(&self) -> String {
         format!("HHPopulation(n={})", self.inner.len())
@@ -689,31 +765,58 @@ impl PyVSNPopulation {
     ) -> Self {
         let mut pop = NeuralPopulation::<VSNModel>::new(n);
         pop.fill_param(0, dt);
-        pop.fill_param(1, 1.0 / tau_m);  // Pre-inverted: store 1/τ_m
+        pop.fill_param(1, 1.0 / tau_m); // Pre-inverted: store 1/τ_m
         pop.fill_param(2, v_rest);
         pop.fill_param(3, v_thresh);
         pop.fill_param(4, v_reset);
-        pop.fill_param(5, 2.0);          // tau_ref
+        pop.fill_param(5, 2.0); // tau_ref
         pop.fill_param(6, beta);
         pop.fill_param(7, surrogate_gain);
-        pop.fill_state(0, v_rest);       // v = v_rest
-        pop.fill_state(1, 0.0);          // refr
-        pop.fill_state(2, 0.0);          // surrogate
+        pop.fill_state(0, v_rest); // v = v_rest
+        pop.fill_state(1, 0.0); // refr
+        pop.fill_state(2, 0.0); // surrogate
         Self { inner: pop }
     }
 
     // ─── Params ─────────────────────────────────────────────
 
-    #[setter] fn set_dt(&mut self, val: f32) { self.inner.fill_param(0, val); }
-    #[setter] fn set_inv_tau_m(&mut self, val: f32) { self.inner.fill_param(1, val); }
+    #[setter]
+    fn set_dt(&mut self, val: f32) {
+        self.inner.fill_param(0, val);
+    }
+    #[setter]
+    fn set_inv_tau_m(&mut self, val: f32) {
+        self.inner.fill_param(1, val);
+    }
     /// Set tau_m in ms — automatically stores as 1/tau_m (pre-inverted).
-    #[setter] fn set_tau_m(&mut self, val: f32) { self.inner.fill_param(1, 1.0 / val); }
-    #[setter] fn set_v_rest(&mut self, val: f32) { self.inner.fill_param(2, val); }
-    #[setter] fn set_v_thresh(&mut self, val: f32) { self.inner.fill_param(3, val); }
-    #[setter] fn set_v_reset(&mut self, val: f32) { self.inner.fill_param(4, val); }
-    #[setter] fn set_tau_ref(&mut self, val: f32) { self.inner.fill_param(5, val); }
-    #[setter] fn set_beta(&mut self, val: f32) { self.inner.fill_param(6, val); }
-    #[setter] fn set_surrogate_gain(&mut self, val: f32) { self.inner.fill_param(7, val); }
+    #[setter]
+    fn set_tau_m(&mut self, val: f32) {
+        self.inner.fill_param(1, 1.0 / val);
+    }
+    #[setter]
+    fn set_v_rest(&mut self, val: f32) {
+        self.inner.fill_param(2, val);
+    }
+    #[setter]
+    fn set_v_thresh(&mut self, val: f32) {
+        self.inner.fill_param(3, val);
+    }
+    #[setter]
+    fn set_v_reset(&mut self, val: f32) {
+        self.inner.fill_param(4, val);
+    }
+    #[setter]
+    fn set_tau_ref(&mut self, val: f32) {
+        self.inner.fill_param(5, val);
+    }
+    #[setter]
+    fn set_beta(&mut self, val: f32) {
+        self.inner.fill_param(6, val);
+    }
+    #[setter]
+    fn set_surrogate_gain(&mut self, val: f32) {
+        self.inner.fill_param(7, val);
+    }
 
     // ─── State getters ──────────────────────────────────────
 
@@ -740,42 +843,29 @@ impl PyVSNPopulation {
 
     // ─── State setters ──────────────────────────────────────
 
-    #[setter] fn set_v(&mut self, val: f32) { self.inner.fill_state(0, val); }
-    #[setter] fn set_refr(&mut self, val: f32) { self.inner.fill_state(1, val); }
-    #[setter] fn set_surrogate(&mut self, val: f32) { self.inner.fill_state(2, val); }
+    #[setter]
+    fn set_v(&mut self, val: f32) {
+        self.inner.fill_state(0, val);
+    }
+    #[setter]
+    fn set_refr(&mut self, val: f32) {
+        self.inner.fill_state(1, val);
+    }
+    #[setter]
+    fn set_surrogate(&mut self, val: f32) {
+        self.inner.fill_state(2, val);
+    }
 
     // ─── Per-neuron arrays ──────────────────────────────────
 
     /// Set a param column from a numpy array (per-neuron values).
     fn set_param_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.param_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_param_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_param_column(&mut self.inner, col, array)
     }
 
     /// Set a state column from a numpy array (per-neuron values).
     fn set_state_array(&mut self, col: usize, array: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = array.readonly();
-        let src = ro.as_slice()?;
-        let dest = self.inner.state_slice_mut(col);
-        if src.len() != dest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "set_state_array: expected {} elements (n), got {}",
-                dest.len(),
-                src.len()
-            )));
-        }
-        dest.copy_from_slice(src);
-        Ok(())
+        set_state_column(&mut self.inner, col, array)
     }
 
     // ─── Step ───────────────────────────────────────────────
@@ -785,7 +875,11 @@ impl PyVSNPopulation {
     /// Args:
     ///     i_in: input current (float32 numpy array, length n)
     ///     spikes_out: output spikes (int32 numpy array, length n, modified in-place)
-    fn step(&mut self, i_in: Bound<'_, PyArray1<f32>>, spikes_out: Bound<'_, PyArray1<i32>>) -> PyResult<()> {
+    fn step(
+        &mut self,
+        i_in: Bound<'_, PyArray1<f32>>,
+        spikes_out: Bound<'_, PyArray1<i32>>,
+    ) -> PyResult<()> {
         let i_ro = i_in.readonly();
         let mut sp_rw = spikes_out.readwrite();
         let i = i_ro.as_slice()?;
@@ -804,7 +898,9 @@ impl PyVSNPopulation {
 
     /// Number of neurons.
     #[getter]
-    fn n(&self) -> usize { self.inner.len() }
+    fn n(&self) -> usize {
+        self.inner.len()
+    }
 
     fn __repr__(&self) -> String {
         format!("VSNPopulation(n={})", self.inner.len())
@@ -919,8 +1015,14 @@ impl PyAdExPopulation {
         }
         // Sensible defaults (all neurons uniform).
         pop.fill_param(m.into(), 0.5); // dt
-        pop.fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_m.into(), 1.0 / 20.0);
-        pop.fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_w.into(), 1.0 / 100.0);
+        pop.fill_param(
+            pillars::zoo::AdExModelParamIdx::inv_tau_m.into(),
+            1.0 / 20.0,
+        );
+        pop.fill_param(
+            pillars::zoo::AdExModelParamIdx::inv_tau_w.into(),
+            1.0 / 100.0,
+        );
         pop.fill_param(pillars::zoo::AdExModelParamIdx::v_rest.into(), -65.0);
         pop.fill_param(pillars::zoo::AdExModelParamIdx::v_thresh.into(), -50.0);
         pop.fill_param(pillars::zoo::AdExModelParamIdx::v_reset.into(), -70.0);
@@ -957,8 +1059,10 @@ impl PyAdExPopulation {
     }
     #[setter]
     fn set_tau_m(&mut self, v: f32) {
-        self.inner
-            .fill_param(pillars::zoo::AdExModelParamIdx::inv_tau_m.into(), 1.0 / v.max(1e-6));
+        self.inner.fill_param(
+            pillars::zoo::AdExModelParamIdx::inv_tau_m.into(),
+            1.0 / v.max(1e-6),
+        );
     }
     #[setter]
     fn set_b(&mut self, v: f32) {
@@ -1023,10 +1127,16 @@ impl PyGLIF4Population {
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::e_leak.into(), -65.0);
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::v_thresh_0.into(), -50.0);
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::v_reset.into(), -70.0);
-        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::inv_tau_ahp.into(), 1.0 / 100.0);
+        pop.fill_param(
+            pillars::zoo::GLIF4ModelParamIdx::inv_tau_ahp.into(),
+            1.0 / 100.0,
+        );
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::delta_g.into(), 2.0);
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::e_ahp.into(), -70.0);
-        pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::inv_tau_theta.into(), 1.0 / 10.0);
+        pop.fill_param(
+            pillars::zoo::GLIF4ModelParamIdx::inv_tau_theta.into(),
+            1.0 / 10.0,
+        );
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::delta_theta.into(), 0.5);
         pop.fill_param(pillars::zoo::GLIF4ModelParamIdx::tau_ref.into(), 2.0);
         pop.fill_state(pillars::zoo::GLIF4ModelStateIdx::v.into(), -65.0);
@@ -1109,6 +1219,7 @@ impl PyFHNPopulation {
         pop.fill_param(pillars::zoo::FHNModelParamIdx::v_thresh.into(), 0.5);
         pop.fill_state(pillars::zoo::FHNModelStateIdx::v.into(), 0.0);
         pop.fill_state(pillars::zoo::FHNModelStateIdx::w.into(), 0.0);
+        pop.fill_state(pillars::zoo::FHNModelStateIdx::was_below.into(), 1.0);
         Self { inner: pop }
     }
 
@@ -1168,17 +1279,17 @@ impl PyHRPopulation {
     #[new]
     fn new(n: usize) -> Self {
         let mut pop = NeuralPopulation::<pillars::zoo::HRModel>::new(n);
-        pop.fill_param(pillars::zoo::HRModelParamIdx::dt.into(), 0.5);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::dt.into(), 0.01);
         pop.fill_param(pillars::zoo::HRModelParamIdx::a.into(), 1.0);
         pop.fill_param(pillars::zoo::HRModelParamIdx::b.into(), 3.0);
         pop.fill_param(pillars::zoo::HRModelParamIdx::c.into(), 1.0);
         pop.fill_param(pillars::zoo::HRModelParamIdx::d.into(), 5.0);
-        pop.fill_param(pillars::zoo::HRModelParamIdx::r.into(), 0.001);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::r.into(), 0.006);
         pop.fill_param(pillars::zoo::HRModelParamIdx::s.into(), 4.0);
         pop.fill_param(pillars::zoo::HRModelParamIdx::x_r.into(), -1.6);
-        pop.fill_param(pillars::zoo::HRModelParamIdx::v_thresh.into(), 0.0);
-        pop.fill_state(pillars::zoo::HRModelStateIdx::x.into(), -1.0);
-        pop.fill_state(pillars::zoo::HRModelStateIdx::y.into(), 0.0);
+        pop.fill_param(pillars::zoo::HRModelParamIdx::v_thresh.into(), 1.0);
+        pop.fill_state(pillars::zoo::HRModelStateIdx::x.into(), -1.6);
+        pop.fill_state(pillars::zoo::HRModelStateIdx::y.into(), -12.0);
         pop.fill_state(pillars::zoo::HRModelStateIdx::z.into(), 0.0);
         Self { inner: pop }
     }
@@ -1307,6 +1418,38 @@ define_population! {
 }
 
 define_population! {
+    docs: "LIF with spike-triggered threshold adaptation (LIFAt): θ decays toward 0 and jumps by beta on each spike — effective threshold v_thresh + θ.",
+    class: PyLIFAtPopulation,
+    py_name: "LIFAtPopulation",
+    model: LIFAtModel,
+    params: [
+        (dt, set_dt, 0, 0.5), (inv_tau_m, set_inv_tau_m, 1, 0.1), (v_rest, set_v_rest, 2, -70.0),
+        (v_thresh, set_v_thresh, 3, -54.0), (v_reset, set_v_reset, 4, -70.0),
+        (inv_tau_theta, set_inv_tau_theta, 5, 0.05), (beta, set_beta, 6, 5.0),
+        (tau_ref, set_tau_ref, 7, 3.0)
+    ],
+    states: [(v, set_v, 0, -70.0), (theta, set_theta, 1, 0.0), (refr, set_refr, 2, 0.0)],
+    extra: {}
+}
+
+define_population! {
+    docs: "Izhikevich with a slow memory state m (Sun et al. 2026) — trace dynamics plus a memory-to-current feedback w_m·m.",
+    class: PyIzhikevichDualPopulation,
+    py_name: "IzhikevichDualPopulation",
+    model: IzhikevichDualModel,
+    params: [
+        (dt, set_dt, 0, 1.0), (a, set_a, 1, 0.02), (b, set_b, 2, 0.2), (c, set_c, 3, -65.0),
+        (d, set_d, 4, 8.0), (tau_ref, set_tau_ref, 5, 3.0), (v_thresh, set_v_thresh, 6, 30.0),
+        (trace_decay, set_trace_decay, 7, 0.5), (tau_m, set_tau_m, 8, 0.9), (w_m, set_w_m, 9, 1.0)
+    ],
+    states: [
+        (v, set_v, 0, -65.0), (u, set_u, 1, -13.0), (refr, set_refr, 2, 0.0),
+        (trace, set_trace, 3, 0.0), (m, set_m, 4, 0.0)
+    ],
+    extra: {}
+}
+
+define_population! {
     docs: "Triangulated LUT-based neuron — a lookup table replaces ODE integration. Call TriangulatedPopulation.calibrate_lif() once before step().",
     class: PyTriangulatedPopulation,
     py_name: "TriangulatedPopulation",
@@ -1385,17 +1528,10 @@ impl PyConnectomeBrain {
     /// delays (u8, steps). `n_neurons = len(row_ptr) - 1`.
     #[new]
     fn new(row_ptr: Vec<u32>, col_idx: Vec<u32>, weights: Vec<f32>, delays: Vec<u8>) -> Self {
-        let n_syn = weights.len();
-        let conn = pillars_connectome::ConnectomeData::from_csr(
-            row_ptr,
-            col_idx,
-            weights,
-            delays,
-            vec![0u8; n_syn], // receptor types: instant current path
-        );
-        let n = conn.n_neurons();
+        let graph = pillars::api::SparseGraph::from_csr(row_ptr, col_idx, &weights, &delays);
+        let n = graph.num_neurons();
         let mut brain =
-            pillars_connectome::Brain::<pillars::zoo::LIFModel>::from_connectome(&conn);
+            pillars_connectome::Brain::<pillars::zoo::LIFModel>::from_sparse_graph(graph);
         brain.configure(|p| {
             p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), 1.0);
             p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), 0.1);
@@ -1503,12 +1639,14 @@ impl PySynapticConnectomeBrain {
         receptor_types: Vec<u8>,
         dt: f32,
     ) -> Self {
-        let conn = pillars_connectome::ConnectomeData::from_csr(
-            row_ptr, col_idx, weights, delays, receptor_types,
-        );
-        let n = conn.n_neurons();
+        let graph = pillars::api::SparseGraph::from_csr(row_ptr, col_idx, &weights, &delays);
+        let n = graph.num_neurons();
         let mut brain =
-            pillars_connectome::SynapticBrain::<pillars::zoo::LIFModel>::from_connectome(&conn, dt);
+            pillars_connectome::SynapticBrain::<pillars::zoo::LIFModel>::from_sparse_graph(
+                graph,
+                receptor_types,
+                dt,
+            );
         brain.configure(|p| {
             p.fill_param(pillars::zoo::LIFModelParamIdx::dt.into(), dt);
             p.fill_param(pillars::zoo::LIFModelParamIdx::inv_tau_m.into(), 0.1);
@@ -1578,8 +1716,216 @@ impl PySynapticConnectomeBrain {
     }
 }
 
+/// Human hand/forearm reference runtime backed by the Atlasov muscle model.
+///
+/// Eight muscles (FCR, ECRL, FCU, ECU, FDS-II, FDP-II, ECRB, FDI) with
+/// forces in newtons and angle-dependent wrist moment arms.
+#[pyclass(name = "HumanHandState", module = "taas_checkmate.pillars")]
+pub struct PyHumanHandState {
+    inner: HumanHandState,
+}
+
+#[pymethods]
+impl PyHumanHandState {
+    /// Create the reference human hand runtime (all forces/params in SI).
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: HumanHandState::new(),
+        }
+    }
+
+    /// Advance one step in isometric mode with motor-neuron spikes and resets
+    /// (int32 arrays of length 8). `dt` is in seconds.
+    fn step(
+        &mut self,
+        spikes: Bound<'_, PyArray1<i32>>,
+        resets: Bound<'_, PyArray1<i32>>,
+        dt: f32,
+    ) -> PyResult<()> {
+        let sp = spikes.readonly();
+        let rs = resets.readonly();
+        let sp_s = sp.as_slice()?;
+        let rs_s = rs.as_slice()?;
+        if sp_s.len() != 8 || rs_s.len() != 8 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "spikes/resets must be length 8",
+            ));
+        }
+        self.inner.step(sp_s, rs_s, dt, None, None);
+        Ok(())
+    }
+
+    /// Advance one step with kinematics: `lengths` (m) and `velocities` (m/s)
+    /// arrays of length 8, plus motor spikes/resets. `dt` is in seconds.
+    fn step_kinematic(
+        &mut self,
+        spikes: Bound<'_, PyArray1<i32>>,
+        resets: Bound<'_, PyArray1<i32>>,
+        dt: f32,
+        lengths: Bound<'_, PyArray1<f32>>,
+        velocities: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<()> {
+        let sp = spikes.readonly();
+        let rs = resets.readonly();
+        let lr = lengths.readonly();
+        let vr = velocities.readonly();
+        let sp_s = sp.as_slice()?;
+        let rs_s = rs.as_slice()?;
+        let l_s = lr.as_slice()?;
+        let v_s = vr.as_slice()?;
+        if sp_s.len() != 8 || rs_s.len() != 8 || l_s.len() != 8 || v_s.len() != 8 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "spikes/resets/lengths/velocities must all be length 8",
+            ));
+        }
+        self.inner.step(sp_s, rs_s, dt, Some(l_s), Some(v_s));
+        Ok(())
+    }
+
+    /// Set the wrist flexion angle in degrees (positive = flexion). Re-evaluates
+    /// the angle-dependent wrist moment arms immediately.
+    fn set_wrist_angle_deg(&mut self, angle_deg: f32) {
+        self.inner.set_wrist_angle_deg(angle_deg);
+    }
+
+    /// Current wrist flexion angle in degrees.
+    #[getter]
+    fn wrist_angle_deg(&self) -> f32 {
+        self.inner.wrist_angle_deg
+    }
+
+    /// Current muscle forces in newtons (length-8 float32 array).
+    #[getter]
+    fn force_n<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        PyArray1::from_slice(py, &self.inner.force_n)
+    }
+
+    /// Net wrist moment in N·m at the current angle.
+    #[getter]
+    fn wrist_moment_nm(&self) -> f32 {
+        self.inner.wrist_moment_nm
+    }
+
+    /// Muscle channel names (FCR, ECRL, FCU, ECU, FDS-II, FDP-II, ECRB, FDI).
+    #[getter]
+    fn muscle_names(&self) -> Vec<String> {
+        HumanMuscle::ALL
+            .iter()
+            .map(|m| m.name().to_string())
+            .collect()
+    }
+
+    /// Maximum isometric force capacity per muscle (newtons, length-8).
+    #[getter]
+    fn max_isometric_force_n<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let p = self.inner.profile;
+        let caps: Vec<f32> = p
+            .muscles
+            .iter()
+            .map(|s| s.max_isometric_force_n())
+            .collect();
+        PyArray1::from_slice(py, &caps)
+    }
+
+    /// Sum of all muscle force capacities (newtons).
+    #[getter]
+    fn peak_force_n(&self) -> f32 {
+        self.inner.profile.peak_force_n()
+    }
+
+    /// Peak wrist moment in N·m at a given wrist angle (all muscles at
+    /// maximum isometric force).
+    fn peak_wrist_moment_nm_at_angle(&self, angle_deg: f32) -> f32 {
+        self.inner.profile.peak_wrist_moment_nm_at_angle(angle_deg)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("HumanHandState(angle={}°)", self.inner.wrist_angle_deg)
+    }
+}
+
+/// Runtime neuron factory: create a population of `n` neurons for a named
+/// zoo model.
+///
+/// Names are case-insensitive and accept both short forms ("hh") and
+/// class-style forms ("HHPopulation", "hh_population", "morris-lecar").
+/// Returns the concrete population class — all population classes share the
+/// duck-typed surface: `step(i_in, spikes_out)`, `n`, per-parameter/state
+/// getters/setters, and `set_param_array`/`set_state_array`.
+///
+/// Raises `ValueError` for unknown model names.
+/// camelCase → snake_case: insert '_' before an uppercase letter only when it
+/// follows a lowercase letter or digit (so "HHPopulation" and "VSNPopulation"
+/// stay intact as "hh"/"vsn", while "IzhikevichDualPopulation" → "izhikevich_dual").
+fn camel_to_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut prev_lower_or_digit = false;
+    for ch in s.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    out
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, n))]
+pub fn make_population<'py>(py: Python<'py>, name: &str, n: usize) -> PyResult<Py<PyAny>> {
+    let mut key = camel_to_snake(name.trim());
+    key = key.replace('-', "_");
+    let key = key
+        .strip_suffix("population")
+        .unwrap_or(&key)
+        .trim_end_matches('_');
+    let pop: Py<PyAny> = match key {
+        "lif" => Py::new(py, PyLIFPopulation::new(n))?.into_any(),
+        "izhikevich" | "izh" => Py::new(py, PyIzhikevichPopulation::new(n))?.into_any(),
+        "izhikevich_dual" | "dual" => Py::new(py, PyIzhikevichDualPopulation::new(n))?.into_any(),
+        "hh" => Py::new(py, PyHHPopulation::new(n))?.into_any(),
+        // VSN is the only manual class whose Rust `new` takes the full param
+        // list; mirror the pyo3-signature defaults here (dt, tau_m, v_rest,
+        // v_thresh, v_reset, beta, surrogate_gain).
+        "vsn" => Py::new(
+            py,
+            PyVSNPopulation::new(n, 0.5, 10.0, -70.0, -54.0, -70.0, 0.9, 10.0),
+        )?
+        .into_any(),
+        "rate" => Py::new(py, PyRatePopulation::new(n))?.into_any(),
+        "adex" | "ad_ex" => Py::new(py, PyAdExPopulation::new(n))?.into_any(),
+        "glif3" => Py::new(py, PyGLIF3Population::new(n))?.into_any(),
+        "glif4" => Py::new(py, PyGLIF4Population::new(n))?.into_any(),
+        "fhn" => Py::new(py, PyFHNPopulation::new(n))?.into_any(),
+        "hr" => Py::new(py, PyHRPopulation::new(n))?.into_any(),
+        "haap" => Py::new(py, PyHAAPPopulation::new(n))?.into_any(),
+        "morris_lecar" | "ml" => Py::new(py, PyMorrisLecarPopulation::new(n))?.into_any(),
+        "saw" => Py::new(py, PySAWPopulation::new(n))?.into_any(),
+        "wc" | "wilson_cowan" => Py::new(py, PyWCPopulation::new(n))?.into_any(),
+        "triangulated" | "lut" => Py::new(py, PyTriangulatedPopulation::new(n))?.into_any(),
+        "atlasov_neuromotor" | "atlasov" => {
+            Py::new(py, PyAtlasovNeuromotorPopulation::new(n))?.into_any()
+        }
+        "lifat" | "lif_at" => Py::new(py, PyLIFAtPopulation::new(n))?.into_any(),
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown neuron model '{name}' (normalized '{other}'); available: \
+                 lif, izhikevich, izhikevich_dual, hh, vsn, rate, adex, glif3, glif4, \
+                 fhn, hr, haap, morris_lecar, saw, wc, triangulated, atlasov_neuromotor, lifat"
+            )));
+        }
+    };
+    Ok(pop)
+}
+
 /// Register the pillars sub-module in the Python module tree.
-pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register<'py>(m: &Bound<'py, PyModule>) -> PyResult<Bound<'py, PyModule>> {
     let sub = PyModule::new(m.py(), "pillars")?;
     sub.add_class::<PyLIFPopulation>()?;
     sub.add_class::<PyIzhikevichPopulation>()?;
@@ -1590,6 +1936,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyGLIF4Population>()?;
     sub.add_class::<PyFHNPopulation>()?;
     sub.add_class::<PyHRPopulation>()?;
+    sub.add_class::<PyIzhikevichDualPopulation>()?;
+    sub.add_class::<PyLIFAtPopulation>()?;
     sub.add_class::<PyGLIF3Population>()?;
     sub.add_class::<PyHAAPPopulation>()?;
     sub.add_class::<PyMorrisLecarPopulation>()?;
@@ -1597,8 +1945,12 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_class::<PyWCPopulation>()?;
     sub.add_class::<PyTriangulatedPopulation>()?;
     sub.add_class::<PyAtlasovNeuromotorPopulation>()?;
+    sub.add_class::<PyHumanHandState>()?;
     sub.add_class::<PyConnectomeBrain>()?;
     sub.add_class::<PySynapticConnectomeBrain>()?;
+    sub.add_class::<PyHeterogeneousConnectomeBrain>()?;
+    sub.add_function(pyo3::wrap_pyfunction!(make_population, &sub)?)?;
+    sub.add_function(pyo3::wrap_pyfunction!(make_brain, &sub)?)?;
     m.add_submodule(&sub)?;
     // Register in sys.modules under the public name so
     // `from taas_checkmate.pillars import X` works (not just attribute access).
@@ -1606,12 +1958,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let parent_name = m.name()?;
     let parent_name = parent_name.to_str()?;
     let public_root = match parent_name.rsplit_once('.') {
-        Some((root, last)) if last == "taas_checkmate" => root,
+        Some((root, "taas_checkmate")) => root,
         _ => parent_name,
     };
     let fq = format!("{public_root}.pillars");
     sub.setattr("__name__", fq.clone())?;
-    m.py().import("sys")?.getattr("modules")?.set_item(&fq, sub.clone())?;
+    m.py()
+        .import("sys")?
+        .getattr("modules")?
+        .set_item(&fq, sub.clone())?;
     // Also register at root for convenience
     m.add_class::<PyLIFPopulation>()?;
     m.add_class::<PyIzhikevichPopulation>()?;
@@ -1622,6 +1977,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGLIF4Population>()?;
     m.add_class::<PyFHNPopulation>()?;
     m.add_class::<PyHRPopulation>()?;
+    m.add_class::<PyIzhikevichDualPopulation>()?;
+    m.add_class::<PyLIFAtPopulation>()?;
     m.add_class::<PyGLIF3Population>()?;
     m.add_class::<PyHAAPPopulation>()?;
     m.add_class::<PyMorrisLecarPopulation>()?;
@@ -1629,7 +1986,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWCPopulation>()?;
     m.add_class::<PyTriangulatedPopulation>()?;
     m.add_class::<PyAtlasovNeuromotorPopulation>()?;
+    m.add_class::<PyHumanHandState>()?;
     m.add_class::<PyConnectomeBrain>()?;
     m.add_class::<PySynapticConnectomeBrain>()?;
-    Ok(())
+    m.add_class::<PyHeterogeneousConnectomeBrain>()?;
+    m.add_function(pyo3::wrap_pyfunction!(make_population, m)?)?;
+    m.add_function(pyo3::wrap_pyfunction!(make_brain, m)?)?;
+    Ok(sub)
 }

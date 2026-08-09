@@ -18,8 +18,8 @@ use pyo3::prelude::*;
 use std::f32::consts::TAU;
 
 use crate::connectome::hh_population_standard;
-use crate::pillars::NeuralPopulation;
 use crate::pillars::zoo::HHModel;
+use crate::pillars::NeuralPopulation;
 
 /// Full hologram pipeline: phase encoding → HH → STDP → decode.
 #[allow(dead_code)]

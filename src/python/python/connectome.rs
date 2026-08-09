@@ -13,7 +13,7 @@
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 
-use crate::core::neuron;
+use pillars::api::neurons as neuron;
 
 // ─── CPU: full connectome simulation in tight Rust loop ──
 

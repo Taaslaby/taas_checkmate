@@ -30,9 +30,9 @@ use crate::connectome::{
     sim_hh_synaptic_pillars, ConnectomeData, GcoParams, IzhikevichParams, LifParams, NeuronModel,
     RateParams, SynapticKinetics,
 };
-use crate::pillars::NeuralPopulation;
 use crate::pillars::zoo::HHModel;
 use crate::pillars::zoo::HHParamIdx;
+use crate::pillars::NeuralPopulation;
 
 // ─── ConnectomeData ──────────────────────────────────
 
@@ -328,6 +328,10 @@ impl PyBrainSimulator {
                     let params = GcoParams { dt_ms };
                     conn::sim_gco(conn_data, &mut self.state, &params, &ext_I, n_steps)
                 }
+                NeuronModel::Hh => {
+                    let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
+                    sim_hh_pillars(conn_data, pop, &ext_I, n_steps, scale)
+                }
             }
         };
 
@@ -570,7 +574,9 @@ impl PyBrainSimulator {
     /// Current membrane potentials (v) — read-only snapshot.
     pub fn v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         if let Some((_, pop)) = &self.hh_pop {
-            pop.state_slice(0)[..self.n_neurons].to_vec().into_pyarray(py)
+            pop.state_slice(0)[..self.n_neurons]
+                .to_vec()
+                .into_pyarray(py)
         } else {
             self.state.v[..self.n_neurons].to_vec().into_pyarray(py)
         }
@@ -617,7 +623,8 @@ impl PyBrainSimulator {
             }
         };
         let n = self.n_neurons;
-        let n_channels = if self.hh_use_pacemaking { 3 } else { 2 };          let chans: &[HHParamIdx] = if self.hh_use_pacemaking {
+        let n_channels = if self.hh_use_pacemaking { 3 } else { 2 };
+        let chans: &[HHParamIdx] = if self.hh_use_pacemaking {
             &[HHParamIdx::G_Na, HHParamIdx::G_K, HHParamIdx::G_CaT]
         } else {
             &[HHParamIdx::G_Na, HHParamIdx::G_K]
@@ -772,8 +779,7 @@ impl PyBrainSimulator {
         external_I: Bound<'_, PyArray2<f32>>,
         steps_per_input: usize,
         dt_ms: f32,
-        #[allow(unused_variables)]
-        tau: f32,
+        #[allow(unused_variables)] tau: f32,
         record_every: usize,
     ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
         let n_neurons = self.n_neurons;

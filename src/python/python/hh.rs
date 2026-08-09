@@ -16,9 +16,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::connectome::{hh_population_pacemaking, hh_population_standard};
-use crate::pillars::NeuralPopulation;
 use crate::pillars::zoo::HHModel;
 use crate::pillars::zoo::HHParamIdx;
+use crate::pillars::NeuralPopulation;
 
 /// Pillars-based Hodgkin-Huxley simulator.
 ///

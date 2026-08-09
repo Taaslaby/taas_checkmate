@@ -36,7 +36,7 @@ pub fn py_cpe_kuramoto_step(
     let col_indices = col_indices.readonly();
     let values = values.readonly();
 
-    crate::core::cpe::kuramoto_step(
+    pillars::api::cpe::kuramoto_step(
         phases.as_slice_mut()?,
         omegas.as_slice()?,
         row_ptr.as_slice()?,
@@ -61,7 +61,7 @@ pub fn py_cpe_phase_coherence(phases: Bound<'_, PyArray1<f32>>) -> f32 {
         Ok(s) => s,
         Err(_) => return 0.0,
     };
-    crate::core::cpe::phase_coherence(phases_slice)
+    pillars::api::cpe::phase_coherence(phases_slice)
 }
 
 /// Spike entropy H and its deviation from target.
@@ -77,7 +77,7 @@ pub fn py_cpe_spike_entropy(
         Ok(s) => s,
         Err(_) => return (0.0, 0.0),
     };
-    crate::core::cpe::spike_entropy(counts_slice, total_steps, h_target)
+    pillars::api::cpe::spike_entropy(counts_slice, total_steps, h_target)
 }
 
 /// Detect spikes: rising edge through threshold.
@@ -99,7 +99,7 @@ pub fn py_cpe_detect_spikes(
         phases.as_slice(),
         phases_prev.as_slice(),
     ) {
-        let result = crate::core::cpe::detect_spikes(p, pp, threshold);
+        let result = pillars::api::cpe::detect_spikes(p, pp, threshold);
         let n = sp.len().min(result.len());
         sp[..n].copy_from_slice(&result[..n]);
     }
@@ -118,12 +118,12 @@ pub fn py_cpe_dopamine_delta(
     alpha: f32,
     beta: f32,
 ) -> f32 {
-    let config = crate::core::cpe::CpeConfig {
+    let config = pillars::api::cpe::CpeConfig {
         alpha,
         beta,
-        ..crate::core::cpe::CpeConfig::default()
+        ..pillars::api::cpe::CpeConfig::default()
     };
-    crate::core::cpe::dopamine_delta(
+    pillars::api::cpe::dopamine_delta(
         &config,
         reward,
         pattern_r,
@@ -137,7 +137,7 @@ pub fn py_cpe_dopamine_delta(
 #[pyfunction]
 #[pyo3(name = "dopamine_timing_gate")]
 pub fn py_cpe_dopamine_timing_gate(critical_steps: usize, total_steps: usize) -> f32 {
-    crate::core::cpe::dopamine_timing_gate(critical_steps, total_steps)
+    pillars::api::cpe::dopamine_timing_gate(critical_steps, total_steps)
 }
 
 /// Eligibility trace update: decay + add on spike.

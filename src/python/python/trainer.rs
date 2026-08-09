@@ -5,7 +5,7 @@
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 
-use crate::core::neuron::trainer::EPropTrainer;
+use pillars::api::trainer::EPropTrainer;
 
 /// Multi-threaded batch trainer for E-Prop Izhikevich Multi.
 ///

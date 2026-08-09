@@ -10,7 +10,7 @@ use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::core::neuron::autotune;
+use pillars::api::autotune;
 
 /// Probe firing rates for a range of bias values.
 ///

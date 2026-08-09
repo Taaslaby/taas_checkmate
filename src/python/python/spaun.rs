@@ -46,7 +46,7 @@ use std::path::PathBuf;
 use crate::karmac::gnw::GlobalWorkspace;
 use crate::karmac::semantic_pointer::SemanticPointer;
 use crate::karmac::working_memory::WorkingMemory;
-use taas_connectome::ConnectomeData;
+use pillars_connectome::ConnectomeData;
 use taas_format::{load_connectome, TaasReader};
 
 /// Python-доступная SPAUN pipeline.

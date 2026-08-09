@@ -635,8 +635,14 @@ mod tests {
         assert_eq!(bsp.lod[0], LodLevel::HhLut, "spike neuron should be HH");
         // Non-spiking neurons get LOD based on octree distance approximation
         // Just verify they're assigned a valid LOD level (no panics, no spiking demotion)
-        assert!(matches!(bsp.lod[1], LodLevel::HhLut | LodLevel::Izhikevich | LodLevel::Lif | LodLevel::Tanh));
-        assert!(matches!(bsp.lod[2], LodLevel::HhLut | LodLevel::Izhikevich | LodLevel::Lif | LodLevel::Tanh));
+        assert!(matches!(
+            bsp.lod[1],
+            LodLevel::HhLut | LodLevel::Izhikevich | LodLevel::Lif | LodLevel::Tanh
+        ));
+        assert!(matches!(
+            bsp.lod[2],
+            LodLevel::HhLut | LodLevel::Izhikevich | LodLevel::Lif | LodLevel::Tanh
+        ));
     }
 
     #[test]
@@ -689,7 +695,11 @@ mod tests {
         let lif = bsp.lod_indices(LodLevel::Lif);
         let tanh = bsp.lod_indices(LodLevel::Tanh);
 
-        assert_eq!(hh.len() + izh.len() + lif.len() + tanh.len(), 100, "all neurons assigned");
+        assert_eq!(
+            hh.len() + izh.len() + lif.len() + tanh.len(),
+            100,
+            "all neurons assigned"
+        );
 
         // Spike neurons are always HH
         assert!(hh.contains(&0), "neuron 0 (spike) should be HH");

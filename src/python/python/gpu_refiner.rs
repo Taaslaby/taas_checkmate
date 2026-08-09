@@ -84,7 +84,7 @@ impl PyGpuConnectomeRefiner {
         let mut f = std::fs::File::open(path)
             .map_err(|e| PyRuntimeError::new_err(format!("Cannot open {path}: {e}")))?;
 
-        let conn = taas_connectome::ConnectomeData::load_baked(&mut f)
+        let conn = pillars_connectome::ConnectomeData::load_baked(&mut f)
             .map_err(|e| PyRuntimeError::new_err(format!("Cannot load .taas: {e}")))?;
 
         let n = conn.n_neurons;
@@ -493,7 +493,7 @@ impl PyGpuConnectomeRefiner {
 
     /// Save refined connectome to .taas file.
     pub fn save(&self, path: &str) -> PyResult<()> {
-        let conn = taas_connectome::ConnectomeData {
+        let conn = pillars_connectome::ConnectomeData {
             n_neurons: self.n,
             n_synapses: self.s,
             row_ptr: self.row_ptr.clone(),

@@ -3,9 +3,12 @@
 #![allow(non_snake_case)]
 
 use numpy::{PyArray1, PyArrayMethods};
+use pillars::kernels::{decode, measure};
 use pyo3::prelude::*;
 
-use crate::core::kuramoto;
+// Высокоуровневые CSR-шаги (разреженная матрица + rayon) — канон
+// `pillars::kernels::phase` (Фаза 9).
+use pillars::kernels::phase::{kuramoto_step_sparse, t3_step_sparse};
 
 // ─── Kuramoto bindings ──────────────────────────────────
 
@@ -34,7 +37,7 @@ pub fn py_kuramoto_step_sparse(
     let mut cos_buf = vec![0.0f32; n];
     let mut coupling_buf = vec![0.0f32; n];
 
-    kuramoto::kuramoto_step_sparse(
+    kuramoto_step_sparse(
         phases.as_slice_mut()?,
         omegas.as_slice()?,
         row_ptr.as_slice()?,
@@ -79,7 +82,7 @@ pub fn py_t3_step_sparse(
     let mut cos_buf = vec![0.0f32; n];
     let mut coupling_buf = vec![0.0f32; n];
 
-    kuramoto::t3_step_sparse(
+    t3_step_sparse(
         phases.as_slice_mut()?,
         amplitudes.as_slice_mut()?,
         omegas.as_slice()?,
@@ -112,7 +115,7 @@ pub fn py_interference(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::interference(
+    measure::interference(
         output.as_slice_mut()?,
         phases_a.as_slice()?,
         phases_b.as_slice()?,
@@ -157,11 +160,8 @@ pub fn py_interference_mean(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::interference_mean(
-        output.as_slice_mut()?,
-        phases_a.as_slice()?,
-        phases_b.as_slice()?,
-    );
+    let out = output.as_slice_mut()?;
+    measure::interference_mean(&mut out[0], phases_a.as_slice()?, phases_b.as_slice()?);
     Ok(())
 }
 
@@ -180,7 +180,7 @@ pub fn py_batch_coherence_sweep(
     let areas = areas.readonly();
     let areas_sin = areas_sin.readonly();
     let areas_cos = areas_cos.readonly();
-    kuramoto::batch_coherence_sweep(
+    measure::batch_coherence_sweep(
         output.as_slice_mut()?,
         areas.as_slice()?,
         areas_sin.as_slice()?,
@@ -204,8 +204,9 @@ pub fn py_phase_coherence(
     let sin_buf = sin_buf.readonly();
     let cos_buf = cos_buf.readonly();
     let amplitudes = amplitudes.readonly();
-    kuramoto::phase_coherence(
-        output.as_slice_mut()?,
+    let out = output.as_slice_mut()?;
+    measure::phase_coherence(
+        &mut out[0],
         sin_buf.as_slice()?,
         cos_buf.as_slice()?,
         amplitudes.as_slice()?,
@@ -228,7 +229,7 @@ pub fn py_band_energy(
     let amplitudes = amplitudes.readonly();
     let omegas = omegas.readonly();
     let band_edges = band_edges.readonly();
-    kuramoto::band_energy(
+    measure::band_energy(
         band_energies.as_slice_mut()?,
         amplitudes.as_slice()?,
         omegas.as_slice()?,
@@ -279,7 +280,7 @@ pub fn py_lazy_sincos_update(
     let mut cos_out = cos_out.readwrite();
     let phases = phases.readonly();
     let mut phases_prev = phases_prev.readwrite();
-    kuramoto::lazy_sincos_update(
+    measure::lazy_sincos_update(
         sin_out.as_slice_mut()?,
         cos_out.as_slice_mut()?,
         phases.as_slice()?,
@@ -302,7 +303,7 @@ pub fn py_kalman_update(
     let mut weights = weights.readwrite();
     let mut cov = cov.readwrite();
     let states = states.readonly();
-    kuramoto::kalman_update(
+    decode::kalman_update(
         weights.as_slice_mut()?,
         cov.as_slice_mut()?,
         states.as_slice()?,
@@ -334,7 +335,7 @@ pub fn py_adam_train(
     let mut m = m.readwrite();
     let mut v = v.readwrite();
     let states = states.readonly();
-    kuramoto::adam_train(
+    decode::adam_train(
         weights.as_slice_mut()?,
         m.as_slice_mut()?,
         v.as_slice_mut()?,
@@ -366,7 +367,7 @@ pub fn py_nlms_train(
     let mut weights = weights.readwrite();
     let mut bias = bias.readwrite();
     let states = states.readonly();
-    kuramoto::nlms_train(
+    decode::nlms_train(
         weights.as_slice_mut()?,
         bias.as_slice_mut()?,
         states.as_slice()?,
@@ -388,14 +389,16 @@ pub fn py_pst_decode(
     L: usize,
     pos: usize,
 ) -> PyResult<()> {
+    // pillars::kernels::decode::pst_decode выводит feat_dim из output.len() —
+    // legacy-аргумент сохраняем только ради совместимости Python-сигнатуры.
+    let _ = feat_dim;
     let mut output = output.readwrite();
     let buffer = buffer.readonly();
     let weights = weights.readonly();
-    kuramoto::pst_decode(
+    decode::pst_decode(
         output.as_slice_mut()?,
         buffer.as_slice()?,
         weights.as_slice()?,
-        feat_dim,
         L,
         pos,
     );
@@ -417,7 +420,7 @@ pub fn py_ring_synthesis(
     let amplitudes = amplitudes.readonly();
     let trig_buf = trig_buf.readonly();
     let weights = weights.readonly();
-    kuramoto::ring_synthesis(
+    decode::ring_synthesis(
         output.as_slice_mut()?,
         amplitudes.as_slice()?,
         trig_buf.as_slice()?,
@@ -465,7 +468,7 @@ pub fn py_winding_matrix(
     let mut output = output.readwrite();
     let phases_a = phases_a.readonly();
     let phases_b = phases_b.readonly();
-    kuramoto::winding_matrix(
+    measure::winding_matrix(
         output.as_slice_mut()?,
         phases_a.as_slice()?,
         phases_b.as_slice()?,

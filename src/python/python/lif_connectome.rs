@@ -18,8 +18,7 @@ use crate::cuda::GpuContext;
 #[cfg(feature = "cuda")]
 use std::sync::Mutex;
 
-
-use crate::core::neuron;
+use pillars::api::neurons as neuron;
 
 #[cfg(feature = "cuda")]
 type CachedCtx = (GpuContext, usize, usize, bool); // ctx, n_neurons, n_synapses, connectome_uploaded
