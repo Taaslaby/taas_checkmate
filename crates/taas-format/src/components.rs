@@ -10,14 +10,14 @@ use crate::writer::TaasWriter;
 // ─── Brain IO ────────────────────────────────────────────
 
 /// Save BrainIO as JSON metadata.
-pub fn save_brain_io(io: &taas_connectome::BrainIO, writer: &mut TaasWriter) {
+pub fn save_brain_io(io: &pillars_connectome::BrainIO, writer: &mut TaasWriter) {
     writer.add_metadata("type", "BrainIO");
     let json = serde_json::to_string(io).unwrap_or_else(|_| "null".to_string());
     writer.add_metadata("brain_io", &json);
 }
 
 /// Load BrainIO from JSON metadata.
-pub fn load_brain_io(reader: &TaasReader) -> Result<taas_connectome::BrainIO, String> {
+pub fn load_brain_io(reader: &TaasReader) -> Result<pillars_connectome::BrainIO, String> {
     reader
         .metadata()
         .get("brain_io")
@@ -36,7 +36,7 @@ pub fn load_brain_io(reader: &TaasReader) -> Result<taas_connectome::BrainIO, St
 /// - `nt_types` (f32[]) — neurotransmitter types (+1 exc, −1 inh)
 /// - `receptor_types` (u8[]) — per-synapse receptor (optional; empty if unset)
 /// - `groups_json` (metadata) — groups serialised as JSON
-pub fn save_connectome(conn: &taas_connectome::ConnectomeData, writer: &mut TaasWriter) {
+pub fn save_connectome(conn: &pillars_connectome::ConnectomeData, writer: &mut TaasWriter) {
     writer.add_metadata("type", "Connectome");
     writer.add_metadata("n_neurons", &conn.n_neurons.to_string());
     writer.add_metadata("n_synapses", &conn.n_synapses.to_string());
@@ -51,7 +51,7 @@ pub fn save_connectome(conn: &taas_connectome::ConnectomeData, writer: &mut Taas
 }
 
 /// Load a connectome from a .taas reader.
-pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::ConnectomeData, String> {
+pub fn load_connectome(reader: &TaasReader) -> Result<pillars_connectome::ConnectomeData, String> {
     let _n_neurons = reader
         .metadata()
         .get("n_neurons")
@@ -64,7 +64,7 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
     // receptor_types is optional — old archives (pre receptor_types) lack it,
     // returning an empty Vec (matches ConnectomeData::new default).
     let receptor_types = reader.get_u8("receptor_types").unwrap_or_default();
-    let groups: Vec<taas_connectome::NeuronGroup> = reader
+    let groups: Vec<pillars_connectome::NeuronGroup> = reader
         .metadata()
         .get("groups")
         .and_then(|g| serde_json::from_str(g).ok())
@@ -74,7 +74,7 @@ pub fn load_connectome(reader: &TaasReader) -> Result<taas_connectome::Connectom
         .map(|g| (g.name.as_str(), g.indices.clone()))
         .collect();
     let mut conn =
-        taas_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs);
+        pillars_connectome::ConnectomeData::new(row_ptr, col_indices, values, nt_types, group_refs);
     conn.receptor_types = receptor_types;
     Ok(conn)
 }

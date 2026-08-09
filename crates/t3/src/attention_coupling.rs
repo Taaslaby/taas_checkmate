@@ -74,6 +74,14 @@ impl AttentionCoupling {
     /// Q/K weights initialized as identity (no transformation initially).
     /// `gamma` is the coupling strength (typically 0.01-0.1).
     pub fn new(n: usize, gamma: f32) -> Self {
+        // O(N²) softmax + coupling: guard against pathological population
+        // sizes — beyond this the quadratic cost dominates the simulation
+        // (see the complexity table in the module docs).
+        assert!(
+            n <= 1024,
+            "AttentionCoupling: n={n} exceeds the O(N²) limit of 1024; \
+             use uniform coupling for larger populations"
+        );
         let state_dim = 3;
         assert!(
             state_dim == 3,
@@ -273,6 +281,12 @@ pub struct CrossAttentionCoupling {
 
 impl CrossAttentionCoupling {
     pub fn new(n: usize, gamma: f32) -> Self {
+        // Same O(N²) guard as AttentionCoupling::new.
+        assert!(
+            n <= 1024,
+            "CrossAttentionCoupling: n={n} exceeds the O(N²) limit of 1024; \
+             use uniform coupling for larger populations"
+        );
         let state_dim = 3;
         let mut q_weight = vec![0.0; state_dim * state_dim];
         let mut k_weight = vec![0.0; state_dim * state_dim];

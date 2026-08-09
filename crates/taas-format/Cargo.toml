@@ -6,7 +6,7 @@ description = ".taas format — universal snapshot for SNN models and oscillator
 
 [dependencies]
 pillars = { path = "../pillars" }
-taas-connectome = { path = "../connectome" }
+pillars-connectome = { path = "../pillars-connectome" }
 taas-t3 = { path = "../t3" }
 taas-train = { path = "../train", optional = true }
 serde = { version = "1", features = ["derive"] }

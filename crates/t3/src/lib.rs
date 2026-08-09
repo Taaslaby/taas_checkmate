@@ -2,10 +2,10 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::len_without_is_empty)]
 
-pub use taas_kernels as kernels;
+pub use pillars::kernels; // Фаза 11: kernels-крейт удалён — прямой pillars-канон
 
 #[cfg(feature = "cuda")]
-pub use cuda_kernels as cuda;
+pub use pillars_cuda::gpu as cuda;
 
 pub mod attention_coupling;
 pub mod backend;

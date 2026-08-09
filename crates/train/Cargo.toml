@@ -5,17 +5,21 @@ edition.workspace = true
 description = "Spiking RL, T3-SPIKE GRAD BPTT, optimizers"
 
 [dependencies]
-taas-kernels = { path = "../kernels" }
-taas-core = { path = "../core" }
+pillars = { path = "../pillars" }
+
 taas-t3 = { path = "../t3", optional = true }
-taas-connectome = { path = "../connectome", optional = true }
-cuda-kernels = { path = "../cuda", optional = true }
+pillars-connectome = { path = "../pillars-connectome", optional = true }
+pillars-cuda = { path = "../pillars-cuda", optional = true }
 rand = "0.8"
 wide = "0.7"
 
 [features]
 t3 = ["taas-t3"]
-connectome = ["taas-connectome", "t3"]
-cuda = ["cuda-kernels", "taas-t3/cuda", "taas-connectome/cuda"]
+connectome = ["pillars-connectome", "t3"]
+cuda = ["pillars-cuda", "taas-t3/cuda", "pillars-connectome/cuda"]
 default = []
+
+[[example]]
+name = "spikegrad_embodied"
+required-features = ["t3"]
 

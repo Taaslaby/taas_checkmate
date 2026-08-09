@@ -147,9 +147,9 @@ mod tests {
 
     #[test]
     fn test_population_roundtrip() {
+        use pillars::zoo::LIFModel;
         use pillars::zoo::Model;
         use pillars::NeuralPopulation;
-        use pillars::zoo::LIFModel;
         let mut pop = NeuralPopulation::<LIFModel>::new(13);
         pop.fill_param(0, 0.5);
         pop.fill_param(1, 0.1);
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_connectome_roundtrip() {
-        use taas_connectome::ConnectomeData;
+        use pillars_connectome::ConnectomeData;
         let conn = ConnectomeData::new(
             vec![0i32, 2, 5, 8],
             vec![0i32, 1, 0, 2, 1, 2, 0, 1],
@@ -340,5 +340,4 @@ mod tests {
         assert_eq!(reader2.get_f32("compressed").unwrap(), &[2.0; 16]);
         assert_eq!(reader2.get_f32("raw2").unwrap(), &[3.0; 16]);
     }
-
 }

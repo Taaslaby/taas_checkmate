@@ -136,7 +136,7 @@ fn migrate_v0_1_to_v0_2(bytes: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use taas_t3::{Avx2Backend, NlmsDecoder, TriOscillator};
 
     /// Test that needs_migration correctly identifies old versions.

@@ -34,7 +34,10 @@ impl TrajectoryBuffer {
         self.count = (self.count + 1).min(self.capacity);
     }
 
-    /// Build trajectory by concatenating L consecutive frames.
+    /// Build trajectory by concatenating L consecutive frames,
+    /// **oldest → newest** (chronological order).
+    ///
+    /// Returns an empty vector if the buffer holds fewer than `L` frames.
     pub fn trajectory(&self, L: usize) -> Vec<f32> {
         if self.count < L || L == 0 {
             return vec![];
@@ -150,11 +153,20 @@ mod tests {
             buf.push(&[i as f32, (i + 1) as f32]);
         }
         assert_eq!(buf.len(), 3);
+        // Surviving frames (chronological): [2,3], [3,4], [4,5].
+        // Contract: trajectory() returns them oldest → newest, exactly.
         let t = buf.trajectory(3);
-        assert_eq!(t.len(), 6);
-        // After 5 pushes, buf has [push3, push4, push5] at positions [0,1,2]
-        // trajectory(3) should return them in order
-        assert!((t[0] - 4.0).abs() < 1e-6 || (t[0] - 2.0).abs() < 1e-6);
+        assert_eq!(t, vec![2.0, 3.0, 3.0, 4.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_trajectory_partial_buffer_chronological() {
+        let mut buf = TrajectoryBuffer::new(4, 2);
+        buf.push(&[0.0, 1.0]);
+        buf.push(&[2.0, 3.0]);
+        // Not full yet: frames are contiguous at buf[0..2], oldest first.
+        let t = buf.trajectory(2);
+        assert_eq!(t, vec![0.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]

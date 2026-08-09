@@ -32,12 +32,7 @@ fn test_config() -> (usize, usize) {
 /// Состояние TriOscillator после прогона: (th1, th2, th3, r1, r2, r3).
 type OscState = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
 
-fn run_forward<B: taas_t3::T3Backend>(
-    backend: B,
-    n: usize,
-    n_steps: usize,
-    seed: u64,
-) -> OscState {
+fn run_forward<B: taas_t3::T3Backend>(backend: B, n: usize, n_steps: usize, seed: u64) -> OscState {
     use rand::Rng;
     use rand::SeedableRng;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);

@@ -114,6 +114,18 @@ impl T3Backend for CudaBackend {
         lr: f32,
         eps: f32,
     ) {
+        // Canonical size contract (mirrors pillars::kernels::decode::nlms_train):
+        // a short `states` would silently truncate the update via `zip`, and
+        // an empty `bias` would panic on `bias[0]` — both caught here up front.
+        assert_eq!(
+            states.len(),
+            weights.len(),
+            "CudaBackend::nlms_train: states length mismatch"
+        );
+        assert!(
+            !bias.is_empty(),
+            "CudaBackend::nlms_train: bias must have at least 1 element"
+        );
         if weights.len() < 1024 {
             let norm_sq: f32 = states.iter().map(|&x| x * x).sum();
             let mu = lr / (norm_sq + eps);
@@ -122,6 +134,9 @@ impl T3Backend for CudaBackend {
             }
             bias[0] += mu * error;
         } else {
+            // NOTE: the GPU kernel normalizes per-lane (`si² + ε`) instead of
+            // the canonical global norm² — documented divergence in
+            // cuda/kernels/decoders.cu; revisit when the GPU path is revived.
             let _ = crate::cuda::nlms_train(weights, bias, states, error, lr, eps);
         }
     }
@@ -134,14 +149,30 @@ impl T3Backend for CudaBackend {
         error: f32,
         s: f32,
     ) {
+        // Canonical size contract (mirrors pillars::kernels::decode::kalman_update).
+        assert_eq!(
+            cov.len(),
+            weights.len(),
+            "CudaBackend::kalman_update: cov length mismatch"
+        );
+        assert_eq!(
+            states.len(),
+            weights.len(),
+            "CudaBackend::kalman_update: states length mismatch"
+        );
         if s <= 1e-12 {
             return;
         }
         if weights.len() < 1024 {
+            // Scalar fallback — MUST use the canonical pillars formula
+            // `cov -= K·states·cov` (floored at 1e-12). The legacy
+            // `cov -= K·cov` here was a real bug: with a negative state
+            // component it *grew* the covariance instead of shrinking it.
+            let s_denom = s + 1e-8;
             for i in 0..weights.len() {
-                let k = cov[i] * states[i] / s;
+                let k = cov[i] * states[i] / s_denom;
                 weights[i] += k * error;
-                cov[i] -= k * cov[i];
+                cov[i] = (cov[i] - k * states[i] * cov[i]).max(1e-12);
             }
         } else {
             let _ = crate::cuda::kalman_update(weights, cov, states, error, s);

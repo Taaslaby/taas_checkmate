@@ -12,6 +12,28 @@
 /// A — симметричная положительно определённая матрица n×n (flattened row-major).
 /// b — правая часть длины n.
 pub fn solve_cg(a: &[f32], b: &[f32], n: usize, max_iter: usize, tol: f32) -> Vec<f32> {
+    // Guards: an inconsistent matrix would index OOB inside `a[i * n + j]`,
+    // and a non-positive tolerance would make the `rsnew.sqrt() < tol`
+    // termination unreachable (infinite loop).
+    assert!(n > 0, "solve_cg: n must be > 0");
+    assert_eq!(
+        a.len(),
+        n * n,
+        "solve_cg: matrix must be n×n ({n}×{n} = {} elements, got {})",
+        n * n,
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        n,
+        "solve_cg: b must have {n} elements, got {}",
+        b.len()
+    );
+    assert!(
+        tol > 0.0 && tol.is_finite(),
+        "solve_cg: tol must be finite and > 0, got {tol}"
+    );
+
     let mut x = vec![0.0f32; n];
     let mut r = b.to_vec();
     let mut p = r.clone();
@@ -75,7 +97,19 @@ impl RidgeSolver {
     /// - `n`: number of samples
     /// - `d`: feature dimension
     pub fn solve(&self, x: &[f32], y: &[f32], n: usize, d: usize) -> Vec<f32> {
-        assert!(x.len() >= n * d && y.len() >= n);
+        assert!(n > 0, "RidgeSolver::solve: n (samples) must be > 0");
+        assert!(d > 0, "RidgeSolver::solve: d (features) must be > 0");
+        assert!(
+            x.len() >= n * d,
+            "RidgeSolver::solve: x must hold n·d = {} elements, got {}",
+            n * d,
+            x.len()
+        );
+        assert!(
+            y.len() >= n,
+            "RidgeSolver::solve: y must hold n elements, got {}",
+            y.len()
+        );
         // Build XᵀX (d×d) and Xᵀy (d)
         let mut a = vec![0.0f32; d * d];
         let mut b = vec![0.0f32; d];

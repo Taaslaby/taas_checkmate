@@ -25,7 +25,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::{core::neuron, kernels};
+use crate::{kernels, neuron};
 
 const RNG_SCALE_24: f32 = 1.0 / 16777216.0;
 const RNG_SCALE_16: f32 = 1.0 / 65536.0;

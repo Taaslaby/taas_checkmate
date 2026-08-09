@@ -79,7 +79,7 @@ pub struct ChaseResult {
 ///
 /// Returns trained bridge + linear decoder.
 pub fn train_connectome_chase<F>(
-    conn: &taas_connectome::data::ConnectomeData,
+    conn: &pillars_connectome::data::ConnectomeData,
     config: &ChaseConfig,
     mut external_I_fn: F,
     seed: u64,
@@ -117,8 +117,8 @@ where
 
     // ── Init LIF state ──
     let mut state =
-        taas_connectome::sim::BrainState::new(n, taas_connectome::sim::NeuronModel::LIF);
-    let _lif_params = taas_connectome::sim::LifParams::new(
+        pillars_connectome::sim::BrainState::new(n, pillars_connectome::sim::NeuronModel::LIF);
+    let _lif_params = pillars_connectome::sim::LifParams::new(
         &vec![config.tau_m; n],
         &vec![config.v_rest; n],
         &vec![config.v_thresh; n],
@@ -138,7 +138,7 @@ where
         // ── Simulate connectome → spikes ──
         #[cfg(feature = "cuda")]
         let spike_buf = {
-            use taas_connectome::sim::gpu;
+            use pillars_connectome::sim::gpu;
             let tau_m_v = vec![config.tau_m; n];
             let v_rest_v = vec![config.v_rest; n];
             let v_thresh_v = vec![config.v_thresh; n];
@@ -156,7 +156,7 @@ where
             )
         };
         #[cfg(not(feature = "cuda"))]
-        let spike_buf = taas_connectome::sim::sim_lif(
+        let spike_buf = pillars_connectome::sim::sim_lif(
             conn,
             &mut state,
             &_lif_params,
@@ -348,7 +348,7 @@ mod tests {
     use super::*;
 
     /// Helper: create a tiny synthetic connectome (seeded for determinism).
-    fn make_tiny_connectome(n: usize, avg_deg: usize) -> taas_connectome::data::ConnectomeData {
+    fn make_tiny_connectome(n: usize, avg_deg: usize) -> pillars_connectome::data::ConnectomeData {
         use rand::{Rng, SeedableRng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut row_ptr = vec![0i32];
@@ -371,7 +371,13 @@ mod tests {
             row_ptr.push(col_indices.len() as i32);
         }
         let nt_types = vec![1.0f32; n];
-        taas_connectome::data::ConnectomeData::new(row_ptr, col_indices, values, nt_types, vec![])
+        pillars_connectome::data::ConnectomeData::new(
+            row_ptr,
+            col_indices,
+            values,
+            nt_types,
+            vec![],
+        )
     }
 
     #[test]

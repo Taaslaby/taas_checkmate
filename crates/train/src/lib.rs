@@ -19,9 +19,9 @@ pub mod spike_cuda;
 #[cfg(feature = "connectome")]
 pub mod connectome_chase;
 
+pub use pillars::api::neurons as neuron;
+pub use pillars::kernels; // Фаза 11: kernels-крейт удалён — прямой pillars-канон
 #[cfg(feature = "cuda")]
-pub use cuda_kernels as cuda;
-pub use taas_core as core;
-pub use taas_kernels as kernels;
+pub use pillars_cuda::gpu as cuda;
 #[cfg(feature = "t3")]
 pub use taas_t3 as t3;

@@ -10,6 +10,28 @@
 
 use super::TWO_PI;
 
+/// Validate Biquad design parameters.
+///
+/// # Panics
+/// If `fs <= 0`, `q <= 0`, or `fc` outside `(0, fs/2)` — any of these
+/// produces an unstable or degenerate IIR filter (or a non-finite
+/// coefficient via `w0.sin()` / `w0.cos()`).
+fn validate_filter_params(fc: f32, q: f32, fs: f32) {
+    assert!(
+        fs > 0.0 && fs.is_finite(),
+        "Biquad: sample_rate must be finite and > 0, got {fs}"
+    );
+    assert!(
+        q > 0.0 && q.is_finite(),
+        "Biquad: Q must be finite and > 0, got {q}"
+    );
+    assert!(
+        fc.is_finite() && fc > 0.0 && fc < fs / 2.0,
+        "Biquad: center frequency {fc} must be in (0, fs/2 = {})",
+        fs / 2.0
+    );
+}
+
 // ─── Biquad IIR Filter ───────────────────────────────────
 
 /// Biquad IIR filter (Transposed Direct Form II).
@@ -40,7 +62,11 @@ impl Biquad {
     }
 
     /// Init as bandpass: fc, q, sample_rate
+    ///
+    /// # Panics
+    /// If `fs <= 0`, `q <= 0`, or `fc` outside `(0, fs/2)`.
     pub fn bandpass(fc: f32, q: f32, fs: f32) -> Self {
+        validate_filter_params(fc, q, fs);
         let w0 = TWO_PI * fc / fs;
         let alpha = w0.sin() / (2.0 * q);
         let a0 = 1.0 + alpha;
@@ -56,7 +82,11 @@ impl Biquad {
     }
 
     /// Init as lowpass: fc, q, sample_rate
+    ///
+    /// # Panics
+    /// If `fs <= 0`, `q <= 0`, or `fc` outside `(0, fs/2)`.
     pub fn lowpass(fc: f32, q: f32, fs: f32) -> Self {
+        validate_filter_params(fc, q, fs);
         let w0 = TWO_PI * fc / fs;
         let alpha = w0.sin() / (2.0 * q);
         let a0 = 1.0 + alpha;
@@ -112,6 +142,26 @@ pub struct Cochlea {
 
 impl Cochlea {
     pub fn new(n_bands: usize, low_hz: f32, high_hz: f32, sample_rate: f32) -> Self {
+        // Parameter validation: an unstable filter bank silently destroys
+        // the signal (IIR blow-up → NaN) instead of failing fast.
+        assert!(
+            sample_rate > 0.0 && sample_rate.is_finite(),
+            "Cochlea: sample_rate must be finite and > 0, got {sample_rate}"
+        );
+        assert!(
+            low_hz > 0.0 && low_hz.is_finite(),
+            "Cochlea: low_hz must be finite and > 0, got {low_hz}"
+        );
+        assert!(
+            high_hz > low_hz && high_hz.is_finite(),
+            "Cochlea: high_hz ({high_hz}) must be > low_hz ({low_hz})"
+        );
+        assert!(
+            high_hz < sample_rate / 2.0,
+            "Cochlea: high_hz ({high_hz}) must be below Nyquist (fs/2 = {})",
+            sample_rate / 2.0
+        );
+
         let q = 0.5;
         let smoothing = 0.995;
         let log_low = low_hz.ln();
@@ -121,10 +171,17 @@ impl Cochlea {
         let mut filters = Vec::with_capacity(n);
         let mut center_freqs = Vec::with_capacity(n);
         for i in 0..n {
-            let t = i as f32 / (n - 1) as f32;
+            // n == 1 → single filter at low_hz (avoids 0/0 → NaN in t).
+            let t = if n > 1 {
+                i as f32 / (n - 1) as f32
+            } else {
+                0.0
+            };
+            // Clamp bounds are ordered (min ≤ max) so `clamp` cannot panic.
+            let upper = (sample_rate / 2.0 - 1.0).max(20.0);
             let fc = (log_low + t * (log_high - log_low))
                 .exp()
-                .clamp(20.0, sample_rate / 2.0 - 1.0);
+                .clamp(20.0, upper);
             filters.push(Biquad::bandpass(fc, q, sample_rate));
             center_freqs.push(fc);
         }
@@ -188,7 +245,9 @@ mod tests {
 
     #[test]
     fn test_cochlea_tick() {
-        let mut c = Cochlea::new(8, 100.0, 8000.0, 16000.0);
+        // high_hz strictly below Nyquist (fs/2 = 8000): a band at exactly
+        // Nyquist would be a degenerate filter and is rejected by validation.
+        let mut c = Cochlea::new(8, 100.0, 7500.0, 16000.0);
         assert_eq!(c.n_bands, 8);
         assert!(c.center_freqs[0] > 90.0 && c.center_freqs[0] < 110.0);
         // Process a sine wave

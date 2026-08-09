@@ -91,7 +91,7 @@ pub struct Avx2Backend;
 
 impl T3Backend for Avx2Backend {
     fn prepare(&self, phases: &mut [f32], cos_out: &mut [f32], sin_out: &mut [f32]) {
-        crate::kernels::kuramoto_prepare(phases, cos_out, sin_out);
+        crate::kernels::phase::kuramoto_prepare(phases, cos_out, sin_out);
     }
 
     fn update(
@@ -350,6 +350,61 @@ mod tests {
         backend.kalman_update(&mut weights, &mut cov, &states, 1.0, 2.0);
         assert!(weights.iter().any(|&w| w != 0.0));
         assert!(cov[0] < 1.0, "cov should decrease: {}", cov[0]);
+    }
+
+    // ─── Backend parity: scalar and AVX2 must be bit-identical ──
+    // Both backends single-source into `taas_kernels` (→ the pillars
+    // canonical kernels), so training updates MUST produce identical bits.
+    // n chosen not divisible by 8 to exercise SIMD + scalar tail paths.
+
+    #[test]
+    fn test_backend_nlms_parity_bit_identical() {
+        let avx = Avx2Backend;
+        let scalar = ScalarBackend;
+        let states: Vec<f32> = (0..17).map(|i| (i as f32 * 0.13).sin()).collect();
+        for &lr in &[0.01f32, 0.1] {
+            let mut w1 = vec![0.3; 17];
+            let mut w2 = w1.clone();
+            let mut b1 = vec![0.0];
+            let mut b2 = vec![0.0];
+            avx.nlms_train(&mut w1, &mut b1, &states, 0.5, lr, 1e-8);
+            scalar.nlms_train(&mut w2, &mut b2, &states, 0.5, lr, 1e-8);
+            assert_eq!(w1, w2, "nlms weights must be bit-identical");
+            assert_eq!(b1, b2, "nlms bias must be bit-identical");
+        }
+    }
+
+    #[test]
+    fn test_backend_kalman_parity_bit_identical() {
+        let avx = Avx2Backend;
+        let scalar = ScalarBackend;
+        let states: Vec<f32> = (0..19).map(|i| (i as f32 * 0.07).cos()).collect();
+        let s: f32 = 0.5 + states.iter().map(|x| x * x).sum::<f32>();
+        let mut w1 = vec![0.1; 19];
+        let mut w2 = w1.clone();
+        let mut c1 = vec![1.0; 19];
+        let mut c2 = c1.clone();
+        avx.kalman_update(&mut w1, &mut c1, &states, -0.3, s);
+        scalar.kalman_update(&mut w2, &mut c2, &states, -0.3, s);
+        assert_eq!(w1, w2, "kalman weights must be bit-identical");
+        assert_eq!(c1, c2, "kalman cov must be bit-identical");
+    }
+
+    /// The cov update must follow the canonical `cov -= K·states·cov` form.
+    /// With a *negative* state component the legacy `cov -= K·cov` formula
+    /// produced k < 0 and *increased* the covariance; the canonical form
+    /// always decays (states[i]² ≥ 0).
+    #[test]
+    fn test_kalman_cov_decays_for_negative_states() {
+        let backend = ScalarBackend;
+        let states = vec![1.0f32, 2.0, -0.5];
+        let mut weights = vec![0.0; 3];
+        let mut cov = vec![1.0f32, 1.0, 1.0];
+        let s = 0.5 + states.iter().map(|x| x * x).sum::<f32>();
+        backend.kalman_update(&mut weights, &mut cov, &states, 1.0, s);
+        for c in &cov {
+            assert!(*c < 1.0, "canonical cov must decay, got {c}");
+        }
     }
 
     #[test]
