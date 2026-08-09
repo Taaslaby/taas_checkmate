@@ -30,25 +30,35 @@
 //! | [`measure`] | interference, coherence, band energy, winding, spike entropy |
 //! | [`dendrite`] | compartmentalized cable dendrites with 7 receptor types |
 //! | [`input`] | Poisson generator, BSA / TTFS / phase encoders |
-//! | [`learning`] | e-prop surrogate + weight update, STDP/BCM batch update, homeostatic scaling, SORN |
+//! | [`io`] | min-truncating IO/gate compat adapters (Фаза 11 — бывший `kernels::io`) |
+//! | [`fused`] | fused layer kernels — spike propagation + Izhikevich/LIF in one pass (RL) |
+//! | [`eprop`] | e-prop batch kernels — LIF/Izhikevich/AdEx/SAW eligibility traces (волна 5) |
+//! | [`wc`] | Wilson-Cowan rate dynamics — bit-identical port of `kernels::wc_step` (волна 7) |
+//! | [`learning`] | e-prop surrogate + weight update, STDP/BCM batch update, Hebbian CSR, homeostatic scaling, SORN |
 //! | [`synapse`] | conductance-based synaptic kinetics — 7 receptor types (AMPA…mAChR) |
-//! | [`hh_channels`] | HH channel specs + rate functions — standard & pacemaking (CaV-T) |
+//! | [`hh_channels`] | HH channel specs + polynomial engine — standard & pacemaking (CaV-T) |
+//! | [`depth_wave`] | DepthGCO — depth-modulated coupled oscillators on CSR (транш 1f) |
 //! | [`stats`] | firing rates, ISI, CV, SpikeRaster |
 //! | [`vnc`] | VNC motor-neuron → actuator mapping |
 //!
-//! > **Not ported**: legacy `depth_wave` (CSR-GCO) — its only user was a Python
-//! > binding that is commented out and a script importing a *different* module
-//! > (`depth_wave_vnc`). It is dead code in the old crate; not carried over.
+//! > `depth_wave` — канон `kernels/depth_wave.rs` (транш 1f): GcoState на CSR
+//! > графе, детерминированная L2-норма (легаси-rayon был недетерминирован).
 
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
 
+pub mod astrocyte;
+pub mod csr;
 pub mod decode;
 pub mod delay;
 pub mod dendrite;
+pub mod depth_wave;
 pub mod dopamine;
+pub mod eprop;
+pub mod fused;
 pub mod hh_channels;
 pub mod input;
+pub mod io;
 pub mod learning;
 pub mod measure;
 pub mod phase;
@@ -56,6 +66,7 @@ pub mod signal;
 pub mod stats;
 pub mod synapse;
 pub mod vnc;
+pub mod wc;
 
 /// 24-bit RNG scale — for Poisson spike generation (LCG state >> 8).
 pub(crate) const RNG_SCALE_24: f32 = 1.0 / 16_777_216.0;
@@ -66,6 +77,40 @@ pub fn wrap_phase(p: f32) -> f32 {
     let tau = core::f32::consts::TAU;
     p - tau * (p / tau).round()
 }
+
+// ═══════════════════════════════════════════════════════
+//  Flat compat surface (Фаза 11) — бывший публичный API крейта
+//  `taas-kernels`. Все batch-кернелы доступны как
+//  `pillars::kernels::<name>` без префикса подмодуля.
+// ═══════════════════════════════════════════════════════
+pub use self::csr::{
+    apply_stdp_ltd_with_topology, compute_hamiltonian_scatter_with_topology,
+    compute_hamiltonian_with_topology, propagate_spikes_with_topology, rate_step_with_topology,
+    step_gco_full_with_topology, ValidatedCsrGraph, ValidatedCsrTopology,
+};
+pub use self::decode::{
+    adam_train, kalman_update, nlms_train, pst_decode, ring_synthesis, t3_complex_decoder,
+    t3_lms_train, t3_pst_features,
+};
+pub use self::delay::{delay_buffer_circular, delay_buffer_multi_tap};
+pub use self::dopamine::{dopamine_traces_step, dopamine_weight_update};
+pub use self::fused::{
+    fused_hidden_izhikevich_step, fused_output_lif_step, poisson_fused_hidden_step,
+};
+pub use self::learning::{bcm_step, homeostatic_scale, stdp_homeostatic, stdp_update};
+pub use self::measure::{
+    band_energy, interference, interference_mean, lazy_sincos_update, phase_coherence,
+    spike_entropy, winding_matrix,
+};
+pub use self::phase::{kuramoto_update_viscous, t3_update};
+pub use self::signal::{
+    adam_step_simd, add_simd, echo_tap, hebbian_update, linear_decoder, phase_gate_apply,
+    relu_simd, safety_clamp, sgd_step_simd, sigmoid_gate, stochastic_encoder, t3_drive_encoder,
+    t3_inverse_kuramoto, t3_tact_generator, thalamic_gate,
+};
+pub use self::wc::wc_step;
+// Экспоненциальный полином — общий для exp-путей всех кернелов.
+pub use crate::math::fast_exp::{fast_exp, fast_exp_poly_simd as fast_exp_simd};
 
 /// Clamp amplitude to [0.001, 10.0] (matches Stuart-Landau amplitude bounds).
 #[inline]

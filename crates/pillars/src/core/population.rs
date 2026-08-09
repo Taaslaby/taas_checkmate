@@ -140,16 +140,38 @@ impl<M: Model> NeuralPopulation<M> {
     // ─── Fill helpers ──────────────────────────────────────────
 
     /// Fill a state column with a value (all neurons).
+    ///
+    /// # Panics
+    /// If `col >= M::N_STATE` — an out-of-range column would wrap
+    /// `col * capacity` in release mode and write outside the allocation.
     pub fn fill_state(&mut self, col: usize, value: f32) {
-        let start = col * self.capacity;
+        assert!(
+            col < M::N_STATE,
+            "fill_state: column {col} out of range for model with N_STATE={}",
+            M::N_STATE
+        );
+        let start = col
+            .checked_mul(self.capacity)
+            .expect("fill_state: capacity overflow");
         for v in &mut self.state.as_mut_slice()[start..start + self.n] {
             *v = value;
         }
     }
 
     /// Fill a param column with a value (all neurons).
+    ///
+    /// # Panics
+    /// If `col >= M::N_PARAMS` — an out-of-range column would wrap
+    /// `col * capacity` in release mode and write outside the allocation.
     pub fn fill_param(&mut self, col: usize, value: f32) {
-        let start = col * self.capacity;
+        assert!(
+            col < M::N_PARAMS,
+            "fill_param: column {col} out of range for model with N_PARAMS={}",
+            M::N_PARAMS
+        );
+        let start = col
+            .checked_mul(self.capacity)
+            .expect("fill_param: capacity overflow");
         for v in &mut self.params.as_mut_slice()[start..start + self.n] {
             *v = value;
         }
@@ -159,18 +181,21 @@ impl<M: Model> NeuralPopulation<M> {
 
     /// Read-only access to a state column.
     pub fn state_slice(&self, col: usize) -> &[f32] {
+        self.assert_state_col(col);
         let start = col * self.capacity;
         &self.state.as_slice()[start..start + self.n]
     }
 
     /// Mutable access to a state column (safe slice).
     pub fn state_slice_mut(&mut self, col: usize) -> &mut [f32] {
+        self.assert_state_col(col);
         let start = col * self.capacity;
         &mut self.state.as_mut_slice()[start..start + self.n]
     }
 
     /// Mutable access to a param column (safe slice).
     pub fn param_slice_mut(&mut self, col: usize) -> &mut [f32] {
+        self.assert_param_col(col);
         let start = col * self.capacity;
         &mut self.params.as_mut_slice()[start..start + self.n]
     }
@@ -186,6 +211,7 @@ impl<M: Model> NeuralPopulation<M> {
     /// the unsafe surface stays out of the API until a real user needs it.
     #[allow(dead_code)]
     pub(crate) unsafe fn state_ptr_mut(&mut self, col: usize) -> *mut f32 {
+        self.assert_state_col(col);
         self.state.as_mut_ptr().add(col * self.capacity)
     }
 
@@ -200,13 +226,33 @@ impl<M: Model> NeuralPopulation<M> {
     /// the unsafe surface stays out of the API until a real user needs it.
     #[allow(dead_code)]
     pub(crate) unsafe fn param_ptr_mut(&mut self, col: usize) -> *mut f32 {
+        self.assert_param_col(col);
         self.params.as_mut_ptr().add(col * self.capacity)
     }
 
     /// Read-only access to a param column.
     pub fn param_slice(&self, col: usize) -> &[f32] {
+        self.assert_param_col(col);
         let start = col * self.capacity;
         &self.params.as_slice()[start..start + self.n]
+    }
+
+    #[inline(always)]
+    fn assert_state_col(&self, col: usize) {
+        assert!(
+            col < M::N_STATE,
+            "state_slice: column {col} out of range for model with N_STATE={}",
+            M::N_STATE
+        );
+    }
+
+    #[inline(always)]
+    fn assert_param_col(&self, col: usize) {
+        assert!(
+            col < M::N_PARAMS,
+            "param_slice: column {col} out of range for model with N_PARAMS={}",
+            M::N_PARAMS
+        );
     }
 
     // ─── Step ──────────────────────────────────────────────────
@@ -257,6 +303,7 @@ impl<M: Model> NeuralPopulation<M> {
             let mut ctx = SimdContext::<f32> {
                 state,
                 params_ptr,
+                param_count: M::N_PARAMS,
                 n: cap,
                 off: i,
                 i_syn: ii,
@@ -326,6 +373,7 @@ impl<M: Model> NeuralPopulation<M> {
             let mut ctx = SimdContext::<SimdType> {
                 state,
                 params_ptr,
+                param_count: M::N_PARAMS,
                 n: cap,
                 off,
                 i_syn,
@@ -368,6 +416,7 @@ impl<M: Model> NeuralPopulation<M> {
                 let mut ctx = SimdContext::<f32> {
                     state,
                     params_ptr,
+                    param_count: M::N_PARAMS,
                     n: cap,
                     off: i,
                     i_syn: ii,

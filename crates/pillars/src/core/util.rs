@@ -43,6 +43,20 @@ pub unsafe fn store8(ptr: *mut f32, off: usize, val: f32x8) {
     (ptr.add(off) as *mut f32x8).write_unaligned(val);
 }
 
+/// Convert a SIMD spike mask (NaN = true, 0.0 = false) to hard 0/1 flags.
+///
+/// Shared by the fused/eprop batch kernels (волна 5 — single implementation
+/// instead of per-module copies).
+#[inline(always)]
+pub fn mask_to_spikes(sm: f32x8) -> [i32; 8] {
+    let arr = sm.to_array();
+    let mut out = [0i32; 8];
+    for (o, &v) in out.iter_mut().zip(arr.iter()) {
+        *o = if v.to_bits() != 0 { 1 } else { 0 };
+    }
+    out
+}
+
 /// Load 8 `i32` spike flags from `ptr + off` as a `f32x8` (1.0 / 0.0).
 ///
 /// Converts integer spikes to float in-lane — used by plasticity kernels

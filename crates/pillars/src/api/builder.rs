@@ -24,13 +24,124 @@ use crate::q10_from_celsius_s;
 use crate::zoo::neurons::{AdExModel, HAAPModel, HHModel, IzhikevichModel, LIFModel, VSNModel};
 use crate::zoo::Model;
 
-/// Unified trait for type-safe population builders.
+/// A validated population-construction failure.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildError {
+    /// A value is not finite or violates a named positive/range constraint.
+    InvalidValue {
+        field: &'static str,
+        value: f32,
+        requirement: &'static str,
+    },
+    /// A required universal-builder slot was not configured.
+    MissingValue { field: &'static str },
+    /// A universal-builder index is outside the model layout.
+    IndexOutOfRange {
+        kind: &'static str,
+        index: usize,
+        limit: usize,
+    },
+    /// A universal-builder slot was assigned more than once.
+    DuplicateIndex { kind: &'static str, index: usize },
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidValue {
+                field,
+                value,
+                requirement,
+            } => write!(f, "builder: {field}={value} must satisfy {requirement}"),
+            Self::MissingValue { field } => {
+                write!(f, "builder: required value `{field}` is missing")
+            }
+            Self::IndexOutOfRange { kind, index, limit } => write!(
+                f,
+                "builder: {kind} index {index} out of range (model has {limit})"
+            ),
+            Self::DuplicateIndex { kind, index } => {
+                write!(f, "builder: duplicate {kind} index {index}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BuildError {}
+
+fn finite(field: &'static str, value: f32) -> Result<(), BuildError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(BuildError::InvalidValue {
+            field,
+            value,
+            requirement: "finite",
+        })
+    }
+}
+
+fn positive(field: &'static str, value: f32) -> Result<(), BuildError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(BuildError::InvalidValue {
+            field,
+            value,
+            requirement: "finite and > 0",
+        })
+    }
+}
+
+fn finite_fields(fields: &[(&'static str, f32)]) -> Result<(), BuildError> {
+    for &(field, value) in fields {
+        finite(field, value)?;
+    }
+    Ok(())
+}
+
+fn validate_specs(
+    specs: &[(usize, f32)],
+    limit: usize,
+    kind: &'static str,
+) -> Result<(), BuildError> {
+    let mut seen = std::collections::HashSet::new();
+    for &(index, value) in specs {
+        if index >= limit {
+            return Err(BuildError::IndexOutOfRange { kind, index, limit });
+        }
+        if !seen.insert(index) {
+            return Err(BuildError::DuplicateIndex { kind, index });
+        }
+        finite("universal value", value)?;
+    }
+    Ok(())
+}
+
+/// Unified builder interface.
+///
+/// `try_build()` is the safe path for configuration that comes from users or
+/// files. `build()` remains the concise compatibility path and panics with the
+/// same [`BuildError`] message when validation fails. The default `try_build`
+/// keeps external custom implementations source-compatible; built-in builders
+/// override it with complete validation.
 pub trait ModelBuilder {
     /// The neuron model created by this builder.
     type Model: crate::zoo::Model;
 
     /// Build the configured neural population.
     fn build(self) -> NeuralPopulation<Self::Model>;
+
+    /// Validate configuration before allocating the population.
+    fn try_build(self) -> Result<NeuralPopulation<Self::Model>, BuildError>
+    where
+        Self: Sized,
+    {
+        // External custom builders keep source compatibility. Built-in builders
+        // override this default with full validation; custom implementations can
+        // opt into stronger checks by overriding it.
+        Ok(self.build())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -178,6 +289,10 @@ impl IzhikevichBuilder {
 
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<IzhikevichModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<IzhikevichModel> {
         let mut pop = NeuralPopulation::<IzhikevichModel>::new(self.n);
 
         // Parameters (column-major SoA)
@@ -195,6 +310,24 @@ impl IzhikevichBuilder {
         pop.fill_state(2, 0.0); // refr
 
         pop
+    }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<IzhikevichModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("a", self.a),
+            ("b", self.b),
+            ("c", self.c),
+            ("d", self.d),
+            ("tau_ref", self.tau_ref),
+            ("v_thresh", self.v_thresh),
+            ("v_init", self.v_init),
+            ("u_init", self.u_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("tau_ref", self.tau_ref)?;
+        Ok(self.build_unchecked())
     }
 }
 
@@ -282,6 +415,10 @@ impl LIFBuilder {
 
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<LIFModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<LIFModel> {
         let mut pop = NeuralPopulation::<LIFModel>::new(self.n);
 
         // Parameters
@@ -297,6 +434,23 @@ impl LIFBuilder {
         pop.fill_state(1, 0.0); // refr
 
         pop
+    }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<LIFModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("tau_m", self.tau_m),
+            ("v_rest", self.v_rest),
+            ("v_thresh", self.v_thresh),
+            ("v_reset", self.v_reset),
+            ("tau_ref", self.tau_ref),
+            ("v_init", self.v_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("tau_m", self.tau_m)?;
+        positive("tau_ref", self.tau_ref)?;
+        Ok(self.build_unchecked())
     }
 }
 
@@ -432,6 +586,10 @@ impl AdExBuilder {
 
     /// Build the population.
     pub fn build(self) -> NeuralPopulation<AdExModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<AdExModel> {
         let mut pop = NeuralPopulation::<AdExModel>::new(self.n);
 
         // Parameters
@@ -455,26 +613,60 @@ impl AdExBuilder {
 
         pop
     }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<AdExModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("tau_m", self.tau_m),
+            ("tau_w", self.tau_w),
+            ("v_rest", self.v_rest),
+            ("v_thresh", self.v_thresh),
+            ("v_reset", self.v_reset),
+            ("delta_t", self.delta_t),
+            ("a", self.a),
+            ("b", self.b),
+            ("tau_ref", self.tau_ref),
+            ("v_peak", self.v_peak),
+            ("v_init", self.v_init),
+            ("w_init", self.w_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("tau_m", self.tau_m)?;
+        positive("tau_w", self.tau_w)?;
+        positive("delta_t", self.delta_t)?;
+        positive("tau_ref", self.tau_ref)?;
+        Ok(self.build_unchecked())
+    }
 }
 
 impl ModelBuilder for IzhikevichBuilder {
     type Model = IzhikevichModel;
     fn build(self) -> NeuralPopulation<IzhikevichModel> {
-        self.build()
+        IzhikevichBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<IzhikevichModel>, BuildError> {
+        IzhikevichBuilder::try_build(self)
     }
 }
 
 impl ModelBuilder for LIFBuilder {
     type Model = LIFModel;
     fn build(self) -> NeuralPopulation<LIFModel> {
-        self.build()
+        LIFBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<LIFModel>, BuildError> {
+        LIFBuilder::try_build(self)
     }
 }
 
 impl ModelBuilder for AdExBuilder {
     type Model = AdExModel;
     fn build(self) -> NeuralPopulation<AdExModel> {
-        self.build()
+        AdExBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<AdExModel>, BuildError> {
+        AdExBuilder::try_build(self)
     }
 }
 
@@ -640,6 +832,10 @@ impl HHBuilder {
 
     /// Build the HH population.
     pub fn build(self) -> NeuralPopulation<HHModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<HHModel> {
         let mut pop = NeuralPopulation::<HHModel>::new(self.n);
         let q10 = q10_from_celsius_s(self.celsius);
 
@@ -667,12 +863,59 @@ impl HHBuilder {
 
         pop
     }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<HHModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("celsius", self.celsius),
+            ("g_na", self.g_na),
+            ("e_na", self.e_na),
+            ("g_k", self.g_k),
+            ("e_k", self.e_k),
+            ("g_leak", self.g_leak),
+            ("e_leak", self.e_leak),
+            ("v_thresh", self.v_thresh),
+            ("inv_cm", self.inv_cm),
+            ("g_cat", self.g_cat),
+            ("e_cat", self.e_cat),
+            ("v_init", self.v_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("inv_cm", self.inv_cm)?;
+        let q10 = q10_from_celsius_s(self.celsius);
+        if !q10.is_finite() {
+            return Err(BuildError::InvalidValue {
+                field: "q10",
+                value: q10,
+                requirement: "finite",
+            });
+        }
+        for (field, value) in [
+            ("g_na", self.g_na),
+            ("g_k", self.g_k),
+            ("g_leak", self.g_leak),
+            ("g_cat", self.g_cat),
+        ] {
+            if value < 0.0 {
+                return Err(BuildError::InvalidValue {
+                    field,
+                    value,
+                    requirement: "finite and >= 0",
+                });
+            }
+        }
+        Ok(self.build_unchecked())
+    }
 }
 
 impl ModelBuilder for HHBuilder {
     type Model = HHModel;
     fn build(self) -> NeuralPopulation<HHModel> {
-        self.build()
+        HHBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<HHModel>, BuildError> {
+        HHBuilder::try_build(self)
     }
 }
 
@@ -779,6 +1022,10 @@ impl HAAPBuilder {
 
     /// Build the HAAP population.
     pub fn build(self) -> NeuralPopulation<HAAPModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<HAAPModel> {
         let mut pop = NeuralPopulation::<HAAPModel>::new(self.n);
 
         // Parameters (17)
@@ -807,15 +1054,55 @@ impl HAAPBuilder {
 
         pop
     }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<HAAPModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("inv_cm", self.inv_cm),
+            ("g_l", self.g_l),
+            ("e_l", self.e_l),
+            ("g_m", self.g_m),
+            ("e_k", self.e_k),
+            ("g_h", self.g_h),
+            ("e_h", self.e_h),
+            ("tau_u", self.tau_u),
+            ("tau_h", self.tau_h),
+            ("v_half_u", self.v_half_u),
+            ("k_u", self.k_u),
+            ("v_half_h", self.v_half_h),
+            ("k_h", self.k_h),
+            ("v_thresh", self.v_thresh),
+            ("v_reset", self.v_reset),
+            ("delta_u", self.delta_u),
+            ("v_init", self.v_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("inv_cm", self.inv_cm)?;
+        positive("tau_u", self.tau_u)?;
+        positive("tau_h", self.tau_h)?;
+        for (field, value) in [("g_l", self.g_l), ("g_m", self.g_m), ("g_h", self.g_h)] {
+            if value < 0.0 {
+                return Err(BuildError::InvalidValue {
+                    field,
+                    value,
+                    requirement: "finite and >= 0",
+                });
+            }
+        }
+        Ok(self.build_unchecked())
+    }
 }
 
 impl ModelBuilder for HAAPBuilder {
     type Model = HAAPModel;
     fn build(self) -> NeuralPopulation<HAAPModel> {
-        self.build()
+        HAAPBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<HAAPModel>, BuildError> {
+        HAAPBuilder::try_build(self)
     }
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 //  Universal Population Builder
@@ -872,8 +1159,20 @@ impl<M: Model> UniversalBuilder<M> {
         self
     }
 
-    /// Build the population.
-    pub fn build(self) -> NeuralPopulation<M> {
+    /// Build the population after validating indices, duplicates and values.
+    pub fn try_build(self) -> Result<NeuralPopulation<M>, BuildError> {
+        validate_specs(&self.params, M::N_PARAMS, "param")?;
+        validate_specs(&self.states, M::N_STATE, "state")?;
+        let dt = self
+            .params
+            .iter()
+            .find(|&&(index, _)| index == 0)
+            .map(|&(_, value)| value)
+            .ok_or(BuildError::MissingValue {
+                field: "dt (param 0)",
+            })?;
+        positive("dt", dt)?;
+
         let mut pop = NeuralPopulation::<M>::new(self.n);
         for (idx, val) in self.params {
             pop.fill_param(idx, val);
@@ -881,14 +1180,22 @@ impl<M: Model> UniversalBuilder<M> {
         for (idx, val) in self.states {
             pop.fill_state(idx, val);
         }
-        pop
+        Ok(pop)
+    }
+
+    /// Compatibility convenience wrapper for callers that want panic-on-error.
+    pub fn build(self) -> NeuralPopulation<M> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
     }
 }
 
 impl<M: Model> ModelBuilder for UniversalBuilder<M> {
     type Model = M;
     fn build(self) -> NeuralPopulation<M> {
-        self.build()
+        UniversalBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<M>, BuildError> {
+        UniversalBuilder::try_build(self)
     }
 }
 
@@ -983,6 +1290,10 @@ impl VSNBuilder {
 
     /// Build the VSN population.
     pub fn build(self) -> NeuralPopulation<VSNModel> {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn build_unchecked(self) -> NeuralPopulation<VSNModel> {
         let mut pop = NeuralPopulation::<VSNModel>::new(self.n);
 
         // Parameters (8)
@@ -1002,15 +1313,44 @@ impl VSNBuilder {
 
         pop
     }
+
+    /// Fallible construction for user-provided configuration.
+    pub fn try_build(self) -> Result<NeuralPopulation<VSNModel>, BuildError> {
+        finite_fields(&[
+            ("dt", self.dt),
+            ("inv_tau_m", self.inv_tau_m),
+            ("v_rest", self.v_rest),
+            ("v_thresh", self.v_thresh),
+            ("v_reset", self.v_reset),
+            ("tau_ref", self.tau_ref),
+            ("beta", self.beta),
+            ("surrogate_gain", self.surrogate_gain),
+            ("v_init", self.v_init),
+        ])?;
+        positive("dt", self.dt)?;
+        positive("inv_tau_m", self.inv_tau_m)?;
+        positive("tau_ref", self.tau_ref)?;
+        if !(0.0..=1.0).contains(&self.beta) {
+            return Err(BuildError::InvalidValue {
+                field: "beta",
+                value: self.beta,
+                requirement: "finite and in [0, 1]",
+            });
+        }
+        positive("surrogate_gain", self.surrogate_gain)?;
+        Ok(self.build_unchecked())
+    }
 }
 
 impl ModelBuilder for VSNBuilder {
     type Model = VSNModel;
     fn build(self) -> NeuralPopulation<VSNModel> {
-        self.build()
+        VSNBuilder::build(self)
+    }
+    fn try_build(self) -> Result<NeuralPopulation<VSNModel>, BuildError> {
+        VSNBuilder::try_build(self)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1085,6 +1425,60 @@ mod tests {
             .surrogate_gain(15.0)
             .build();
         assert_eq!(pop.len(), 120);
+    }
+
+    #[test]
+    fn test_validated_builders_reject_invalid_values() {
+        assert!(matches!(
+            LIFBuilder::new(8).dt(0.0).try_build(),
+            Err(BuildError::InvalidValue { field: "dt", .. })
+        ));
+        assert!(matches!(
+            AdExBuilder::new(8).tau_m(f32::NAN).try_build(),
+            Err(BuildError::InvalidValue { field: "tau_m", .. })
+        ));
+        assert!(matches!(
+            VSNBuilder::new(8).beta(1.1).try_build(),
+            Err(BuildError::InvalidValue { field: "beta", .. })
+        ));
+        assert!(matches!(
+            HAAPBuilder::new(8).g_m(-1.0).try_build(),
+            Err(BuildError::InvalidValue { field: "g_m", .. })
+        ));
+    }
+
+    #[test]
+    fn test_universal_builder_validation() {
+        let missing_dt = UniversalBuilder::<VSNModel>::new(4)
+            .state(0usize, -70.0)
+            .try_build();
+        assert!(matches!(
+            missing_dt,
+            Err(BuildError::MissingValue {
+                field: "dt (param 0)"
+            })
+        ));
+
+        let duplicate = UniversalBuilder::<VSNModel>::new(4)
+            .param(0usize, 0.5)
+            .param(0usize, 0.5)
+            .try_build();
+        assert!(matches!(
+            duplicate,
+            Err(BuildError::DuplicateIndex {
+                kind: "param",
+                index: 0
+            })
+        ));
+
+        let out_of_range = UniversalBuilder::<VSNModel>::new(4)
+            .param(0usize, 0.5)
+            .param(VSNModel::N_PARAMS, 1.0)
+            .try_build();
+        assert!(matches!(
+            out_of_range,
+            Err(BuildError::IndexOutOfRange { kind: "param", .. })
+        ));
     }
 
     #[test]

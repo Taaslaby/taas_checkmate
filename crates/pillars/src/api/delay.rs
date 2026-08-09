@@ -149,4 +149,24 @@ mod tests {
         let mut buf = DelayBuffer::new(4);
         buf.add(0, 5, 1.0);
     }
+
+    /// Контракт `effective_delay = delay.max(1)`: спайк с delay=0 должен
+    /// быть доставлен на *следующем* шаге (слот (step+1) % MAX), а не в
+    /// слот, который уже прочитан и очищен на текущем шаге. push.rs
+    /// применяет max(1) на обоих сайтах записи — этот тест фиксирует
+    /// кольцевую часть контракта.
+    #[test]
+    fn test_delay_zero_delivers_next_step() {
+        let mut buf = DelayBuffer::new(2);
+        // Эмулируем сайт записи из push.rs: slot = (step + delay.max(1)) % MAX
+        let step = 0usize;
+        let delay = 0u8;
+        buf.add((step + delay.max(1) as usize) % MAX_DELAY_SLOTS, 0, 1.0);
+
+        let mut out = [0.0f32; 2];
+        buf.read_slot(0, &mut out);
+        assert_eq!(out, [0.0, 0.0], "слот текущего шага должен остаться пустым");
+        buf.read_slot(1, &mut out);
+        assert_eq!(out, [1.0, 0.0], "спайк ложится в слот следующего шага");
+    }
 }

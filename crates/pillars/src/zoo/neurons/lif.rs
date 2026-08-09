@@ -39,39 +39,43 @@ pub mod lif {
         pub tau_ref: f32,
     }
 
-impl ComputeNeuron for LIFModel {
-    type State<S: SimdLane> = LIFState<S>;
-    type Params<S: SimdLane> = LIFParams<S>;
+    impl ComputeNeuron for LIFModel {
+        type State<S: SimdLane> = LIFState<S>;
+        type Params<S: SimdLane> = LIFParams<S>;
 
-    #[inline(always)]
-    fn step<S: SimdLane>(state: &mut LIFState<S>, params: &LIFParams<S>, ctx: &mut StepContext<S>) {
-        let zero = S::zero();
-        let is_refr = state.refr.cmp_gt(zero);
+        #[inline(always)]
+        fn step<S: SimdLane>(
+            state: &mut LIFState<S>,
+            params: &LIFParams<S>,
+            ctx: &mut StepContext<S>,
+        ) {
+            let zero = S::zero();
+            let is_refr = state.refr.cmp_gt(zero);
 
-        // ─── Legacy parity: absolute refractory FREEZES v (no integration, no spike) ───
-        // Legacy kernels (kernels::neuron::lif) skip dynamics entirely while refr > 0:
-        //   vv = refr_mask.blend(vv, vv + dv);   sm = (vv >= v_th) & !refr
-        // Clamping v to v_reset at INPUT (old design) let v drift during refractory and
-        // allowed spike breakthrough at high currents — the exact bug fixed here.
+            // ─── Legacy parity: absolute refractory FREEZES v (no integration, no spike) ───
+            // Legacy kernels (kernels::neuron::lif) skip dynamics entirely while refr > 0:
+            //   vv = refr_mask.blend(vv, vv + dv);   sm = (vv >= v_th) & !refr
+            // Clamping v to v_reset at INPUT (old design) let v drift during refractory and
+            // allowed spike breakthrough at high currents — the exact bug fixed here.
 
-        // Forward Euler on the raw v (not clamped)
-        let dv = (params.v_rest - state.v + ctx.i_syn) * params.inv_tau_m * ctx.dt_simd();
-        let v_new = state.v + dv;
+            // Forward Euler on the raw v (not clamped)
+            let dv = (params.v_rest - state.v + ctx.i_syn) * params.inv_tau_m * ctx.dt();
+            let v_new = state.v + dv;
 
-        // Spike detection — gated on NOT refractory (legacy: sm & !refr)
-        let spike_raw = v_new.cmp_ge(params.v_thresh);
-        let spike = is_refr.cond().then(zero).else_(spike_raw);
-        ctx.emit_spike(spike);
+            // Spike detection — gated on NOT refractory (legacy: sm & !refr)
+            let spike_raw = v_new.cmp_ge(params.v_thresh);
+            let spike = is_refr.cond().then(zero).else_(spike_raw);
+            ctx.emit_spike(spike);
 
-        // On spike reset to v_reset; during refractory v stays FROZEN
-        let v_final = spike.cond().then(params.v_reset).else_(v_new);
-        state.v = is_refr.cond().then(state.v).else_(v_final);
+            // On spike reset to v_reset; during refractory v stays FROZEN
+            let v_final = spike.cond().then(params.v_reset).else_(v_new);
+            state.v = is_refr.cond().then(state.v).else_(v_final);
 
-        // Refractory timer
-        let refr_dec = state.refr - ctx.dt_simd();
-        let refr_set = spike.cond().then(params.tau_ref).else_(refr_dec);
-        state.refr = refr_set.max(zero);
-    }
+            // Refractory timer
+            let refr_dec = state.refr - ctx.dt();
+            let refr_set = spike.cond().then(params.tau_ref).else_(refr_dec);
+            state.refr = refr_set.max(zero);
+        }
     }
 }
 

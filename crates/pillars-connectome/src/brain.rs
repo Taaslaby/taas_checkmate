@@ -4,17 +4,29 @@
 //! simulation loop: [`NeuralPopulation`]s, CSR spike routing with axonal delays
 //! (ring buffer), external current injection.
 //!
-//! This replaces the legacy `taas-connectome` "assembled from corners"
-//! simulators — the engine here is 100% pillars.
-//!
 //! [`NeuralPopulation`]: pillars::NeuralPopulation
 
 use std::collections::HashMap;
 
-use pillars::api::{Edge, Network, PopulationId};
+use pillars::api::{Edge, Network, PopulationId, SparseGraph};
 use pillars::zoo::Model;
 
 use crate::data::ConnectomeData;
+
+/// Build the pillars [`SparseGraph`] from the canonical (legacy i32-CSR)
+/// [`ConnectomeData`]. The legacy format has no per-synapse axonal delay —
+/// all edges use delay 0 (delivered on the next step).
+pub(crate) fn sparse_graph(conn: &ConnectomeData) -> SparseGraph {
+    // `max(0)` guards against a negative (invalid) i32 CSR entry silently
+    // wrapping to a huge u32 index — such a graph is rejected cleanly by
+    // `SparseGraph::from_csr` instead of corrupting the simulation.
+    SparseGraph::from_csr(
+        conn.row_ptr.iter().map(|&v| v.max(0) as u32).collect(),
+        conn.col_indices.iter().map(|&v| v.max(0) as u32).collect(),
+        &conn.values,
+        &vec![0u8; conn.n_synapses],
+    )
+}
 
 /// Drives a connectome on the pillars engine.
 ///
@@ -37,20 +49,26 @@ pub struct Brain<M: Model + 'static + Send + Sync> {
 
 impl<M: Model + 'static + Send + Sync> Brain<M> {
     /// Build a one-population brain: every connectome neuron is an `M` neuron,
-    /// wired exactly as the CSR graph says (weights + axonal delays).
+    /// wired exactly as the CSR graph says (weights; legacy delays are 0).
     ///
     /// Call [`Brain::configure`] afterwards to set the model parameters and
     /// initial state, then [`Brain::step`] to run.
     pub fn from_connectome(conn: &ConnectomeData) -> Self {
-        let n = conn.n_neurons();
+        Self::from_sparse_graph(sparse_graph(conn))
+    }
+
+    /// Build a one-population brain from a raw pillars [`SparseGraph`] (weights
+    /// plus axonal delays per synapse). Used where per-synapse delays matter,
+    /// e.g. the python `ConnectomeBrain` facade.
+    pub fn from_sparse_graph(graph: SparseGraph) -> Self {
+        let n = graph.num_neurons();
         let mut net = Network::new();
         let pop = net.add_population::<M>(n);
 
         // Flatten the CSR graph into edges (weight + axonal delay each).
-        let g = &conn.graph;
-        let mut edges = Vec::with_capacity(conn.n_synapses());
+        let mut edges = Vec::with_capacity(graph.num_synapses());
         for i in 0..n {
-            let row = g.row(i);
+            let row = graph.row(i);
             for (k, &j) in row.col.iter().enumerate() {
                 edges.push(Edge::new(i as u32, j, row.weights[k], row.delays[k]));
             }
@@ -73,8 +91,11 @@ impl<M: Model + 'static + Send + Sync> Brain<M> {
     /// - If `conn.groups` is empty
     /// - If any neuron is in multiple groups or in no group
     pub fn from_groups(conn: &ConnectomeData) -> Self {
-        assert!(!conn.groups.is_empty(), "from_groups requires at least one group");
-        let n = conn.n_neurons();
+        assert!(
+            !conn.groups.is_empty(),
+            "from_groups requires at least one group"
+        );
+        let n = conn.n_neurons;
         let mut net = Network::new();
 
         // 1. One population per group (ordered by group index), plus a
@@ -100,7 +121,7 @@ impl<M: Model + 'static + Send + Sync> Brain<M> {
         }
 
         // 2. Cross-group routing: translate each CSR edge to (pop, local) pairs.
-        let g = &conn.graph;
+        let g = sparse_graph(conn);
         for i in 0..n {
             let (pi, li) = global_to_local[i];
             let row = g.row(i);
@@ -139,7 +160,11 @@ impl<M: Model + 'static + Send + Sync> Brain<M> {
     ///
     /// # Panics
     /// If `name` is not a group.
-    pub fn configure_group(&mut self, name: &str, f: impl FnOnce(&mut pillars::NeuralPopulation<M>)) {
+    pub fn configure_group(
+        &mut self,
+        name: &str,
+        f: impl FnOnce(&mut pillars::NeuralPopulation<M>),
+    ) {
         let pop = *self.pops.get(name).expect("unknown group");
         self.net.configure::<M>(pop, f);
     }

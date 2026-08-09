@@ -2,15 +2,14 @@
 //!
 //! Generates typed State/Params structs + Model impl with step bridge.
 //!
-//! IMPORTANT: Use `crate::` paths (not `$crate` or `::pillars::`).
-//! In a proc-macro context, `$crate` resolves to the macro's crate (pillars-macros),
-//! but the generated code is compiled in `pillars`. So we use `crate::` which
-//! always resolves to the compiling crate.
+//! Generated bridges resolve the owning `pillars` dependency with
+//! `proc-macro-crate`, so renamed downstream dependencies work too.
 
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
 use proc_macro2::TokenStream as TS2;
+use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{quote, ToTokens};
 use std::collections::{HashMap, HashSet};
 use syn::{parse_macro_input, Attribute, Data, DeriveInput, Expr, Ident, ItemMod, Pat, Stmt};
@@ -47,9 +46,30 @@ fn base_name(name: &Ident) -> Ident {
     Ident::new(stripped, name.span())
 }
 
+/// Resolve the `pillars` crate as seen by the crate invoking this derive.
+///
+/// `FoundCrate::Itself` is important for the zoo models compiled inside the
+/// pillars crate; downstream users may rename the dependency in Cargo.toml.
+fn pillars_path() -> Result<TS2, TS2> {
+    match crate_name("pillars") {
+        Ok(FoundCrate::Itself) => Ok(quote!(crate)),
+        Ok(FoundCrate::Name(name)) => {
+            let ident = Ident::new(&name, proc_macro2::Span::call_site());
+            Ok(quote!(::#ident))
+        }
+        Err(_) => Err(quote! {
+            compile_error!("pillars-macros could not resolve the `pillars` dependency; add `pillars` to [dependencies]");
+        }),
+    }
+}
+
 #[proc_macro_derive(NeuronModel, attributes(state, param, no_spike))]
 pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    let pillars = match pillars_path() {
+        Ok(path) => path,
+        Err(diagnostic) => return diagnostic.into(),
+    };
     let name = &input.ident;
     let base = base_name(name);
 
@@ -116,14 +136,14 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
     // State from_raw_simd / to_raw_simd
     let from_raw_simd: TS2 = sf.iter().enumerate()
         .map(|(i, id)| quote! {
-            #id: (ptr.add(#i * stride + off) as *const crate::core::arch::SimdType).read_unaligned(),
+            #id: (ptr.add(#i * stride + off) as *const #pillars::core::arch::SimdType).read_unaligned(),
         }).collect();
     let to_raw_simd: TS2 = sf
         .iter()
         .enumerate()
         .map(|(i, id)| {
             quote! {
-                let p = ptr.add(#i * stride + off) as *mut crate::core::arch::SimdType;
+                let p = ptr.add(#i * stride + off) as *mut #pillars::core::arch::SimdType;
                 p.write_unaligned(self.#id);
             }
         })
@@ -147,7 +167,7 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
     // Params from_raw_simd
     let p_from_raw_simd: TS2 = pf.iter().enumerate()
         .map(|(i, id)| quote! {
-            #id: (ptr.add(#i * stride + off) as *const crate::core::arch::SimdType).read_unaligned(),
+            #id: (ptr.add(#i * stride + off) as *const #pillars::core::arch::SimdType).read_unaligned(),
         }).collect();
 
     // Params from_raw (scalar)
@@ -168,13 +188,13 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
         // ─── State struct ───
         pub struct #sn<S> { #s_def }
 
-        impl<S: crate::core::lane::SimdLane> #sn<S> {
+        impl<S: #pillars::core::lane::SimdLane> #sn<S> {
             #[inline(always)]
-            pub(crate) unsafe fn from_ctx(ctx: &crate::core::context::SimdContext<S>) -> Self {
+            pub(crate) unsafe fn from_ctx(ctx: &#pillars::core::context::SimdContext<S>) -> Self {
                 Self { #from_ctx }
             }
             #[inline(always)]
-            pub(crate) fn to_ctx(self, ctx: &mut crate::core::context::SimdContext<S>) {
+            pub(crate) fn to_ctx(self, ctx: &mut #pillars::core::context::SimdContext<S>) {
                 #to_ctx
             }
         }
@@ -190,7 +210,7 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #sn<crate::core::arch::SimdType> {
+        impl #sn<#pillars::core::arch::SimdType> {
             #[inline(always)]
             pub(crate) unsafe fn from_raw_simd(ptr: *const f32, off: usize, stride: usize) -> Self {
                 Self { #from_raw_simd }
@@ -204,9 +224,9 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
         // ─── Params struct ───
         pub struct #pn<S> { #p_def }
 
-        impl<S: crate::core::lane::SimdLane> #pn<S> {
+        impl<S: #pillars::core::lane::SimdLane> #pn<S> {
             #[inline(always)]
-            pub(crate) unsafe fn from_ctx(ctx: &crate::core::context::SimdContext<S>) -> Self {
+            pub(crate) unsafe fn from_ctx(ctx: &#pillars::core::context::SimdContext<S>) -> Self {
                 Self { #p_from_ctx }
             }
         }
@@ -228,7 +248,7 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #pn<crate::core::arch::SimdType> {
+        impl #pn<#pillars::core::arch::SimdType> {
             #[inline(always)]
             pub(crate) unsafe fn from_raw_simd(ptr: *const f32, off: usize, stride: usize) -> Self {
                 Self { #p_from_raw_simd }
@@ -263,20 +283,20 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
         }
 
         // ─── Model impl with bridge to ComputeNeuron ───
-        impl crate::zoo::Model for #name {
+        impl #pillars::zoo::Model for #name {
             const N_PARAMS: usize = #np;
             const N_STATE: usize = #ns;
             const HAS_SPIKE: bool = #has_spike;
 
             #[inline(always)]
-            fn step<S: crate::core::lane::SimdLane>(ctx: &mut crate::core::context::SimdContext<S>) {
+            fn step<S: #pillars::core::lane::SimdLane>(ctx: &mut #pillars::core::context::SimdContext<S>) {
                 unsafe {
                     let mut state = #sn::<S>::from_ctx(ctx);
                     let params = #pn::<S>::from_ctx(ctx);
-                    let mut sc = crate::core::compute::StepContext::new(
+                    let mut sc = #pillars::core::compute::StepContext::new(
                         ctx.i(), ctx.pre(), ctx.post(), ctx.dtf(),
                     );
-                    <Self as crate::core::compute::ComputeNeuron>::step::<S>(
+                    <Self as #pillars::core::compute::ComputeNeuron>::step::<S>(
                         &mut state, &params, &mut sc,
                     );
                     state.to_ctx(ctx);
@@ -313,7 +333,8 @@ pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
 //   - Cond-typed locals: `let is_refr = …cmp_gt(…).cond();` then
 //     `is_refr.then(a).else_(b)` (the Cond wraps the 1.0/0.0 mask — a float
 //     on the CUDA side, so the chain compiles to a ternary on the variable)
-//   - S::splat/one/zero/vtrap/sigmoid/blend, ctx.dt_simd()/i_syn,
+//   - S::splat/one/zero/vtrap/sigmoid/blend, ctx.dt()/i_syn,
+//     with ctx.dt_simd() retained as a compatibility alias,
 //     ctx.emit_spike()
 //   - `params.X.to_array()[0]` — scalar extraction of a param lane → P[idx]
 //   - ops: ohmic_current, ohmic_gated, membrane_depolarize,
@@ -360,7 +381,12 @@ pub fn dual_neuron(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
                 })
                 .flatten()
-                .map(|p| p.get_ident().map(|i| i.to_string()).unwrap_or_default())
+                .map(|p| {
+                    p.segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default()
+                })
                 .collect();
             if derives.iter().any(|d| d == "NeuronModel") {
                 model_name = Some(s.ident.clone());
@@ -379,8 +405,8 @@ pub fn dual_neuron(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let trait_path = imp.trait_.as_ref().map(|(_, p, _)| p).cloned();
                 let is_compute = trait_path
                     .as_ref()
-                    .and_then(|p| p.get_ident())
-                    .map(|i| i == "ComputeNeuron")
+                    .and_then(|p| p.segments.last())
+                    .map(|segment| segment.ident == "ComputeNeuron")
                     .unwrap_or(false);
                 if is_compute {
                     for it in &imp.items {
@@ -939,11 +965,7 @@ fn transpile_expr_stmt(e: &Expr, ctx: &mut Ctx) -> String {
     match e {
         Expr::Assign(a) => {
             let lhs = transpile_lvalue(a.left.as_ref(), ctx);
-            format!(
-                "    {} = {};",
-                lhs,
-                transpile_expr(a.right.as_ref(), ctx)
-            )
+            format!("    {} = {};", lhs, transpile_expr(a.right.as_ref(), ctx))
         }
         Expr::MethodCall(m)
             if expr_is_ident(m.receiver.as_ref(), "ctx") && m.method == "emit_spike" =>
@@ -1216,8 +1238,9 @@ fn eval_const_bool(e: &Expr, ctx: &Ctx) -> Option<bool> {
 }
 
 fn transpile_method(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> String {
-    // ctx.dt_simd()
-    if expr_is_ident(m.receiver.as_ref(), "ctx") && m.method == "dt_simd" {
+    // Both names map to the same runner-supplied scalar timestep. `dt()` is
+    // canonical for new models; `dt_simd()` remains source-compatible.
+    if expr_is_ident(m.receiver.as_ref(), "ctx") && (m.method == "dt" || m.method == "dt_simd") {
         return "DT".to_string();
     }
     // S::splat(x) / S::one() / S::zero() / S::vtrap(a, b)

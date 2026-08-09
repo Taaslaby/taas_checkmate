@@ -245,6 +245,7 @@ mod tests {
         let mut ctx = SimdContext::<S> {
             state: [S::splat(0.0); MAX_STATES],
             params_ptr: NonNull::dangling(),
+            param_count: 9,
             n: 8,
             off: 0,
             i_syn: S::splat(0.0),

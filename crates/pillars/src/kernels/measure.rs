@@ -46,6 +46,10 @@ pub fn interference_mean(output: &mut f32, phases_a: &[f32], phases_b: &[f32]) {
         n,
         "interference_mean: phases_b length mismatch"
     );
+    if n == 0 {
+        *output = 0.0;
+        return;
+    }
     let n8 = n & !7;
     let mut sum = f32x8::splat(0.0);
     for off in (0..n8).step_by(8) {
@@ -321,6 +325,13 @@ pub fn batch_coherence_sweep(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interference_mean_empty_is_zero() {
+        let mut output = f32::NAN;
+        interference_mean(&mut output, &[], &[]);
+        assert_eq!(output, 0.0);
+    }
 
     #[test]
     fn interference_and_coherence_basic() {

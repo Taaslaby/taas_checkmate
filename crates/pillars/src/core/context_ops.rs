@@ -229,6 +229,7 @@ mod tests {
             state: [S::zero(); MAX_STATES],
             params_ptr: NonNull::new(params.as_ptr() as *mut f32)
                 .expect("params_ptr must be non-null"),
+            param_count: params.len() / n,
             n,
             off,
             i_syn: S::zero(),

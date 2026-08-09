@@ -193,8 +193,13 @@ pub fn run_program<S: SimdLane>(program: &[OpNode], regs: &mut [S; N_REGS], dt: 
 
     let mut spike = zero;
     for op in program {
-        debug_assert!(
-            op.out_reg < N_REGS && op.in_regs.iter().all(|&r| r < N_REGS),
+        assert!(
+            op.out_reg < N_REGS
+                && op
+                    .in_regs
+                    .iter()
+                    .take(op_arity(op.kind))
+                    .all(|&r| r < N_REGS),
             "formula register out of range"
         );
         match op.kind {
@@ -296,9 +301,9 @@ pub const fn op_arity(kind: OpKind) -> usize {
 /// Validate a program before execution — every output and input register
 /// must be within `0..N_REGS`.
 ///
-/// The interpreter re-checks registers with `debug_assert` per op in debug
-/// builds; call this once at build time (e.g. in the node editor) to fail
-/// fast with a clear message instead of a mid-execution panic.
+/// The interpreter re-checks register bounds on every operation; call this
+/// once at build time (e.g. in the node editor) to fail fast with a clear
+/// message before execution.
 pub fn validate_program(program: &[OpNode]) -> Result<(), String> {
     for (i, op) in program.iter().enumerate() {
         if op.out_reg >= N_REGS {
@@ -326,10 +331,7 @@ pub fn validate_program(program: &[OpNode]) -> Result<(), String> {
 ///
 /// `connected_pins[i]` — число пинов, реально подключённых к узлу `i`
 /// (длина должна совпадать с `program.len()`).
-pub fn validate_program_arity(
-    program: &[OpNode],
-    connected_pins: &[usize],
-) -> Result<(), String> {
+pub fn validate_program_arity(program: &[OpNode], connected_pins: &[usize]) -> Result<(), String> {
     validate_program(program)?;
     if connected_pins.len() != program.len() {
         return Err(format!(
@@ -590,6 +592,14 @@ mod tests {
         assert!(err.contains("needs 4"), "{err}");
         // Длины не совпали — тоже ошибка
         assert!(validate_program_arity(&prog, &[]).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "formula register out of range")]
+    fn test_run_program_rejects_malformed_program_in_release() {
+        let mut regs = [0.0f32; N_REGS];
+        let bad = [OpNode::new(OpKind::Add, TEMP0).with_in(&[TEMP0, N_REGS])];
+        let _ = run_program(&bad, &mut regs, 0.5f32, 0.0f32);
     }
 
     #[test]

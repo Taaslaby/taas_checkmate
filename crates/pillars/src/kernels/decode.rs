@@ -161,7 +161,10 @@ pub fn kalman_update(weights: &mut [f32], cov: &mut [f32], states: &[f32], error
     let n = weights.len();
     assert_eq!(cov.len(), n, "kalman_update: cov length mismatch");
     assert_eq!(states.len(), n, "kalman_update: states length mismatch");
-    debug_assert!(s > 0.0, "kalman_update: s must be > 0, got {s}");
+    assert!(
+        s.is_finite() && s > 0.0,
+        "kalman_update: s must be finite and > 0, got {s}"
+    );
     let s2 = f32x8::splat(s + 1e-8);
     let err_s = f32x8::splat(error);
     let n8 = n & !7;
@@ -172,7 +175,11 @@ pub fn kalman_update(weights: &mut [f32], cov: &mut [f32], states: &[f32], error
             let st = load8(states.as_ptr(), off);
             let k = c * st / s2;
             store8(weights.as_mut_ptr(), off, w + k * err_s);
-            store8(cov.as_mut_ptr(), off, (c - k * st * c).max(f32x8::splat(1e-12)));
+            store8(
+                cov.as_mut_ptr(),
+                off,
+                (c - k * st * c).max(f32x8::splat(1e-12)),
+            );
         }
     }
     let s2 = s + 1e-8;
@@ -334,6 +341,18 @@ mod tests {
             weights.iter().any(|&w| w.abs() > 0.001),
             "NLMS weights should update"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "finite and > 0")]
+    fn kalman_update_rejects_non_positive_innovation() {
+        kalman_update(&mut [], &mut [], &[], 0.0, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "finite and > 0")]
+    fn kalman_update_rejects_non_finite_innovation() {
+        kalman_update(&mut [], &mut [], &[], 0.0, f32::NAN);
     }
 
     #[test]

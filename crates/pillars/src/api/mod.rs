@@ -30,6 +30,10 @@
 //! | [`network`] | Multi-population orchestrator with ring buffer delays |
 //! | [`compact`] | Dense spike mask → active-index compaction |
 //! | [`push`] | Event-driven scatter of active spikes into delay slots |
+//! | [`neurons`] | Stateful populations: EPropLIF, GLIF3/4, STP, somato-dendritic, chordotonal |
+//! | [`cpe`] | ChaosPatternEngine — dopamine-STDP + Kuramoto on connectomes |
+//! | [`autotune`] | E-Prop hyperparameter search: FR probe + config suggestion |
+//! | [`embodied`] | FlyWire embodied neuromotor engine (NMJ delay + Atlasov + joints) |
 //!
 //! ## Quick start
 //!
@@ -50,19 +54,25 @@
 //! pop.step(&i_in, &mut spikes);
 //! ```
 
+pub mod autotune;
 pub mod builder;
 pub mod compact;
+pub mod cpe;
 pub mod delay;
+pub mod embodied;
 pub mod formula;
 pub mod graph;
+pub mod human_hand;
 pub mod network;
+pub mod neurons;
 pub mod population;
 pub mod push;
+pub mod trainer;
 
 pub use crate::core::population::NeuralPopulation;
 pub use builder::{
-    AdExBuilder, HAAPBuilder, HHBuilder, HHPreset, IzhPattern, IzhikevichBuilder, LIFBuilder,
-    ModelBuilder, UniversalBuilder, VSNBuilder,
+    AdExBuilder, BuildError, HAAPBuilder, HHBuilder, HHPreset, IzhPattern, IzhikevichBuilder,
+    LIFBuilder, ModelBuilder, UniversalBuilder, VSNBuilder,
 };
 pub use compact::{compact_spikes, compact_spikes_into};
 pub use delay::DelayBuffer;
@@ -71,5 +81,8 @@ pub use formula::{
     P0, S0, S1, S2, S3, TEMP0,
 };
 pub use graph::{SparseGraph, SynapseRow, MAX_DELAY_SLOTS};
+pub use human_hand::{
+    HumanHandProfile, HumanHandState, HumanMuscle, HumanMuscleSpec, HUMAN_SPECIFIC_TENSION_PA,
+};
 pub use network::{Edge, Network};
 pub use population::{Population, PopulationId};

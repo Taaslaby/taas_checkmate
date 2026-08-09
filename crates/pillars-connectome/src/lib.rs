@@ -1,28 +1,62 @@
-//! # pillars-connectome — pillars-native connectome orchestrator
+//! # pillars-connectome — universal connectome brain simulator
 //!
-//! A clean replacement for the legacy `taas-connectome`, which was assembled
-//! from several corners (legacy safe kernels + pillars + cuda-kernels). This
-//! crate speaks **only** pillars:
+//! Единственный connectome-крейт (волна 12: слияние легаси `taas-connectome` и
+//! pillars-нативного оркестратора). Движок — 100% pillars:
 //!
 //! ```text
-//! ConnectomeData  →  SparseGraph (adjacency, the source of truth)
-//!        │
-//!        ▼
-//! Brain<M>  →  Network (NeuralPopulation<M> + delays + spike routing)
-//!        │
-//!        ▼
-//!      step() / inject() / spikes()
+//! ConnectomeData (i32-CSR + NT types + receptor types + groups)
+//!      │
+//!      ├── Brain<M>          → pillars::api::Network (spike routing)
+//!      ├── SynapticBrain<M>  → pillars::kernels::synapse (conductance kinetics)
+//!      └── sim::sim_*        → универсальный API поверх Brain/SynapticBrain
+//!      │
+//!      ├── BrainRunner       (высокоуровневый конфигурируемый runner)
+//!      ├── SpikeRecorder     (rate extraction)
+//!      └── rcm              (Reverse Cuthill–McKee reordering)
 //! ```
 //!
-//! No legacy adapters, no duplicated equations — the engine is pillars itself.
+//! Легаси `taas-connectome` удалён; его публичный API сохранён 1:1 здесь
+//! (`connectome::` в корневом крейте = `pillars_connectome::`).
+
+// Унаследованные от легаси-крейта соглашения об именах (внешний API).
+#![allow(non_snake_case)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::len_without_is_empty)]
+#![allow(clippy::manual_memcpy)]
 
 pub mod brain;
 pub mod data;
+pub mod propagate;
+pub mod rcm;
+pub mod record;
+pub mod runner;
+pub mod sim;
 pub mod synaptic;
+pub mod types;
 
 pub use brain::Brain;
-pub use data::{ConnectomeData, NeuronGroup};
+pub use data::{
+    BrainIO, ConnectomeData, InputChannel, InputEncoding, NeuronGroup, OutputChannel, OutputReadout,
+};
+pub use pillars::kernels::synapse::{DecayFactors, ReceptorType, SynapticKinetics};
+pub use rcm::{
+    apply_permutation_to_csr, apply_permutation_to_groups, apply_permutation_to_state, bandwidth,
+    build_adjacency, fiedler_vector, mean_bandwidth, reverse_cuthill_mckee, spectral_ordering,
+};
+pub use record::{SpikeRecorder, SpikeRecordings};
+pub use runner::{BrainConfig, BrainRunner, LearningRule, NeuronConfig, PoissonGroup};
+pub use sim::{
+    csr_propagate, csr_propagate_conductance_from_queue, csr_propagate_from_queue,
+    hh_population_pacemaking, hh_population_standard, pad_to, push_spikes_to_queue, sim_gco,
+    sim_gco_record, sim_hh_pillars, sim_hh_synaptic_pillars, sim_izhikevich, sim_izhikevich_dual,
+    sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate, step_izhikevich_dual_pillars,
+    step_izhikevich_pillars, step_lif_pillars, BrainState, GcoParams, IzhikevichDualParams,
+    IzhikevichParams, LifParams, NeuronModel, RateParams, SpikeQueue,
+};
 pub use synaptic::SynapticBrain;
+
+#[cfg(feature = "cuda")]
+pub use sim::gpu::{sim_izhikevich_gpu, sim_lif_gpu};
 
 #[cfg(test)]
 mod tests {
@@ -34,15 +68,15 @@ mod tests {
     #[test]
     fn signal_propagates_through_chain() {
         // CSR for 0→1, 1→2 (weights 50, no delay).
-        let conn = ConnectomeData::from_csr(
-            vec![0u32, 1, 2, 2], // row_ptr (n_neurons = 3)
-            vec![1u32, 2],       // col_idx
+        let conn = ConnectomeData::new(
+            vec![0i32, 1, 2, 2], // row_ptr (n_neurons = 3)
+            vec![1i32, 2],       // col_idx
             vec![50.0f32, 50.0], // weights
-            vec![0u8, 0],        // delays
-            vec![0u8, 0],        // receptor_types
+            vec![],              // nt_types → auto-fill 1.0
+            vec![],              // groups
         );
-        assert_eq!(conn.n_neurons(), 3);
-        assert_eq!(conn.n_synapses(), 2);
+        assert_eq!(conn.n_neurons, 3);
+        assert_eq!(conn.n_synapses, 2);
 
         let mut brain = Brain::<LIFModel>::from_connectome(&conn);
         // Fast neurons (tau = 1 ms) so a single 50-weight pulse crosses the
@@ -96,18 +130,21 @@ mod tests {
             counts[0] += s[0];
             counts[1] += s[1];
         }
-        assert!(counts[1] > 0, "direct network: neuron 1 should spike, got {counts:?}");
+        assert!(
+            counts[1] > 0,
+            "direct network: neuron 1 should spike, got {counts:?}"
+        );
     }
 
     /// Group mode: "sensory" (neurons 0,1) → "motor" (neurons 2,3) via edge 0→2.
     #[test]
     fn groups_route_cross_group() {
-        let mut conn = ConnectomeData::from_csr(
-            vec![0u32, 1, 1, 1, 1], // n = 4: neuron 0 has one outgoing edge
-            vec![2u32],             // 0 → 2 (sensory → motor)
+        let mut conn = ConnectomeData::new(
+            vec![0i32, 1, 1, 1, 1], // n = 4: neuron 0 has one outgoing edge
+            vec![2i32],             // 0 → 2 (sensory → motor)
             vec![50.0f32],
-            vec![0u8],
-            vec![0u8],
+            vec![],
+            vec![],
         );
         conn.groups = vec![
             NeuronGroup {
@@ -149,14 +186,16 @@ mod tests {
     /// whose synaptic current g·(E_rev − V) drives it to spike.
     #[test]
     fn synaptic_ampa_drives_post() {
-        // receptor type 0 = AMPA (E_rev = 0 mV).
-        let conn = ConnectomeData::from_csr(
-            vec![0u32, 1, 1], // n = 2: neuron 0 has one outgoing edge
-            vec![1u32],       // 0 → 1
+        // receptor type 0 = AMPA (E_rev = 0 mV) — built from nt_types.
+        let mut conn = ConnectomeData::new(
+            vec![0i32, 1, 1], // n = 2: neuron 0 has one outgoing edge
+            vec![1i32],       // 0 → 1
             vec![1.0f32],     // conductance weight
-            vec![0u8],
-            vec![0u8], // AMPA
+            vec![1.0, 1.0],   // nt_types (excitatory)
+            vec![],
         );
+        conn.build_receptor_types(); // nt > 0 → AMPA (0)
+        assert_eq!(conn.receptor_types, vec![0u8]);
         let mut brain = SynapticBrain::<LIFModel>::from_connectome(&conn, 0.5);
         brain.configure(|p| {
             p.fill_param(0, 0.5); // dt
@@ -184,14 +223,14 @@ mod tests {
     /// `sim_lif` was still the oracle — a regression guard for the delegate.
     #[test]
     fn sim_lif_delegate_matches_legacy_counts() {
-        let conn = taas_connectome::ConnectomeData::new(
+        let conn = ConnectomeData::new(
             vec![0i32, 1, 2, 2],
             vec![1i32, 2],
             vec![50.0, 50.0],
             vec![1.0, 1.0, 1.0],
             vec![],
         );
-        let params = taas_connectome::sim::LifParams::new(
+        let params = LifParams::new(
             &[1.0, 1.0, 1.0],       // tau_m
             &[-70.0, -70.0, -70.0], // v_rest
             &[-54.0, -54.0, -54.0], // v_thresh
@@ -199,14 +238,11 @@ mod tests {
             0.5,                    // dt_ms
             2.0,                    // tau_ref
         );
-        let mut state =
-            taas_connectome::sim::BrainState::new(3, taas_connectome::sim::NeuronModel::LIF);
+        let mut state = BrainState::new(3, NeuronModel::LIF);
         state.v = vec![-70.0; state.v.len()];
 
         let n_steps = 200;
-        let spikes = taas_connectome::sim::sim_lif(
-            &conn, &mut state, &params, &[50.0, 0.0, 0.0], n_steps, 1.0,
-        );
+        let spikes = sim_lif(&conn, &mut state, &params, &[50.0, 0.0, 0.0], n_steps, 1.0);
         let mut counts = [0i32; 3];
         for step in 0..n_steps {
             for i in 0..3 {
@@ -214,24 +250,50 @@ mod tests {
             }
         }
         assert_eq!(
-            counts, [40, 40, 40],
+            counts,
+            [40, 40, 40],
             "sim_lif delegate must reproduce the legacy parity counts"
+        );
+
+        // Scale-folding lock-in: `scale` is folded into the edge weights. In a
+        // subthreshold regime (weights 20 — a single pulse does not cross the
+        // threshold) doubling the scale must strictly increase the propagated
+        // drive, hence the total spike count.
+        let weak = ConnectomeData::new(
+            vec![0i32, 1, 2, 2],
+            vec![1i32, 2],
+            vec![20.0f32, 20.0],
+            vec![1.0, 1.0, 1.0],
+            vec![],
+        );
+        let mut s1 = BrainState::new(3, NeuronModel::LIF);
+        s1.v = vec![-70.0; s1.v.len()];
+        let sp1 = sim_lif(&weak, &mut s1, &params, &[50.0, 0.0, 0.0], n_steps, 1.0);
+        let mut s2 = BrainState::new(3, NeuronModel::LIF);
+        s2.v = vec![-70.0; s2.v.len()];
+        let sp2 = sim_lif(&weak, &mut s2, &params, &[50.0, 0.0, 0.0], n_steps, 2.0);
+        let total1: i32 = sp1.iter().sum();
+        let total2: i32 = sp2.iter().sum();
+        assert!(
+            total2 > total1,
+            "scale=2.0 must fire more than scale=1.0 (got {total1} vs {total2})"
         );
     }
 
     /// Izhikevich delegate must genuinely propagate: chain 0→1→2, drive
-    /// neuron 0, neuron 2 spikes. The legacy `sim_izhikevich` dropped this
-    /// (propagated current overwritten by external_I before the neuron step).
+    /// neuron 0, neuron 2 spikes.
     #[test]
     fn izhikevich_propagates_through_chain() {
-        use pillars::zoo::{IzhikevichModel, IzhikevichModelParamIdx as P, IzhikevichModelStateIdx as S};
+        use pillars::zoo::{
+            IzhikevichModel, IzhikevichModelParamIdx as P, IzhikevichModelStateIdx as S,
+        };
 
-        let conn = ConnectomeData::from_csr(
-            vec![0u32, 1, 2, 2],
-            vec![1u32, 2],
+        let conn = ConnectomeData::new(
+            vec![0i32, 1, 2, 2],
+            vec![1i32, 2],
             vec![50.0f32, 50.0],
-            vec![0u8, 0],
-            vec![0u8, 0],
+            vec![],
+            vec![],
         );
         let mut brain = Brain::<IzhikevichModel>::from_connectome(&conn);
         brain.configure(|p| {
@@ -253,22 +315,13 @@ mod tests {
             brain.step();
             neuron2_spikes += brain.spikes()[2];
         }
-        assert!(
-            neuron2_spikes > 0,
-            "Izhikevich signal must propagate 0→1→2 (the legacy dropped it)"
-        );
+        assert!(neuron2_spikes > 0, "Izhikevich signal must propagate 0→1→2");
     }
 
     /// Empty connectome (no synapses) — Brain must still build and step.
     #[test]
     fn empty_connectome_steps() {
-        let conn = ConnectomeData::from_csr(
-            vec![0u32, 0, 0],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        );
+        let conn = ConnectomeData::new(vec![0i32, 0, 0], vec![], vec![], vec![], vec![]);
         let mut brain = Brain::<LIFModel>::from_connectome(&conn);
         brain.configure(|pop| {
             pop.fill_param(0, 0.5);

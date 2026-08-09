@@ -88,6 +88,10 @@ pub const MAX_PARAM_COLS: usize = 32;
 pub struct SimdContext<'a, S: SimdLane> {
     pub(crate) state: [S; MAX_STATES],
     pub(crate) params_ptr: NonNull<f32>,
+    /// Number of parameter columns in the concrete model.
+    /// Every parameter accessor checks against this value before doing raw
+    /// pointer arithmetic, so safe model code cannot read past the SoA buffer.
+    pub(crate) param_count: usize,
     pub(crate) n: usize,
     pub(crate) off: usize,
     pub(crate) i_syn: S,
@@ -101,10 +105,18 @@ pub struct SimdContext<'a, S: SimdLane> {
 impl<'a, S: SimdLane> SimdContext<'a, S> {
     #[inline(always)]
     pub fn s(&self, i: usize) -> S {
+        assert!(
+            i < MAX_STATES,
+            "SimdContext::s: state index {i} >= MAX_STATES ({MAX_STATES})"
+        );
         self.state[i]
     }
     #[inline(always)]
     pub fn set_s(&mut self, i: usize, v: S) {
+        assert!(
+            i < MAX_STATES,
+            "SimdContext::set_s: state index {i} >= MAX_STATES ({MAX_STATES})"
+        );
         self.state[i] = v;
     }
     /// Parameters: SIMD (SoA vector load) / scalar
@@ -117,8 +129,10 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// ever needed).
     #[inline(always)]
     pub fn p(&self, i: usize) -> S {
-        debug_assert!(i < MAX_PARAM_COLS, "param index {i} exceeds MAX_PARAM_COLS");
-        // SAFETY: caller contract above — valid index, live buffer.
+        self.assert_param_index(i);
+        // SAFETY: `assert_param_index` proves that `i` addresses one of the
+        // model's allocated parameter columns; the runner supplies valid
+        // `n`/`off` for this SIMD chunk.
         unsafe { S::load_param(self.params_ptr.as_ptr(), i, self.n, self.off) }
     }
 
@@ -130,8 +144,7 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// converted index must be `< M::N_PARAMS`.
     #[inline(always)]
     pub fn p_enum<E: Into<usize> + Copy>(&self, e: E) -> S {
-        // SAFETY: as `p` — caller guarantees the converted index is valid.
-        unsafe { S::load_param(self.params_ptr.as_ptr(), e.into(), self.n, self.off) }
+        self.p(e.into())
     }
     /// Scalar parameter access via raw index.
     ///
@@ -139,8 +152,10 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// `i` must be a valid param column index (`< M::N_PARAMS`).
     #[inline(always)]
     pub fn pf(&self, i: usize) -> f32 {
-        debug_assert!(i < MAX_PARAM_COLS, "param index {i} exceeds MAX_PARAM_COLS");
-        // SAFETY: caller contract — valid index, live buffer, off < capacity.
+        self.assert_param_index(i);
+        // SAFETY: `assert_param_index` proves that `i` addresses one of the
+        // model's allocated parameter columns; the runner supplies valid
+        // `n`/`off` for this scalar lane.
         unsafe { *self.params_ptr.as_ptr().add(i * self.n + self.off) }
     }
 
@@ -148,8 +163,16 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// as [`SimdContext::pf`] (NOT type-checked against param columns).
     #[inline(always)]
     pub fn pf_enum<E: Into<usize> + Copy>(&self, e: E) -> f32 {
-        // SAFETY: as `pf` — caller guarantees the converted index is valid.
-        unsafe { *self.params_ptr.as_ptr().add(e.into() * self.n + self.off) }
+        self.pf(e.into())
+    }
+
+    #[inline(always)]
+    fn assert_param_index(&self, i: usize) {
+        assert!(
+            i < self.param_count,
+            "SimdContext: parameter index {i} out of range (model has {} columns)",
+            self.param_count
+        );
     }
 
     #[inline(always)]
@@ -172,8 +195,10 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// `dt[off + lane]` instead of a broadcast scalar.
     ///
     /// This is the SIMD path used by the biological opcodes
-    /// ([`leak_integrate`](crate::core::context_ops::leak_integrate),
-    /// `refractory_timer`, `membrane_depolarize`, the formula VM) — they take
+    /// ([`leak_integrate`](crate::ops::membrane::leak_integrate),
+    /// [`refractory_timer`](crate::ops::refractory::refractory_timer),
+    /// [`membrane_depolarize`](crate::ops::membrane::membrane_depolarize),
+    /// and the formula VM) — they take
     /// `dt` as a lane vector. The `ComputeNeuron` bridge instead feeds the
     /// broadcast [`SimdContext::dtf`] into `StepContext::dt_simd()`.
     ///
@@ -183,14 +208,18 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// (`test_population_simd_tail_parity`) when you do.
     #[inline(always)]
     pub fn dt(&self) -> S {
+        assert!(
+            self.param_count > 0,
+            "SimdContext::dt: model has no parameter columns"
+        );
         // SAFETY: params column 0 exists (every model has >= 1 param), buffer
         // live, off + SIZE <= capacity (runner contract).
         unsafe { S::load_param(self.params_ptr.as_ptr(), 0, self.n, self.off) }
     }
 
-    /// Scalar timestep — the broadcast `dt` the runner loaded from params[0]
+    /// Scalar timestep — the broadcast `dt` the runner loaded from `params[0]`
     /// (neuron 0's dt) before stepping. Used by the `ComputeNeuron` bridge
-    /// (`StepContext::dt_simd()`); all zoo models go through it.
+    /// (`StepContext::dt()`); all zoo models go through it.
     #[inline(always)]
     pub fn dtf(&self) -> f32 {
         self.dt_val
@@ -202,12 +231,21 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// `params_ptr` must point to a valid parameter buffer that outlives the
     /// returned context for lifetime `'a`; `offset + S::SIZE <= capacity`.
     #[inline(always)]
-    pub unsafe fn new_raw(params_ptr: *const f32, capacity: usize, offset: usize, dt: f32) -> Self {
+    pub unsafe fn new_raw(
+        params_ptr: *const f32,
+        param_count: usize,
+        capacity: usize,
+        offset: usize,
+        dt: f32,
+    ) -> Self {
         // SAFETY: documented contract — params_ptr is non-null and live for
         // 'a; the pointer is stored as-is (raw contexts don't own memory).
         Self {
             state: [S::zero(); MAX_STATES],
             params_ptr: NonNull::new_unchecked(params_ptr as *mut f32),
+            // Raw contexts have no model type from which to infer the number
+            // of columns, so the caller supplies it explicitly.
+            param_count,
             n: capacity,
             off: offset,
             i_syn: S::zero(),
@@ -225,8 +263,14 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// `slice` must have at least `S::SIZE` elements, and all elements must be readable.
     #[inline(always)]
     pub fn load_i(&mut self, slice: &[f32]) {
-        // SAFETY: `slice` is a &[f32] — as_ptr() is valid for slice.len() >=
-        // S::SIZE (documented), stride n = S::SIZE keeps the vector in bounds.
+        assert!(
+            slice.len() >= S::SIZE,
+            "SimdContext::load_i: slice has {}, needs at least {} elements",
+            slice.len(),
+            S::SIZE
+        );
+        // SAFETY: the assertion above establishes that the slice contains a
+        // full SIMD lane; stride n = S::SIZE keeps the vector in bounds.
         unsafe {
             self.i_syn = S::load_param(slice.as_ptr(), 0, S::SIZE, 0);
         }
@@ -238,7 +282,17 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// `slice` must have at least `S::SIZE` elements. `state_idx` must be < [`MAX_STATES`].
     #[inline(always)]
     pub fn load_state_channel(&mut self, state_idx: usize, slice: &[f32]) {
-        // SAFETY: both documented contracts — slice.len() >= S::SIZE (valid
+        assert!(
+            state_idx < MAX_STATES,
+            "SimdContext::load_state_channel: state index {state_idx} >= MAX_STATES ({MAX_STATES})"
+        );
+        assert!(
+            slice.len() >= S::SIZE,
+            "SimdContext::load_state_channel: slice has {}, needs at least {} elements",
+            slice.len(),
+            S::SIZE
+        );
+        // SAFETY: both assertions above establish the documented contracts.
         // read) and state_idx < MAX_STATES (in-bounds array index; the const
         // guard in the load/save macros makes M::N_STATE <= MAX_STATES).
         unsafe {
@@ -255,6 +309,10 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// - `state_idx` must be < [`MAX_STATES`].
     #[inline(always)]
     pub unsafe fn save_state_channel(&self, state_idx: usize, ptr: *mut f32) {
+        assert!(
+            state_idx < MAX_STATES,
+            "SimdContext::save_state_channel: state index {state_idx} >= MAX_STATES ({MAX_STATES})"
+        );
         // SAFETY: documented contracts above — the raw slice is valid for
         // S::SIZE elements and write_to_slice writes exactly SIZE lanes.
         self.state[state_idx]
@@ -295,6 +353,7 @@ mod tests {
             state: [S::zero(); MAX_STATES],
             params_ptr: NonNull::new(params.as_ptr() as *mut f32)
                 .expect("params_ptr must be non-null"),
+            param_count: params.len() / n,
             n,
             off,
             i_syn: S::zero(),
@@ -364,11 +423,35 @@ mod tests {
     #[test]
     fn test_context_new_raw() {
         let params = make_lif_params(8);
-        let ctx = unsafe { SimdContext::<f32x8>::new_raw(params.as_ptr(), 8, 0, 0.5) };
+        let ctx = unsafe { SimdContext::<f32x8>::new_raw(params.as_ptr(), 6, 8, 0, 0.5) };
         assert!((ctx.dt_val - 0.5).abs() < 1e-6);
         for i in 0..MAX_STATES {
             assert_eq!(ctx.state[i].to_array()[0], 0.0, "state[{i}] should be 0");
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "needs at least")]
+    fn test_context_load_i_rejects_short_slice() {
+        let params = make_lif_params(8);
+        let mut ctx = make_context::<f32x8>(0, &params, 8);
+        ctx.load_i(&[1.0, 2.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "parameter index")]
+    fn test_context_param_index_is_checked_in_release() {
+        let params = make_lif_params(8);
+        let ctx = make_context::<f32x8>(0, &params, 8);
+        let _ = ctx.p(6);
+    }
+
+    #[test]
+    #[should_panic(expected = "state index")]
+    fn test_context_state_index_is_checked() {
+        let params = make_lif_params(8);
+        let mut ctx = make_context::<f32x8>(0, &params, 8);
+        ctx.set_s(MAX_STATES, f32x8::zero());
     }
 
     #[test]

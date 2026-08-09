@@ -87,280 +87,280 @@ pub mod hh {
     use crate::ops::{edge_spike, membrane_depolarize, ohmic_current, ohmic_gated};
     use pillars_macros::NeuronModel;
 
-// ═══════════════════════════════════════════════════════════════
-//  Gate Definition (α/β rate functions)
-// ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    //  Gate Definition (α/β rate functions)
+    // ═══════════════════════════════════════════════════════════════
 
-/// Hodgkin-Huxley gate rate parameters (α/β formulation).
-///
-/// Each gate has:
-/// - `v_off`: voltage offset for vtrap (e.g., -40 for m-gate)
-/// - `scale`: vtrap divisor (e.g., 10 for m-gate)
-/// - `alpha_c`, `beta_c`: rate coefficients
-/// - `beta_volt`, `beta_div`: β exponential/sigmoid parameters
-/// - `alpha_exp`: if true, α = alpha_c·exp(v_shift/scale) (h-gate)
-///   if false, α = alpha_c·vtrap(v_shift, scale) (m, n)
-/// - `beta_sigmoid`: if true, β = beta_c/(1+exp(-(V+beta_volt)/beta_div))
-///   if false, β = beta_c·exp(-(V+beta_volt)/beta_div)
-#[derive(Copy, Clone)]
-pub struct GateParams {
-    pub v_off: f32,
-    pub scale: f32,
-    pub alpha_c: f32,
-    pub beta_c: f32,
-    pub beta_volt: f32,
-    pub beta_div: f32,
-    pub alpha_exp: bool,
-    pub beta_sigmoid: bool,
-}
-
-/// m-gate: Na⁺ activation — fast, voltage-dependent opening
-/// α = 0.1·vtrap(-(V+40), 10)   β = 4·exp(-(V+65)/18)
-pub const GATE_M: GateParams = GateParams {
-    v_off: -40.0,
-    scale: 10.0,
-    alpha_c: 0.1,
-    beta_c: 4.0,
-    beta_volt: 65.0,
-    beta_div: 18.0,
-    alpha_exp: false,
-    beta_sigmoid: false,
-};
-
-/// h-gate: Na⁺ inactivation — slower, closes Na channels during spike
-/// α = 0.07·exp(-(V+65)/20)     β = 1/(1+exp(-(V+35)/10))
-///  α is EXPONENTIAL, NOT vtrap (unlike m/n)!
-pub const GATE_H: GateParams = GateParams {
-    v_off: -65.0,
-    scale: 20.0,
-    alpha_c: 0.07,
-    beta_c: 1.0,
-    beta_volt: 35.0,
-    beta_div: 10.0,
-    alpha_exp: true,
-    beta_sigmoid: true,
-};
-
-/// n-gate: K⁺ activation — slow, opens KV channels for repolarization
-/// α = 0.01·vtrap(-(V+55), 10)  β = 0.125·exp(-(V+65)/80)
-pub const GATE_N: GateParams = GateParams {
-    v_off: -55.0,
-    scale: 10.0,
-    alpha_c: 0.01,
-    beta_c: 0.125,
-    beta_volt: 65.0,
-    beta_div: 80.0,
-    alpha_exp: false,
-    beta_sigmoid: false,
-};
-
-/// CaV-T (T-type calcium) gate — single low-threshold activation gate `c` for
-/// pacemaking (Wang & Rinzel 1993 / Hill & Tononi 2005).
-///
-/// ```text
-/// m_inf  = 1 / (1 + exp(-(v+56)/6.2))     — steady-state activation
-/// τ_c    = 0.6 ms                          — fixed time constant
-/// c(t+1) = m_inf + (c - m_inf)·exp(-dt·Q10/τ_c)
-/// ```
-///
-/// α = m_inf/τ, β = (1−m_inf)/τ → α+β = 1/τ is **constant**, so the
-/// exponential-Euler decay is voltage-independent (one `fast_exp` total).
-pub const GATE_CAT_TAU: f32 = 0.6;
-pub const GATE_CAT_INV_TAU: f32 = 1.0 / GATE_CAT_TAU; // precomputed — NO vector division in step()
-pub const GATE_CAT_V_HALF: f32 = -56.0;
-pub const GATE_CAT_K: f32 = 6.2;
-pub const GATE_CAT_INV_K: f32 = 1.0 / GATE_CAT_K; // precomputed — NO vector division in step()
-
-/// Compute the CaV-T gate one step via exponential Euler (constant-τ form).
-///
-/// Exactly mirrors `hh_channels::cat_c_alpha`/`cat_c_beta` with
-/// `α+β = 1/τ_c` folded into a voltage-independent decay.
-///
-/// # Precision
-/// Uses `fast_exp()` by default (~1e-5 error). Enable feature `hh-precise-gates`
-/// for exact `exp()` (~1 ULP) at ~3x performance cost.
-#[inline(always)]
-fn compute_cat_gate_state<S: SimdLane>(v: S, c: S, dt_q10: S) -> S {
-    // m_inf = 1/(1+exp(-(v+56)/6.2)) — arg division folded into precomputed inv_k
-    // (the 1/(1+e) reciprocal stays: it is a single divps, the sigmoid itself)
-    let arg = -(v + S::splat(GATE_CAT_V_HALF)) * S::splat(GATE_CAT_INV_K);
-    let m_inf = S::one() / (S::one() + arg.fast_exp());
-
-    // decay = exp(-dt·Q10/τ_c) — voltage-independent, τ folded into inv_tau
-    #[cfg(feature = "hh-precise-gates")]
-    let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).exp();
-
-    #[cfg(not(feature = "hh-precise-gates"))]
-    let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).fast_exp();
-
-    decay.mul_add(c - m_inf, m_inf)
-}
-
-/// Compute HH gate one step via Exponential Euler.
-///
-/// ```text
-/// α(V)     — rate of opening
-/// β(V)     — rate of closing
-/// x_∞      = α/(α+β)           — steady state
-/// τ(V)     = 1/(α+β)           — time constant
-/// x(t+dt)  = x_∞ + (x-x_∞)·exp(-dt·Q10·(α+β))
-/// ```
-///
-/// All `if` branches are compile-time (const GateParams) — zero overhead.
-/// No scalar conversion, no branching at runtime.
-#[inline(always)]
-fn compute_gate_state<S: SimdLane>(v: S, gate: S, params: GateParams, dt_q10: S) -> S {
-    let v_shift = S::splat(params.v_off) - v;
-
-    // α function: either vtrap (m, n) or exponential (h)
-    let alpha = if params.alpha_exp {
-        S::splat(params.alpha_c) * (v_shift / S::splat(params.scale)).fast_exp()
-    } else {
-        S::splat(params.alpha_c) * S::vtrap(v_shift, S::splat(params.scale))
-    };
-
-    // β function: either exponential (m, n) or sigmoid (h)
-    let exp_arg = -(v + S::splat(params.beta_volt)) / S::splat(params.beta_div);
-    let beta = if params.beta_sigmoid {
-        S::splat(params.beta_c) / (S::one() + exp_arg.fast_exp())
-    } else {
-        S::splat(params.beta_c) * exp_arg.fast_exp()
-    };
-
-    let sum = alpha + beta;
-    let g_inf = alpha / sum;
-
-    // Выбор точности exp в зависимости от feature flag
-    #[cfg(feature = "hh-precise-gates")]
-    let decay = (-dt_q10 * sum).exp(); // Точный exp (~1 ULP)
-
-    #[cfg(not(feature = "hh-precise-gates"))]
-    let decay = (-dt_q10 * sum).fast_exp(); // Быстрый exp (~1e-5)
-
-    // FMA: g_inf + (gate - g_inf)·decay
-    decay.mul_add(gate - g_inf, g_inf)
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Model Definition
-// ═══════════════════════════════════════════════════════════════
-
-/// Hodgkin-Huxley (1952) squid axon — continuous conductance-based model.
-///
-/// # States (6)
-/// - `v`: membrane potential (mV)
-/// - `m`: Na⁺ activation gate
-/// - `h`: Na⁺ inactivation gate
-/// - `n`: K⁺ activation gate
-/// - `c`: CaV-T (T-type calcium) activation gate (pacemaking)
-/// - `was_below`: edge-detection flag (1.0 = was below v_thresh last step)
-///
-/// # Params (12)
-/// - `dt`, `g_Na`, `E_Na`, `g_K`, `E_K`, `g_Leak`, `E_Leak`,
-///   `q10`, `v_thresh`, `inv_cm`, `g_CaT`, `E_CaT`
-///
-/// Set `g_CaT = 0` for the classic squid-axon HH (no Ca²⁺ current) and
-/// `g_CaT = 0.5, E_CaT = +120` for **pacemaking** (spontaneous oscillation).
-#[derive(NeuronModel)]
-pub struct HHModel {
-    #[state]
-    pub v: f32,
-    #[state]
-    pub m: f32,
-    #[state]
-    pub h: f32,
-    #[state]
-    pub n: f32,
-    #[state]
-    pub c: f32,
-    #[state]
-    pub was_below: f32,
-
-    #[param]
-    pub dt: f32,
-    #[param]
-    pub g_Na: f32,
-    #[param]
-    pub E_Na: f32,
-    #[param]
-    pub g_K: f32,
-    #[param]
-    pub E_K: f32,
-    #[param]
-    pub g_Leak: f32,
-    #[param]
-    pub E_Leak: f32,
-    #[param]
-    pub q10: f32,
-    #[param]
-    pub v_thresh: f32,
-    #[param]
-    pub inv_cm: f32,
-    #[param]
-    pub g_CaT: f32,
-    #[param]
-    pub E_CaT: f32,
-}
-
-impl ComputeNeuron for HHModel {
-    type State<S: SimdLane> = HHState<S>;
-    type Params<S: SimdLane> = HHParams<S>;
-
-    #[inline(always)]
-    fn step<S: SimdLane>(
-        state: &mut Self::State<S>,
-        params: &Self::Params<S>,
-        ctx: &mut StepContext<S>,
-    ) {
-        // ─── Temperature-scaled time step ─────────────────────────
-        let dt_q10 = ctx.dt_simd() * params.q10;
-
-        // ─── Gate Integration (4 gates) ───────────────────────────
-        // Standard gates: x_∞ = α/(α+β), x' = x_∞ + (x-x_∞)·exp(-dt·Q10·(α+β))
-        let m_new = compute_gate_state(state.v, state.m, GATE_M, dt_q10);
-        let h_new = compute_gate_state(state.v, state.h, GATE_H, dt_q10);
-        let n_new = compute_gate_state(state.v, state.n, GATE_N, dt_q10);
-        // CaV-T gate: constant τ form — one fast_exp, no α/β split
-        let c_new = compute_cat_gate_state(state.v, state.c, dt_q10);
-
-        // ─── Ionic Currents via ops::ohmic (NEURON convention) ───
-        // Na⁺: g_Na·m³·h·(V-E_Na)  — cube() = 2× vmulps
-        // K⁺:  g_K·n⁴·(V-E_K)      — powi::<4>() = 2× vmulps
-        // CaT: g_CaT·c·(V-E_CaT)    — 0 for standard HH, 0.5 for pacemaking
-        // Leak: g_L·(V-E_L)          — 1× vmulps
-        let gating_na = m_new.cube() * h_new; // m³h
-        let gating_k = n_new.powi::<4>(); // n⁴
-
-        let i_na = ohmic_gated(params.g_Na, state.v, params.E_Na, gating_na);
-        let i_k = ohmic_gated(params.g_K, state.v, params.E_K, gating_k);
-        let i_cat = ohmic_gated(params.g_CaT, state.v, params.E_CaT, c_new);
-        let i_leak = ohmic_current(params.g_Leak, state.v, params.E_Leak);
-
-        // ─── Membrane Integration (ops::membrane) ─────────────────
-        // V' = V + (I_inj - ΣI_ion) · inv_Cm · dt
-        let v_new = membrane_depolarize(
-            state.v,
-            ctx.i_syn,
-            i_na + i_k + i_cat + i_leak,
-            params.inv_cm,
-            ctx.dt_simd(),
-        );
-
-        // ─── Spike Detection (Edge-Triggered, No V Reset!) ───────
-        // ❌ No v_reset — HH is continuous biophysical model.
-        // ✅ Edge-triggered: fires once on rising edge through v_thresh.
-        let is_above = v_new.cmp_ge(params.v_thresh);
-        let (spike, was_below_next) = edge_spike(is_above, state.was_below);
-        ctx.emit_spike(spike);
-
-        // ─── State Update (All Continuous!) ──────────────────────
-        state.v = v_new;
-        state.m = m_new;
-        state.h = h_new;
-        state.n = n_new;
-        state.c = c_new;
-        state.was_below = was_below_next;
+    /// Hodgkin-Huxley gate rate parameters (α/β formulation).
+    ///
+    /// Each gate has:
+    /// - `v_off`: voltage offset for vtrap (e.g., -40 for m-gate)
+    /// - `scale`: vtrap divisor (e.g., 10 for m-gate)
+    /// - `alpha_c`, `beta_c`: rate coefficients
+    /// - `beta_volt`, `beta_div`: β exponential/sigmoid parameters
+    /// - `alpha_exp`: if true, α = alpha_c·exp(v_shift/scale) (h-gate)
+    ///   if false, α = alpha_c·vtrap(v_shift, scale) (m, n)
+    /// - `beta_sigmoid`: if true, β = beta_c/(1+exp(-(V+beta_volt)/beta_div))
+    ///   if false, β = beta_c·exp(-(V+beta_volt)/beta_div)
+    #[derive(Copy, Clone)]
+    pub struct GateParams {
+        pub v_off: f32,
+        pub scale: f32,
+        pub alpha_c: f32,
+        pub beta_c: f32,
+        pub beta_volt: f32,
+        pub beta_div: f32,
+        pub alpha_exp: bool,
+        pub beta_sigmoid: bool,
     }
+
+    /// m-gate: Na⁺ activation — fast, voltage-dependent opening
+    /// α = 0.1·vtrap(-(V+40), 10)   β = 4·exp(-(V+65)/18)
+    pub const GATE_M: GateParams = GateParams {
+        v_off: -40.0,
+        scale: 10.0,
+        alpha_c: 0.1,
+        beta_c: 4.0,
+        beta_volt: 65.0,
+        beta_div: 18.0,
+        alpha_exp: false,
+        beta_sigmoid: false,
+    };
+
+    /// h-gate: Na⁺ inactivation — slower, closes Na channels during spike
+    /// α = 0.07·exp(-(V+65)/20)     β = 1/(1+exp(-(V+35)/10))
+    ///  α is EXPONENTIAL, NOT vtrap (unlike m/n)!
+    pub const GATE_H: GateParams = GateParams {
+        v_off: -65.0,
+        scale: 20.0,
+        alpha_c: 0.07,
+        beta_c: 1.0,
+        beta_volt: 35.0,
+        beta_div: 10.0,
+        alpha_exp: true,
+        beta_sigmoid: true,
+    };
+
+    /// n-gate: K⁺ activation — slow, opens KV channels for repolarization
+    /// α = 0.01·vtrap(-(V+55), 10)  β = 0.125·exp(-(V+65)/80)
+    pub const GATE_N: GateParams = GateParams {
+        v_off: -55.0,
+        scale: 10.0,
+        alpha_c: 0.01,
+        beta_c: 0.125,
+        beta_volt: 65.0,
+        beta_div: 80.0,
+        alpha_exp: false,
+        beta_sigmoid: false,
+    };
+
+    /// CaV-T (T-type calcium) gate — single low-threshold activation gate `c` for
+    /// pacemaking (Wang & Rinzel 1993 / Hill & Tononi 2005).
+    ///
+    /// ```text
+    /// m_inf  = 1 / (1 + exp(-(v+56)/6.2))     — steady-state activation
+    /// τ_c    = 0.6 ms                          — fixed time constant
+    /// c(t+1) = m_inf + (c - m_inf)·exp(-dt·Q10/τ_c)
+    /// ```
+    ///
+    /// α = m_inf/τ, β = (1−m_inf)/τ → α+β = 1/τ is **constant**, so the
+    /// exponential-Euler decay is voltage-independent (one `fast_exp` total).
+    pub const GATE_CAT_TAU: f32 = 0.6;
+    pub const GATE_CAT_INV_TAU: f32 = 1.0 / GATE_CAT_TAU; // precomputed — NO vector division in step()
+    pub const GATE_CAT_V_HALF: f32 = -56.0;
+    pub const GATE_CAT_K: f32 = 6.2;
+    pub const GATE_CAT_INV_K: f32 = 1.0 / GATE_CAT_K; // precomputed — NO vector division in step()
+
+    /// Compute the CaV-T gate one step via exponential Euler (constant-τ form).
+    ///
+    /// Exactly mirrors `hh_channels::cat_c_alpha`/`cat_c_beta` with
+    /// `α+β = 1/τ_c` folded into a voltage-independent decay.
+    ///
+    /// # Precision
+    /// Uses `fast_exp()` by default (~1e-5 error). Enable feature `hh-precise-gates`
+    /// for exact `exp()` (~1 ULP) at ~3x performance cost.
+    #[inline(always)]
+    fn compute_cat_gate_state<S: SimdLane>(v: S, c: S, dt_q10: S) -> S {
+        // m_inf = 1/(1+exp(-(v+56)/6.2)) — arg division folded into precomputed inv_k
+        // (the 1/(1+e) reciprocal stays: it is a single divps, the sigmoid itself)
+        let arg = -(v + S::splat(GATE_CAT_V_HALF)) * S::splat(GATE_CAT_INV_K);
+        let m_inf = S::one() / (S::one() + arg.fast_exp());
+
+        // decay = exp(-dt·Q10/τ_c) — voltage-independent, τ folded into inv_tau
+        #[cfg(feature = "hh-precise-gates")]
+        let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).exp();
+
+        #[cfg(not(feature = "hh-precise-gates"))]
+        let decay = (-dt_q10 * S::splat(GATE_CAT_INV_TAU)).fast_exp();
+
+        decay.mul_add(c - m_inf, m_inf)
+    }
+
+    /// Compute HH gate one step via Exponential Euler.
+    ///
+    /// ```text
+    /// α(V)     — rate of opening
+    /// β(V)     — rate of closing
+    /// x_∞      = α/(α+β)           — steady state
+    /// τ(V)     = 1/(α+β)           — time constant
+    /// x(t+dt)  = x_∞ + (x-x_∞)·exp(-dt·Q10·(α+β))
+    /// ```
+    ///
+    /// All `if` branches are compile-time (const GateParams) — zero overhead.
+    /// No scalar conversion, no branching at runtime.
+    #[inline(always)]
+    fn compute_gate_state<S: SimdLane>(v: S, gate: S, params: GateParams, dt_q10: S) -> S {
+        let v_shift = S::splat(params.v_off) - v;
+
+        // α function: either vtrap (m, n) or exponential (h)
+        let alpha = if params.alpha_exp {
+            S::splat(params.alpha_c) * (v_shift / S::splat(params.scale)).fast_exp()
+        } else {
+            S::splat(params.alpha_c) * S::vtrap(v_shift, S::splat(params.scale))
+        };
+
+        // β function: either exponential (m, n) or sigmoid (h)
+        let exp_arg = -(v + S::splat(params.beta_volt)) / S::splat(params.beta_div);
+        let beta = if params.beta_sigmoid {
+            S::splat(params.beta_c) / (S::one() + exp_arg.fast_exp())
+        } else {
+            S::splat(params.beta_c) * exp_arg.fast_exp()
+        };
+
+        let sum = alpha + beta;
+        let g_inf = alpha / sum;
+
+        // Выбор точности exp в зависимости от feature flag
+        #[cfg(feature = "hh-precise-gates")]
+        let decay = (-dt_q10 * sum).exp(); // Точный exp (~1 ULP)
+
+        #[cfg(not(feature = "hh-precise-gates"))]
+        let decay = (-dt_q10 * sum).fast_exp(); // Быстрый exp (~1e-5)
+
+        // FMA: g_inf + (gate - g_inf)·decay
+        decay.mul_add(gate - g_inf, g_inf)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Model Definition
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Hodgkin-Huxley (1952) squid axon — continuous conductance-based model.
+    ///
+    /// # States (6)
+    /// - `v`: membrane potential (mV)
+    /// - `m`: Na⁺ activation gate
+    /// - `h`: Na⁺ inactivation gate
+    /// - `n`: K⁺ activation gate
+    /// - `c`: CaV-T (T-type calcium) activation gate (pacemaking)
+    /// - `was_below`: edge-detection flag (1.0 = was below v_thresh last step)
+    ///
+    /// # Params (12)
+    /// - `dt`, `g_Na`, `E_Na`, `g_K`, `E_K`, `g_Leak`, `E_Leak`,
+    ///   `q10`, `v_thresh`, `inv_cm`, `g_CaT`, `E_CaT`
+    ///
+    /// Set `g_CaT = 0` for the classic squid-axon HH (no Ca²⁺ current) and
+    /// `g_CaT = 0.5, E_CaT = +120` for **pacemaking** (spontaneous oscillation).
+    #[derive(NeuronModel)]
+    pub struct HHModel {
+        #[state]
+        pub v: f32,
+        #[state]
+        pub m: f32,
+        #[state]
+        pub h: f32,
+        #[state]
+        pub n: f32,
+        #[state]
+        pub c: f32,
+        #[state]
+        pub was_below: f32,
+
+        #[param]
+        pub dt: f32,
+        #[param]
+        pub g_Na: f32,
+        #[param]
+        pub E_Na: f32,
+        #[param]
+        pub g_K: f32,
+        #[param]
+        pub E_K: f32,
+        #[param]
+        pub g_Leak: f32,
+        #[param]
+        pub E_Leak: f32,
+        #[param]
+        pub q10: f32,
+        #[param]
+        pub v_thresh: f32,
+        #[param]
+        pub inv_cm: f32,
+        #[param]
+        pub g_CaT: f32,
+        #[param]
+        pub E_CaT: f32,
+    }
+
+    impl ComputeNeuron for HHModel {
+        type State<S: SimdLane> = HHState<S>;
+        type Params<S: SimdLane> = HHParams<S>;
+
+        #[inline(always)]
+        fn step<S: SimdLane>(
+            state: &mut Self::State<S>,
+            params: &Self::Params<S>,
+            ctx: &mut StepContext<S>,
+        ) {
+            // ─── Temperature-scaled time step ─────────────────────────
+            let dt_q10 = ctx.dt_simd() * params.q10;
+
+            // ─── Gate Integration (4 gates) ───────────────────────────
+            // Standard gates: x_∞ = α/(α+β), x' = x_∞ + (x-x_∞)·exp(-dt·Q10·(α+β))
+            let m_new = compute_gate_state(state.v, state.m, GATE_M, dt_q10);
+            let h_new = compute_gate_state(state.v, state.h, GATE_H, dt_q10);
+            let n_new = compute_gate_state(state.v, state.n, GATE_N, dt_q10);
+            // CaV-T gate: constant τ form — one fast_exp, no α/β split
+            let c_new = compute_cat_gate_state(state.v, state.c, dt_q10);
+
+            // ─── Ionic Currents via ops::ohmic (NEURON convention) ───
+            // Na⁺: g_Na·m³·h·(V-E_Na)  — cube() = 2× vmulps
+            // K⁺:  g_K·n⁴·(V-E_K)      — powi::<4>() = 2× vmulps
+            // CaT: g_CaT·c·(V-E_CaT)    — 0 for standard HH, 0.5 for pacemaking
+            // Leak: g_L·(V-E_L)          — 1× vmulps
+            let gating_na = m_new.cube() * h_new; // m³h
+            let gating_k = n_new.powi::<4>(); // n⁴
+
+            let i_na = ohmic_gated(params.g_Na, state.v, params.E_Na, gating_na);
+            let i_k = ohmic_gated(params.g_K, state.v, params.E_K, gating_k);
+            let i_cat = ohmic_gated(params.g_CaT, state.v, params.E_CaT, c_new);
+            let i_leak = ohmic_current(params.g_Leak, state.v, params.E_Leak);
+
+            // ─── Membrane Integration (ops::membrane) ─────────────────
+            // V' = V + (I_inj - ΣI_ion) · inv_Cm · dt
+            let v_new = membrane_depolarize(
+                state.v,
+                ctx.i_syn,
+                i_na + i_k + i_cat + i_leak,
+                params.inv_cm,
+                ctx.dt_simd(),
+            );
+
+            // ─── Spike Detection (Edge-Triggered, No V Reset!) ───────
+            // ❌ No v_reset — HH is continuous biophysical model.
+            // ✅ Edge-triggered: fires once on rising edge through v_thresh.
+            let is_above = v_new.cmp_ge(params.v_thresh);
+            let (spike, was_below_next) = edge_spike(is_above, state.was_below);
+            ctx.emit_spike(spike);
+
+            // ─── State Update (All Continuous!) ──────────────────────
+            state.v = v_new;
+            state.m = m_new;
+            state.h = h_new;
+            state.n = n_new;
+            state.c = c_new;
+            state.was_below = was_below_next;
+        }
     }
 }
 

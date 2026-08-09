@@ -80,6 +80,67 @@ pub fn stdp_update(
     }
 }
 
+/// STDP with homeostatic weight-sum regulation (волна 8, транш 1b).
+///
+/// Same update as [`stdp_update`] plus a global pull of the total weight
+/// sum toward `target_sum`:
+///
+/// ```text
+/// homeo = (target_sum − Σw) / n
+/// w'    = clamp(w + lr_ltp·tr_post − lr_ltd·tr_pre + homeo, 0, w_max)
+/// ```
+///
+/// Canonical port of the legacy `kernels::neuron::stp::stdp_homeostatic`
+/// (бит-в-бит: та же формула суммы, тот же порядок арифметики SIMD/tail).
+pub fn stdp_homeostatic(
+    weights: &mut [f32],
+    traces_pre: &[f32],
+    traces_post: &[f32],
+    lr_ltd: f32,
+    lr_ltp: f32,
+    target_sum: f32,
+    w_max: f32,
+) {
+    let n = weights.len().min(traces_pre.len()).min(traces_post.len());
+    if n == 0 {
+        return;
+    }
+
+    // Global weight sum (SIMD reduce + scalar tail, тот же порядок, что в легаси).
+    let n8 = n & !7;
+    let mut sum = 0.0f32;
+    for off in (0..n8).step_by(8) {
+        let wv = unsafe { load8(weights.as_ptr(), off) };
+        let a = wv.to_array();
+        sum += a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7];
+    }
+    for &val in &weights[n8..n] {
+        sum += val;
+    }
+
+    let homeo = (target_sum - sum) / n as f32;
+    let ltd_s = f32x8::splat(lr_ltd);
+    let ltp_s = f32x8::splat(lr_ltp);
+    let homeo_s = f32x8::splat(homeo);
+    let wmax_s = f32x8::splat(w_max);
+    let zero_s = f32x8::splat(0.0);
+
+    for off in (0..n8).step_by(8) {
+        unsafe {
+            let mut w = load8(weights.as_ptr(), off);
+            let pre = load8(traces_pre.as_ptr(), off);
+            let post = load8(traces_post.as_ptr(), off);
+            w = w + ltp_s * post - ltd_s * pre + homeo_s;
+            w = w.min(wmax_s).max(zero_s);
+            store8(weights.as_mut_ptr(), off, w);
+        }
+    }
+    for i in n8..n {
+        weights[i] += lr_ltp * traces_post[i] - lr_ltd * traces_pre[i] + homeo;
+        weights[i] = weights[i].max(0.0).min(w_max);
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  BCM — Bienenstock, Cooper & Munro (1982)
 //  Rate-based plasticity with sliding threshold θ_M
@@ -276,7 +337,11 @@ pub fn hebbian_csr_step(
             let mut w_arr = [0.0f32; 8];
             for j in 0..batch_n {
                 let post_idx = col_indices[off + j] as usize;
-                post_arr[j] = if post_idx < n_neurons { m[post_idx] } else { 0.0 };
+                post_arr[j] = if post_idx < n_neurons {
+                    m[post_idx]
+                } else {
+                    0.0
+                };
                 w_arr[j] = values[off + j];
             }
             // Fill remaining with last valid value (avoids zero-bias on partial blocks)

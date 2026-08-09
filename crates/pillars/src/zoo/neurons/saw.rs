@@ -59,7 +59,7 @@ pub mod saw {
             let is_refr = state.refr.cmp_gt(zero).cond();
 
             // ─── Legacy parity: absolute refractory FREEZES v (no integration, no spike) ───
-            // Legacy kernels (kernels::neuron::saw) skip dynamics entirely while refr > 0:
+            // Легаси batch-кернел (удалён в волну 7) пропускал динамику в рефрактерности:
             //   vv += refr_mask.blend(zero, dt·dv);  sm = (vv >= v_th) & !refr
             // Clamping v to v_reset at INPUT (old design) let v drift during refractory.
             let v = state.v;

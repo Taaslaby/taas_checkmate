@@ -970,15 +970,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cuda-kernels"
-version = "0.1.0"
-dependencies = [
- "cc",
- "serial_test",
- "taas-kernels",
-]
-
-[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2547,9 +2538,11 @@ dependencies = [
 name = "pillars-connectome"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "pillars",
+ "pillars-cuda",
  "rand",
- "taas-connectome",
+ "serde",
 ]
 
 [[package]]
@@ -2558,12 +2551,14 @@ version = "0.1.0"
 dependencies = [
  "pillars",
  "pillars-macros",
+ "serial_test",
 ]
 
 [[package]]
 name = "pillars-macros"
 version = "0.1.0"
 dependencies = [
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -3358,47 +3353,19 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "criterion",
- "cuda-kernels",
  "numpy",
  "pillars",
  "pillars-connectome",
+ "pillars-cuda",
  "pyo3",
  "rand",
  "rayon",
  "serde",
  "serde_json",
- "taas-connectome",
- "taas-core",
  "taas-format",
- "taas-kernels",
  "taas-t3",
  "taas-train",
  "wide",
-]
-
-[[package]]
-name = "taas-connectome"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "cuda-kernels",
- "pillars",
- "pillars-connectome",
- "rand",
- "serde",
- "taas-core",
- "taas-kernels",
-]
-
-[[package]]
-name = "taas-core"
-version = "0.1.0"
-dependencies = [
- "pillars",
- "rand",
- "rayon",
- "serde",
- "taas-kernels",
 ]
 
 [[package]]
@@ -3409,33 +3376,23 @@ dependencies = [
  "crc32fast",
  "memmap2",
  "pillars",
+ "pillars-connectome",
  "serde",
  "serde_json",
- "taas-connectome",
  "taas-t3",
  "taas-train",
  "zstd",
 ]
 
 [[package]]
-name = "taas-kernels"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "pillars",
- "rayon",
- "wide",
-]
-
-[[package]]
 name = "taas-t3"
 version = "0.1.0"
 dependencies = [
- "cuda-kernels",
+ "pillars",
+ "pillars-cuda",
  "rand",
  "serde",
  "serde_json",
- "taas-kernels",
  "wide",
 ]
 
@@ -3443,11 +3400,10 @@ dependencies = [
 name = "taas-train"
 version = "0.1.0"
 dependencies = [
- "cuda-kernels",
+ "pillars",
+ "pillars-connectome",
+ "pillars-cuda",
  "rand",
- "taas-connectome",
- "taas-core",
- "taas-kernels",
  "taas-t3",
  "wide",
 ]

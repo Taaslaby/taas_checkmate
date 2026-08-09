@@ -9,6 +9,8 @@ description = "Pillars — reusable SIMD bio primitives for neural computation"
 [dependencies]
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
 rayon = { version = "1.8", optional = true }
 pillars-macros = { path = "../pillars-macros" }
 

@@ -9,10 +9,11 @@
 
 use pillars::api::SparseGraph;
 use pillars::kernels::synapse::{DecayFactors, ReceptorType, SynapticKinetics};
-use pillars::NeuralPopulation;
 use pillars::zoo::Model;
+use pillars::NeuralPopulation;
 
-use crate::data::ConnectomeData;
+use crate::brain::sparse_graph;
+use crate::data::{build_receptor_types_from_csr, ConnectomeData};
 
 /// Drives a connectome with conductance-based (AMPA/NMDA/GABA) synapses.
 ///
@@ -37,13 +38,27 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
     /// `M`'s **state column 0** to be the membrane potential `v` (true for
     /// the zoo point models — LIF, Izhikevich, HH, …).
     pub fn from_connectome(conn: &ConnectomeData, dt: f32) -> Self {
-        let n = conn.n_neurons();
+        // Fallback: if no per-synapse receptor types were built yet, derive
+        // them from the per-neuron NT signs (nt > 0 → AMPA, nt ≤ 0 → GABA_A).
+        let receptor_types = if conn.receptor_types.is_empty() {
+            build_receptor_types_from_csr(&conn.row_ptr, conn.n_synapses, &conn.nt_types)
+        } else {
+            conn.receptor_types.clone()
+        };
+        Self::from_sparse_graph(sparse_graph(conn), receptor_types, dt)
+    }
+
+    /// Build from a raw pillars [`SparseGraph`] + explicit per-synapse receptor
+    /// types (used where per-synapse delays matter — e.g. the python
+    /// `SynapticConnectomeBrain` facade).
+    pub fn from_sparse_graph(graph: SparseGraph, receptor_types: Vec<u8>, dt: f32) -> Self {
+        let n = graph.num_neurons();
         Self {
             pop: NeuralPopulation::<M>::new(n),
             kinetics: SynapticKinetics::new(n),
             factors: DecayFactors::new(dt),
-            graph: conn.graph.clone(),
-            receptor_types: conn.receptor_types.clone(),
+            graph,
+            receptor_types,
             n,
         }
     }

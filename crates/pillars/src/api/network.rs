@@ -164,13 +164,25 @@ impl Network {
     ///
     /// # Panics
     /// Panics if `build()` has already been called.
-    pub fn add_population<M: Model + 'static + Send + Sync>(&mut self, count: usize) -> PopulationId {
+    pub fn add_population<M: Model + 'static + Send + Sync>(
+        &mut self,
+        count: usize,
+    ) -> PopulationId {
         assert!(self.graph.is_none(), "Cannot add populations after build()");
+        let new_total = self
+            .total_neurons
+            .checked_add(count)
+            .expect("Network: total neuron count overflow");
+        assert!(
+            new_total <= u32::MAX as usize,
+            "Network: total neuron count {} exceeds u32::MAX",
+            new_total
+        );
         let id = self.pops.len();
         let pop = crate::api::NeuralPopulation::<M>::new(count);
         self.pops.push(Box::new(pop));
-        self.total_neurons += count;
-        self.pop_offsets.push(self.total_neurons);
+        self.total_neurons = new_total;
+        self.pop_offsets.push(new_total);
         id
     }
 
@@ -217,13 +229,17 @@ impl Network {
             let ti = to_indices[i] as usize;
             assert!(fi < from_count, "from index {fi} out of bounds");
             assert!(ti < to_count, "to index {ti} out of bounds");
+            assert!(
+                weights[i].is_finite(),
+                "Network::connect: weight {i} must be finite, got {}",
+                weights[i]
+            );
 
-            self.edges.push((
-                (from_offset + fi) as u32,
-                (to_offset + ti) as u32,
-                weights[i],
-                delays[i],
-            ));
+            let pre = u32::try_from(from_offset + fi)
+                .expect("Network::connect: global pre index exceeds u32::MAX");
+            let post = u32::try_from(to_offset + ti)
+                .expect("Network::connect: global post index exceeds u32::MAX");
+            self.edges.push((pre, post, weights[i], delays[i]));
         }
     }
 
@@ -342,7 +358,7 @@ impl Network {
     /// Configure a population's model parameters / state via its typed model.
     ///
     /// The ergonomic replacement for `pop_typed_mut` — the closure gets the
-    /// typed [`NeuralPopulation<M>`] directly, so you can `fill_param`/
+    /// typed [`crate::api::NeuralPopulation<M>`] directly, so you can `fill_param`/
     /// `fill_state` by the model's column indices.
     ///
     /// # Panics
@@ -398,6 +414,11 @@ impl Network {
             assert!(
                 idx < count,
                 "inject_current: neuron index {idx} out of bounds (population has {count})"
+            );
+            assert!(
+                values[i].is_finite(),
+                "inject_current: value {i} must be finite, got {}",
+                values[i]
             );
             self.delay.add(slot, start + idx, values[i]);
         }
@@ -654,6 +675,24 @@ mod tests {
         let pop = net.add_population::<LIFModel>(2);
         net.build();
         net.inject_current(pop, &[5], &[1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn test_network_rejects_non_finite_weight() {
+        let mut net = Network::new();
+        let a = net.add_population::<LIFModel>(1);
+        let b = net.add_population::<LIFModel>(1);
+        net.connect(a, &[0], b, &[0], &[f32::NAN], &[0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn test_network_rejects_non_finite_current() {
+        let mut net = Network::new();
+        let pop = net.add_population::<LIFModel>(1);
+        net.build();
+        net.inject_current(pop, &[0], &[f32::INFINITY]);
     }
 
     #[test]

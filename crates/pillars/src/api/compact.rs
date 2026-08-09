@@ -3,11 +3,13 @@
 //! Extracts indices of active neurons from a dense spike array.
 //!
 //! ## How it works
-//! Spikes arrive as `i32` 0/1. Each chunk of 8 is converted — branchlessly —
-//! into an `f32x8` where an active spike is `-0.0` (sign bit set) and a
-//! silent one is `+0.0`: `((spike != 0) as u32) << 31` is the sign bit.
-//! One `move_mask()` then extracts the sign bits of all 8 lanes in a single
-//! `vmovmskps` (AVX2), and `trailing_zeros` (`tzcnt`) walks only the set bits.
+//! Spikes arrive as `i32` 0/1. Each chunk of 8 is converted into an `f32x8`
+//! where an active spike is `-0.0` (sign bit set) and a silent one is `+0.0`:
+//! `((spike != 0) as u32) << 31` is the sign bit. The 8-lane conversion is a
+//! fixed, fully unrolled scalar loop — data-independent, hence *branchless*,
+//! but it is not SIMD arithmetic. One `move_mask()` then extracts the sign
+//! bits of all 8 lanes in a single `vmovmskps` (AVX2), and `trailing_zeros`
+//! (`tzcnt`) walks only the set bits.
 //!
 //! For 1–5% sparsity (typical SNN) this avoids up to 8 data-dependent
 //! branches per chunk — the previous implementation paid them on every
@@ -17,9 +19,11 @@ use wide::f32x8;
 
 /// Extract indices of active (non-zero) neurons into a reusable buffer.
 ///
-/// SIMD fast path: 8 spikes per chunk via `move_mask` + `trailing_zeros`
-/// (branchless, one `vmovmskps` per chunk on AVX2). Scalar tail for the
-/// remainder. Semantics are identical to the scalar reference:
+/// Fast path: 8 spikes per chunk — the i32→f32x8 conversion is a fixed
+/// unrolled scalar loop (branchless, but not SIMD arithmetic); the
+/// compaction itself is SIMD via `move_mask` + `trailing_zeros` (one
+/// `vmovmskps` per chunk on AVX2). Scalar tail for the remainder.
+/// Semantics are identical to the scalar reference:
 /// `out = [i for (i, s) in spikes.iter().enumerate() if *s != 0]`.
 #[inline]
 pub fn compact_spikes_into(spikes: &[i32], out: &mut Vec<u32>) {

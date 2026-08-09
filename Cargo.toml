@@ -3,8 +3,8 @@ resolver = "2"
 members = [
     "crates/pillars", "crates/pillars-macros", "crates/pillars-cuda",
     "crates/pillars-connectome",
-    "crates/kernels", "crates/t3", "crates/cuda", "crates/connectome",
-    "crates/core",     "crates/train",
+    "crates/t3",
+    "crates/train",
     "crates/taas-format",
 ]
 
@@ -40,15 +40,12 @@ name = "taas_checkmate"
 # Internal crates (always present)
 pillars = { path = "crates/pillars" }
 pillars-connectome = { path = "crates/pillars-connectome", optional = true }
-taas-kernels = { path = "crates/kernels" }
-taas-core = { path = "crates/core" }
 taas-train = { path = "crates/train" }
 taas-format = { path = "crates/taas-format", features = ["train"] }
 
 # Internal crates (optional, behind features)
 taas-t3 = { path = "crates/t3", optional = true }
-cuda-kernels = { path = "crates/cuda", optional = true }
-taas-connectome = { path = "crates/connectome", optional = true }
+pillars-cuda = { path = "crates/pillars-cuda", optional = true }
 
 # External dependencies
 rayon = "1"
@@ -72,11 +69,6 @@ name = "bench_all"
 harness = false
 
 [[bench]]
-name = "bench_rcm"
-harness = false
-required-features = ["connectome"]
-
-[[bench]]
 name = "bench_lod_gnw"
 harness = false
 required-features = ["karmac"]
@@ -91,16 +83,16 @@ t3 = ["taas-t3"]
 train = ["taas-train/t3"]
 
 # Connectome brain simulator (also exposes connectome_chase in train)
-connectome = ["taas-connectome", "taas-train/connectome"]
+connectome = ["dep:pillars-connectome", "taas-train/connectome"]
 
 # Cognitive architecture (GNW, LOD, BasalGanglia) — встроено в корневой крейт
 karmac = []
 
 # GPU acceleration — compound feature, implies t3 + connectome
 cuda = ["t3", "connectome",
-        "cuda-kernels",
+        "dep:pillars-cuda",
         "taas-t3/cuda",
-        "taas-connectome/cuda",
+        "pillars-connectome/cuda",
         "taas-train/cuda"]
 
 # Python bindings

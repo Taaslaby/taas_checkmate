@@ -20,14 +20,24 @@
 
 // ═══ Layer 1: api/ — network orchestration (safe) ═══════════
 pub use crate::api::builder::{
-    AdExBuilder, HAAPBuilder, HHBuilder, HHPreset, IzhPattern, IzhikevichBuilder, LIFBuilder,
-    ModelBuilder, UniversalBuilder, VSNBuilder,
+    AdExBuilder, BuildError, HAAPBuilder, HHBuilder, HHPreset, IzhPattern, IzhikevichBuilder,
+    LIFBuilder, ModelBuilder, UniversalBuilder, VSNBuilder,
 };
+// Authoring facade: one import is enough for a downstream model crate.
 pub use crate::api::formula::{
     run_program, FormulaModel, OpKind, OpNode, I_SYN, MAX_FORMULA_MODELS, N_REGS, P0, S0, S1, S2,
     S3, TEMP0,
 };
-pub use crate::api::{Network, Population, PopulationId, SparseGraph};
+pub use crate::api::{
+    HumanHandProfile, HumanHandState, HumanMuscle, HumanMuscleSpec, Network, Population,
+    PopulationId, SparseGraph, HUMAN_SPECIFIC_TENSION_PA,
+};
+pub use crate::kernels::csr::{
+    apply_stdp_ltd_with_topology, compute_hamiltonian_scatter_with_topology,
+    compute_hamiltonian_with_topology, propagate_spikes_with_topology, rate_step_with_topology,
+    step_gco_full_with_topology, ValidatedCsrGraph, ValidatedCsrTopology,
+};
+pub use pillars_macros::{dual_neuron, NeuronModel};
 
 // ═══ Layer 2: zoo/ — ready-made models ══════════════════════
 pub use crate::zoo::sensors::chordotonal_step;

@@ -173,29 +173,20 @@ impl AlignedVec {
 
     /// Get element at index.
     ///
-    /// # Panics (debug only)
-    /// Panics if `index >= len()` (release: caller MUST guarantee it — an
-    /// out-of-range index reads uninitialized heap memory).
+    /// # Panics
+    /// Panics if `index >= len()`, in both debug and release builds.
     #[inline(always)]
     pub fn get(&self, index: usize) -> f32 {
-        debug_assert!(index < self.logical_len);
-        // SAFETY: debug_asserted `index < logical_len`; ptr is valid for
-        // `logical_len` initialized elements.
-        unsafe { *self.ptr.as_ptr().add(index) }
+        self.as_slice()[index]
     }
 
     /// Set element at index.
     ///
-    /// # Panics (debug only)
-    /// Panics if `index >= len()` (release: caller MUST guarantee it — an
-    /// out-of-range index writes to heap memory outside the logical region).
+    /// # Panics
+    /// Panics if `index >= len()`, in both debug and release builds.
     #[inline(always)]
     pub fn set(&mut self, index: usize, value: f32) {
-        debug_assert!(index < self.logical_len);
-        // SAFETY: as `get`, plus &mut self gives exclusive write access.
-        unsafe {
-            *self.ptr.as_ptr().add(index) = value;
-        }
+        self.as_mut_slice()[index] = value;
     }
 
     /// Fill buffer with a value.
@@ -386,6 +377,20 @@ mod tests {
         for i in 0..8 {
             assert!((v.get(i) - i as f32).abs() < 0.001);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_get_out_of_bounds_panics_in_all_builds() {
+        let v = AlignedVec::new(1, 0.0);
+        let _ = v.get(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_set_out_of_bounds_panics_in_all_builds() {
+        let mut v = AlignedVec::new(1, 0.0);
+        v.set(1, 1.0);
     }
 
     #[test]

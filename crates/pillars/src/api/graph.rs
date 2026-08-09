@@ -89,6 +89,12 @@ impl SparseGraph {
         if let Some(&t) = to.iter().max() {
             assert!((t as usize) < n_neurons, "to index {t} >= {n_neurons}");
         }
+        for (i, &weight) in weights.iter().enumerate() {
+            assert!(
+                weight.is_finite(),
+                "weight {i} must be finite, got {weight}"
+            );
+        }
         for &d in delays.iter() {
             assert!(
                 (d as usize) < MAX_DELAY_SLOTS,
@@ -104,20 +110,37 @@ impl SparseGraph {
         triplets.sort_unstable_by_key(|t| t.0);
 
         // Count outgoing synapses per neuron
-        let mut counts = vec![0u32; n_neurons];
+        let mut counts = vec![0u64; n_neurons];
         for &(f, _, _, _) in &triplets {
-            counts[f as usize] += 1;
+            counts[f as usize] = counts[f as usize]
+                .checked_add(1)
+                .expect("SparseGraph: outgoing synapse count overflow");
         }
 
-        // Build CSR row_ptr: row_ptr[i] = start index of neuron i's edges
+        // Build CSR row_ptr: row_ptr[i] = start index of neuron i's edges.
+        // Accumulate in u64: synapse counts beyond u32::MAX are pathological,
+        // but a silent u32 wrap in release mode would truncate row_ptr and
+        // turn later `row()` calls into OOB reads.
         let mut row_ptr = vec![0u32; n_neurons + 1];
-        let mut cum = 0u32;
+        let mut cum: u64 = 0;
         for i in 0..n_neurons {
-            row_ptr[i] = cum;
-            cum += counts[i];
+            row_ptr[i] = u32::try_from(cum).unwrap_or_else(|_| {
+                panic!("SparseGraph: too many synapses ({cum}) for a u32 CSR row_ptr")
+            });
+            cum = cum
+                .checked_add(counts[i])
+                .expect("SparseGraph: synapse count overflow");
         }
-        row_ptr[n_neurons] = cum;
+        row_ptr[n_neurons] =
+            u32::try_from(cum).expect("SparseGraph: too many synapses for a u32 CSR row_ptr");
         let total = cum as usize;
+        // Catches a u32 wrap inside `counts[f] += 1` (a single neuron with
+        // > u32::MAX outgoing edges): the sum would then disagree with the
+        // true edge count and the scatter below would write OOB.
+        assert_eq!(
+            total, n_syn,
+            "SparseGraph: synapse count overflow ({total} != {n_syn})"
+        );
 
         let mut col_idx = vec![0u32; total];
         let mut weights_vec = vec![0.0f32; total];
@@ -165,15 +188,34 @@ impl SparseGraph {
                 w[1]
             );
         }
+        assert!(
+            col_idx.len() <= u32::MAX as usize,
+            "CSR col_idx too large ({} synapses > u32::MAX): u32 row_ptr cannot address it",
+            col_idx.len()
+        );
         assert_eq!(
             row_ptr[n_neurons] as usize,
             col_idx.len(),
             "CSR row_ptr must end at col_idx.len()"
         );
-        assert_eq!(col_idx.len(), weights.len(), "col_idx/weights length mismatch");
-        assert_eq!(col_idx.len(), delays.len(), "col_idx/delays length mismatch");
+        assert_eq!(
+            col_idx.len(),
+            weights.len(),
+            "col_idx/weights length mismatch"
+        );
+        assert_eq!(
+            col_idx.len(),
+            delays.len(),
+            "col_idx/delays length mismatch"
+        );
         for &t in &col_idx {
             assert!((t as usize) < n_neurons, "col index {t} >= {n_neurons}");
+        }
+        for (i, &weight) in weights.iter().enumerate() {
+            assert!(
+                weight.is_finite(),
+                "weight {i} must be finite, got {weight}"
+            );
         }
         for &d in delays.iter() {
             assert!(
@@ -205,6 +247,11 @@ impl SparseGraph {
     /// Get outgoing synapses of a neuron by its global index.
     #[inline(always)]
     pub fn row(&self, i: usize) -> SynapseRow<'_> {
+        assert!(
+            i < self.n_neurons,
+            "SparseGraph::row: neuron index {i} out of range (n_neurons={})",
+            self.n_neurons
+        );
         let start = self.row_ptr[i] as usize;
         let end = self.row_ptr[i + 1] as usize;
         SynapseRow {
@@ -217,12 +264,22 @@ impl SparseGraph {
     /// Check if the neuron has any outgoing synapses.
     #[inline(always)]
     pub fn has_outgoing(&self, i: usize) -> bool {
+        assert!(
+            i < self.n_neurons,
+            "SparseGraph::has_outgoing: neuron index {i} out of range (n_neurons={})",
+            self.n_neurons
+        );
         self.row_ptr[i] < self.row_ptr[i + 1]
     }
 
     /// Outgoing synapse count (degree) of the neuron.
     #[inline(always)]
     pub fn degree(&self, i: usize) -> usize {
+        assert!(
+            i < self.n_neurons,
+            "SparseGraph::degree: neuron index {i} out of range (n_neurons={})",
+            self.n_neurons
+        );
         (self.row_ptr[i + 1] - self.row_ptr[i]) as usize
     }
 }
@@ -327,6 +384,18 @@ mod tests {
         SparseGraph::from_triplets(3, &[0], &[1], &[1.0], &[99]);
     }
 
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn test_graph_rejects_non_finite_triplet_weight() {
+        SparseGraph::from_triplets(2, &[0], &[1], &[f32::NAN], &[0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn test_graph_rejects_non_finite_csr_weight() {
+        SparseGraph::from_csr(vec![0, 1, 1], vec![1], &[f32::INFINITY], &[0]);
+    }
+
     /// Немонотонный row_ptr должен отклоняться на загрузке, а не паниковать
     /// позже внутри neighbors() с непонятным slice-индексом.
     #[test]
@@ -347,7 +416,20 @@ mod tests {
         SparseGraph::from_csr(vec![1, 4], vec![0, 1, 2, 0], &[1.0; 4], &[0; 4]);
     }
 
-    /// Валидный CSR проходит — проверка не слишком строгая.
+    #[test]
+    #[should_panic(expected = "SparseGraph::row")]
+    fn test_graph_row_out_of_bounds_is_explicit() {
+        let g = SparseGraph::from_triplets(1, &[], &[], &[], &[]);
+        let _ = g.row(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "SparseGraph::degree")]
+    fn test_graph_degree_out_of_bounds_is_explicit() {
+        let g = SparseGraph::from_triplets(1, &[], &[], &[], &[]);
+        let _ = g.degree(1);
+    }
+
     #[test]
     fn test_from_csr_valid_roundtrip() {
         let g = SparseGraph::from_csr(

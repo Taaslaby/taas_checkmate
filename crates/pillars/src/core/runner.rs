@@ -338,6 +338,7 @@ pub unsafe fn run_neuron_ext<M: Model>(
         let mut ctx = SimdContext::<f32x8> {
             state,
             params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+            param_count: M::N_PARAMS,
             n,
             off,
             i_syn,
@@ -390,6 +391,7 @@ pub unsafe fn run_neuron_ext<M: Model>(
             let mut ctx = SimdContext::<f32> {
                 state,
                 params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+                param_count: M::N_PARAMS,
                 n,
                 off: i,
                 i_syn: ii,
@@ -435,6 +437,13 @@ pub unsafe fn run_neuron_par<M: Model>(
     chunk_size: usize,
 ) {
     use rayon::prelude::*;
+
+    const {
+        assert!(
+            M::N_STATE <= 6,
+            "run_neuron_par accepts at most 6 state channels; use NeuralPopulation for more"
+        );
+    }
 
     if n == 0 {
         return;
@@ -483,6 +492,7 @@ pub unsafe fn run_neuron_par<M: Model>(
                 state,
                 params_ptr: NonNull::new(params_ptr as *mut f32)
                     .expect("params_ptr must be non-null"),
+                param_count: M::N_PARAMS,
                 n,
                 off: total_off,
                 i_syn,
@@ -525,6 +535,7 @@ pub unsafe fn run_neuron_par<M: Model>(
                     state,
                     params_ptr: NonNull::new(params_ptr as *mut f32)
                         .expect("params_ptr must be non-null"),
+                    param_count: M::N_PARAMS,
                     n,
                     off: idx,
                     i_syn: ii,

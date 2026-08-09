@@ -78,6 +78,10 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+// Let proc-macro generated code use a stable absolute path both inside this
+// crate and from downstream model crates (`::pillars::...`).
+extern crate self as pillars;
+
 pub mod api;
 pub mod core;
 pub mod kernels;
@@ -87,6 +91,7 @@ pub mod prelude;
 pub mod zoo;
 
 pub use api::NeuralPopulation;
+pub use pillars_macros::{dual_neuron, NeuronModel};
 
 use wide::f32x8;
 

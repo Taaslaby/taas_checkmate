@@ -25,7 +25,7 @@
 //!         // Typed access: state.v, params.v_thresh, ctx.i_syn, ctx.dt
 //!         let is_refr = state.refr.cmp_gt(S::zero());
 //!         let v_dyn = is_refr.cond().then(params.v_reset).else_(state.v);
-//!         let dv = (params.v_rest - v_dyn + ctx.i_syn) * params.inv_tau_m * ctx.dt_simd();
+//!         let dv = (params.v_rest - v_dyn + ctx.i_syn) * params.inv_tau_m * ctx.dt();
 //!         let v_new = v_dyn + dv;
 //!         let spike = v_new.cmp_ge(params.v_thresh);
 //!         ctx.emit_spike(spike);
@@ -74,10 +74,21 @@ impl<S: SimdLane> StepContext<S> {
         }
     }
 
-    /// Time step broadcast to SIMD lane.
+    /// Time step as a SIMD lane.
+    ///
+    /// This is the canonical authoring accessor. The timestep is supplied once
+    /// by the runner and is broadcast uniformly to all lanes for the typed
+    /// `ComputeNeuron` API. Use `ctx.dt()` in new models; `dt_simd()` remains
+    /// as a compatibility alias.
+    #[inline(always)]
+    pub fn dt(&self) -> S {
+        S::splat(self.dt)
+    }
+
+    /// Compatibility alias for [`Self::dt`].
     #[inline(always)]
     pub fn dt_simd(&self) -> S {
-        S::splat(self.dt)
+        self.dt()
     }
 
     /// Emit a spike: `cond` should be a mask (true = -1.0, false = 0.0).
@@ -164,7 +175,8 @@ mod tests {
         let spike = 30.0f32.cmp_ge(20.0f32);
         ctx.emit_spike(spike);
         assert_ne!(ctx.spike_mask().to_bits(), 0, "scalar should spike");
-        assert!((ctx.dt_simd() - 0.5).abs() < 1e-6);
+        assert!((ctx.dt() - 0.5).abs() < 1e-6);
+        assert!((ctx.dt_simd() - ctx.dt()).abs() < 1e-6);
     }
 
     #[test]

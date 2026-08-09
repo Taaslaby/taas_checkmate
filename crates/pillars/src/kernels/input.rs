@@ -10,6 +10,8 @@
 //! | [`bsa_encode`] | `|signal − recon| > θ → emit + add kernel·sign(err)` | Spike train + reconstruction | Bens Spiker Algorithm |
 //! | [`phase_encode`] | `phase += signal·gain, spike if cos(phase) > θ` | Phase-dependent spikes | Temporal encoding |
 //! | [`TtfsEncoder`] | `delay = (1−value)·max_delay` | Single spike at t = delay | Time-to-First-Spike |
+//! | [`PwmEncoder`] | `sensor > (t/period + shift) mod 1 → spike_current` | PWM duty-cycle encoding | Analog→spike rate |
+//! | [`LinearDecoder`] | `out = W·states + bias` | Linear readout (kernel: `signal::linear_decoder`) | Decode populations |
 
 use core::f32::consts::PI;
 
@@ -189,6 +191,106 @@ pub fn phase_encode(
 }
 
 // ═══════════════════════════════════════════════════════════
+//  PWM encoder
+// ═══════════════════════════════════════════════════════════
+
+const GOLDEN_RATIO: f32 = 0.618_034;
+
+/// Pulse-Width Modulation encoder for sensor→spike conversion.
+///
+/// Each sensor gets a phase shift `(i·0.618034) mod 1` (golden-ratio hashing).
+/// At step `t`, sensor `i` emits `spike_current` when `sensors[i] > (t/period +
+/// shift) mod 1` — the duty cycle follows the sensor value.
+pub struct PwmEncoder {
+    num_sensors: usize,
+    period: usize,
+    tick: usize,
+    spike_current: f32,
+    phase_shifts: Vec<f32>,
+}
+
+impl PwmEncoder {
+    pub fn new(n: usize, period: usize, spike_current: f32) -> Self {
+        let phase_shifts: Vec<f32> = (0..n)
+            .map(|i| ((i as f32) * GOLDEN_RATIO).fract())
+            .collect();
+        Self {
+            num_sensors: n,
+            period,
+            tick: 0,
+            spike_current,
+            phase_shifts,
+        }
+    }
+
+    /// Encode sensor values into spike currents.
+    pub fn encode(&mut self, sensors: &[f32], out_currents: &mut [f32]) {
+        let t = self.tick as f32 / self.period as f32;
+        self.tick = (self.tick + 1) % self.period;
+        for i in 0..self.num_sensors.min(sensors.len()).min(out_currents.len()) {
+            let threshold = (t + self.phase_shifts[i]).fract();
+            out_currents[i] = if sensors[i] > threshold {
+                self.spike_current
+            } else {
+                0.0
+            };
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Linear decoder
+// ═══════════════════════════════════════════════════════════
+
+/// Stateful linear decoder: `out = W·states + bias`.
+///
+/// Holds `weights` (n_in × n_out, row-major) and `bias` (n_out). The decode
+/// kernel is single-sourced from [`crate::kernels::signal::linear_decoder`].
+pub struct LinearDecoder {
+    n_inputs: usize,
+    n_outputs: usize,
+    weights: Vec<f32>,
+    bias: Vec<f32>,
+}
+
+impl LinearDecoder {
+    pub fn new(n_in: usize, n_out: usize) -> Self {
+        Self {
+            n_inputs: n_in,
+            n_outputs: n_out,
+            weights: vec![0.0f32; n_in * n_out],
+            bias: vec![0.0f32; n_out],
+        }
+    }
+
+    pub fn weights(&self) -> &[f32] {
+        &self.weights
+    }
+    pub fn weights_mut(&mut self) -> &mut [f32] {
+        &mut self.weights
+    }
+    pub fn bias(&self) -> &[f32] {
+        &self.bias
+    }
+    pub fn bias_mut(&mut self) -> &mut [f32] {
+        &mut self.bias
+    }
+
+    /// Decode: out = W * states + bias.
+    pub fn decode(&mut self, states: &[f32], out_buffer: &mut [f32]) {
+        assert!(states.len() >= self.n_inputs);
+        assert!(out_buffer.len() >= self.n_outputs);
+
+        crate::kernels::signal::linear_decoder(
+            &mut out_buffer[..self.n_outputs],
+            &states[..self.n_inputs],
+            &self.weights,
+            &self.bias,
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  TTFS (Time-To-First-Spike)
 // ═══════════════════════════════════════════════════════════
 
@@ -337,6 +439,66 @@ mod tests {
         assert!(
             (phases[0] - 0.1).abs() < 1e-6,
             "phase should advance by signal·gain"
+        );
+    }
+
+    #[test]
+    fn pwm_encoder_threshold_fires() {
+        let mut enc = PwmEncoder::new(4, 10, 30.0);
+        let mut out = vec![0.0f32; 4];
+        // sensors above any threshold in [0,1) always fire
+        enc.encode(&[2.0f32; 4], &mut out);
+        for &o in &out {
+            assert_eq!(o, 30.0, "sensor=2.0 > threshold → spike_current");
+        }
+    }
+
+    #[test]
+    fn pwm_encoder_zero_never_fires() {
+        let mut enc = PwmEncoder::new(4, 10, 30.0);
+        let mut out = vec![0.0f32; 4];
+        // sensors of 0.0 are never above a threshold in [0,1)
+        enc.encode(&[0.0f32; 4], &mut out);
+        for &o in &out {
+            assert_eq!(o, 0.0, "sensor=0.0 < threshold → 0");
+        }
+    }
+
+    #[test]
+    fn pwm_encoder_tick_wraps() {
+        let mut enc = PwmEncoder::new(1, 3, 30.0);
+        let mut out = vec![0.0f32; 1];
+        // n=1 → shift=0.0, period=3 → пороги 0, 1/3, 2/3; sensor=0.4
+        // бьёт 0 и 1/3, но не 2/3 → частичная скважность
+        let mut fires = 0;
+        for _ in 0..6 {
+            enc.encode(&[0.4f32], &mut out);
+            fires += (out[0] > 0.0) as usize;
+        }
+        assert!(
+            fires > 0 && fires < 6,
+            "PWM duty should be partial, got {fires}"
+        );
+    }
+
+    #[test]
+    fn linear_decoder_dot_product() {
+        let mut dec = LinearDecoder::new(3, 2);
+        dec.weights_mut()
+            .copy_from_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        dec.bias_mut().copy_from_slice(&[0.5, -0.5]);
+        let states = [1.0f32, 1.0, 1.0];
+        let mut out = vec![0.0f32; 2];
+        dec.decode(&states, &mut out);
+        assert!(
+            (out[0] - 6.5).abs() < 1e-5,
+            "out[0] = 1+2+3+0.5 = 6.5, got {}",
+            out[0]
+        );
+        assert!(
+            (out[1] - 14.5).abs() < 1e-5,
+            "out[1] = 4+5+6−0.5 = 14.5, got {}",
+            out[1]
         );
     }
 }

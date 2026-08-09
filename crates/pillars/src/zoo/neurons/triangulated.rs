@@ -347,6 +347,7 @@ mod tests {
                 state,
                 params_ptr: NonNull::new(p.as_ptr() as *mut f32)
                     .expect("params_ptr must be non-null"),
+                param_count: 3,
                 n: 8,
                 off: 0,
                 i_syn: 30.0,

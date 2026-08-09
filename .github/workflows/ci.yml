@@ -36,11 +36,11 @@ jobs:
       - name: Clippy (no features)
         run: cargo clippy --no-default-features -- -D warnings
 
-      # Every feature EXCEPT `cuda`/`python`. `cuda` → cuda-kernels → its
+      # Every feature EXCEPT `cuda`/`python`. `cuda` → pillars-cuda → its
       # build.rs compiles .cu with nvcc and panics "nvcc not found" on runners
       # without a CUDA toolkit (ubuntu-latest has none). `python` needs numpy
       # headers at build time — covered by the dedicated `python` job below.
-      # Same strategy as the `windows` job's `--exclude cuda-kernels`.
+      # Same strategy as the `windows` job's `--exclude pillars-cuda`.
       - name: Clippy (all features, no CUDA)
         run: cargo clippy --features "t3,train,connectome,karmac,unity" -- -D warnings
 
@@ -62,7 +62,7 @@ jobs:
         run: cargo test --features "t3,train,connectome,karmac,unity"
 
       - name: Run kernel progonator tests (integration)
-        run: cargo test -p taas-kernels --test kernel_progon
+        run: cargo test -p pillars --test kernel_progon
 
       - name: Bench check (compilation only)
         run: cargo bench --no-default-features --bench bench -- --list
@@ -102,7 +102,7 @@ jobs:
 
   windows:
     # Windows (MSVC) migration guard — no nvcc on these runners, so
-    # cuda-kernels is excluded (its build.rs panics: "nvcc not found").
+    # pillars-cuda is excluded (its build.rs compiles .cu with nvcc).
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,13 +116,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check workspace (no cuda)
-        run: cargo check --workspace --exclude cuda-kernels
+        run: cargo check --workspace --exclude pillars-cuda
 
       - name: Clippy pillars
         run: cargo clippy -p pillars --lib -- -D warnings
 
       - name: Test workspace (no cuda)
-        run: cargo test --workspace --exclude cuda-kernels
+        run: cargo test --workspace --exclude pillars-cuda
 
       - name: Check examples
         run: cargo check -p pillars --examples
