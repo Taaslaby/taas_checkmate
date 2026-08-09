@@ -26,6 +26,7 @@ T3 — это **супер-модуль** из 8 подмодулей для rea
 src/t3/
 ├── mod.rs          — корень + реэкспорты
 ├── backend.rs      — T3Backend trait + Avx2Backend implementation
+├── backend_cuda.rs — CudaBackend (feature `cuda`, через pillars-cuda::gpu)
 ├── oscillator.rs   — TriOscillator<B: T3Backend> — основная структура
 ├── phase_gate.rs   — Sigmoid Phase Gate
 ├── cochlea.rs      — Biquad filter bank + envelope follower
@@ -119,7 +120,8 @@ T3Backend::nlms_train  → nlms_train_avx     (Normalized LMS)
 T3Backend::kalman_update → kalman_update_avx (Kalman filter)
 ```
 
-Планируется **CudaBackend** — через `cuda-kernels` крейт (GPU).
+**CudaBackend** — реализован в `backend_cuda.rs` (feature `cuda`, через
+`pillars-cuda::gpu`): `TriOscillator<CudaBackend>` переносит фазы/амплитуды на GPU.
 
 ### 2.2 TriOscillator — 3-Population State
 
@@ -267,7 +269,7 @@ min_w ‖Xw - y‖² + α·‖w‖²
 
 ## 4. Backend Comparison
 
-| Feature | Avx2Backend (current) | CudaBackend (planned) |
+| Feature | Avx2Backend (default) | CudaBackend (feature `cuda`) |
 |:--------|:---------------------|:---------------------|
 | Hardware | Any x86-64 with AVX2 | NVIDIA GPU |
 | Vectorization | 8× f32 per instruction | 32–1024× threads |

@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)]()
 [![Сахалыы](https://img.shields.io/badge/тыл-Сахалыы-green)](docs/README_SAKHA.md)
 
-👉 **[Сахалыы документация (README_SAKHA.md)](docs/README_SAKHA.md)**
+👉 **[Сахалыы документация (README_SAKHA.md)](resources/docs/README_SAKHA.md)**
 
 ---
 
@@ -66,23 +66,19 @@
 ```
 taas_checkmate/
 ├── crates/
-│   ├── kernels/        ← Низкоуровневые SIMD-ядра (AVX2 / AVX-512)
-│   │   └── src/neuron/ ← LIF, Izhikevich, AdEx, HH (Hodgkin-Huxley), Active Dendrites
-│   │
-│   ├── core/           ← Безопасные обёртки + сомато-дендритный цикл
-│   │
-│   ├── connectome/     ← Симулятор связей мозга (FlyWire коннектом мухи)
-│   │
-│   ├── cuda-kernels/   ← Сверхбыстрый GPU-ускоритель (CUDA Graphs)
-│   │
-│   ├── t3/             ← Движок ритмов и осцилляторов мозга (Курамото)
-│   │
-│   ├── train/          ← Обучение (RL Actor-Critic, E-Prop, SPIGRAD)
-│   │
-│   └── karmac/         ← Когнитивная архитектура мозга (Сознание/GNW, Базальные ганглии)
+│   ├── pillars/          ← ЕДИНЫЙ ДВИЖОК: SIMD-ядра + нейроны (LIF, Izhikevich,
+│   │                        HH, AdEx, FHN, …) + NeuralPopulation + Network
+│   ├── pillars-macros/   ← Макросы моделей (#[neuron])
+│   ├── pillars-cuda/     ← CUDA: NVRTC-модели + gpu-модуль (GpuContext,
+│   │                        микроядра kernels/*.cu, connectome batch)
+│   ├── pillars-connectome/ ← Симулятор связей мозга (FlyWire коннектом мухи) —
+│   │                        ConnectomeData + Brain + sim_* (единый крейт)
+│   ├── t3/               ← Движок ритмов и осцилляторов мозга (Курамото)
+│   ├── train/            ← Обучение (RL Actor-Critic, E-Prop, SPIGRAD)
+│   └── taas-format/      ← .taas формат (save/load, BrainIO)
 │
-├── examples/           ← Готовые примеры (MNIST, FlyWire brain, Голограммы)
-└── tests/              ← Полный набор из 154+ автоматических тестов
+├── resources/examples/   ← Готовые примеры (spiking_gpt, spaun_pipeline, FlyWire)
+└── tests/                ← Полный набор из 370+ автоматических тестов
 ```
 
 ---
@@ -115,6 +111,9 @@ v, u, spikes = tc.step_izhikevich(v, u, I, dt=0.5)
 # Или симуляция полного коннектома мухи FlyWire
 brain = tc.BrainSimulator(n_neurons=130000, model="lif")
 spike_buffer = brain.step_batch(dt_ms=0.5, n_steps=100)
+
+# Новый единый фасад (Фаза 9): все модели и коннектомы в одном модуле
+from taas_checkmate.pillars import LIFPopulation, ConnectomeBrain
 ```
 
 ---
@@ -131,10 +130,11 @@ spike_buffer = brain.step_batch(dt_ms=0.5, n_steps=100)
 
 ## 📚 Документация и Детали
 
-- 📖 **[PYTHON_API_RU.md](docs/PYTHON_API_RU.md)** — Полный справочник по Python API
-- 🔬 **[MATHEMATICAL_AUDIT.md](docs/MATHEMATICAL_AUDIT.md)** — Подробный аудит уравнений
-- 🌊 **[T3_ARCHITECTURE.md](docs/T3_ARCHITECTURE.md)** — Архитектура волновых ритмов мозга
-- 🤖 **[RL_API.md](docs/RL_API.md)** — Обучение агентов с подкреплением (Actor-Critic)
+- 📖 **[PYTHON_API_RU.md](resources/docs/PYTHON_API_RU.md)** — Полный справочник по Python API
+- 🔬 **[MATHEMATICAL_AUDIT.md](resources/docs/MATHEMATICAL_AUDIT.md)** — Подробный аудит уравнений
+- 🌊 **[T3_ARCHITECTURE.md](resources/docs/T3_ARCHITECTURE.md)** — Архитектура волновых ритмов мозга
+- 🤖 **[RL_API.md](resources/docs/RL_API.md)** — Обучение агентов с подкреплением (Actor-Critic)
+- 🧩 **[UNIFIED_API.md](resources/docs/UNIFIED_API.md)** — Единая схема pillars-API после консолидации
 
 ---
 

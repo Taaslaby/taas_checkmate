@@ -23,6 +23,16 @@ pub use neuron::{EPropLIF, eprop_update, surrogate_gradient, PoissonGenerator,
 pub use neuron::{TtfsEncoder, population_rate_decode};
 pub use neuron::{SornNetwork, intrinsic_plasticity, synaptic_normalization};
 pub use taas_format::{TaasWriter, TaasReader, TAAS_MAGIC, TAAS_VERSION};
+
+// connectome (единый крейт, волна 12): корневой alias = pillars_connectome
+pub use pillars_connectome as connectome;
+// pillars_connectome::ConnectomeData, Brain, SynapticBrain, sim_*, BrainRunner,
+// SpikeRecorder, rcm::*, SpikeQueue, BrainState, LifParams, ...
+
+// cuda (волна 13, feature "cuda"): единый pillars-cuda, alias в root/t3/train
+pub use pillars_cuda::gpu as cuda;
+// GpuContext, DevicePtr, csr_spmv_tanh, csr_stdp_dopamine_devptr, get_device_count,
+// set_device, pst_jacobian_gpu, t3_fused_forward_bptt, interference_matrix, ...
 ```
 
 ---
@@ -46,7 +56,7 @@ pub trait T3Backend: Send + Sync {
 
 **Implementations:**
 - `Avx2Backend` — ZST, вызывает AVX2 ASM через FFI
-- `CudaBackend` — (planned) GPU backend
+- `CudaBackend` — GPU backend (feature `cuda`, через `pillars-cuda::gpu`)
 
 ### 1.2 TriOscillator
 
@@ -368,6 +378,140 @@ pub fn apply_stdp_ltd(
 pub const PI: f32 = std::f32::consts::PI;        // 3.1415927
 pub const TWO_PI: f32 = 2.0 * std::f32::consts::PI; // 6.2831855
 ```
+
+---
+
+## 7. Connectome — единый `pillars-connectome` (волна 12)
+
+> Легаси `taas-connectome` слит в `pillars-connectome` (1 крейт) и удалён.
+> Корневой `connectome::` = `pillars_connectome::` — публичный API легаси
+> сохранён 1:1. Движок — 100% pillars (`Brain`/`SynapticBrain` строят
+> `SparseGraph` внутри себя).
+
+### 7.1 Данные: `ConnectomeData`
+
+```rust
+// i32-CSR + NT types + receptor types + группы — единый канон
+let conn = pillars_connectome::ConnectomeData::new(
+    row_ptr,      // Vec<i32>, [n_neurons + 1]
+    col_indices,  // Vec<i32>, [n_synapses]
+    values,       // Vec<f32>, [n_synapses]
+    nt_types,     // Vec<f32>, per-neuron: +1 exc, -1 inh (или пусто → все exc)
+    groups,       // Vec<(&str, Vec<usize>)> — именованные группы
+);
+conn.build_receptor_types();            // nt-знаки → AMPA(0)/GABA_A(2)
+conn.build_receptor_types_flywire(&m);  // Drosophila-маппинг (+2=GLUT→GluCl(5) и т.д.)
+conn.reorder_rcm();                     // Reverse Cuthill–McKee in-place
+conn.save_baked(&mut w) / load_baked(&mut r); // бинарный .taas (magic "TAAS")
+```
+
+Плюс `BrainIO` + `InputChannel`/`OutputChannel` (Direct/Poisson encoding, Linear readout).
+
+### 7.2 Движки: `Brain<M>` и `SynapticBrain<M>`
+
+```rust
+// Instant-current: каждый спайк добавляет вес ребра во входной ток цели
+let mut brain = pillars_connectome::Brain::<pillars::zoo::LIFModel>::from_connectome(&conn);
+// или с per-synapse axonal delays (python-фасад):
+let g = pillars::api::SparseGraph::from_csr(row_ptr_u32, col_u32, &weights, &delays);
+let mut brain = pillars_connectome::Brain::<M>::from_sparse_graph(g);
+
+brain.configure(|p| { /* fill_param / fill_state */ });
+brain.inject(&[0], &[50.0]);   // внешний ток
+brain.step();
+let spikes = brain.spikes();   // &[i32] mask 0/1
+
+// Conductance: AMPA/NMDA/GABA kinetics (рецепторы из conn.receptor_types)
+let mut sb = pillars_connectome::SynapticBrain::<M>::from_connectome(&conn, dt_ms);
+sb.set_kinetics(&k);           // carry-over между вызовами
+let s = sb.step(&external_i);  // Vec<i32> спайки за шаг
+```
+
+### 7.3 Высокоуровневый API
+
+| Символ | Назначение |
+|--------|------------|
+| `sim_lif`, `sim_izhikevich`, `sim_izhikevich_dual`, `sim_izhikevich_synaptic`, `sim_lif_synaptic`, `sim_rate`, `sim_gco`, `sim_gco_record` | batch-симуляция на коннектоме (делегаты `crate::Brain`/`SynapticBrain`; `scale` свёрнут в weights) |
+| `sim_hh_pillars`, `sim_hh_synaptic_pillars`, `hh_population_standard`, `hh_population_pacemaking` | HH на `NeuralPopulation<HHModel>` (эталон — `bench_hh_parity`) |
+| `BrainRunner` + `BrainConfig` (lif/izh/hh/rate/gco), `PoissonGroup`, `LearningRule` | конфигурируемый цикл |
+| `SpikeRecorder`, `SpikeRecordings` | DN/MN rate extraction |
+| `csr_propagate_from_queue`, `csr_propagate_conductance_from_queue`, `SpikeQueue` | низкоуровневая CSR-пропагация |
+| `rcm::{build_adjacency, reverse_cuthill_mckee, spectral_ordering, bandwidth, apply_permutation_to_csr, ...}` | переупорядочение коннектома (10–50× cache misses) |
+| `sim::gpu::{sim_lif_gpu, sim_izhikevich_gpu}` | CUDA (feature `cuda`) |
+
+### 7.4 Python
+
+```python
+from taas_checkmate.pillars import ConnectomeBrain, SynapticConnectomeBrain
+
+b = ConnectomeBrain(row_ptr, col_idx, weights, delays)   # u32 CSR, delays u8
+b.dt = 0.5; b.inject([0], [30.0]); b.step()
+spikes = b.spikes          # numpy (n,) 0/1
+
+sb = SynapticConnectomeBrain(row_ptr, col_idx, weights, delays, receptor_types, dt)
+sb.step(i_in, spikes_out)  # conductance path
+```
+
+Легаси-классы (`ConnectomeData`, `BrainSimulator`, `BrainRunner`, `SpikeRecorder`) —
+в `taas_checkmate.connectome` через корневой alias.
+
+---
+
+## 8. CUDA — единый `pillars-cuda` (волна 13)
+
+> Легаси `cuda-kernels` (`crates/cuda`, 11.5K строк) слит в `pillars-cuda` и
+> удалён. Workspace: 9 → **7 крейтов**. Корневой `cuda::` (и `taas_t3::cuda`,
+> `taas_train::cuda`) = `pillars_cuda::gpu::` — все python-биндинги и
+> `CudaBackend` работают без изменений.
+
+### 8.1 Два GPU-слоя
+
+1. **NVRTC (JIT)** — `#[dual_neuron]`-модели из `pillars::zoo::neurons`
+   (17 моделей) транспилируются в CUDA C++ строку и компилируются в PTX
+   через NVRTC на лету. `CompiledModel` + `*_CUDA_SOURCE`, parity-тесты
+   `lif/izhikevich/hh/zoo_parity`.
+2. **AOT-микроядра** — `kernels/*.cu` (по одному микроядру на файл:
+   `gpu_context`, `csr_spmv_tanh`, `stdp_dopamine`, `t3_update`, `decoders`,
+   `kuramoto`, `gco`, `fused`, `gates`, `hh`, `izhikevich`, …) компилируются
+   nvcc в статическую либу. Модуль `gpu` — FFI-обвязка.
+
+### 8.2 `gpu`-модуль (бывший `cuda_kernels`)
+
+```rust
+// Persistent GPU-контекст: все нейроны/синапсы остаются на устройстве
+let mut ctx = pillars_cuda::gpu::GpuContext::new(n_neurons, n_synapses)?;
+ctx.upload_connectome(&row_ptr, &col, &values, &nt_types, &external_i)?;
+ctx.upload_lif_params(dt_ms, &tau_m, &v_rest, &v_thresh, &v_reset)?;
+ctx.batch_lif_steps(&external_i, dev_spike_buf, &mut spikes, &mut v, n_steps)?;
+
+// RAII device-память
+let d_v = pillars_cuda::gpu::DevicePtr::<f32>::new(n)?;
+d_v.copy_from_host(&data)?;
+
+// GPU SPAUN-кернелы (device-указатели)
+pillars_cuda::gpu::csr_spmv_tanh(out, in, rp, ci, values, input, scale, n, None)?;
+pillars_cuda::gpu::csr_stdp_dopamine_devptr(d_w, d_rp, d_ci, d_tr, lr, delta, w_min, w_max, n)?;
+```
+
+- `GpuContext` — upload/download/batch LIF+Izh+HH, connectome CSR propagate,
+  CUDA Graphs, T3/Kuramoto/GCO/Aberton, LIF-AT/STDP, HH-движок (прямой `__expf()`).
+- Standalone-обёртки (`safety_clamp`, `stdp_update`, `nlms_train`, `kuramoto_prepare`,
+  `echo_tap`, `t3_*`, `interference_matrix`, `band_energy`, `ring_synthesis`, …) —
+  **host → device → host** round-trip (волна 13: исправлен баг с host-указателями).
+
+### 8.3 Python
+
+```python
+from taas_checkmate import cuda           # feature "cuda"
+from taas_checkmate.spaun_gpu import SpaunPipelineGPU   # GPU SPAUN
+from taas_checkmate.hh_gpu import GpuHhLut
+```
+
+### 8.4 Валидация
+
+- `pillars-cuda` tests: **38** (17 gpu-module + 21 NVRTC-parity) — зелёные на RTX 4060 Ti
+- `neuron_reference::verify_vs_neuron_gpu` — HH GPU vs NEURON ground-truth ✓
+- CI исключает `pillars-cuda` (нужен nvcc) как ранее `cuda-kernels`
 
 ---
 

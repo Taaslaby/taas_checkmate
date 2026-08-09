@@ -52,7 +52,7 @@ Holds raw SoA pointers, processes 8 neurons at a time. **Not for user code.**
 
 ```rust
 pub struct SimdContext<S: SimdLane> {
-    pub state: [S; 6],       // N_STATE ≤ 6, loaded from SoA
+    pub state: [S; 16],      // MAX_STATES = 16, loaded from SoA
     pub params_ptr: *const f32,
     pub n: usize, pub off: usize,
     pub i_syn: S, pub i_pre: S, pub i_post: S,
@@ -104,11 +104,11 @@ impl ComputeNeuron for LIFModel {
         // All access is typed — no raw indices anywhere
         let is_refr = state.refr.cmp_gt(S::zero());
         let v = is_refr.cond().then(params.v_reset).else_(state.v);
-        let dv = (params.v_rest - v + ctx.i_syn) * params.inv_tau_m * ctx.dt_simd();
+        let dv = (params.v_rest - v + ctx.i_syn) * params.inv_tau_m * ctx.dt();
         let spike = (v + dv).cmp_ge(params.v_thresh);
         ctx.emit_spike(spike);
         state.v = spike.cond().then(params.v_reset).else_(v + dv);
-        state.refr = (state.refr - ctx.dt_simd())
+        state.refr = (state.refr - ctx.dt())
             .max(S::zero());
     }
 }
@@ -135,12 +135,15 @@ pub struct StepContext<S: SimdLane> {
     pub i_syn: S,      // Post-synaptic current
     pub i_pre: S,      // Pre-spike bus (for STDP)
     pub i_post: S,     // Post-spike bus (for STDP)
-    pub dt: f32,       // Scalar dt (broadcast with .dt_simd())
+    pub dt: f32,       // Scalar dt (broadcast with .dt())
     spike_mask: S,
 }
 
 impl<S: SimdLane> StepContext<S> {
-    pub fn dt_simd(&self) -> S { S::splat(self.dt) }
+    /// Canonical timestep accessor for model authors.
+    pub fn dt(&self) -> S { S::splat(self.dt) }
+    /// Compatibility alias for `dt()`.
+    pub fn dt_simd(&self) -> S { self.dt() } // compatibility alias
     pub fn emit_spike(&mut self, cond: S);
 }
 ```
@@ -184,7 +187,7 @@ fn step<S: SimdLane>(state: &mut HAAPState<S>, params: &HAAPParams<S>, ctx: &mut
     let i_leak = ohmic_current(params.g_l, state.v, params.e_l);
     let i_m = ohmic_current(params.g_m * state.u, state.v, params.e_k);
     let i_h = ohmic_current(params.g_h * state.h, state.v, params.e_h);
-    state.v = membrane_depolarize(state.v, ctx.i_syn, i_leak + i_m + i_h, params.inv_cm, ctx.dt_simd());
+    state.v = membrane_depolarize(state.v, ctx.i_syn, i_leak + i_m + i_h, params.inv_cm, ctx.dt());
     // ... gates, spike detection
 }
 ```
@@ -267,7 +270,7 @@ impl ComputeNeuron for HHModel {
         let i_leak = ohmic_current(params.g_leak, state.v, params.e_leak);
 
         state.v = membrane_depolarize(state.v, ctx.i_syn, i_na + i_k + i_leak,
-                                       params.inv_cm, ctx.dt_simd());
+                                       params.inv_cm, ctx.dt());
         state.m = m_new; state.h = h_new; state.n = n_new;
 
         // Edge-triggered spike

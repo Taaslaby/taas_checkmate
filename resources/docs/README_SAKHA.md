@@ -62,12 +62,13 @@
 ```
 taas_checkmate/
 ├── crates/
-│   ├── kernels/        ← SIMD-ядролар (AVX2 / AVX-512)
-│   ├── core/           ← Сомато-дендритнай цикл
-│   ├── connectome/     ← FlyWire муха мэйиитин коннектома
-│   ├── cuda-kernels/   ← GPU ускоритель (CUDA Graphs)
+│   ├── pillars/        ← Единый канон: api + zoo + kernels (SIMD)
+│   ├── pillars-macros/ ← Модель макростарын (#[dual_neuron])
+│   ├── pillars-cuda/   ← GPU: NVRTC-модели + gpu-микроядра (GpuContext)
+│   ├── pillars-connectome/ ← FlyWire коннектома + Brain/sim_*
 │   ├── t3/             ← Мэйии ритмнарын движога (Курамото)
-│   └── train/          ← Обучение (RL Actor-Critic, E-Prop)
+│   ├── train/          ← Обучение (RL Actor-Critic, E-Prop)
+│   └── taas-format/    ← .taas формат
 ```
 
 ---

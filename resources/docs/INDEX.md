@@ -5,141 +5,90 @@
 
 ---
 
-## 📦 Workspace Structure (10 crates)
+## 📦 Workspace Structure (8 crates)
 
 ```
 taas_checkmate/
 ├── Cargo.toml          ← Workspace root + Python bindings (cdylib)
 ├── build.rs            ← CUDA nvcc compilation
 ├── src/
-│   ├── lib.rs          ← Main crate (Python bindings via PyO3)
-│   └── python/
-│       ├── mod.rs      ← PyO3 module registration
-│       ├── neuron.rs   ← Neuron step functions (LIF, Izhikevich, HH, GCO, Atlasov)
-│       ├── connectome.rs     ← Connectome benchmarks (CPU + GPU)
-│       ├── connectome_brain.rs ← BrainSimulator PyO3 class
-│       ├── sparse.rs   ← CSR sparse operations
-│       ├── hh.rs       ← HH LUT PyO3 class
-│       ├── karmac.rs   ← CarmackBSP PyO3 class
-│       ├── t3.rs       ← T3 oscillator + SPIGRAD
-│       ├── eprop.rs    ← E-Prop learning
-│       ├── ...         ← 20+ additional Python modules
+│   ├── lib.rs          ← Main crate: re-exports pillars, connectome (= pillars-connectome),
+│   │                      python bindings, unity ABI, karmac (inline), iit (inline)
+│   ├── python/
+│   │   ├── mod.rs      ← PyO3 module registration (taas_checkmate.pillars facade)
+│   │   ├── neuron.rs   ← step_* нейронов (LIF, Izhikevich, HH, GCO, ...) — скаляр-или-массив
+│   │   ├── pillars.rs  ← NeuralPopulation, Network, ConnectomeBrain, SynapticConnectomeBrain
+│   │   ├── connectome_brain.rs ← BrainSimulator / BrainRunner PyO3 классы
+│   │   ├── connectome.rs       ← Connectome + BrainIO (legacy ABI)
+│   │   ├── sparse.rs   ← CSR sparse operations
+│   │   ├── karmac.rs   ← Cognitive architecture PyO3 классы
+│   │   ├── t3.rs       ← T3 oscillator + SPIGRAD
+│   │   ├── ...         ← 20+ additional Python modules
+│   ├── unity.rs        ← C ABI для Unity
+│   └── karmac/         ← [feature karmac] GNW, LOD, BasalGanglia (inline)
 │
 ├── crates/
-│   ├── kernels/         ← [core] SIMD neuron kernels (f32x8)
-│   │   ├── src/neuron/  ← LIF, Izhikevich, HH, AdEx, FHN, HR, WC, SAW,
-│   │   │                  Dendrite, Synapse, STP, Dopamine, Astrocyte,
-│   │   │                  Atlasov Neuromotor, DepthWave/GCO, Fused kernels
-│   │   ├── src/safe.rs  ← Safe wrappers for SIMD kernels
-│   │   ├── src/lib.rs   ← Public API re-exports
-│   │   └── tests/       ← Integration tests (kernel_progon.rs)
+│   ├── pillars/          ← [core] ЕДИНЫЙ ДВИЖОК (api + zoo + kernels + core)
+│   │   ├── src/api/      ← NeuralPopulation, Network, SparseGraph, builder,
+│   │   │                  stateful-классы (EPropLIF, SornNetwork, DelayBuffer, ...)
+│   │   ├── src/zoo/      ← NeuronModel'ы: LIF, Izhikevich (+dual), HH, AdEx, FHN, HR,
+│   │   │                  WC, SAW, GCO, Rate, ... (#[neuron] derive)
+│   │   ├── src/kernels/  ← signal, decode, input, synapse, learning, phase,
+│   │   │                  depth_wave, astrocyte, wc, io, stats
+│   │   ├── src/core/     ← SIMD runner (run_neuron), lane, buf, population, network
+│   │   └── tests/        ← 18+ parity-тестов против легаси-эталонов
 │   │
-│   ├── core/            ← [core] Safe wrappers + high-level neuron models
-│   │   ├── src/neuron/  ← Wrappers: LIF, Izhikevich, HH (LUT), AdEx,
-│   │   │                  AdEx, FHN, HR, WC, SAW, Atlasov, STP, STDP,
-│   │   │                  E-Prop, SORN, Encoding, Autotune, Stats, Delay
-│   │   ├── src/sparse.rs  ← GCO + CSR propagation
-│   │   ├── src/kuramoto.rs ← T3 oscillator engine
-│   │   └── src/koit.rs  ← XOR attention RNG
+│   ├── pillars-macros/   ← #[neuron] / #[dual_neuron] derive-макросы моделей
+│   ├── pillars-cuda/     ← CUDA-ускорители pillars (warp kernels)
 │   │
-│   ├── connectome/      ← [optional] Connectome brain simulator
-│   │   ├── src/sim.rs   ← sim_lif, sim_hh, sim_izhikevich, sim_gco
-│   │   ├── src/data.rs  ← ConnectomeData (CSR + NT types)
-│   │   ├── src/rcm.rs   ← Reverse Cuthill-McKee ordering
-│   │   ├── src/cortical.rs ← Laminar cortical model
-│   │   └── src/record.rs← SpikeRecorder
+│   ├── pillars-connectome/ ← [optional] ЕДИНЫЙ connectome-крейт (волна 12: легаси
+│   │   │                      taas-connectome слит сюда и удалён)
+│   │   ├── src/data.rs   ← ConnectomeData (i32-CSR + NT + receptor_types + groups),
+│   │   │                  BrainIO/каналы, .taas save/load, рецептор-билдеры
+│   │   ├── src/brain.rs  ← Brain<M> (pillars::api::Network + SparseGraph внутри)
+│   │   ├── src/synaptic.rs ← SynapticBrain<M> (conductance: AMPA/NMDA/GABA kinetics)
+│   │   ├── src/sim.rs    ← sim_lif, sim_izhikevich(+dual/synaptic), sim_rate, sim_gco,
+│   │   │                  sim_hh_*, hh_population_* (делегаты crate::Brain/SynapticBrain)
+│   │   ├── src/runner.rs ← BrainRunner (конфигурируемый runner, Poisson-группы, LearningRule)
+│   │   ├── src/record.rs ← SpikeRecorder
+│   │   ├── src/rcm/      ← Reverse Cuthill–McKee ordering (bfs/spectral/permute)
+│   │   ├── src/types.rs / propagate.rs ← SpikeQueue, BrainState, params, CSR propagation
+│   │   ├── tests/hh_parity.rs ← SIMD/scalar + pacemaking/standard HH гарантии
+│   │   └── benches/bench_rcm.rs ← RCM bandwidth + propagate до/после (5% и 10%)
 │   │
 │   ├── t3/              ← [optional] T3 oscillator + PST + decoders
-│   │   ├── src/oscillator.rs  ← TriOscillator
-│   │   ├── src/pst.rs   ← Phase Space Topology features
-│   │   ├── src/decoders.rs ← NLMS, Kalman, IK decoders
-│   │   ├── src/trajectory.rs ← T2SpikeGrad (BPTT)
-│   │   └── src/backend.rs / backend_cuda.rs
-│   │
-│   ├── train/           ← [optional] Training (RL, E-Prop, SPIGRAD)
-│   │   ├── src/rl.rs    ← Actor-Critic agent
-│   │   ├── src/spike/   ← Forward/backward BPTT
-│   │   └── src/connectome_chase.rs ← Connectome chase training
-│   │
-│   ├── cuda-kernels/    ← [optional] CUDA GPU acceleration
-│   │   ├── kernels/*.cu ← 25+ CUDA kernels
-│   │   ├── src/lib.rs   ← Rust FFI bindings
-│   │   ├── src/context.rs ← GpuContext
-│   │   ├── src/ffi.rs   ← extern "C" declarations
-│   │   └── src/kernels.rs ← Safe wrappers
-│   │
-│   ├── karmac/          ← [optional] Cognitive architecture
-│   │   ├── src/lod.rs   ← Carmack LOD (octree)
-│   │   ├── src/gnw.rs   ← Global Neuronal Workspace
-│   │   ├── src/basal_ganglia.rs ← Action selection
-│   │   ├── src/semantic_pointer.rs ← Semantic pointers
-│   │   └── src/working_memory.rs ← Working memory
-│   │
-│   ├── taas-format/     ← [core] .taas file format (save/load)
-│   │   ├── src/writer.rs / reader.rs ← Binary serialization
-│   │   └── src/components.rs ← BrainState save/load
-│   │
-│   ├── taas-embodied/   ← [optional] Embodied simulation
-│   │   └── src/fly_embodied.rs ← Fly + MuJoCo integration
-│   │
-│   ├── cpe/             ← [core] Chaos Pattern Engine
-│   │   ├── src/coherence.rs, stdp.rs, hybrid.rs
-│   │   └── src/dopamine.rs ← 3-factor plasticity
-│   │
-│   ├── iit/             ← [core] Integrated Information Theory
-│   │   └── src/lib.rs   ← Phi computation
-│   │
-│   ├── gpu-eval/        ← [core] GPU evaluation helpers
-│   │
-│   └── unity/           ← [optional] Unity C ABI bindings
-│       └── cs/TaaSBrain.cs ← C# bridge
+│   ├── train/           ← [optional] Training (RL, E-Prop, SPIGRAD, connectome chase)
+│   └── taas-format/     ← [core] .taas file format (save/load, BrainIO, ConnectomeData)
 │
-├── examples/
-│   ├── core/            ← Core engine examples
-│   ├── connectome/      ← FlyWire connectome baking
-│   ├── mnist/           ← MNIST training (eprop, t3)
-│   ├── hh/              ← HH calibration + visualization
-│   ├── fly/             ← MuJoCo fly simulations
-│   │   ├── scripts/     ← Python scripts (VNC, CPG, walking)
-│   │   └── models/      ← MuJoCo XML + OBJ assets
-│   └── python/          ← Legacy Python scripts
+├── resources/
+│   ├── docs/            ← Документация (INDEX, API_REFERENCE, PYTHON_API_RU, ...)
+│   ├── examples/        ← Примеры (spiking_gpt, spaun_pipeline, embodied_creature, ...)
+│   ├── validate/        ← NEURON-валидация (hh/izh/adex/fhn .mod + compare_all.py)
+│   └── neurofly/        ← FlyWire/MANC pipeline (подмодуль)
 │
-├── tests/               ← Integration tests
-├── benches/             ← Criterion benchmarks (bench_all.rs)
-└── docs/                ← Documentation
-    ├── INDEX.md         ← THIS FILE — project map
-    ├── README_SAKHA.md  ← Yakut language README
-    ├── ARCHITECTURE.md  ← System architecture
-    ├── NEURON_MODELS.md ← Neuron model reference
-    ├── ATLASOV_NEUROMOTOR.md ← Atlasov muscle engine
-    ├── RECEPTORS_AND_NEUROTRANSMITTERS.md ← Synaptic physiology
-    ├── VNC_BIOMECHANICS.md ← VNC + MuJoCo biomechanics
-    ├── PYTHON_API_RU.md ← Python API reference (Russian)
-    ├── RL_API.md        ← Reinforcement learning API
-    ├── T3_ARCHITECTURE.md ← T3 oscillator architecture
-    └── MATHEMATICAL_AUDIT.md ← Mathematical formula audit
+├── tests/               ← Integration tests (smoke API, neuron, kuramoto, sparse, ...)
+└── benches/             ← Criterion benchmarks (bench.rs, bench_all.rs, bench_lod_gnw.rs)
 ```
 
 ---
 
 ## 🔧 Crate Dependency Graph
 
+> ⚠️ Актуально (Волна 12, 2026-08-08): `taas-core`, `taas-kernels`,
+> `taas-connectome` **удалены**. `pillars` — единый канон
+> (api/zoo/kernels/core); `pillars-connectome` — единственный connectome-крейт
+> (легаси API сохранён 1:1, корневой `connectome::` = `pillars_connectome::`).
+> См. `UNIFIED_API.md`.
+
 ```
 taas-checkmate (root)
-├── taas-kernels        ← NO DEPENDENCIES (standalone SIMD kernels)
-├── taas-core           ← depends on: kernels
-├── taas-format         ← depends on: kernels, core, connectome, t3, train
-├── cpe                ← depends on: kernels, core
-├── iit                ← depends on: kernels, core
-├── gpu-eval           ← depends on: (standalone)
-│
-├── t3 [optional]      ← depends on: kernels, core
-├── train [optional]   ← depends on: kernels, core, t3
-├── connectome [optional] ← depends on: kernels, core, t3
-├── cuda-kernels [optional] ← depends on: kernels, core, t3, connectome
-├── karmac [optional]  ← depends on: kernels, core
-├── taas-embodied [optional] ← depends on: kernels, core, connectome
-└── unity [optional]   ← depends on: connectome
+├── pillars              ← единый канон (зависит только от pillars-macros)
+├── pillars-macros       ← derive-макросы (без зависимостей)
+├── pillars-cuda         ← depends on: pillars, pillars-macros; gpu-модуль (GpuContext + 23 AOT-микроядра kernels/*.cu)
+├── pillars-connectome   ← depends on: pillars (+ pillars-cuda, feature "cuda")
+├── t3 [optional]        ← depends on: pillars (+ pillars-cuda, feature "cuda")
+├── train [optional]     ← depends on: pillars, t3, pillars-connectome, pillars-cuda
+└── taas-format          ← depends on: pillars, pillars-connectome, t3 (+ train)
 ```
 
 ---
@@ -151,10 +100,10 @@ taas-checkmate (root)
 | `default` | `t3` | T3 oscillator engine |
 | `t3` | `taas-t3` | Oscillator + PST + decoders |
 | `train` | `taas-train/t3` | BPTT, SPIGRAD, connectome chase |
-| `connectome` | `taas-connectome` + `taas-train/connectome` | Connectome brain simulator |
+| `connectome` | `pillars-connectome` + `taas-train/connectome` | Connectome brain simulator |
 | `karmac` | `karmac` | Cognitive architecture (GNW, LOD) |
-| `cuda` | `t3` + `connectome` + `cuda-kernels` | GPU acceleration |
-| `python` | `pyo3` + `numpy` + `connectome` + `t3` + `karmac` | Python bindings |
+| `cuda` | `t3` + `connectome` + `pillars-cuda` + `pillars-connectome/cuda` | GPU acceleration |
+| `python` | `pyo3` + `numpy` + `pillars-connectome` + `connectome` + `t3` + `karmac` | Python bindings |
 | `unity` | `connectome` | Unity C ABI |
 | `all` | Everything | Full build |
 
@@ -162,29 +111,29 @@ taas-checkmate (root)
 
 ## 🧪 Test Inventory
 
+> Числа — по последнему прогону; свежие значения — `cargo test` / CI.
+
 | Package | Tests | Scope |
 |---------|-------|-------|
-| `taas-kernels` | **155** | LIF (5), Izhikevich (13), HH (SIMD), AdEx, FHN, Dendrite, Synapse, Astrocyte, Atlasov (7), DepthWave/GCO (3), E-Prop, Fused |
-| `taas-core` | **40** | Neuron wrappers, HH LUT (14), E-Prop, Poisson, Autotune, SORN, Encoding, STDP |
-| `taas-connectome` | **42** | ConnectomeData, sim_lif, sim_hh, RCM, Cortical, Record |
+| `pillars` | 18+ parity-бинарей + lib | run_neuron, zoo-модели, api (Network/Graph/Build), parity vs легаси |
+| `pillars-connectome` | **55** | ConnectomeData, Brain/SynapticBrain, sim_lif/izh/rate/gco/hh, RCM, Runner, hh_parity (4) |
 | `taas-t3` | **77** | Oscillator, PST, Backend (CPU+CUDA), Trajectory, Decoders |
-| `cuda-kernels` | **17** | GPU kernels (requires nvcc) |
-| `karmac` | **29** | LOD (octree), GNW, Basal Ganglia, Semantic Pointer, Working Memory |
-| `taas-iit` | **5** | Phi computation |
-| `taas-embodied` | **2** | Fly embodied pipeline |
-| **Total** | **~367+** | |
+| `taas-train` | **24** | RL agent, connectome chase, E-Prop |
+| `pillars-cuda` | **38** | NVRTC zoo-модели + gpu-модуль (GpuContext, микроядра, parity) (requires nvcc) |
+| `taas-format` | **18** | .taas writer/reader, BrainIO, ConnectomeData roundtrip |
+| **Total** | **~390+** | |
 
 ---
 
 ## 📊 Key Validation Results
 
-| Model | Tests | Industry Standard Verified |
-|-------|-------|--------------------------|
-| **LIF** | 5 | ✅ Analytical F-I curve, refractory period, exponential Euler accuracy |
-| **Izhikevich** | 13 | ✅ 5 canonical firing patterns (RS, FS, IB, LTS, CH) per Izhikevich 2003 |
-| **HH (LUT)** | 14 | ✅ H&H 1952: gating variables, AP shape, threshold, I-F curve, input resistance |
-| **Atlasov** | 7 | ✅ Ca²⁺ kinetics, Hill-type f(L) & f(V), agonist-antagonist |
-| **GCO** | 3 | ✅ Phase coherence maintainance |
+| Model | Verified | Notes |
+|-------|----------|-------|
+| **LIF** | ✅ | Analytical F-I curve, refractory period, exponential Euler accuracy |
+| **Izhikevich** | ✅ | 5 canonical firing patterns (RS, FS, IB, LTS, CH) per Izhikevich 2003 |
+| **HH** | ✅ | H&H 1952 via `pillars::HHModel` (SIMD/scalar parity, pacemaking CaV-T) |
+| **AdEx / FHN / HR / WC** | ✅ | Parity vs NEURON (resources/validate) |
+| **GCO** | ✅ | Phase coherence maintenance |
 
 ---
 
@@ -192,9 +141,9 @@ taas-checkmate (root)
 
 See `.github/workflows/ci.yml`:
 - Rust stable build
-- `cargo test --all-features`
-- Clippy linting
+- `cargo clippy --features "t3,train,connectome,karmac,unity" -- -D warnings`
+- `cargo build` + `cargo test` с теми же фичами
 
 ---
 
-*Last updated: 2026-07-26*
+*Last updated: 2026-08-08 (Волна 12 — единый pillars-connectome)*
