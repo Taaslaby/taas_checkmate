@@ -904,7 +904,7 @@ pub extern "C" fn brain_set_lif_params(
     let mut cur_v_reset = vec![DEFAULT_V_RESET; brain.n_neurons];
 
     for i in 0..brain.n_neurons {
-        let idx = (i % brain.n_padded) as usize;
+        let idx = i % brain.n_padded;
         cur_tau_m[i] = storage.packed[brain.n_padded + idx];
         cur_v_rest[i] = storage.packed[2 * brain.n_padded + idx];
         cur_v_thresh[i] = storage.packed[3 * brain.n_padded + idx];

@@ -1,11 +1,14 @@
+// Lint configuration — scoped to the root crate only (pillars has its own).
+// - non_snake_case: physics notation (E_leak, I_soma, etc.) — pervasive.
+// - needless_range_loop + manual_memcpy: SIMD stride loops on raw slices.
+// - type_complexity + module_inception: compat re-exports and facade modules.
+// - manual_clamp: bounds check on raw pointer math where .clamp() changes NaN behaviour.
 #![allow(non_snake_case)]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::module_inception)]
 #![allow(clippy::manual_memcpy)]
-#![allow(clippy::unnecessary_cast)]
 #![allow(clippy::manual_clamp)]
-#![allow(clippy::misnamed_getters)]
 
 //! # taas-checkmate
 //!

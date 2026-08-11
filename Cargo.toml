@@ -85,6 +85,14 @@ harness = false
 [[example]]
 name = "spikegpt_infer"
 
+[[example]]
+name = "cognitive_arena"
+required-features = ["karmac"]
+
+[[example]]
+name = "hide_seek_arena"
+required-features = ["karmac"]
+
 [features]
 default = ["t3", "format"]
 

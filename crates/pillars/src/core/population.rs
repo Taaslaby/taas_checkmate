@@ -267,6 +267,8 @@ impl<M: Model> NeuralPopulation<M> {
         if self.n <= 8 {
             self.step_scalar(i_in, spikes_out);
         } else {
+            // SAFETY: `step_simd` requires n > 8 (guaranteed above) and
+            // padded-to-capacity buffers (guaranteed by `NeuralPopulation::new`).
             unsafe {
                 self.step_simd(i_in, spikes_out);
             }

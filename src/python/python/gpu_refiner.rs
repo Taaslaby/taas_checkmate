@@ -387,14 +387,14 @@ impl PyGpuConnectomeRefiner {
 
                 for bw_step in (0..n_steps - 1).rev() {
                     let dtheta_step =
-                        unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) } as *mut f32;
+                        unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) };
                     let dtheta_next =
-                        unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) } as *const f32;
+                        unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) };
                     let phases_step =
-                        unsafe { d_phases_traj.as_ptr().add(bw_step * n) } as *const f32;
+                        unsafe { d_phases_traj.as_ptr().add(bw_step * n) };
 
                     ctx.bptt_step(
-                        d_grad_weights.as_mut_ptr() as *mut f32,
+                        d_grad_weights.as_mut_ptr(),
                         dtheta_step,
                         dtheta_next,
                         phases_step,
@@ -406,14 +406,14 @@ impl PyGpuConnectomeRefiner {
                 // Phase 4: GPU Gradient Clipping
                 if grad_clip_norm > 0.0 {
                     ctx.grad_norm_async(
-                        d_grad_weights.as_ptr() as *const f32,
+                        d_grad_weights.as_ptr(),
                         d_grad_norm.as_mut_ptr(),
                         d_grad_norm_partial.as_mut_ptr(),
                     )
                     .map_err(|e| PyRuntimeError::new_err(format!("grad_norm: {e}")))?;
                     ctx.grad_clip_async(
-                        d_grad_weights.as_mut_ptr() as *mut f32,
-                        d_grad_norm.as_ptr() as *const f32,
+                        d_grad_weights.as_mut_ptr(),
+                        d_grad_norm.as_ptr(),
                         grad_clip_norm,
                     )
                     .map_err(|e| PyRuntimeError::new_err(format!("grad_clip: {e}")))?;
@@ -440,7 +440,7 @@ impl PyGpuConnectomeRefiner {
                 };
 
                 ctx.weight_update_async(
-                    d_grad_weights.as_ptr() as *const f32,
+                    d_grad_weights.as_ptr(),
                     lr,
                     sparsity_scale,
                     homeostasis_scale,

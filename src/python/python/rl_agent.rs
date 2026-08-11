@@ -139,7 +139,7 @@ impl PyActorCriticAgent {
         self.inner.n_hidden
     }
     #[getter]
-    fn n_actions(&self) -> usize {
+    fn n_actions_real(&self) -> usize {
         self.inner.n_actions_real
     }
 

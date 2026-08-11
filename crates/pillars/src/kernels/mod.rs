@@ -79,9 +79,9 @@ pub fn wrap_phase(p: f32) -> f32 {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Flat compat surface— бывший публичный API крейта
-//  `taas-kernels`. Все batch-кернелы доступны как
-//  `pillars::kernels::<name>` без префикса подмодуля.
+//  Flat re-export surface — all batch kernels are
+//  accessible as `pillars::kernels::<name>` without a
+//  submodule prefix.
 // ═══════════════════════════════════════════════════════
 pub use self::csr::{
     apply_stdp_ltd_with_topology, compute_hamiltonian_scatter_with_topology,
