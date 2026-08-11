@@ -41,7 +41,7 @@ name = "taas_checkmate"
 pillars = { path = "crates/pillars" }
 pillars-connectome = { path = "crates/pillars-connectome", optional = true }
 taas-train = { path = "crates/train" }
-taas-format = { path = "crates/taas-format", features = ["train"] }
+taas-format = { path = "crates/taas-format", features = ["train"], optional = true }
 
 # Internal crates (optional, behind features)
 taas-t3 = { path = "crates/t3", optional = true }
@@ -53,9 +53,14 @@ wide = "0.7"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+wasm-bindgen = { version = "0.2", optional = true }
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 pyo3 = { version = "0.23", features = ["extension-module", "abi3", "abi3-py311"], optional = true }
 numpy = { version = "0.23", optional = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+# getrandom 0.2 (pulled in by rand 0.8) needs the "js" backend on wasm32-unknown-unknown.
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -73,11 +78,22 @@ name = "bench_lod_gnw"
 harness = false
 required-features = ["karmac"]
 
+[[bench]]
+name = "bench_spikegpt_forward"
+harness = false
+
+[[example]]
+name = "spikegpt_infer"
+
 [features]
-default = ["t3"]
+default = ["t3", "format"]
 
 # Core T3 oscillator engine (oscillator + PST + decoders)
 t3 = ["taas-t3"]
+
+# .taas save/load format (pulls zstd; excluded from the wasm build so no C
+# cross-compiler is required for the browser package)
+format = ["dep:taas-format"]
 
 # Training (BPTT, SPIGRAD, connectome chase)
 train = ["taas-train/t3"]
@@ -87,6 +103,8 @@ connectome = ["dep:pillars-connectome", "taas-train/connectome"]
 
 # Cognitive architecture (GNW, LOD, BasalGanglia) — встроено в корневой крейт
 karmac = []
+# JavaScript/WASM facade over the Rust-owned Cognitive Arena state machine
+wasm = ["karmac", "dep:wasm-bindgen"]
 
 # GPU acceleration — compound feature, implies t3 + connectome
 cuda = ["t3", "connectome",
@@ -96,10 +114,10 @@ cuda = ["t3", "connectome",
         "taas-train/cuda"]
 
 # Python bindings
-python = ["dep:pyo3", "dep:numpy", "dep:pillars-connectome", "connectome", "t3", "taas-train/connectome", "karmac"]
+python = ["dep:pyo3", "dep:numpy", "dep:pillars-connectome", "connectome", "t3", "format", "taas-train/connectome", "karmac"]
 
 # Unity C ABI (inlined in main crate, like python)
 unity = ["connectome"]
 
 # Everything
-all = ["t3", "train", "connectome", "karmac", "cuda", "python", "unity"]
+all = ["t3", "train", "format", "connectome", "karmac", "wasm", "cuda", "python", "unity"]

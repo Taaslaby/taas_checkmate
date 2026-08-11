@@ -48,6 +48,7 @@ pub use pillars::prelude::*;
 // ═══════════════════════════════════════════════════════
 //  Internal crate re-exports
 // ═══════════════════════════════════════════════════════
+#[cfg(feature = "format")]
 pub use taas_format;
 pub use taas_train as train;
 
@@ -72,6 +73,9 @@ pub mod io; // Integrated Information Theory (Φ) — перенесено из 
 
 #[cfg(feature = "python")]
 pub mod python;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 #[cfg(feature = "unity")]
 pub mod unity;

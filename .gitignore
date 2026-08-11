@@ -47,3 +47,6 @@ __pypackages__/
 # Downloaded validation datasets (Zenodo/Figshare archives) - not part of the source tree.
 validation_data/
 !validation_data/human_hand/results.json
+
+# Generated wasm-pack output for the Cognitive Arena web UI (see build-wasm.sh)
+/resources/web/cognitive-arena/pkg/
