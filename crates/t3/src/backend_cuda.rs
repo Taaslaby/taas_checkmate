@@ -1,4 +1,4 @@
-//! # CudaBackend — GPU T3 backend via cuda-kernels.
+//! # CudaBackend — GPU T3 backend via pillars-cuda.
 //!
 //! ## Async pipeline (single sync per step)
 //!

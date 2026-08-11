@@ -26,10 +26,12 @@
 
 pub mod engine;
 pub mod ffi;
+pub mod kernel;
 
-/// AOT GPU microkernels + persistent device context (moved verbatim from the
-/// legacy `cuda-kernels` crate, Волна 13). One `.cu` per microkernel in
-/// `kernels/`, FFI wrappers here. Exposed upstream as `cuda`:
+pub use kernel::{BufferArg, CudaKernel, LaunchConfig, ScalarArg};
+
+/// AOT GPU microkernels + persistent device context. One `.cu` per
+/// microkernel in `kernels/`, FFI wrappers here. Exposed upstream as `cuda`:
 /// `pub use pillars_cuda::gpu as cuda;`.
 pub mod gpu;
 

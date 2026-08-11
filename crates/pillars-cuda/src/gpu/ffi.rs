@@ -28,7 +28,8 @@ extern "C" {
     pub(crate) fn cuda_morris_lecar_step(
         v: *mut c_float,
         w: *mut c_float,
-        I_in: *mut c_float,
+        was_below: *mut c_float,
+        I_in: *const c_float,
         spikes: *mut c_int,
         params: *const c_float,
         dt: c_float,

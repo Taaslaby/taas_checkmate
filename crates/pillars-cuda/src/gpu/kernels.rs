@@ -180,18 +180,39 @@ pub fn saw_step(
 pub fn step_morris_lecar(
     v: &mut [f32],
     w: &mut [f32],
-    i_in: &mut [f32],
+    was_below: &mut [f32],
+    i_in: &[f32],
     spikes: &mut [i32],
     params: &[f32],
     dt: f32,
 ) -> Result<(), String> {
-    let n = v.len() as c_int;
+    let n = v.len();
+    assert_eq!(w.len(), n, "morris_lecar: w length must match v");
+    assert_eq!(
+        was_below.len(),
+        n,
+        "morris_lecar: was_below length must match v"
+    );
+    assert_eq!(i_in.len(), n, "morris_lecar: input length must match v");
+    assert_eq!(spikes.len(), n, "morris_lecar: spikes length must match v");
+    let expected_params = n
+        .checked_mul(14)
+        .expect("morris_lecar: parameter length overflows usize");
+    assert_eq!(
+        params.len(),
+        expected_params,
+        "morris_lecar: params must be 14*n SoA values"
+    );
+    let n: c_int = n
+        .try_into()
+        .expect("morris_lecar: population length exceeds CUDA int range");
     ok_or(
         unsafe {
             cuda_morris_lecar_step(
                 v.as_mut_ptr(),
                 w.as_mut_ptr(),
-                i_in.as_mut_ptr(),
+                was_below.as_mut_ptr(),
+                i_in.as_ptr(),
                 spikes.as_mut_ptr(),
                 params.as_ptr(),
                 dt,
@@ -208,7 +229,20 @@ pub fn step_nmda_mg_block(
     i_out: &mut [f32],
     params: &[f32],
 ) -> Result<(), String> {
-    let n = v.len() as c_int;
+    let n = v.len();
+    assert_eq!(g_act.len(), n, "nmda_mg_block: g_act length must match v");
+    assert_eq!(i_out.len(), n, "nmda_mg_block: output length must match v");
+    let expected_params = n
+        .checked_mul(4)
+        .expect("nmda_mg_block: parameter length overflows usize");
+    assert_eq!(
+        params.len(),
+        expected_params,
+        "nmda_mg_block: params must be 4*n AoS values"
+    );
+    let n: c_int = n
+        .try_into()
+        .expect("nmda_mg_block: population length exceeds CUDA int range");
     ok_or(
         unsafe {
             cuda_nmda_mg_block_step(
@@ -231,7 +265,29 @@ pub fn step_tsodyks_markram(
     params: &[f32],
     dt: f32,
 ) -> Result<(), String> {
-    let n = x.len() as c_int;
+    let n = x.len();
+    assert_eq!(u.len(), n, "tsodyks_markram: u length must match x");
+    assert_eq!(
+        spikes.len(),
+        n,
+        "tsodyks_markram: spikes length must match x"
+    );
+    assert_eq!(
+        w_eff.len(),
+        n,
+        "tsodyks_markram: output length must match x"
+    );
+    let expected_params = n
+        .checked_mul(4)
+        .expect("tsodyks_markram: parameter length overflows usize");
+    assert_eq!(
+        params.len(),
+        expected_params,
+        "tsodyks_markram: params must be 4*n AoS values"
+    );
+    let n: c_int = n
+        .try_into()
+        .expect("tsodyks_markram: population length exceeds CUDA int range");
     ok_or(
         unsafe {
             cuda_tsodyks_markram_step(

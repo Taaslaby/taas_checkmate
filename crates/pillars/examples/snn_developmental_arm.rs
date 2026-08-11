@@ -139,8 +139,8 @@ impl SnnPolicy {
         for motor in 0..MOTORS {
             let error = target[motor] as f32 - spikes[motor] as f32;
             let local_grad = error * surrogate[motor].clamp(0.0, 1.0);
-            for feature in 0..FEATURES {
-                self.weights[motor][feature] += 0.12 * local_grad * features[feature];
+            for (weight, &feature) in self.weights[motor].iter_mut().zip(features.iter()) {
+                *weight += 0.12 * local_grad * feature;
             }
             for w in &mut self.weights[motor] {
                 *w = w.clamp(-80.0, 80.0);

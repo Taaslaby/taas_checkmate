@@ -169,7 +169,7 @@ impl CompiledModel {
         // upload→capture→launch→download cycle makes concurrent `step()`
         // calls safe. (The persistent API below is single-threaded per model
         // — benchmarks run one model at a time.)
-        let _lock = STEP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         self.upload(states, params, i_in)?;
         self.step_device(dt)?;
         self.download_states(states)?;
@@ -420,7 +420,7 @@ impl Drop for CompiledModel {
             // Best effort: if the context can't be made current on this
             // thread, the frees would fail anyway — skip them silently.
             if set_current_ctx(d).is_ok() {
-                let _lock = STEP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+                let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
                 unsafe {
                     let _ = (d.cu_mem_free)(self.d_states);
                     let _ = (d.cu_mem_free)(self.d_params);
@@ -523,7 +523,7 @@ fn global_ctx() -> &'static Result<(CtxHandle, i32, i32), String> {
 /// we need (the process uses one context, no restore required).
 /// Serializes graph capture + replay across `CompiledModel`s (see
 /// [`CompiledModel::step_graph`]).
-static STEP_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static CUDA_CALL_LOCK: Mutex<()> = Mutex::new(());
 
 fn set_current_ctx(d: &'static Driver) -> Result<(), String> {
     let (ctx, _, _) = *global_ctx().as_ref().map_err(|e| e.clone())?;
@@ -598,7 +598,10 @@ unsafe fn capture_graph(d: &Driver, model: &CompiledModel, _dt: f32) -> Result<G
         let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
         let _ = (d.cu_stream_destroy)(stream);
         let _ = (d.cu_mem_free)(d_args);
-        return Err(format!("graph capture launch: {}", cu_error(d, launch_rc)));
+        return Err(format!(
+            "graph capture launch: {}",
+            driver_error(d, launch_rc)
+        ));
     }
 
     // 4. End capture, instantiate.
@@ -621,7 +624,7 @@ unsafe fn capture_graph(d: &Driver, model: &CompiledModel, _dt: f32) -> Result<G
     if rc != 0 {
         let _ = (d.cu_stream_destroy)(stream);
         let _ = (d.cu_mem_free)(d_args);
-        return Err(format!("graph instantiate: {}", cu_error(d, rc)));
+        return Err(format!("graph instantiate: {}", driver_error(d, rc)));
     }
 
     Ok(GraphState {
@@ -695,7 +698,7 @@ fn compile_and_load(
         )?;
         // NVRTC compiles as C++ → kernel names are mangled (e.g.
         // `_Z9hh_kernelPfPKfS1_Pifii`). Read the real name out of the PTX.
-        let mangled = extract_entry_name(&ptx, kernel_name);
+        let mangled = extract_entry_name(&ptx, kernel_name)?;
         let name = CString::new(mangled).map_err(|_| "kernel name contains NUL")?;
         let mut func: CUfunction = std::ptr::null_mut();
         let rc = (d.cu_module_get_function)(&mut func, module, name.as_ptr());
@@ -703,7 +706,7 @@ fn compile_and_load(
             let ptx_head = String::from_utf8_lossy(&ptx[..ptx.len().min(800)]).into_owned();
             return Err(format!(
                 "kernel `{kernel_name}` not found in module ({}):\n{ptx_head}\n---\n{}",
-                cu_error(d, rc),
+                driver_error(d, rc),
                 first_lines(source, 20)
             ));
         }
@@ -712,11 +715,12 @@ fn compile_and_load(
 }
 
 fn nvrtc_to_ptx(source: &str, major: i32, minor: i32) -> Result<Vec<u8>, String> {
+    let n = nvrtc().as_ref().map_err(|e| e.clone())?;
     unsafe {
         let mut prog: nvrtcProgram = std::ptr::null_mut();
         let src = CString::new(source).map_err(|_| "source contains NUL")?;
         let fname = CString::new("dual.cu").unwrap();
-        let rc = nvrtcCreateProgram(
+        let rc = (n.nvrtc_create_program)(
             &mut prog,
             src.as_ptr(),
             fname.as_ptr(),
@@ -731,30 +735,30 @@ fn nvrtc_to_ptx(source: &str, major: i32, minor: i32) -> Result<Vec<u8>, String>
         let arch = format!("--gpu-architecture=compute_{major}{minor}");
         let opt = CString::new(arch).unwrap();
         let opts = [opt.as_ptr()];
-        let rc = nvrtcCompileProgram(prog, 1, opts.as_ptr());
+        let rc = (n.nvrtc_compile_program)(prog, 1, opts.as_ptr());
         if rc != 0 {
-            let log = nvrtc_log(prog);
-            let _ = nvrtcDestroyProgram(&mut prog);
+            let log = nvrtc_log(n, prog);
+            let _ = (n.nvrtc_destroy_program)(&mut prog);
             return Err(format!("NVRTC compile error: {}\n{}", nvrtc_error(rc), log));
         }
 
         let mut ptx_size: usize = 0;
-        let _ = nvrtcGetPTXSize(prog, &mut ptx_size);
+        let _ = (n.nvrtc_get_ptx_size)(prog, &mut ptx_size);
         let mut ptx = vec![0u8; ptx_size];
-        let _ = nvrtcGetPTX(prog, ptx.as_mut_ptr() as *mut c_char);
-        let _ = nvrtcDestroyProgram(&mut prog);
+        let _ = (n.nvrtc_get_ptx)(prog, ptx.as_mut_ptr() as *mut c_char);
+        let _ = (n.nvrtc_destroy_program)(&mut prog);
         Ok(ptx)
     }
 }
 
-fn nvrtc_log(prog: nvrtcProgram) -> String {
+fn nvrtc_log(n: &Nvrtc, prog: nvrtcProgram) -> String {
     unsafe {
         let mut size: usize = 0;
-        if nvrtcGetProgramLogSize(prog, &mut size) != 0 || size == 0 {
+        if (n.nvrtc_get_program_log_size)(prog, &mut size) != 0 || size == 0 {
             return String::new();
         }
         let mut buf = vec![0u8; size];
-        if nvrtcGetProgramLog(prog, buf.as_mut_ptr() as *mut c_char) != 0 {
+        if (n.nvrtc_get_program_log)(prog, buf.as_mut_ptr() as *mut c_char) != 0 {
             return String::new();
         }
         String::from_utf8_lossy(&buf).into_owned()
@@ -765,7 +769,7 @@ fn nvrtc_log(prog: nvrtcProgram) -> String {
 // code calls `nvrtc_error(rc)` re-exported below.
 pub use crate::ffi::nvrtc_error;
 
-fn cu_error(d: &Driver, rc: CUresult) -> String {
+pub(crate) fn driver_error(d: &Driver, rc: CUresult) -> String {
     unsafe {
         let mut p: *const c_char = std::ptr::null();
         if (d.cu_get_error_string)(rc, &mut p) != 0 || p.is_null() {
@@ -775,11 +779,71 @@ fn cu_error(d: &Driver, rc: CUresult) -> String {
     }
 }
 
-fn check_cu(d: &Driver, rc: CUresult) -> Result<(), String> {
+pub(crate) fn device_context(d: &'static Driver) -> Result<(), String> {
+    set_current_ctx(d)
+}
+
+/// Compile and load a generic CUDA kernel, returning both module and function
+/// so the module can be unloaded by the owning `CudaKernel`.
+pub(crate) fn compile_source_function(
+    source: &str,
+    kernel_name: &str,
+) -> Result<(CUmodule, CUfunction), String> {
+    let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let d = driver().as_ref().map_err(|e| e.clone())?;
+    set_current_ctx(d)?;
+    unsafe {
+        let (_, major, minor) = *global_ctx().as_ref().map_err(|e| e.clone())?;
+        let compile = |major: i32, minor: i32| -> Result<(CUmodule, CUfunction), String> {
+            let ptx = nvrtc_to_ptx(source, major, minor)?;
+            let mut module: CUmodule = std::ptr::null_mut();
+            check_cu(
+                d,
+                (d.cu_module_load_data_ex)(
+                    &mut module,
+                    ptx.as_ptr() as *const c_void,
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+            )?;
+            let entry = match extract_exact_entry_name(&ptx, kernel_name) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    let _ = (d.cu_module_unload)(module);
+                    return Err(error);
+                }
+            };
+            let name = match CString::new(entry) {
+                Ok(name) => name,
+                Err(error) => {
+                    let _ = (d.cu_module_unload)(module);
+                    return Err(format!("kernel name contains NUL: {error}"));
+                }
+            };
+            let mut function: CUfunction = std::ptr::null_mut();
+            let rc = (d.cu_module_get_function)(&mut function, module, name.as_ptr());
+            if rc != 0 {
+                let _ = (d.cu_module_unload)(module);
+                return Err(format!(
+                    "kernel `{kernel_name}` not found: {}",
+                    driver_error(d, rc)
+                ));
+            }
+            Ok((module, function))
+        };
+        compile(major, minor).or_else(|native| {
+            compile(90, 0)
+                .map_err(|fallback| format!("{native}\nfallback compute_90 failed: {fallback}"))
+        })
+    }
+}
+
+pub(crate) fn check_cu(d: &Driver, rc: CUresult) -> Result<(), String> {
     if rc == 0 {
         Ok(())
     } else {
-        Err(cu_error(d, rc))
+        Err(driver_error(d, rc))
     }
 }
 
@@ -789,18 +853,50 @@ fn first_lines(s: &str, n: usize) -> String {
 
 /// Extract the (mangled) kernel name from PTX — the token after
 /// `.visible .entry` up to the opening `(`.
-fn extract_entry_name(ptx: &[u8], fallback: &str) -> String {
+fn extract_exact_entry_name(ptx: &[u8], requested: &str) -> Result<String, String> {
     let text = String::from_utf8_lossy(ptx);
+    let mut matches = Vec::new();
     for line in text.lines() {
         if let Some(idx) = line.find(".entry ") {
             let rest = &line[idx + ".entry ".len()..];
             if let Some(open) = rest.find('(') {
                 let name = rest[..open].trim();
-                if !name.is_empty() {
-                    return name.to_string();
+                if name == requested {
+                    matches.push(name.to_string());
                 }
             }
         }
     }
-    fallback.to_string()
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(format!(
+            "kernel entry `{requested}` not found exactly in NVRTC PTX; generic kernels must use extern \\\"C\\\""
+        )),
+        count => Err(format!(
+            "kernel entry `{requested}` is ambiguous in NVRTC PTX ({count} exact matches)"
+        )),
+    }
+}
+
+fn extract_entry_name(ptx: &[u8], requested: &str) -> Result<String, String> {
+    let text = String::from_utf8_lossy(ptx);
+    let mut matches = Vec::new();
+    for line in text.lines() {
+        if let Some(idx) = line.find(".entry ") {
+            let rest = &line[idx + ".entry ".len()..];
+            if let Some(open) = rest.find('(') {
+                let name = rest[..open].trim();
+                if !name.is_empty() && (name == requested || name.ends_with(requested)) {
+                    matches.push(name.to_string());
+                }
+            }
+        }
+    }
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(format!("kernel entry `{requested}` not found in NVRTC PTX")),
+        count => Err(format!(
+            "kernel entry `{requested}` is ambiguous in NVRTC PTX ({count} matches)"
+        )),
+    }
 }

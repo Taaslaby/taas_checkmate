@@ -1,4 +1,4 @@
-//! FFI layer: NVRTC (static link, `nvrtc.lib`) + CUDA **driver API**.
+//! FFI layer: NVRTC (dynamic load) + CUDA **driver API**.
 //!
 //! On Windows the toolkit ships an *empty* `cuda.lib` stub — the real driver
 //! lives in `nvcuda.dll` (in System32) and has no import library in the
@@ -6,8 +6,12 @@
 //! (`LoadLibraryW` on Windows, `dlopen` on Unix) and resolve the handful of
 //! entry points we need via `GetProcAddress`/`dlsym`.
 //!
+//! NVRTC is loaded the same way: it ships in the CUDA toolkit `bin` dir, so a
+//! hard link would make any consumer binary (e.g. the Python `.pyd`) fail to
+//! load on machines where the toolkit `bin` is not on the OS search path.
+//!
 //! All unsafe FFI is confined to this module; `engine.rs` uses the safe
-//! [`Driver`] handle.
+//! [`Driver`] and [`Nvrtc`] handles.
 
 #![allow(non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
 
@@ -36,31 +40,177 @@ pub const CU_STREAM_CAPTURE_MODE_THREAD_LOCAL: u32 = 0x00;
 // cuGraphInstantiate flags
 pub const CU_GRAPH_INSTANTIATE_DEFAULT: u64 = 0;
 
-// ── NVRTC (statically linked against nvrtc.lib) ─────────────────────
+// ── NVRTC (dynamically loaded — same reason as the driver) ─────────
 pub type nvrtcResult = c_int;
 pub type nvrtcProgram = *mut c_void;
 
-#[link(name = "nvrtc")]
-extern "C" {
-    pub fn nvrtcCreateProgram(
-        prog: *mut nvrtcProgram,
-        src: *const c_char,
-        name: *const c_char,
-        numHeaders: c_int,
-        headers: *const *const c_char,
-        includeNames: *const *const c_char,
-    ) -> nvrtcResult;
-    pub fn nvrtcCompileProgram(
-        prog: nvrtcProgram,
-        numOptions: c_int,
-        options: *const *const c_char,
-    ) -> nvrtcResult;
-    pub fn nvrtcGetPTXSize(prog: nvrtcProgram, ptxSize: *mut usize) -> nvrtcResult;
-    pub fn nvrtcGetPTX(prog: nvrtcProgram, ptx: *mut c_char) -> nvrtcResult;
-    pub fn nvrtcGetProgramLogSize(prog: nvrtcProgram, logSize: *mut usize) -> nvrtcResult;
-    pub fn nvrtcGetProgramLog(prog: nvrtcProgram, log: *mut c_char) -> nvrtcResult;
-    pub fn nvrtcGetErrorString(result: nvrtcResult) -> *const c_char;
-    pub fn nvrtcDestroyProgram(prog: *mut nvrtcProgram) -> nvrtcResult;
+pub type NvrtcCreateProgramFn = unsafe extern "C" fn(
+    *mut nvrtcProgram,
+    *const c_char,
+    *const c_char,
+    c_int,
+    *const *const c_char,
+    *const *const c_char,
+) -> nvrtcResult;
+pub type NvrtcCompileProgramFn =
+    unsafe extern "C" fn(nvrtcProgram, c_int, *const *const c_char) -> nvrtcResult;
+pub type NvrtcGetPTXSizeFn = unsafe extern "C" fn(nvrtcProgram, *mut usize) -> nvrtcResult;
+pub type NvrtcGetPTXFn = unsafe extern "C" fn(nvrtcProgram, *mut c_char) -> nvrtcResult;
+pub type NvrtcGetProgramLogSizeFn = unsafe extern "C" fn(nvrtcProgram, *mut usize) -> nvrtcResult;
+pub type NvrtcGetProgramLogFn = unsafe extern "C" fn(nvrtcProgram, *mut c_char) -> nvrtcResult;
+pub type NvrtcGetErrorStringFn = unsafe extern "C" fn(nvrtcResult) -> *const c_char;
+pub type NvrtcDestroyProgramFn = unsafe extern "C" fn(*mut nvrtcProgram) -> nvrtcResult;
+
+/// Resolved NVRTC entry points (host-side compiler — no GPU required).
+pub struct Nvrtc {
+    pub nvrtc_create_program: NvrtcCreateProgramFn,
+    pub nvrtc_compile_program: NvrtcCompileProgramFn,
+    pub nvrtc_get_ptx_size: NvrtcGetPTXSizeFn,
+    pub nvrtc_get_ptx: NvrtcGetPTXFn,
+    pub nvrtc_get_program_log_size: NvrtcGetProgramLogSizeFn,
+    pub nvrtc_get_program_log: NvrtcGetProgramLogFn,
+    pub nvrtc_get_error_string: NvrtcGetErrorStringFn,
+    pub nvrtc_destroy_program: NvrtcDestroyProgramFn,
+}
+
+static NVRTC: OnceLock<Result<Nvrtc, String>> = OnceLock::new();
+
+/// Load (once) and return the NVRTC compiler API handle.
+pub fn nvrtc() -> &'static Result<Nvrtc, String> {
+    NVRTC.get_or_init(Nvrtc::load)
+}
+
+impl Nvrtc {
+    fn load() -> Result<Self, String> {
+        #[cfg(windows)]
+        let lib = find_nvrtc_windows()?;
+        #[cfg(unix)]
+        let lib = find_nvrtc_unix()?;
+        #[cfg(not(any(windows, unix)))]
+        return Err("unsupported platform".to_string());
+
+        macro_rules! sym {
+            ($t:ty, $name:literal) => {
+                unsafe { load_symbol::<$t>($name, lib)? }
+            };
+        }
+
+        Ok(Self {
+            nvrtc_create_program: sym!(NvrtcCreateProgramFn, "nvrtcCreateProgram"),
+            nvrtc_compile_program: sym!(NvrtcCompileProgramFn, "nvrtcCompileProgram"),
+            nvrtc_get_ptx_size: sym!(NvrtcGetPTXSizeFn, "nvrtcGetPTXSize"),
+            nvrtc_get_ptx: sym!(NvrtcGetPTXFn, "nvrtcGetPTX"),
+            nvrtc_get_program_log_size: sym!(NvrtcGetProgramLogSizeFn, "nvrtcGetProgramLogSize"),
+            nvrtc_get_program_log: sym!(NvrtcGetProgramLogFn, "nvrtcGetProgramLog"),
+            nvrtc_get_error_string: sym!(NvrtcGetErrorStringFn, "nvrtcGetErrorString"),
+            nvrtc_destroy_program: sym!(NvrtcDestroyProgramFn, "nvrtcDestroyProgram"),
+        })
+    }
+}
+
+/// Known `nvrtc64_*.dll` names, newest first (CUDA 11 → 13).
+#[cfg(windows)]
+const NVRTC_WINDOWS_CANDIDATES: &[&str] = &[
+    "nvrtc64_130_0.dll",
+    "nvrtc64_131.dll",
+    "nvrtc64_130.dll",
+    "nvrtc64_122.dll",
+    "nvrtc64_121.dll",
+    "nvrtc64_120.dll",
+    "nvrtc64_112_0.dll",
+    "nvrtc64_111_0.dll",
+    "nvrtc64_110_0.dll",
+];
+
+#[cfg(windows)]
+fn find_nvrtc_windows() -> Result<*mut c_void, String> {
+    let mut errors: Vec<String> = Vec::new();
+    // 1) Bare names — LoadLibraryW searches the app dir, System32 and PATH.
+    for name in NVRTC_WINDOWS_CANDIDATES {
+        match os::load(name) {
+            Ok(h) => return Ok(h),
+            Err(e) => errors.push(e),
+        }
+    }
+    // 2) CUDA_PATH\bin[x64] — full path, no PATH dependency.
+    if let Ok(path) = std::env::var("CUDA_PATH") {
+        for sub in ["bin\\x64", "bin"] {
+            if let Some(full) = nvrtc_dll_in_dir(&format!("{path}\\{sub}")) {
+                if let Ok(h) = os::load(&full) {
+                    return Ok(h);
+                }
+            }
+        }
+    }
+    // 3) Default toolkit root — any installed version, newest last.
+    if let Ok(progfiles) = std::env::var("ProgramFiles") {
+        let root = format!("{progfiles}\\NVIDIA GPU Computing Toolkit\\CUDA");
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .map(|e| e.path().to_string_lossy().into_owned())
+                .collect();
+            versions.sort();
+            for dir in versions.into_iter().rev() {
+                for sub in ["bin\\x64", "bin"] {
+                    if let Some(full) = nvrtc_dll_in_dir(&format!("{dir}\\{sub}")) {
+                        if let Ok(h) = os::load(&full) {
+                            return Ok(h);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err(format!(
+        "NVRTC (nvrtc64_*.dll) not found: {}",
+        errors.first().cloned().unwrap_or_default()
+    ))
+}
+
+/// First `nvrtc64*.dll` in `dir` (newest by name), if any.
+#[cfg(windows)]
+fn nvrtc_dll_in_dir(dir: &str) -> Option<String> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut names: Vec<String> = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("nvrtc64") && n.ends_with(".dll"))
+        .collect();
+    names.sort();
+    names.into_iter().next_back().map(|n| format!("{dir}\\{n}"))
+}
+
+#[cfg(unix)]
+fn find_nvrtc_unix() -> Result<*mut c_void, String> {
+    const CANDIDATES: &[&str] = &[
+        "libnvrtc.so.13",
+        "libnvrtc.so.12",
+        "libnvrtc.so.11",
+        "libnvrtc.so",
+    ];
+    let mut errors: Vec<String> = Vec::new();
+    for name in CANDIDATES {
+        match os_unix::load(name) {
+            Ok(h) => return Ok(h),
+            Err(e) => errors.push(e),
+        }
+    }
+    for dir in [
+        "/usr/local/cuda/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/opt/cuda/lib64",
+    ] {
+        for name in CANDIDATES {
+            if let Ok(h) = os_unix::load(&format!("{dir}/{name}")) {
+                return Ok(h);
+            }
+        }
+    }
+    Err(format!(
+        "NVRTC (libnvrtc.so*) not found: {}",
+        errors.first().cloned().unwrap_or_default()
+    ))
 }
 
 // ── Driver API types (dynamically loaded) ───────────────────────────
@@ -79,6 +229,7 @@ pub type CuModuleLoadDataExFn = unsafe extern "C" fn(
 ) -> CUresult;
 pub type CuModuleGetFunctionFn =
     unsafe extern "C" fn(*mut CUfunction, CUmodule, *const c_char) -> CUresult;
+pub type CuModuleUnloadFn = unsafe extern "C" fn(CUmodule) -> CUresult;
 pub type CuMemAllocFn = unsafe extern "C" fn(*mut CUdeviceptr, usize) -> CUresult;
 pub type CuMemFreeFn = unsafe extern "C" fn(CUdeviceptr) -> CUresult;
 pub type CuMemcpyHtoDFn = unsafe extern "C" fn(CUdeviceptr, *const c_void, usize) -> CUresult;
@@ -120,6 +271,7 @@ pub struct Driver {
     pub cu_ctx_set_current: CuCtxSetCurrentFn,
     pub cu_module_load_data_ex: CuModuleLoadDataExFn,
     pub cu_module_get_function: CuModuleGetFunctionFn,
+    pub cu_module_unload: CuModuleUnloadFn,
     pub cu_mem_alloc: CuMemAllocFn,
     pub cu_mem_free: CuMemFreeFn,
     pub cu_memcpy_htod: CuMemcpyHtoDFn,
@@ -170,6 +322,7 @@ impl Driver {
             cu_ctx_set_current: sym!(CuCtxSetCurrentFn, "cuCtxSetCurrent"),
             cu_module_load_data_ex: sym!(CuModuleLoadDataExFn, "cuModuleLoadDataEx"),
             cu_module_get_function: sym!(CuModuleGetFunctionFn, "cuModuleGetFunction"),
+            cu_module_unload: sym!(CuModuleUnloadFn, "cuModuleUnload"),
             cu_mem_alloc: sym!(CuMemAllocFn, "cuMemAlloc"),
             cu_mem_free: sym!(CuMemFreeFn, "cuMemFree"),
             cu_memcpy_htod: sym!(CuMemcpyHtoDFn, "cuMemcpyHtoD"),
@@ -299,12 +452,15 @@ fn load_unix_so() -> Result<*mut std::os::raw::c_void, String> {
 
 /// Human-readable NVRTC error message (static string, no free needed).
 pub fn nvrtc_error(rc: nvrtcResult) -> String {
-    unsafe {
-        let p = nvrtcGetErrorString(rc);
-        if p.is_null() {
-            format!("unknown NVRTC error {rc}")
-        } else {
-            CStr::from_ptr(p).to_string_lossy().into_owned()
-        }
+    match nvrtc().as_ref() {
+        Ok(n) => unsafe {
+            let p = (n.nvrtc_get_error_string)(rc);
+            if p.is_null() {
+                format!("unknown NVRTC error {rc}")
+            } else {
+                CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
+        },
+        Err(e) => format!("NVRTC unavailable: {e}"),
     }
 }
