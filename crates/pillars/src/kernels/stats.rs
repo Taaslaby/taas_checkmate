@@ -36,14 +36,16 @@ pub fn population_rate_decode(
 /// Firing rates per neuron (Hz) from a spike buffer `[time × neuron]`.
 pub fn firing_rates(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f32) -> Vec<f32> {
     let mut rates = vec![0.0f32; n_neurons];
-    for t in 0..n_steps.min(spike_buffer.len() / n_neurons.max(1)) {
+    let available_steps = spike_buffer.len().checked_div(n_neurons).unwrap_or(0);
+    let observed_steps = n_steps.min(available_steps);
+    for t in 0..observed_steps {
         for i in 0..n_neurons {
             if spike_buffer[t * n_neurons + i] != 0 {
                 rates[i] += 1.0;
             }
         }
     }
-    let duration = (n_steps as f32) * dt;
+    let duration = (observed_steps as f32) * dt;
     if duration > 0.0 {
         for r in rates.iter_mut() {
             *r /= duration;
@@ -96,11 +98,15 @@ pub fn compute_cvs(spike_buffer: &[i32], n_neurons: usize, n_steps: usize, dt: f
     if n_neurons == 0 || n_steps == 0 {
         return cvs;
     }
+    let observed_steps = n_steps.min(spike_buffer.len() / n_neurons);
+    if observed_steps == 0 {
+        return cvs;
+    }
 
     for i in 0..n_neurons {
         let mut isi_values = Vec::new();
         let mut last_spike: Option<usize> = None;
-        for t in 0..n_steps {
+        for t in 0..observed_steps {
             if spike_buffer[t * n_neurons + i] != 0 {
                 if let Some(last) = last_spike {
                     let interval = (t - last) as f32 * dt * 1000.0;
@@ -167,7 +173,10 @@ impl SpikeRaster {
     /// Convert to a dense matrix `[n_steps × n_neurons]` (1 = spike).
     pub fn to_dense(&self, n_neurons: usize) -> (Vec<i32>, usize) {
         let n_steps = self.n_steps;
-        let mut dense = vec![0i32; n_steps * n_neurons];
+        let dense_len = n_steps
+            .checked_mul(n_neurons)
+            .expect("SpikeRaster::to_dense: matrix size overflows usize");
+        let mut dense = vec![0i32; dense_len];
         for &(t, i) in &self.events {
             if t < n_steps && i < n_neurons {
                 dense[t * n_neurons + i] = 1;
@@ -250,6 +259,24 @@ mod tests {
         );
         let cvs = compute_cvs(&buf, 1, 100, 0.001);
         assert!(cvs[0] < 0.05, "regular firing → CV ≈ 0, got {}", cvs[0]);
+    }
+
+    #[test]
+    fn statistics_use_available_frames_when_request_is_longer() {
+        // Only two frames are available although callers request ten. The
+        // denominator must be two, and CV must not index past the buffer.
+        let buf = [1i32, 0, 1, 0];
+        let rates = firing_rates(&buf, 2, 10, 1.0);
+        assert_eq!(rates, vec![1.0, 0.0]);
+        let cvs = compute_cvs(&buf, 2, 10, 1.0);
+        assert_eq!(cvs.len(), 2);
+    }
+
+    #[test]
+    fn population_rate_decode_empty_population_is_safe() {
+        let mut rates = [1.0f32];
+        population_rate_decode(&mut rates, &[], 0, 10);
+        assert_eq!(rates, [1.0]);
     }
 
     #[test]

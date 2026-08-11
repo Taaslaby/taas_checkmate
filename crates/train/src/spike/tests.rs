@@ -1,9 +1,9 @@
 #![allow(deprecated)]
-use crate::spike::{t3spike_backward, t3spike_forward, T3SpikeTrajectory};
+use crate::spike::{t3spike_backward, t3spike_forward};
 use crate::t3::pst_linear_dim;
 
 fn make_drives(seed: usize, n_steps: usize, n: usize) -> Vec<f32> {
-    let mut rng = |i: usize| -> f32 { ((i as f64 * 1.337).sin() * 1.5) as f32 };
+    let rng = |i: usize| -> f32 { ((i as f64 * 1.337).sin() * 1.5) as f32 };
     let n_total = n_steps * 3 * n;
     (0..n_total)
         .map(|i| {
@@ -22,7 +22,7 @@ fn test_pst_jacobian_analytic_vs_fd() {
         let n_steps = 1;
         let drives = make_drives(seed, n_steps, n_osc);
 
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
         );
 
@@ -209,7 +209,7 @@ fn test_dynamics_jacobian_fd() {
         let n_steps = 1;
         let drives = make_drives(seed, n_steps, n_osc);
 
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
         );
 
@@ -256,7 +256,7 @@ fn test_fast_pst_jacobian_analytic_vs_fd() {
         let n_steps = 1;
         let drives = make_drives(seed, n_steps, n_osc);
 
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc, n_steps, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08, &drives,
         );
 
@@ -442,7 +442,7 @@ fn test_theta_post_derivative() {
 
     // Perturb drive[3,0,0] by ±eps
     let eps = 1e-4f32;
-    let idx = 3 * 3 * n_osc + 0;
+    let idx = 3 * 3 * n_osc;
     let mut dp = drives.clone();
     let orig = dp[idx];
     dp[idx] = orig + eps;
@@ -455,14 +455,14 @@ fn test_theta_post_derivative() {
     );
 
     // θ_post at step 3 = θ_pre at step 4
-    let th_p = tp.th1_pre()[4 * n_osc + 0];
-    let th_m = tm.th1_pre()[4 * n_osc + 0];
+    let th_p = tp.th1_pre()[4 * n_osc];
+    let th_m = tm.th1_pre()[4 * n_osc];
     let fd_dth = (th_p - th_m) / (2.0 * eps);
 
-    let r_pre = traj.r1_pre()[3 * n_osc + 0];
-    let r_pre4 = traj.r1_pre()[4 * n_osc + 0];
-    let th_pre3 = traj.th1_pre()[3 * n_osc + 0];
-    let th_pre4 = traj.th1_pre()[4 * n_osc + 0];
+    let r_pre = traj.r1_pre()[3 * n_osc];
+    let r_pre4 = traj.r1_pre()[4 * n_osc];
+    let th_pre3 = traj.th1_pre()[3 * n_osc];
+    let th_pre4 = traj.th1_pre()[4 * n_osc];
     println!(
         "r_pre[3,0]={:.6} r_pre[4,0]={:.6} th_pre[3,0]={:.6} th_pre[4,0]={:.6}",
         r_pre, r_pre4, th_pre3, th_pre4
@@ -473,7 +473,7 @@ fn test_theta_post_derivative() {
         "fd_dth={:.6} expected={:.6} drive_orig={:.6}",
         fd_dth,
         expected,
-        drives[3 * 3 * n_osc + 0]
+        drives[3 * 3 * n_osc]
     );
     let tol = 0.05;
     assert!(
@@ -649,7 +649,7 @@ fn test_gradient_survival_analytic_vs_fd() {
 
         for step in 0..3.min(n_steps) {
             for pop in 0..3 {
-                let idx = step * 3 * n_osc + pop * n_osc + 0;
+                let idx = step * 3 * n_osc + pop * n_osc;
                 let mut dp = drives.clone();
                 dp[idx] += eps;
                 let mut dm = drives.clone();
@@ -725,7 +725,7 @@ fn test_gradient_sign_debug_seed2() {
 
     let drives = random_drives(n_steps, n_osc, 2);
 
-    let (pst, traj) = t3spike_forward(
+    let (_pst, traj) = t3spike_forward(
         n_osc,
         n_steps,
         dt,
@@ -750,7 +750,7 @@ fn test_gradient_sign_debug_seed2() {
     for eps_val in [1e-2f32, 5e-3, 2e-3, 1e-3, 5e-4] {
         println!("\n  eps={:.0e}:", eps_val);
         for step in 0..3 {
-            let idx = step * 3 * n_osc + 2 * n_osc + 0;
+            let idx = step * 3 * n_osc + 2 * n_osc;
             let mut dp = drives.clone();
             dp[idx] += eps_val;
             let mut dm = drives.clone();
@@ -816,7 +816,7 @@ fn test_gradient_sign_vs_nsteps() {
     println!("\n  Scanning n_steps (uniform drives):");
     for n_steps in [1, 2, 3, 5, 10, 20, 50, 100, 200] {
         let drives = &drives_base[..n_steps * 3 * n_osc];
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc,
             n_steps,
             0.05,
@@ -835,7 +835,7 @@ fn test_gradient_sign_vs_nsteps() {
         grad_pst[2] = 1.0;
         let ana = crate::spike::t3spike_backward(&grad_pst, &traj);
 
-        let idx = 0 * 3 * n_osc + 1 * n_osc + 0;
+        let idx = n_osc;
         let mut dp = drives.to_vec();
         dp[idx] += eps;
         let mut dm = drives.to_vec();
@@ -879,7 +879,7 @@ fn test_gradient_sign_vs_nsteps() {
     for eps_val in [1e-2f32, 1e-3] {
         let n_steps = 200;
         let drives = &drives_random[..n_steps * 3 * n_osc];
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc,
             n_steps,
             0.05,
@@ -898,7 +898,7 @@ fn test_gradient_sign_vs_nsteps() {
         grad_pst[2] = 1.0;
         let ana = crate::spike::t3spike_backward(&grad_pst, &traj);
 
-        let idx = 0 * 3 * n_osc + 1 * n_osc + 0;
+        let idx = n_osc;
         let mut dp = drives.to_vec();
         dp[idx] += eps_val;
         let mut dm = drives.to_vec();
@@ -944,7 +944,7 @@ fn test_gradient_sign_vs_nsteps() {
     let drives_s2 = random_drives(200, n_osc, 2);
     for n_steps in [5, 10, 20, 50, 100, 200] {
         let drives = &drives_s2[..n_steps * 3 * n_osc];
-        let (pst, traj) = t3spike_forward(
+        let (_pst, traj) = t3spike_forward(
             n_osc,
             n_steps,
             0.05,
@@ -964,7 +964,7 @@ fn test_gradient_sign_vs_nsteps() {
         }
         let ana = crate::spike::t3spike_backward(&grad_pst, &traj);
 
-        let idx = 0 * 3 * n_osc + 2 * n_osc + 0;
+        let idx = 2 * n_osc;
         let eps_val = 1e-3f32;
         let mut dp = drives.to_vec();
         dp[idx] += eps_val;

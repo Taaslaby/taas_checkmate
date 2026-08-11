@@ -65,7 +65,11 @@ pub struct BcmSynapse {
 impl BcmSynapse {
     /// Create new BCM synapse population of `n` synapses (padded to %8).
     pub fn new(n: usize) -> Self {
-        let n_pad = n.div_ceil(8) * 8;
+        let n_pad = n
+            .checked_add(7)
+            .and_then(|value| value.checked_div(8))
+            .and_then(|lanes| lanes.checked_mul(8))
+            .expect("BcmSynapse: n overflows SIMD padding");
         Self {
             n: n_pad,
             x: vec![0.0; n_pad],
@@ -88,7 +92,17 @@ impl BcmSynapse {
     ///
     /// Канон — `kernels::learning::bcm_step` (SIMD + scalar tail внутри канона).
     pub fn step(&mut self, pre_rates: &[f32], post_rates: &[f32], dt: f32) {
-        let n = self.n.min(pre_rates.len()).min(post_rates.len());
+        assert_eq!(
+            pre_rates.len(),
+            self.n,
+            "BcmSynapse::step: pre_rates length must equal padded population length"
+        );
+        assert_eq!(
+            post_rates.len(),
+            self.n,
+            "BcmSynapse::step: post_rates length must equal padded population length"
+        );
+        let n = self.n;
         if n == 0 {
             return;
         }
@@ -151,7 +165,12 @@ impl HomeostaticScale {
     ///
     /// `weights` and `post_rates` must have the same length.
     pub fn step(&self, weights: &mut [f32], post_rates: &[f32], dt: f32) {
-        let n = weights.len().min(post_rates.len());
+        assert_eq!(
+            weights.len(),
+            post_rates.len(),
+            "HomeostaticScale::step: weights and post_rates lengths must match"
+        );
+        let n = weights.len();
         let n8 = n & !7;
         if n8 > 0 {
             homeostatic_scale(
@@ -225,5 +244,33 @@ mod tests {
             weights[0] < 1.0,
             "Homeostatic: high rate should decrease weights"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "pre_rates length must equal")]
+    fn bcm_rejects_mismatched_rates() {
+        let mut bcm = BcmSynapse::new(8);
+        bcm.step(&[1.0; 7], &[1.0; 8], 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "weights and post_rates lengths must match")]
+    fn homeostatic_rejects_mismatched_lengths() {
+        let hs = HomeostaticScale::new(0.01, 5.0);
+        let mut weights = vec![1.0; 8];
+        hs.step(&mut weights, &[1.0; 7], 1.0);
+    }
+
+    #[test]
+    fn bcm_uses_padded_length_for_non_aligned_population() {
+        let mut bcm = BcmSynapse::new(9);
+        assert_eq!(bcm.n, 16);
+        bcm.step(&[0.5; 16], &[1.0; 16], 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflows SIMD padding")]
+    fn bcm_rejects_padding_overflow() {
+        let _ = BcmSynapse::new(usize::MAX);
     }
 }

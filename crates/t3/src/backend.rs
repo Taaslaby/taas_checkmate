@@ -4,7 +4,7 @@
 //!
 //! - [`Avx2Backend`] — AVX2 ASM через neuron-engine FFI (по умолчанию, fast)
 //! - [`ScalarBackend`] — чистый Rust, без ASM (portable, для отладки)
-//! - [`CudaBackend`] — GPU через `cuda-kernels` крейт (planned)
+//! - [`CudaBackend`] — GPU через `pillars-cuda` (feature-gated)
 //!
 //! ## Архитектура
 //!
@@ -204,8 +204,8 @@ impl T3Backend for ScalarBackend {
         lr: f32,
         eps: f32,
     ) {
-        // Single-source: delegates to the consolidated `taas_kernels::safe`
-        // wrapper, which routes to `pillars::kernels::decode::nlms_train`.
+        // Single-source: delegates directly to the canonical
+        // `pillars::kernels::decode::nlms_train` kernel.
         crate::kernels::nlms_train(weights, bias, states, error, lr, eps);
     }
 
@@ -226,18 +226,11 @@ impl T3Backend for ScalarBackend {
     }
 }
 
-// ─── CudaBackend (placeholder — requires cuda-kernels crate) ───
+// ─── CudaBackend is provided by the optional pillars-cuda backend ───
 //
-// To implement: add `cuda-kernels` as dependency, create CudaBackend
-// struct with GpuContext, implement T3Backend trait.
-//
-// ```ignore
-// pub struct CudaBackend {
-//     ctx: crate::cuda::GpuContext,
-//     n: usize,
-// }
-// impl T3Backend for CudaBackend { ... }
-// ```
+// The CUDA implementation lives in backend_cuda.rs and pillars-cuda.
+// The concrete CUDA implementation is feature-gated in `backend_cuda.rs`.
+// The GPU kernels themselves live in the `pillars-cuda` crate.
 
 #[cfg(test)]
 mod tests {

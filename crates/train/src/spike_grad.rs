@@ -58,6 +58,190 @@ pub struct SpikeGradBridge {
 }
 
 impl SpikeGradBridge {
+    #[inline]
+    fn assert_config_values(
+        n_osc: usize,
+        dt: f32,
+        drive_gain: f32,
+        alpha: f32,
+        freq_min: f32,
+        freq_max: f32,
+        coupling_w12: f32,
+        coupling_w13: f32,
+        coupling_w23: f32,
+    ) {
+        assert!(n_osc > 0, "SpikeGradBridge: n_osc must be > 0");
+        assert!(
+            dt.is_finite() && dt > 0.0,
+            "SpikeGradBridge: dt must be finite and > 0"
+        );
+        assert!(
+            drive_gain.is_finite(),
+            "SpikeGradBridge: drive_gain must be finite"
+        );
+        assert!(alpha.is_finite(), "SpikeGradBridge: alpha must be finite");
+        assert!(
+            freq_min.is_finite() && freq_max.is_finite() && freq_min <= freq_max,
+            "SpikeGradBridge: frequency bounds must be finite and ordered"
+        );
+        assert!(
+            coupling_w12.is_finite() && coupling_w13.is_finite() && coupling_w23.is_finite(),
+            "SpikeGradBridge: coupling weights must be finite"
+        );
+    }
+
+    #[inline]
+    fn assert_config(&self) {
+        Self::assert_config_values(
+            self.n_osc,
+            self.dt,
+            self.drive_gain,
+            self.alpha,
+            self.freq_min,
+            self.freq_max,
+            self.coupling_w12,
+            self.coupling_w13,
+            self.coupling_w23,
+        );
+    }
+
+    #[inline]
+    fn checked_len(n_steps: usize, width: usize, label: &str) -> usize {
+        n_steps
+            .checked_mul(width)
+            .unwrap_or_else(|| panic!("{label}: n_steps * width overflowed"))
+    }
+
+    #[inline]
+    fn expected_pst_len(&self, n_steps: usize) -> usize {
+        Self::checked_len(n_steps, crate::t3::pst_linear_dim(self.n_osc), "PST shape")
+    }
+
+    #[inline]
+    fn assert_layout(&self) {
+        self.assert_config();
+        assert!(self.spike_dim > 0, "SpikeGradBridge: spike_dim must be > 0");
+        assert_eq!(
+            self.drive_dim,
+            self.n_osc
+                .checked_mul(3)
+                .expect("SpikeGradBridge: drive shape overflowed"),
+            "SpikeGradBridge: drive_dim does not match n_osc"
+        );
+        assert_eq!(
+            self.w.len(),
+            self.spike_dim
+                .checked_mul(self.drive_dim)
+                .expect("SpikeGradBridge: weight shape overflowed"),
+            "SpikeGradBridge: weight storage has the wrong length"
+        );
+        assert_eq!(
+            self.b.len(),
+            self.drive_dim,
+            "SpikeGradBridge: bias storage has the wrong length"
+        );
+    }
+
+    #[inline]
+    fn assert_finite(values: &[f32], label: &str) {
+        assert!(
+            values.iter().all(|value| value.is_finite()),
+            "SpikeGradBridge: {label} contains a non-finite value"
+        );
+    }
+
+    #[inline]
+    fn assert_trajectory_shape_config(&self, traj: &T3SpikeTrajectory) {
+        let n = traj.n_osc;
+        let steps = traj.n_steps;
+        let state_len = Self::checked_len(steps, n, "SpikeGradBridge: trajectory state");
+        let flat_len = state_len
+            .checked_mul(9)
+            .expect("SpikeGradBridge: trajectory flat shape overflowed");
+        assert_eq!(
+            traj.flat.len(),
+            flat_len,
+            "SpikeGradBridge::backward: trajectory flat storage has the wrong length"
+        );
+        for (label, state) in [
+            ("th1_final", &traj.th1_final),
+            ("th2_final", &traj.th2_final),
+            ("th3_final", &traj.th3_final),
+            ("r1_final", &traj.r1_final),
+            ("r2_final", &traj.r2_final),
+            ("r3_final", &traj.r3_final),
+        ] {
+            assert_eq!(
+                state.len(),
+                n,
+                "SpikeGradBridge::backward: trajectory {label} has the wrong length"
+            );
+        }
+        for (label, actual, expected) in [
+            ("dt", traj.dt, self.dt),
+            ("drive_gain", traj.drive_gain, self.drive_gain),
+            ("alpha", traj.alpha, self.alpha),
+            ("freq_min", traj.freq_min, self.freq_min),
+            ("freq_max", traj.freq_max, self.freq_max),
+            ("w12", traj.w12, self.coupling_w12),
+            ("w13", traj.w13, self.coupling_w13),
+            ("w23", traj.w23, self.coupling_w23),
+        ] {
+            assert_eq!(
+                actual, expected,
+                "SpikeGradBridge::backward: trajectory {label} does not match bridge configuration"
+            );
+        }
+    }
+
+    #[inline]
+    fn assert_trajectory_layout(&self, traj: &T3SpikeTrajectory) {
+        self.assert_trajectory_shape_config(traj);
+        for (label, state) in [
+            ("th1_final", &traj.th1_final),
+            ("th2_final", &traj.th2_final),
+            ("th3_final", &traj.th3_final),
+            ("r1_final", &traj.r1_final),
+            ("r2_final", &traj.r2_final),
+            ("r3_final", &traj.r3_final),
+        ] {
+            Self::assert_finite(state, label);
+        }
+        Self::assert_finite(&traj.flat, "trajectory storage");
+    }
+
+    #[inline]
+    fn assert_backward_shapes(
+        &self,
+        grad_pst: &[f32],
+        traj: &T3SpikeTrajectory,
+        spikes: &[f32],
+        per_step_grad_pst: Option<&[f32]>,
+    ) {
+        assert_eq!(
+            traj.n_osc, self.n_osc,
+            "SpikeGradBridge::backward: trajectory has a different oscillator count"
+        );
+        let n_steps = traj.n_steps;
+        assert_eq!(
+            grad_pst.len(),
+            crate::t3::pst_linear_dim(self.n_osc),
+            "SpikeGradBridge::backward: final PST gradient has the wrong length"
+        );
+        assert_eq!(
+            spikes.len(),
+            Self::checked_len(n_steps, self.spike_dim, "SpikeGradBridge::backward input"),
+            "SpikeGradBridge::backward: spikes must match trajectory length"
+        );
+        if let Some(per_step) = per_step_grad_pst {
+            assert_eq!(
+                per_step.len(),
+                self.expected_pst_len(n_steps),
+                "SpikeGradBridge::backward: per-step PST gradient has the wrong length"
+            );
+        }
+    }
+
     /// Create new bridge with random weights.
     ///
     /// `spike_dim`: number of spike input features (per timestep)
@@ -75,8 +259,24 @@ impl SpikeGradBridge {
         coupling_w13: f32,
         coupling_w23: f32,
     ) -> Self {
-        let drive_dim = 3 * n_osc;
-        let n_weights = spike_dim * drive_dim;
+        Self::assert_config_values(
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+        );
+        assert!(spike_dim > 0, "SpikeGradBridge: spike_dim must be > 0");
+        let drive_dim = 3usize
+            .checked_mul(n_osc)
+            .expect("SpikeGradBridge::new: drive shape overflowed");
+        let n_weights = spike_dim
+            .checked_mul(drive_dim)
+            .expect("SpikeGradBridge::new: weight shape overflowed");
         let mut rng = rand::thread_rng();
         use rand::Rng;
         let mut w = Vec::with_capacity(n_weights);
@@ -120,10 +320,29 @@ impl SpikeGradBridge {
         weights: &[f32],
         bias: &[f32],
     ) -> Self {
-        let drive_dim = 3 * n_osc;
+        Self::assert_config_values(
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+        );
+        assert!(spike_dim > 0, "SpikeGradBridge: spike_dim must be > 0");
+        Self::assert_finite(weights, "weights");
+        Self::assert_finite(bias, "bias");
+        let drive_dim = 3usize
+            .checked_mul(n_osc)
+            .expect("SpikeGradBridge::from_weights: drive shape overflowed");
+        let expected_weights = spike_dim
+            .checked_mul(drive_dim)
+            .expect("SpikeGradBridge::from_weights: weight shape overflowed");
         assert_eq!(
             weights.len(),
-            spike_dim * drive_dim,
+            expected_weights,
             "from_weights: weights.len()={} != spike_dim*drive_dim={}*{}",
             weights.len(),
             spike_dim,
@@ -166,9 +385,26 @@ impl SpikeGradBridge {
         coupling_w13: f32,
         coupling_w23: f32,
     ) -> Self {
-        let drive_dim = 3 * n_osc;
+        Self::assert_config_values(
+            n_osc,
+            dt,
+            drive_gain,
+            alpha,
+            freq_min,
+            freq_max,
+            coupling_w12,
+            coupling_w13,
+            coupling_w23,
+        );
+        assert!(spike_dim > 0, "SpikeGradBridge: spike_dim must be > 0");
+        let drive_dim = 3usize
+            .checked_mul(n_osc)
+            .expect("SpikeGradBridge::new_zero: drive shape overflowed");
+        let n_weights = spike_dim
+            .checked_mul(drive_dim)
+            .expect("SpikeGradBridge::new_zero: weight shape overflowed");
         Self {
-            w: vec![0.0; spike_dim * drive_dim],
+            w: vec![0.0; n_weights],
             b: vec![0.0; drive_dim],
             n_osc,
             dt,
@@ -187,7 +423,7 @@ impl SpikeGradBridge {
     /// ── Forward pass ──
     ///
     /// `spikes`: [T × spike_dim] flattened, row-major.
-    /// Returns `(pst_features[T × pst_dim], trajectory)`.
+    /// Returns `(final_step_pst_features[pst_dim], trajectory)`.
     ///
     /// Internally computes:
     /// ```text
@@ -196,9 +432,18 @@ impl SpikeGradBridge {
     /// ```
     /// then runs T3 forward with these drives.
     pub fn forward(&self, spikes: &[f32], n_steps: usize) -> (Vec<f32>, T3SpikeTrajectory) {
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        Self::assert_finite(spikes, "spikes");
         let sd = self.spike_dim;
         let dd = self.drive_dim;
-        let len = n_steps * dd;
+        assert_eq!(
+            spikes.len(),
+            Self::checked_len(n_steps, sd, "SpikeGradBridge::forward input"),
+            "SpikeGradBridge::forward: spikes must have n_steps * spike_dim elements"
+        );
+        let len = Self::checked_len(n_steps, dd, "SpikeGradBridge::forward drives");
 
         let mut drives = vec![0.0; len];
         for t in 0..n_steps {
@@ -245,17 +490,55 @@ impl SpikeGradBridge {
         spikes: &[f32],
         per_step_grad_pst: Option<&[f32]>,
     ) -> (Vec<f32>, Vec<f32>) {
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        self.assert_trajectory_layout(traj);
+        self.assert_backward_shapes(grad_pst, traj, spikes, per_step_grad_pst);
+        Self::assert_finite(grad_pst, "final PST gradient");
+        Self::assert_finite(spikes, "spikes");
+        if let Some(per_step) = per_step_grad_pst {
+            Self::assert_finite(per_step, "per-step PST gradient");
+        }
+        self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst)
+    }
+
+    /// Fast BPTT path for trusted, already-validated trajectories.
+    ///
+    /// This keeps shape/configuration checks but skips the O(T×N) finite-value
+    /// scan over trajectory buffers. Callers must guarantee that the bridge,
+    /// trajectory, gradients, and spikes contain only finite values. The
+    /// regular [`Self::backward`] method remains the safe default.
+    pub fn backward_fast(
+        &self,
+        grad_pst: &[f32],
+        traj: &T3SpikeTrajectory,
+        spikes: &[f32],
+        per_step_grad_pst: Option<&[f32]>,
+    ) -> (Vec<f32>, Vec<f32>) {
+        self.assert_layout();
+        self.assert_trajectory_shape_config(traj);
+        self.assert_backward_shapes(grad_pst, traj, spikes, per_step_grad_pst);
+        self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst)
+    }
+
+    #[inline]
+    fn backward_impl(
+        &self,
+        grad_pst: &[f32],
+        traj: &T3SpikeTrajectory,
+        spikes: &[f32],
+        per_step_grad_pst: Option<&[f32]>,
+    ) -> (Vec<f32>, Vec<f32>) {
         let dd = self.drive_dim;
         let sd = self.spike_dim;
         let n_steps = traj.n_steps;
-
-        // BPTT through T3 → grad_drives [n_steps × drive_dim]
         let grad_drives = t3spike_backward_per_step(grad_pst, traj, per_step_grad_pst);
-
-        // Project grad_drives back to bridge weights:
-        // dL/dW[i, j] = Σ_t grad_drives[t, j] × spikes[t, i]
-        // dL/db[j]    = Σ_t grad_drives[t, j]
-        let mut grad_w = vec![0.0; sd * dd];
+        let mut grad_w = vec![
+            0.0;
+            sd.checked_mul(dd)
+                .expect("SpikeGradBridge::backward: gradient shape overflowed")
+        ];
         let mut grad_b = vec![0.0; dd];
 
         for t in 0..n_steps {
@@ -279,7 +562,29 @@ impl SpikeGradBridge {
     /// `grad_b`: [drive_dim] — gradient w.r.t. b
     /// `lr`: learning rate
     pub fn update(&mut self, grad_w: &[f32], grad_b: &[f32], lr: f32) {
-        let nw = self.spike_dim * self.drive_dim;
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        Self::assert_finite(grad_w, "weight gradient");
+        Self::assert_finite(grad_b, "bias gradient");
+        let nw = self
+            .spike_dim
+            .checked_mul(self.drive_dim)
+            .expect("SpikeGradBridge::update: gradient shape overflowed");
+        assert_eq!(
+            grad_w.len(),
+            nw,
+            "SpikeGradBridge::update: grad_w has the wrong length"
+        );
+        assert_eq!(
+            grad_b.len(),
+            self.drive_dim,
+            "SpikeGradBridge::update: grad_b has the wrong length"
+        );
+        assert!(
+            lr.is_finite() && lr >= 0.0,
+            "SpikeGradBridge::update: lr must be finite and >= 0"
+        );
         for i in 0..nw {
             self.w[i] -= lr * grad_w[i];
         }
@@ -306,7 +611,61 @@ impl SpikeGradBridge {
         m_b: &mut [f32],
         v_b: &mut [f32],
     ) {
-        let nw = self.spike_dim * self.drive_dim;
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        Self::assert_finite(grad_w, "weight gradient");
+        Self::assert_finite(grad_b, "bias gradient");
+        Self::assert_finite(m_w, "Adam m_w state");
+        Self::assert_finite(v_w, "Adam v_w state");
+        Self::assert_finite(m_b, "Adam m_b state");
+        Self::assert_finite(v_b, "Adam v_b state");
+        let nw = self
+            .spike_dim
+            .checked_mul(self.drive_dim)
+            .expect("SpikeGradBridge::update_adam: gradient shape overflowed");
+        assert_eq!(
+            grad_w.len(),
+            nw,
+            "SpikeGradBridge::update_adam: grad_w has the wrong length"
+        );
+        assert_eq!(
+            grad_b.len(),
+            self.drive_dim,
+            "SpikeGradBridge::update_adam: grad_b has the wrong length"
+        );
+        assert_eq!(
+            m_w.len(),
+            nw,
+            "SpikeGradBridge::update_adam: m_w has the wrong length"
+        );
+        assert_eq!(
+            v_w.len(),
+            nw,
+            "SpikeGradBridge::update_adam: v_w has the wrong length"
+        );
+        assert_eq!(
+            m_b.len(),
+            self.drive_dim,
+            "SpikeGradBridge::update_adam: m_b has the wrong length"
+        );
+        assert_eq!(
+            v_b.len(),
+            self.drive_dim,
+            "SpikeGradBridge::update_adam: v_b has the wrong length"
+        );
+        assert!(
+            lr.is_finite()
+                && lr >= 0.0
+                && beta1.is_finite()
+                && (0.0..1.0).contains(&beta1)
+                && beta2.is_finite()
+                && (0.0..1.0).contains(&beta2)
+                && eps.is_finite()
+                && eps > 0.0,
+            "SpikeGradBridge::update_adam: invalid optimizer parameters"
+        );
+        assert!(t > 0, "SpikeGradBridge::update_adam: t must be > 0");
         for i in 0..nw {
             m_w[i] = beta1 * m_w[i] + (1.0 - beta1) * grad_w[i];
             v_w[i] = beta2 * v_w[i] + (1.0 - beta2) * grad_w[i] * grad_w[i];
@@ -326,9 +685,19 @@ impl SpikeGradBridge {
 
     /// Bridge output: compute drives from spikes without running T3.
     pub fn compute_drives(&self, spikes: &[f32], n_steps: usize) -> Vec<f32> {
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        Self::assert_finite(spikes, "spikes");
         let sd = self.spike_dim;
         let dd = self.drive_dim;
-        let mut drives = vec![0.0; n_steps * dd];
+        assert_eq!(
+            spikes.len(),
+            Self::checked_len(n_steps, sd, "SpikeGradBridge::compute_drives input"),
+            "SpikeGradBridge::compute_drives: spikes must match n_steps * spike_dim"
+        );
+        let mut drives =
+            vec![0.0; Self::checked_len(n_steps, dd, "SpikeGradBridge::compute_drives output")];
         for t in 0..n_steps {
             let base = t * dd;
             let s = &spikes[t * sd..(t + 1) * sd];
@@ -416,7 +785,7 @@ mod tests {
         // Per-step PST gradient (nonzero only at the last feature for testing)
         let mut per_step = vec![0.0; t * pst_dim];
         for step in 0..t {
-            per_step[step * pst_dim + 0] = 1.0; // gradient on sin(θ₁) at every step
+            per_step[step * pst_dim] = 1.0; // gradient on sin(θ₁) at every step
         }
 
         let grad_pst = vec![0.0; pst_dim];
@@ -454,5 +823,106 @@ mod tests {
             .zip(bridge.w.iter())
             .any(|(a, b)| (a - b).abs() > 1e-8);
         assert!(changed, "ADAM should update weights");
+    }
+
+    #[test]
+    fn test_bridge_backward_fast_matches_checked() {
+        let bridge = SpikeGradBridge::new_zero(1, 2, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let spikes = vec![0.2; 5];
+        let (pst, traj) = bridge.forward(&spikes, 5);
+        let grad_pst = vec![1.0; pst.len()];
+        let checked = bridge.backward(&grad_pst, &traj, &spikes, None);
+        let fast = bridge.backward_fast(&grad_pst, &traj, &spikes, None);
+        assert_eq!(checked, fast);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge: spike_dim must be > 0")]
+    fn test_bridge_rejects_zero_spike_dim() {
+        let _ = SpikeGradBridge::new_zero(0, 1, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge: dt must be finite and > 0")]
+    fn test_bridge_rejects_invalid_dt() {
+        let _ = SpikeGradBridge::new_zero(1, 1, 0.0, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge: frequency bounds must be finite and ordered")]
+    fn test_bridge_rejects_invalid_frequency_bounds() {
+        let _ = SpikeGradBridge::new_zero(1, 1, 0.05, 10.0, 1.0, 3.0, 0.5, 0.3, 0.15, 0.08);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "SpikeGradBridge::backward: trajectory dt does not match bridge configuration"
+    )]
+    fn test_bridge_rejects_mismatched_trajectory_config() {
+        let bridge = SpikeGradBridge::new_zero(1, 1, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let spikes = [0.0; 1];
+        let (pst, mut traj) = bridge.forward(&spikes, 1);
+        traj.dt = 0.1;
+        let _ = bridge.backward(&pst, &traj, &spikes, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge: weights contains a non-finite value")]
+    fn test_bridge_rejects_non_finite_weights() {
+        let _ = SpikeGradBridge::from_weights(
+            1,
+            1,
+            0.05,
+            10.0,
+            1.0,
+            0.5,
+            3.0,
+            0.3,
+            0.15,
+            0.08,
+            &[f32::NAN; 3],
+            &[0.0; 3],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "spikes must have n_steps * spike_dim elements")]
+    fn test_bridge_rejects_wrong_forward_shape() {
+        let bridge = SpikeGradBridge::new_zero(2, 1, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let _ = bridge.forward(&[0.0; 3], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge::backward: trajectory flat storage")]
+    fn test_bridge_rejects_malformed_trajectory() {
+        let bridge = SpikeGradBridge::new_zero(1, 1, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let spikes = [0.0; 1];
+        let (pst, mut traj) = bridge.forward(&spikes, 1);
+        traj.flat.pop();
+        let _ = bridge.backward(&pst, &traj, &spikes, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "SpikeGradBridge::update_adam: m_w")]
+    fn test_bridge_rejects_wrong_adam_state_shape() {
+        let mut bridge =
+            SpikeGradBridge::new_zero(1, 1, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let mut empty_m_w = Vec::new();
+        let mut empty_v_w = Vec::new();
+        let mut empty_m_b = Vec::new();
+        let mut empty_v_b = Vec::new();
+        bridge.update_adam(
+            &[0.0; 3],
+            &[0.0; 3],
+            0.01,
+            0.9,
+            0.999,
+            1e-8,
+            1,
+            &mut empty_m_w,
+            &mut empty_v_w,
+            &mut empty_m_b,
+            &mut empty_v_b,
+        );
     }
 }

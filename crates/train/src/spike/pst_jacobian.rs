@@ -373,7 +373,7 @@ mod tests {
         // Single non-zero grad: sin(θ₁₀)
         let n = 8;
         let pst_dim = pst_linear_dim(n);
-        let th1: Vec<f32> = (0..n).map(|i| (i as f32 * 0.7)).collect();
+        let th1: Vec<f32> = (0..n).map(|i| i as f32 * 0.7).collect();
         let th2 = vec![0.0; n];
         let th3 = vec![0.0; n];
         let r1 = vec![1.0; n];

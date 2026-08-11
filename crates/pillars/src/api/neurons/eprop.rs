@@ -211,12 +211,21 @@ pub struct EPropIzhikevichMulti {
 
 impl EPropIzhikevichMulti {
     pub fn new(n_pre: usize, n_post: usize, dt: f32, tau_e: f32) -> Self {
-        let n_pad = n_post.div_ceil(8) * 8;
+        assert!(n_pre > 0, "EPropIzhikevichMulti: n_pre must be > 0");
+        assert!(n_post > 0, "EPropIzhikevichMulti: n_post must be > 0");
+        let n_pad = n_post
+            .checked_add(7)
+            .and_then(|value| value.checked_div(8))
+            .and_then(|lanes| lanes.checked_mul(8))
+            .expect("EPropIzhikevichMulti: n_post overflows SIMD padding");
+        let eligibility_len = n_pre
+            .checked_mul(n_pad)
+            .expect("EPropIzhikevichMulti: n_pre * n_post overflows");
         Self {
             v: vec![-65.0; n_pad],
             u: vec![-13.0; n_pad],
             psi: vec![0.0; n_pad],
-            e: vec![0.0; n_pre * n_pad],
+            e: vec![0.0; eligibility_len],
             n_pre,
             n_post: n_pad,
             dt,
@@ -237,10 +246,30 @@ impl EPropIzhikevichMulti {
         I_ext: &[f32],
         spikes: &mut [i32],
     ) -> usize {
-        let n = self.n_post.min(I_ext.len()).min(spikes.len());
-        if n == 0 {
-            return 0;
-        }
+        assert_eq!(
+            I_ext.len(),
+            self.n_post,
+            "multi E-Prop step: I_ext length must equal padded n_post"
+        );
+        assert_eq!(
+            spikes.len(),
+            self.n_post,
+            "multi E-Prop step: spikes length must equal padded n_post"
+        );
+        let expected_synapses = self
+            .n_pre
+            .checked_mul(self.n_post)
+            .expect("multi E-Prop step: synapse shape overflow");
+        assert_eq!(
+            weights.len(),
+            expected_synapses,
+            "multi E-Prop step: weights length mismatch"
+        );
+        assert_eq!(
+            z_pre.len(),
+            self.n_pre,
+            "multi E-Prop step: z_pre length mismatch"
+        );
 
         let n_pre = self.n_pre;
         let dt = self.dt;
@@ -274,6 +303,25 @@ impl EPropIzhikevichMulti {
     /// Apply E-Prop weight update for column-major weight matrix.
     pub fn update_weights_multi(&self, weights: &mut [f32], learning_signals: &[f32], lr: f32) {
         let n_post = self.n_post;
+        let expected_synapses = self
+            .n_pre
+            .checked_mul(n_post)
+            .expect("multi E-Prop update: synapse shape overflow");
+        assert_eq!(
+            self.e.len(),
+            expected_synapses,
+            "multi E-Prop update: eligibility shape mismatch"
+        );
+        assert_eq!(
+            weights.len(),
+            expected_synapses,
+            "multi E-Prop update: weights length mismatch"
+        );
+        assert_eq!(
+            learning_signals.len(),
+            n_post,
+            "multi E-Prop update: learning_signals length mismatch"
+        );
         let n8 = n_post & !7;
         if n8 == 0 {
             return;
@@ -517,12 +565,21 @@ impl EPropAdExMulti {
         a: f32,
         b: f32,
     ) -> Self {
-        let n_pad = n_post.div_ceil(8) * 8;
+        assert!(n_pre > 0, "EPropAdExMulti: n_pre must be > 0");
+        assert!(n_post > 0, "EPropAdExMulti: n_post must be > 0");
+        let n_pad = n_post
+            .checked_add(7)
+            .and_then(|value| value.checked_div(8))
+            .and_then(|lanes| lanes.checked_mul(8))
+            .expect("EPropAdExMulti: n_post overflows SIMD padding");
+        let eligibility_len = n_pre
+            .checked_mul(n_pad)
+            .expect("EPropAdExMulti: n_pre * n_post overflows");
         Self {
             v: vec![v_rest; n_pad],
             w: vec![0.0; n_pad],
             psi: vec![0.0; n_pad],
-            e: vec![0.0; n_pre * n_pad],
+            e: vec![0.0; eligibility_len],
             n_pre,
             n_post: n_pad,
             dt,
@@ -561,10 +618,30 @@ impl EPropAdExMulti {
         I_ext: &[f32],
         spikes: &mut [i32],
     ) -> usize {
-        let n = self.n_post.min(I_ext.len()).min(spikes.len());
-        if n == 0 {
-            return 0;
-        }
+        assert_eq!(
+            I_ext.len(),
+            self.n_post,
+            "multi E-Prop step: I_ext length must equal padded n_post"
+        );
+        assert_eq!(
+            spikes.len(),
+            self.n_post,
+            "multi E-Prop step: spikes length must equal padded n_post"
+        );
+        let expected_synapses = self
+            .n_pre
+            .checked_mul(self.n_post)
+            .expect("multi E-Prop step: synapse shape overflow");
+        assert_eq!(
+            weights.len(),
+            expected_synapses,
+            "multi E-Prop step: weights length mismatch"
+        );
+        assert_eq!(
+            z_pre.len(),
+            self.n_pre,
+            "multi E-Prop step: z_pre length mismatch"
+        );
 
         let n_pre = self.n_pre;
         let dt = self.dt;
@@ -606,6 +683,25 @@ impl EPropAdExMulti {
     /// Apply E-Prop weight update for column-major weight matrix.
     pub fn update_weights_multi(&self, weights: &mut [f32], learning_signals: &[f32], lr: f32) {
         let n_post = self.n_post;
+        let expected_synapses = self
+            .n_pre
+            .checked_mul(n_post)
+            .expect("multi E-Prop update: synapse shape overflow");
+        assert_eq!(
+            self.e.len(),
+            expected_synapses,
+            "multi E-Prop update: eligibility shape mismatch"
+        );
+        assert_eq!(
+            weights.len(),
+            expected_synapses,
+            "multi E-Prop update: weights length mismatch"
+        );
+        assert_eq!(
+            learning_signals.len(),
+            n_post,
+            "multi E-Prop update: learning_signals length mismatch"
+        );
         let n8 = n_post & !7;
         if n8 == 0 {
             return;
@@ -705,5 +801,39 @@ mod tests {
             total += pop.step(&weights, &z_pre, &i_ext, &mut spikes);
         }
         assert!(total > 0, "EPropAdExMulti should fire");
+    }
+
+    #[test]
+    #[should_panic(expected = "multi E-Prop step: weights length mismatch")]
+    fn eprop_izh_multi_rejects_mismatched_weights() {
+        let mut pop = EPropIzhikevichMulti::new(2, 8, 1.0, 20.0);
+        let mut spikes = vec![0i32; 8];
+        pop.step(&[0.0; 15], &[1, 0], &[0.0; 8], &mut spikes);
+    }
+
+    #[test]
+    #[should_panic(expected = "multi E-Prop update: learning_signals length mismatch")]
+    fn eprop_adex_multi_rejects_mismatched_learning_signals() {
+        let pop = EPropAdExMulti::new_default(2, 8, 1.0, 20.0);
+        let mut weights = vec![0.0f32; 2 * 8];
+        pop.update_weights_multi(&mut weights, &[1.0; 7], 0.1);
+    }
+
+    #[test]
+    #[should_panic(expected = "n_pre must be > 0")]
+    fn eprop_multi_rejects_zero_pre_dimension() {
+        let _ = EPropIzhikevichMulti::new(0, 8, 1.0, 20.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "n_post must be > 0")]
+    fn eprop_multi_rejects_zero_post_dimension() {
+        let _ = EPropAdExMulti::new_default(2, 0, 1.0, 20.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflows SIMD padding")]
+    fn eprop_multi_rejects_padding_overflow() {
+        let _ = EPropIzhikevichMulti::new(1, usize::MAX, 1.0, 20.0);
     }
 }

@@ -4,8 +4,17 @@
     cd taas_checkmate && python3 tests/test_spigrad_gradient.py
 """
 
+import sys
+
 import numpy as np
 import taas_checkmate as tcm
+
+# Windows consoles may default to cp1251; the report uses Unicode markers.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
 
 N_OSC = 4
 N_STEPS = 20

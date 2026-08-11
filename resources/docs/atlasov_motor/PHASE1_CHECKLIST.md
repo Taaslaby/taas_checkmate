@@ -7,24 +7,29 @@
 
 ---
 
-## Milestone 1: Create `taas_embodied` Crate (Day 1 morning)
+## Milestone 1: Create the embodied module (Day 1 morning)
+
+> **Current layout:** this historical plan predates the workspace consolidation. Do not create `taas-embodied`, `taas-core`, or `taas-kernels` crates. New embodied code belongs in `pillars::api` / `pillars::zoo` and, when needed, `pillars-connectome`.
 
 ### M1.1: Workspace setup
-- [ ] Create new crate: `cargo new --lib taas-embodied`
-- [ ] Add to workspace root `Cargo.toml`:
+- [ ] Extend the existing `pillars` embodied API, or create a new crate under `crates/` only when the feature needs a separate package. Do **not** run `cargo new --lib taas-embodied`.
+- [ ] Use the existing workspace crates; do not add legacy members:
   ```toml
-  [workspace]
-  members = ["taas-kernels", "taas-core", "taas-embodied"]
+  members = [
+      "crates/pillars", "crates/pillars-cuda", "crates/pillars-connectome",
+      "crates/t3", "crates/train", "crates/taas-format",
+  ]
   ```
-- [ ] Add dependencies to `taas-embodied/Cargo.toml`:
+- [ ] If a separate crate under `crates/` is justified, add dependencies relative to that crate's directory:
   ```toml
   [dependencies]
-  taas-kernels = { path = "../taas-kernels" }
-  taas-core = { path = "../taas-core" }
+  pillars = { path = "../pillars" }
+  pillars-connectome = { path = "../pillars-connectome" }
   mujoco-sys = "0.2"
   ndarray = "0.15"
   serde = { version = "1.0", features = ["derive"] }
   ```
+  If the implementation belongs in the existing `crates/pillars` module, do not add a self-dependency; use `crate::api`, `crate::zoo`, and `crate::kernels` directly.
 
 ### M1.2: Core data structures
 - [ ] Copy `fly_embodied_skeleton.rs` → `taas-embodied/src/fly_embodied.rs`
@@ -257,5 +262,4 @@ fn joint_moved(angle_before: f32, angle_after: f32, threshold: f32) -> bool {
 - Phase 3: GPU optimization (SIMD/CUDA benchmarks)
 - Phase 4: Behavior exploration (navigation, obstacle avoidance, etc.)
 
-> ⚠️ **SUPERSEDED (2026-08-03):** план реализован — `taas-embodied` больше не отдельный крейт.
-> Код свёрнут в `crates/core/src/neuron/embodied.rs` (`core::neuron::embodied`) при консолидации воркспейса 13 → 9 крейтов.
+> ⚠️ **SUPERSEDED:** этот план описывает старую структуру. `taas-embodied`, `taas-core` и `taas-kernels` больше не являются workspace crates. Реализацию продолжать через `pillars::api`, `pillars::zoo` и `pillars-connectome`; текущий workspace перечислен в `Cargo.toml`.

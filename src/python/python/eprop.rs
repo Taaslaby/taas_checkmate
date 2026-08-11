@@ -3,6 +3,7 @@
 #![allow(non_snake_case)]
 
 use numpy::{PyArray1, PyArrayMethods};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use pillars::api::neurons as neuron;
@@ -98,6 +99,10 @@ impl PyEPropLIF {
 /// Each post-neuron maintains `n_pre` eligibility traces.
 /// Column-major layout: `e[i * n_post + j]` for synapse (i→j).
 ///
+/// `n_post` is padded to the SIMD width. The `step` and `update_weights`
+/// methods therefore require `I_ext`, `spikes`, weights, and learning signals
+/// to use the padded length exposed by `n_post()`.
+///
 /// Step computes: I_total_j = I_ext_j + Σ_i weights[i·n+j] · z_pre[i]
 /// Then Izhikevich dynamics + per-synapse eligibility:
 ///   de_ij/dt = -e_ij/τ_e + ψ_j · z_pre_i
@@ -110,10 +115,24 @@ pub struct PyEPropIzhikevichMulti {
 impl PyEPropIzhikevichMulti {
     #[new]
     #[pyo3(signature = (n_pre, n_post, dt=1.0, tau_e=20.0))]
-    fn new(n_pre: usize, n_post: usize, dt: f32, tau_e: f32) -> Self {
-        Self {
-            inner: neuron::EPropIzhikevichMulti::new(n_pre, n_post, dt, tau_e),
+    fn new(n_pre: usize, n_post: usize, dt: f32, tau_e: f32) -> PyResult<Self> {
+        if n_pre == 0 {
+            return Err(PyValueError::new_err("n_pre must be > 0"));
         }
+        if n_post == 0 {
+            return Err(PyValueError::new_err("n_post must be > 0"));
+        }
+        let n_padded = n_post
+            .checked_add(7)
+            .and_then(|value| value.checked_div(8))
+            .and_then(|lanes| lanes.checked_mul(8))
+            .ok_or_else(|| PyValueError::new_err("n_post overflows SIMD padding"))?;
+        n_pre
+            .checked_mul(n_padded)
+            .ok_or_else(|| PyValueError::new_err("n_pre * n_post overflows"))?;
+        Ok(Self {
+            inner: neuron::EPropIzhikevichMulti::new(n_pre, n_post, dt, tau_e),
+        })
     }
 
     /// One step: fused weight accumulation + Izhikevich + per-synapse eligibility.
@@ -130,6 +149,41 @@ impl PyEPropIzhikevichMulti {
         let z_pre = z_pre.readonly();
         let I_ext = I_ext.readonly();
         let mut spikes = spikes.readwrite();
+        let expected_weights =
+            self.inner
+                .n_pre
+                .checked_mul(self.inner.n_post)
+                .ok_or_else(|| {
+                    PyValueError::new_err("EPropIzhikevichMulti: synapse shape overflows")
+                })?;
+        if weights.len()? != expected_weights {
+            return Err(PyValueError::new_err(format!(
+                "weights length mismatch: expected {}, got {}",
+                expected_weights,
+                weights.len()?
+            )));
+        }
+        if z_pre.len()? != self.inner.n_pre {
+            return Err(PyValueError::new_err(format!(
+                "z_pre length mismatch: expected {}, got {}",
+                self.inner.n_pre,
+                z_pre.len()?
+            )));
+        }
+        if I_ext.len()? != self.inner.n_post {
+            return Err(PyValueError::new_err(format!(
+                "I_ext length mismatch: expected padded n_post {}, got {}",
+                self.inner.n_post,
+                I_ext.len()?
+            )));
+        }
+        if spikes.len()? != self.inner.n_post {
+            return Err(PyValueError::new_err(format!(
+                "spikes length mismatch: expected padded n_post {}, got {}",
+                self.inner.n_post,
+                spikes.len()?
+            )));
+        }
         Ok(self.inner.step(
             weights.as_slice()?,
             z_pre.as_slice()?,
@@ -150,6 +204,27 @@ impl PyEPropIzhikevichMulti {
     ) -> PyResult<()> {
         let mut weights = weights.readwrite();
         let ls = learning_signals.readonly();
+        let expected_weights =
+            self.inner
+                .n_pre
+                .checked_mul(self.inner.n_post)
+                .ok_or_else(|| {
+                    PyValueError::new_err("EPropIzhikevichMulti: synapse shape overflows")
+                })?;
+        if weights.len()? != expected_weights {
+            return Err(PyValueError::new_err(format!(
+                "weights length mismatch: expected {}, got {}",
+                expected_weights,
+                weights.len()?
+            )));
+        }
+        if ls.len()? != self.inner.n_post {
+            return Err(PyValueError::new_err(format!(
+                "learning_signals length mismatch: expected {}, got {}",
+                self.inner.n_post,
+                ls.len()?
+            )));
+        }
         self.inner
             .update_weights_multi(weights.as_slice_mut()?, ls.as_slice()?, lr);
         Ok(())

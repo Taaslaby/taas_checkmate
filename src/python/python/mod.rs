@@ -58,6 +58,8 @@ pub mod trainer;
 pub mod vnc;
 // pub mod iit;
 #[cfg(feature = "cuda")]
+pub mod cuda_kernel;
+#[cfg(feature = "cuda")]
 pub mod gpu_refiner;
 pub mod hologram;
 pub mod spaun;
@@ -442,6 +444,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
         add_fn_facade!(pillars, kuramoto::py_ring_synthesis_cuda);
         add_fn_facade!(pillars, kuramoto::py_interference_matrix_cuda);
         add_fn_facade!(pillars, kuramoto::py_band_energy_cuda);
+        export_class_facade!(pillars, cuda_kernel::PyCudaKernel);
     }
     export_class_facade!(pillars, eprop::PyEPropLIF);
     export_class_facade!(pillars, eprop::PyEPropIzhikevichMulti);

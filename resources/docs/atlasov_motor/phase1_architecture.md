@@ -29,11 +29,22 @@ Kinematics → Video/Analysis
 
 ## Module Structure (Rust)
 
-```
-taas_embodied/  [NEW]
-├── lib.rs
-│   └── pub mod fly_embodied;
-├── fly_embodied.rs
+> **Current layout:** the structure below is historical. Do not create a new
+> `taas_embodied` crate. Place the implementation in the existing workspace,
+> using `pillars::api` / `pillars::zoo` for neural and motor models and
+> `pillars-connectome` for connectome simulation.
+
+```text
+Current layout:
+  crates/pillars/src/api/
+    └── embodied.rs / neurons/atlasov.rs
+  crates/pillars-connectome/src/
+    └── brain.rs / sim.rs / runner.rs
+  examples or tests/
+    └── embodied_fly_sim.rs
+
+Historical layout (do not recreate):
+  fly_embodied.rs
 │   ├── struct FlyEmbodiedState {
 │   │   pub neuron_engine: NeuronEngine,
 │   │   pub atlasov_state: AtlasovState,
@@ -202,19 +213,21 @@ impl FlyEmbodiedState {
 
 ## Dependencies
 
-Add to `Cargo.toml`:
+If a separate crate under `crates/` is justified, add dependencies relative
+to that crate's directory (do not add `taas-core` or `taas-kernels`):
 ```toml
 [dependencies]
-taas-kernels = { path = "../taas-kernels" }
-taas-core = { path = "../taas-core" }
-mujoco-sys = "0.2"  # C FFI bindings to MuJoCo
+pillars = { path = "../pillars" }
+pillars-connectome = { path = "../pillars-connectome" }
+mujoco-sys = "0.2"  # C FFI bindings to MuJoCo, if this target uses MuJoCo
 ndarray = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.5"  # for benches
 ```
+For code added directly to `crates/pillars`, use `crate::api`, `crate::zoo`,
+and `crate::kernels` instead of adding a self-dependency.
 
 
-> ⚠️ **SUPERSEDED (2026-08-03):** план реализован — `taas-embodied` больше не отдельный крейт.
-> Код свёрнут в `crates/core/src/neuron/embodied.rs` (`core::neuron::embodied`) при консолидации воркспейса 13 → 9 крейтов.
+> ⚠️ **SUPERSEDED:** этот документ описывает историческую структуру. `taas-embodied`, `taas-core` и `taas-kernels` удалены из workspace. Реализацию продолжать в `pillars::api`, `pillars::zoo` и `pillars-connectome`; не копировать старые пути из примеров выше.

@@ -202,6 +202,10 @@ pub fn run_program<S: SimdLane>(program: &[OpNode], regs: &mut [S; N_REGS], dt: 
                     .all(|&r| r < N_REGS),
             "formula register out of range"
         );
+        assert!(
+            !(P0..P0 + 8).contains(&op.out_reg),
+            "formula parameter registers are read-only"
+        );
         match op.kind {
             OpKind::Leak => {
                 let (v, i, inv_tau, v_rest) = (
@@ -309,6 +313,12 @@ pub fn validate_program(program: &[OpNode]) -> Result<(), String> {
         if op.out_reg >= N_REGS {
             return Err(format!(
                 "op {i} ({:?}): out_reg {} >= N_REGS ({N_REGS})",
+                op.kind, op.out_reg
+            ));
+        }
+        if (P0..P0 + 8).contains(&op.out_reg) {
+            return Err(format!(
+                "op {i} ({:?}): parameter register {} is read-only",
                 op.kind, op.out_reg
             ));
         }
@@ -566,6 +576,12 @@ mod tests {
         let bad_in = vec![OpNode::new(OpKind::Add, t0).with_in(&[t0, N_REGS])];
         let err = validate_program(&bad_in).unwrap_err();
         assert!(err.contains("in_reg"), "{err}");
+
+        // Parameter registers are inputs only; writing one would make the
+        // program depend on instruction order and be overwritten next step.
+        let writes_param = vec![OpNode::const_(P0, 1.0)];
+        let err = validate_program(&writes_param).unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
     }
 
     /// Мусор в НЕиспользуемом пине не должен валить валидацию:
@@ -599,6 +615,14 @@ mod tests {
     fn test_run_program_rejects_malformed_program_in_release() {
         let mut regs = [0.0f32; N_REGS];
         let bad = [OpNode::new(OpKind::Add, TEMP0).with_in(&[TEMP0, N_REGS])];
+        let _ = run_program(&bad, &mut regs, 0.5f32, 0.0f32);
+    }
+
+    #[test]
+    #[should_panic(expected = "formula parameter registers are read-only")]
+    fn test_run_program_rejects_parameter_destination_without_prevalidation() {
+        let mut regs = [0.0f32; N_REGS];
+        let bad = [OpNode::const_(P0, 1.0)];
         let _ = run_program(&bad, &mut regs, 0.5f32, 0.0f32);
     }
 

@@ -355,6 +355,9 @@ pub fn eprop_izhikevich_step_multi(
 ) -> usize {
     assert!(n_pre > 0, "eprop_izhikevich_step_multi: n_pre must be > 0");
     let n = v.len(); // n_post (column stride)
+    let synapse_len = n_pre
+        .checked_mul(n)
+        .expect("eprop_izhikevich_step_multi: n_pre * n_post overflows");
     assert_eq!(u.len(), n, "eprop_izhikevich_step_multi: u length mismatch");
     assert_eq!(
         psi.len(),
@@ -363,7 +366,7 @@ pub fn eprop_izhikevich_step_multi(
     );
     assert_eq!(
         e.len(),
-        n_pre * n,
+        synapse_len,
         "eprop_izhikevich_step_multi: e length mismatch"
     );
     assert_eq!(
@@ -378,7 +381,7 @@ pub fn eprop_izhikevich_step_multi(
     );
     assert_eq!(
         weights.len(),
-        n_pre * n,
+        synapse_len,
         "eprop_izhikevich_step_multi: weights length mismatch"
     );
     assert_eq!(
@@ -549,11 +552,14 @@ pub fn eprop_adex_step_multi(
         "eprop_adex_step_multi: tau_m/tau_w must be > 0"
     );
     let n = v.len(); // n_post (column stride)
+    let synapse_len = n_pre
+        .checked_mul(n)
+        .expect("eprop_adex_step_multi: n_pre * n_post overflows");
     assert_eq!(w.len(), n, "eprop_adex_step_multi: w length mismatch");
     assert_eq!(psi.len(), n, "eprop_adex_step_multi: psi length mismatch");
     assert_eq!(
         e.len(),
-        n_pre * n,
+        synapse_len,
         "eprop_adex_step_multi: e length mismatch"
     );
     assert_eq!(
@@ -568,7 +574,7 @@ pub fn eprop_adex_step_multi(
     );
     assert_eq!(
         weights.len(),
-        n_pre * n,
+        synapse_len,
         "eprop_adex_step_multi: weights length mismatch"
     );
     assert_eq!(

@@ -45,7 +45,9 @@ pub const SIMD_SIZE_BYTES: usize = std::mem::size_of::<SimdType>();
 /// Round `n` up to the nearest multiple of SIMD `LANES`.
 #[inline(always)]
 pub fn pad_lanes(n: usize) -> usize {
-    n.div_ceil(LANES) * LANES
+    n.div_ceil(LANES)
+        .checked_mul(LANES)
+        .expect("pad_lanes: size overflows usize")
 }
 
 /// Number of complete SIMD chunks (n / LANES).
@@ -145,6 +147,12 @@ mod tests {
     #[test]
     fn test_simd_size_bytes() {
         assert_eq!(SIMD_SIZE_BYTES, LANES * 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflows")]
+    fn test_pad_lanes_overflow_is_rejected() {
+        let _ = pad_lanes(usize::MAX);
     }
 
     #[test]

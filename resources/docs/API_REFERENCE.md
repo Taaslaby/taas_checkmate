@@ -33,6 +33,10 @@ pub use pillars_connectome as connectome;
 pub use pillars_cuda::gpu as cuda;
 // GpuContext, DevicePtr, csr_spmv_tanh, csr_stdp_dopamine_devptr, get_device_count,
 // set_device, pst_jacobian_gpu, t3_fused_forward_bptt, interference_matrix, ...
+
+// CudaKernel (волна 14): pillars_cuda::{CudaKernel, BufferArg, ScalarArg, LaunchConfig}
+// — универсальный онлайн GPU-компилятор (физика/химия/частицы). В корень крейта
+// НЕ реэкспортируется; Python: taas_checkmate.pillars.CudaKernel (feature python,cuda).
 ```
 
 ---
@@ -512,6 +516,179 @@ from taas_checkmate.hh_gpu import GpuHhLut
 - `pillars-cuda` tests: **38** (17 gpu-module + 21 NVRTC-parity) — зелёные на RTX 4060 Ti
 - `neuron_reference::verify_vs_neuron_gpu` — HH GPU vs NEURON ground-truth ✓
 - CI исключает `pillars-cuda` (нужен nvcc) как ранее `cuda-kernels`
+
+---
+
+## 9. CudaKernel — универсальный онлайн GPU-компилятор (волна 14)
+
+> Отдельный trusted-слой поверх NVRTC, независимый от `CompiledModel` и
+> `gpu`-микроядер. Принимает **произвольный CUDA C++** (физика, химия,
+> частицы, PDE), компилирует в PTX на лету и исполняет с host-буферами:
+> `upload → launch → sync → download`.
+>
+> Rust: `pillars_cuda::{CudaKernel, BufferArg, ScalarArg, LaunchConfig}`.
+> Python: `taas_checkmate.pillars.CudaKernel` (сборка `--features 'python,cuda'`).
+
+### 9.1 Rust API
+
+```rust
+use pillars_cuda::{CudaKernel, BufferArg, ScalarArg, LaunchConfig};
+
+let kernel = CudaKernel::compile(source, "spring_step")?;   // NVRTC → PTX → module
+let mut x = vec![1.0f32; 257];
+let mut v = vec![0.0f32; 257];
+let mut m = vec![1.0f32; 257];
+let mut f = vec![0.0f32; 257];
+let n = x.len() as i32;
+
+let mut buffers = [
+    BufferArg::F32(&mut x),
+    BufferArg::F32(&mut v),
+    BufferArg::F32(&mut m),
+    BufferArg::F32(&mut f),
+];
+kernel.launch(
+    &mut buffers,
+    &[
+        ScalarArg::F32(4.0),
+        ScalarArg::F32(0.2),
+        ScalarArg::F32(0.01),
+        ScalarArg::I32(n),
+    ],
+    LaunchConfig::for_len(n as usize)?,
+)?;
+```
+
+| Тип | Описание |
+|:----|:---------|
+| `CudaKernel::compile(source, kernel_name)` | NVRTC-компиляция; точное имя `extern "C"` entry |
+| `CudaKernel::launch(buffers, scalars, config)` | upload → launch → sync → download |
+| `CudaKernel::name()` | имя ядра |
+| `BufferArg::F32(&mut [f32])` / `BufferArg::I32(&mut [i32])` | host-буфер (копия на device и обратно) |
+| `ScalarArg::F32 / I32 / U32` | скалярные аргументы по значению |
+| `LaunchConfig { grid, block }` / `LaunchConfig::for_len(n)` | 1D-конфигурация (block ≤ 1024) |
+
+**Контракт ABI:**
+1. Порядок аргументов зеркалит CUDA C++: сначала **все pointer-буферы**, затем **все скаляры** (`kernel(float* x, float* v, float dt, int n)`).
+2. Kernel обязан быть `extern "C" __global__` — имя ищется точно, суффиксный матчинг запрещён (ошибка вместо запуска чужого entry).
+3. Скаляры: только `f32` / `i32` / `u32` (без `double`, `size_t`, структур).
+4. Буферы — contiguous, непустые; в Python дополнительно запрещён алиасинг/пересечение массивов.
+5. Состояние между запусками живёт в host-буферах — каждый `launch` делает полный round-trip (persistent-буферы — следующий слой).
+
+### 9.2 Python API
+
+```python
+from taas_checkmate.pillars import CudaKernel   # требуется сборка python,cuda
+
+k = CudaKernel(source, "spring_step")           # ValueError при ошибке компиляции
+k.name                                          # "spring_step"
+k.run([x, v, m, f], scalars=[4.0, 0.2, 0.01, n], grid=2, block=256)
+```
+
+- `buffers` — список contiguous `np.float32` массивов (должны быть непустыми и не пересекаться);
+- `scalars` — `int` → `int32`, `float` → `float32`; по умолчанию `None`;
+- `grid` / `block` — 1D размеры launch'а (default `1` / `256`);
+- ошибки: компиляция → `ValueError`, запуск → `RuntimeError` (несоответствие аргументов отсекается драйвером до запуска).
+
+### 9.3 Примеры физических kernel'ов
+
+#### Масса–пружина (spring-damper) — проверено
+
+```python
+import numpy as np
+from taas_checkmate.pillars import CudaKernel
+
+SRC = r'''
+extern "C" __global__ void spring_step(
+    float* x, float* velocity, const float* mass, const float* force,
+    float stiffness, float damping, float dt, int n
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    float a = (force[i] - stiffness * x[i] - damping * velocity[i]) / mass[i];
+    velocity[i] += a * dt;
+    x[i] += velocity[i] * dt;
+}
+'''
+k = CudaKernel(SRC, "spring_step")
+
+n = 1024
+x = np.full(n, 1.0, np.float32)   # смещение от равновесия
+v = np.zeros(n, np.float32)       # скорость
+m = np.ones(n, np.float32)        # масса
+f = np.zeros(n, np.float32)       # внешняя сила
+
+for _ in range(100):              # 100 шагов симуляции
+    k.run([x, v, m, f], scalars=[4.0, 0.2, 0.001, n], grid=4, block=256)
+```
+
+#### 1D диффузия (теплопроводность, double-buffer)
+
+```python
+SRC = r'''
+extern "C" __global__ void diffusion_step(
+    const float* u, float* u_next, float D, float dt, float dx, int n
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < 1 || i > n - 2) { if (i < n) u_next[i] = u[i]; return; }  // границы
+    u_next[i] = u[i] + dt * D * (u[i-1] - 2.0f*u[i] + u[i+1]) / (dx*dx);
+}
+'''
+k = CudaKernel(SRC, "diffusion_step")
+
+n = 4096
+u  = np.zeros(n, np.float32)
+u[n//4:n//2] = 1.0                # начальный импульс
+u2 = np.zeros(n, np.float32)
+for _ in range(200):
+    k.run([u, u2], scalars=[0.5, 0.0001, 0.01, n], grid=16, block=256)
+    u, u2 = u2, u                 # swap: актуальное состояние всегда в `u`
+```
+
+> Устойчивость явной схемы: `D·dt/dx² ≤ 0.5` (пример выше — ровно 0.5).
+
+#### N-body гравитация (O(N²), глобальные массивы)
+
+```python
+SRC = r'''
+extern "C" __global__ void gravity_step(
+    float* px, float* py, float* vx, float* vy,
+    const float* mass, float G, float softening, float dt, int n
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    float ax = 0.0f, ay = 0.0f;
+    for (int j = 0; j < n; ++j) {
+        if (j == i) continue;
+        float dx = px[j] - px[i], dy = py[j] - py[i];
+        float r2 = dx*dx + dy*dy + softening*softening;
+        float inv = G * mass[j] / (r2 * sqrtf(r2));
+        ax += dx * inv;
+        ay += dy * inv;
+    }
+    vx[i] += ax * dt; vy[i] += ay * dt;
+    px[i] += vx[i] * dt; py[i] += vy[i] * dt;
+}
+'''
+```
+
+### 9.4 Безопасность
+
+`CudaKernel` исполняет **произвольный trusted CUDA C++ без песочницы**
+(NVRTC не изолирует код). Для локальной разработки это нормально; для
+публичного онлайн-сервиса нужны отдельный GPU-worker-процесс, лимиты
+VRAM/времени исполнения, watchdog и политика проверки исходников.
+
+### 9.5 Требования
+
+- NVIDIA GPU + драйвер; NVRTC грузится **динамически** (`nvrtc64_*.dll` через
+  PATH/`CUDA_PATH`/корень тулкита; `libnvrtc.so*` на Unix) — импорт
+  Python-модуля работает и без CUDA-тулкита в search path;
+- wheel собран с `--features 'python,cuda'` (в `pyproject.toml` по умолчанию
+  `features = ["python"]`, поэтому для CUDA собирайте вручную:
+  `maturin develop --features 'python,cuda'`);
+- regression-тесты: `crates/pillars-cuda/tests/kernel_physics.rs` (generic
+  physics + error-path'ы) и `biophys_parity.rs`.
 
 ---
 

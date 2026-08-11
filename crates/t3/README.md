@@ -1,6 +1,6 @@
 # taas-t3 — Temporal Triplet Oscillator Engine
 
-3-population Kuramoto oscillator with Stuart-Landau amplitudes, PST features, decoders, and spike encoders. Generic over compute backends (AVX2, scalar, CUDA planned).
+3-population Kuramoto oscillator with Stuart-Landau amplitudes, PST features, decoders, and spike encoders. Generic over compute backends (AVX2, scalar, and optional CUDA via `pillars-cuda`).
 
 ## Architecture
 
@@ -47,9 +47,9 @@ pub trait T3Backend: Send + Sync {
 }
 ```
 
-- `Avx2Backend` (default) — pure SIMD via `taas-kernels`
+- `Avx2Backend` (default) — SIMD through canonical `pillars` kernels
 - `ScalarBackend` — portable, for debugging/verification
-- `CudaBackend` — GPU (requires `cuda` feature, WIP)
+- `CudaBackend` — optional GPU backend from `pillars-cuda` (requires the `cuda` feature and CUDA/NVRTC runtime)
 
 ### Decoders
 
@@ -113,6 +113,6 @@ let (drive, pred_class) = ctrl.drive_for(&mut tri, target_class, "gradient");
 
 ## Dependencies
 
-- `taas-kernels` (SIMD primitives)
+- `pillars` (canonical SIMD kernels and backend primitives)
 - `wide`, `serde`, `serde_json`, `rand`
-- Optional: `cuda-kernels` (GPU backend)
+- Optional: `pillars-cuda` through the root `cuda` feature (CUDA/NVRTC required for runtime execution)

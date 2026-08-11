@@ -1,6 +1,6 @@
-//! IO module — re-exported from `taas_kernels::io`.
+//! IO module — compatibility re-exports for the unified pillars API.
 //!
-//! `PwmEncoder`, `LinearDecoder`, gates, and signal processing functions.
-//! Implementation lives in `crates/kernels/src/io.rs`.
+//! `PwmEncoder`, `LinearDecoder`, gates, and signal processing functions are
+//! implemented canonically in `pillars::kernels::io`.
 
 pub use crate::kernels::io::*;

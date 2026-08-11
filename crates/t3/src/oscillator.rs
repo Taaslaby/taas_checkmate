@@ -29,7 +29,7 @@ use super::{
 ///
 /// Type parameter `B` — compute backend:
 /// - [`Avx2Backend`](super::backend::Avx2Backend) (default) — AVX2 ASM
-/// - `CudaBackend` — GPU (requires `cuda-kernels` crate, not yet implemented)
+/// - `CudaBackend` — GPU (provided by the optional `pillars-cuda` backend)
 pub struct TriOscillator<B: T3Backend = super::backend::Avx2Backend> {
     pub n: usize,
     pub backend: B,

@@ -38,7 +38,7 @@
 
 ## 3. CUDA C++ GPU Акселераторы
 
-Файлы ядра CUDA находятся в `crates/cuda/kernels/hh.cu`.
+AOT CUDA-ядра находятся в `crates/pillars-cuda/kernels/`, а dual-neuron CUDA source генерируется из моделей `pillars::zoo::neurons` через `#[dual_neuron]`. Исполняемый GPU-драйвер и FFI находятся в `crates/pillars-cuda`.
 
 ### Бенчмарки производительности ядра:
 - **Размер коннектома**: 153,962 нейрона, 3,990,039 синапсов.

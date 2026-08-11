@@ -450,7 +450,7 @@ fn run_gpu_hh_trace(
     let ctx = GpuContext::new(n, n_synapses).unwrap();
 
     let mut v = vec![v_init; n];
-    let mut gates = gates_init.to_vec();
+    let gates = gates_init.to_vec();
     let Ii = vec![i_ext; n];
     let g_leak_arr = vec![g_leak; n];
     let e_leak_arr = vec![e_leak; n];
