@@ -18,6 +18,7 @@
 //! All functions require valid pointers for `n` elements.
 //! Column stride = `n` (SoA layout: [col0×n] [col1×n] …).
 
+#![deny(unsafe_op_in_unsafe_fn)]
 use crate::core::context::{SimdContext, MAX_STATES};
 use crate::core::lane::SimdLane;
 use crate::zoo::Model;
@@ -260,20 +261,24 @@ pub unsafe fn run_neuron<M: Model>(
     params: *const f32,
     n: usize,
 ) {
-    run_neuron_ext::<M>(
-        v,
-        u,
-        h,
-        r,
-        s,
-        t,
-        i_in,
-        spikes,
-        params,
-        n,
-        std::ptr::null(),
-        std::ptr::null(),
-    )
+    // SAFETY: contract of `run_neuron` — all six state pointers, i_in,
+    // spikes and params are valid for n elements; i_pre/i_post are null.
+    unsafe {
+        run_neuron_ext::<M>(
+            v,
+            u,
+            h,
+            r,
+            s,
+            t,
+            i_in,
+            spikes,
+            params,
+            n,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    }
 }
 
 /// Legacy extended runner — accepts exactly **6 state pointers** (v,u,h,r,s,t)
@@ -314,129 +319,133 @@ pub unsafe fn run_neuron_ext<M: Model>(
     let n8 = n & !7;
     // SAFETY: params is valid for n elements (caller contract); element 0
     // holds the global dt broadcast value.
-    let dt = *params;
+    let dt = unsafe { *params };
     let ptrs = [v, u, h, r, s, t];
 
     for off in (0..n8).step_by(8) {
-        if off + 64 < n8 {
-            crate::core::util::prefetch_read(params, off + 64);
-            if !v.is_null() {
-                crate::core::util::prefetch_read(v, off + 64);
-            }
-        }
-
-        // SAFETY: all state pointers are valid for n elements (caller contract);
-        // off + 8 <= n8 <= n, so all 8 lanes stay in bounds. read_unaligned
-        // is correct — SIMD loads tolerate any alignment.
-        let mut state = [f32x8::zero(); MAX_STATES];
-        for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
-            state[k] = (p.add(off) as *const f32x8).read_unaligned();
-        }
-
-        // SAFETY: i_in is valid for n elements; off + 8 <= n.
-        // read_unaligned is required — external buffers are not SIMD-aligned.
-        let i_syn = (i_in.add(off) as *const f32x8)
-            .read_unaligned()
-            .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
-            .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
-
-        // SAFETY: i_pre_in/i_post_in are valid for n elements when non-null
-        // (caller contract). off + 8 <= n.
-        let i_pre_val = if i_pre_in.is_null() {
-            f32x8::zero()
-        } else {
-            (i_pre_in.add(off) as *const f32x8).read_unaligned()
-        };
-        let i_post_val = if i_post_in.is_null() {
-            f32x8::zero()
-        } else {
-            (i_post_in.add(off) as *const f32x8).read_unaligned()
-        };
-
-        let mut ctx = SimdContext::<f32x8> {
-            state,
-            params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
-            param_count: M::N_PARAMS,
-            n,
-            off,
-            i_syn,
-            i_pre: i_pre_val,
-            i_post: i_post_val,
-            dt_val: dt,
-            spike_mask: f32x8::zero(),
-            _marker: PhantomData,
-        };
-
-        M::step(&mut ctx);
-
-        // SAFETY: state pointers valid for n elements; off + 8 <= n.
-        // write_unaligned is correct — state buffers use raw pointers.
-        for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
-            (p.add(off) as *mut f32x8).write_unaligned(ctx.s(k));
-        }
-
-        // SAFETY: spikes pointer valid for n elements; off + j < n.
-        if M::HAS_SPIKE {
-            let m = ctx.spike_mask().move_mask();
-            if m == 0 {
-                for j in 0..8 {
-                    *spikes.add(off + j) = 0;
-                }
-            } else {
-                for j in 0..8 {
-                    *spikes.add(off + j) = (m >> j) & 1;
+        unsafe {
+            if off + 64 < n8 {
+                crate::core::util::prefetch_read(params, off + 64);
+                if !v.is_null() {
+                    crate::core::util::prefetch_read(v, off + 64);
                 }
             }
-        }
-    }
 
-    // ── Scalar tail (n8..n) — one neuron at a time ──
-    if n8 < n {
-        for i in n8..n {
-            // SAFETY: i < n (loop bound), all pointers valid for n elements.
-            let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
-            // SAFETY: i_pre_in/i_post_in valid for n when non-null.
-            let i_pre = if i_pre_in.is_null() {
-                0.0
-            } else {
-                *i_pre_in.add(i)
-            };
-            let i_post = if i_post_in.is_null() {
-                0.0
-            } else {
-                *i_post_in.add(i)
-            };
-
-            // SAFETY: state pointers valid for n elements; i < n.
-            let mut state = [0.0f32; MAX_STATES];
-            for k in 0..M::N_STATE {
-                state[k] = *ptrs[k].add(i);
+            // SAFETY: all state pointers are valid for n elements (caller contract);
+            // off + 8 <= n8 <= n, so all 8 lanes stay in bounds. read_unaligned
+            // is correct — SIMD loads tolerate any alignment.
+            let mut state = [f32x8::zero(); MAX_STATES];
+            for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
+                state[k] = (p.add(off) as *const f32x8).read_unaligned();
             }
 
-            let mut ctx = SimdContext::<f32> {
+            // SAFETY: i_in is valid for n elements; off + 8 <= n.
+            // read_unaligned is required — external buffers are not SIMD-aligned.
+            let i_syn = (i_in.add(off) as *const f32x8)
+                .read_unaligned()
+                .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
+                .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
+
+            // SAFETY: i_pre_in/i_post_in are valid for n elements when non-null
+            // (caller contract). off + 8 <= n.
+            let i_pre_val = if i_pre_in.is_null() {
+                f32x8::zero()
+            } else {
+                (i_pre_in.add(off) as *const f32x8).read_unaligned()
+            };
+            let i_post_val = if i_post_in.is_null() {
+                f32x8::zero()
+            } else {
+                (i_post_in.add(off) as *const f32x8).read_unaligned()
+            };
+
+            let mut ctx = SimdContext::<f32x8> {
                 state,
                 params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
                 param_count: M::N_PARAMS,
                 n,
-                off: i,
-                i_syn: ii,
-                i_pre,
-                i_post,
+                off,
+                i_syn,
+                i_pre: i_pre_val,
+                i_post: i_post_val,
                 dt_val: dt,
-                spike_mask: 0.0,
+                spike_mask: f32x8::zero(),
                 _marker: PhantomData,
             };
 
             M::step(&mut ctx);
 
-            // SAFETY: i < n, all state pointers valid.
+            // SAFETY: state pointers valid for n elements; off + 8 <= n.
+            // write_unaligned is correct — state buffers use raw pointers.
             for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
-                *p.add(i) = ctx.s(k);
+                (p.add(off) as *mut f32x8).write_unaligned(ctx.s(k));
             }
-            // SAFETY: spikes pointer valid for n elements.
+
+            // SAFETY: spikes pointer valid for n elements; off + j < n.
             if M::HAS_SPIKE {
-                *spikes.add(i) = ctx.spike_mask().move_mask() as i32;
+                let m = ctx.spike_mask().move_mask();
+                if m == 0 {
+                    for j in 0..8 {
+                        *spikes.add(off + j) = 0;
+                    }
+                } else {
+                    for j in 0..8 {
+                        *spikes.add(off + j) = (m >> j) & 1;
+                    }
+                }
             }
+    }
+    }
+
+    // ── Scalar tail (n8..n) — one neuron at a time ──
+    if n8 < n {
+        for i in n8..n {
+        unsafe {
+                // SAFETY: i < n (loop bound), all pointers valid for n elements.
+                let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                // SAFETY: i_pre_in/i_post_in valid for n when non-null.
+                let i_pre = if i_pre_in.is_null() {
+                    0.0
+                } else {
+                    *i_pre_in.add(i)
+                };
+                let i_post = if i_post_in.is_null() {
+                    0.0
+                } else {
+                    *i_post_in.add(i)
+                };
+
+                // SAFETY: state pointers valid for n elements; i < n.
+                let mut state = [0.0f32; MAX_STATES];
+                for k in 0..M::N_STATE {
+                    state[k] = *ptrs[k].add(i);
+                }
+
+                let mut ctx = SimdContext::<f32> {
+                    state,
+                    params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+                    param_count: M::N_PARAMS,
+                    n,
+                    off: i,
+                    i_syn: ii,
+                    i_pre,
+                    i_post,
+                    dt_val: dt,
+                    spike_mask: 0.0,
+                    _marker: PhantomData,
+                };
+
+                M::step(&mut ctx);
+
+                // SAFETY: i < n, all state pointers valid.
+                for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
+                    *p.add(i) = ctx.s(k);
+                }
+                // SAFETY: spikes pointer valid for n elements.
+                if M::HAS_SPIKE {
+                    *spikes.add(i) = ctx.spike_mask().move_mask() as i32;
+                }
+    }
         }
     }
 }
@@ -490,7 +499,9 @@ pub unsafe fn run_neuron_par<M: Model>(
         check_no_overlap(&ranges);
     }
 
-    let ptrs = SendablePtrs::new(v, u, h, r, s, t, i_in, spikes, params);
+    // SAFETY: SendablePtrs::new encodes live pointers as usize; validity
+    // is re-asserted per-thread via the contract of `run_neuron_par`.
+    let ptrs = unsafe { SendablePtrs::new(v, u, h, r, s, t, i_in, spikes, params) };
 
     (0..nc).into_par_iter().for_each(move |ci| {
         let off = ci * cs;
@@ -504,93 +515,97 @@ pub unsafe fn run_neuron_par<M: Model>(
 
         let n8 = len & !7;
         // SAFETY: params_ptr points to a valid params buffer; element 0 holds global dt.
-        let dt = *params_ptr;
+        let dt = unsafe { *params_ptr };
 
         for chunk_off in (0..n8).step_by(8) {
-            let total_off = off + chunk_off;
-            // SAFETY: total_off + 8 <= off + n8 <= n; all state pointers valid for n.
-            // read_unaligned tolerates any alignment.
-            let mut state = [f32x8::zero(); MAX_STATES];
-            for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
-                state[k] = (p.add(total_off) as *const f32x8).read_unaligned();
-            }
-
-            // SAFETY: i_in_ptr valid for n elements; total_off + 8 <= n.
-            let i_syn = (i_in_ptr.add(total_off) as *const f32x8)
-                .read_unaligned()
-                .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
-                .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
-
-            let mut ctx = SimdContext::<f32x8> {
-                state,
-                params_ptr: NonNull::new(params_ptr as *mut f32)
-                    .expect("params_ptr must be non-null"),
-                param_count: M::N_PARAMS,
-                n,
-                off: total_off,
-                i_syn,
-                i_pre: f32x8::zero(),
-                i_post: f32x8::zero(),
-                dt_val: dt,
-                spike_mask: f32x8::zero(),
-                _marker: PhantomData,
-            };
-
-            M::step(&mut ctx);
-
-            // SAFETY: state pointers valid; total_off + 8 <= n.
-            for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
-                (p.add(total_off) as *mut f32x8).write_unaligned(ctx.s(k));
-            }
-
-            // SAFETY: spikes_ptr valid for n elements.
-            if M::HAS_SPIKE {
-                let m = ctx.spike_mask().move_mask();
-                if m == 0 {
-                    for j in 0..8 {
-                        *spikes_ptr.add(total_off + j) = 0;
-                    }
-                } else {
-                    for j in 0..8 {
-                        *spikes_ptr.add(total_off + j) = (m >> j) & 1;
-                    }
+        unsafe {
+                let total_off = off + chunk_off;
+                // SAFETY: total_off + 8 <= off + n8 <= n; all state pointers valid for n.
+                // read_unaligned tolerates any alignment.
+                let mut state = [f32x8::zero(); MAX_STATES];
+                for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
+                    state[k] = (p.add(total_off) as *const f32x8).read_unaligned();
                 }
-            }
-        }
 
-        // ── Scalar tail (n8..len) — one neuron at a time ──
-        if n8 < len {
-            for j in n8..len {
-                let idx = off + j;
-                // SAFETY: idx < n; all pointers valid for n elements (disjoint range).
-                let ii = (*i_in_ptr.add(idx)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
-                // SAFETY: state_ptrs valid for n; idx < n.
-                let mut state = [0.0f32; MAX_STATES];
-                for k in 0..M::N_STATE {
-                    state[k] = *state_ptrs[k].add(idx);
-                }
-                let mut ctx = SimdContext::<f32> {
+                // SAFETY: i_in_ptr valid for n elements; total_off + 8 <= n.
+                let i_syn = (i_in_ptr.add(total_off) as *const f32x8)
+                    .read_unaligned()
+                    .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
+                    .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
+
+                let mut ctx = SimdContext::<f32x8> {
                     state,
                     params_ptr: NonNull::new(params_ptr as *mut f32)
                         .expect("params_ptr must be non-null"),
                     param_count: M::N_PARAMS,
                     n,
-                    off: idx,
-                    i_syn: ii,
-                    i_pre: 0.0,
-                    i_post: 0.0,
+                    off: total_off,
+                    i_syn,
+                    i_pre: f32x8::zero(),
+                    i_post: f32x8::zero(),
                     dt_val: dt,
-                    spike_mask: 0.0,
+                    spike_mask: f32x8::zero(),
                     _marker: PhantomData,
                 };
+
                 M::step(&mut ctx);
-                // SAFETY: idx < n.
+
+                // SAFETY: state pointers valid; total_off + 8 <= n.
                 for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
-                    *p.add(idx) = ctx.s(k);
+                    (p.add(total_off) as *mut f32x8).write_unaligned(ctx.s(k));
                 }
+
+                // SAFETY: spikes_ptr valid for n elements.
                 if M::HAS_SPIKE {
-                    *spikes_ptr.add(idx) = ctx.spike_mask().move_mask() as i32;
+                    let m = ctx.spike_mask().move_mask();
+                    if m == 0 {
+                        for j in 0..8 {
+                            *spikes_ptr.add(total_off + j) = 0;
+                        }
+                    } else {
+                        for j in 0..8 {
+                            *spikes_ptr.add(total_off + j) = (m >> j) & 1;
+                        }
+                    }
                 }
+    }
+        }
+
+        // ── Scalar tail (n8..len) — one neuron at a time ──
+        if n8 < len {
+            for j in n8..len {
+        unsafe {
+                    let idx = off + j;
+                    // SAFETY: idx < n; all pointers valid for n elements (disjoint range).
+                    let ii = (*i_in_ptr.add(idx)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                    // SAFETY: state_ptrs valid for n; idx < n.
+                    let mut state = [0.0f32; MAX_STATES];
+                    for k in 0..M::N_STATE {
+                        state[k] = *state_ptrs[k].add(idx);
+                    }
+                    let mut ctx = SimdContext::<f32> {
+                        state,
+                        params_ptr: NonNull::new(params_ptr as *mut f32)
+                            .expect("params_ptr must be non-null"),
+                        param_count: M::N_PARAMS,
+                        n,
+                        off: idx,
+                        i_syn: ii,
+                        i_pre: 0.0,
+                        i_post: 0.0,
+                        dt_val: dt,
+                        spike_mask: 0.0,
+                        _marker: PhantomData,
+                    };
+                    M::step(&mut ctx);
+                    // SAFETY: idx < n.
+                    for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
+                        *p.add(idx) = ctx.s(k);
+                    }
+                    if M::HAS_SPIKE {
+                        *spikes_ptr.add(idx) = ctx.spike_mask().move_mask() as i32;
+                    }
+    }
             }
         }
     });

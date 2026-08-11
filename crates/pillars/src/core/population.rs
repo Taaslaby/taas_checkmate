@@ -28,6 +28,8 @@
 //! - `i_in` → ctx.i_syn (post-synaptic current, clamped to ±100)
 //! - `i_pre` / `i_post` → ctx.i_pre / ctx.i_post (for STDP, optional)
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -212,7 +214,9 @@ impl<M: Model> NeuralPopulation<M> {
     #[allow(dead_code)]
     pub(crate) unsafe fn state_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.assert_state_col(col);
-        self.state.as_mut_ptr().add(col * self.capacity)
+        // SAFETY: `col < N_STATE` (asserted above), stride = capacity, so
+        // the offset stays within the allocation.
+        unsafe { self.state.as_mut_ptr().add(col * self.capacity) }
     }
 
     /// Unsafe mutable pointer to a param column (internal use only).
@@ -227,7 +231,9 @@ impl<M: Model> NeuralPopulation<M> {
     #[allow(dead_code)]
     pub(crate) unsafe fn param_ptr_mut(&mut self, col: usize) -> *mut f32 {
         self.assert_param_col(col);
-        self.params.as_mut_ptr().add(col * self.capacity)
+        // SAFETY: `col < N_PARAMS` (asserted above), stride = capacity, so
+        // the offset stays within the allocation.
+        unsafe { self.params.as_mut_ptr().add(col * self.capacity) }
     }
 
     /// Read-only access to a param column.
@@ -343,8 +349,11 @@ impl<M: Model> NeuralPopulation<M> {
 
         for off in (0..n8).step_by(8) {
             if off + 64 < n8 {
-                crate::core::util::prefetch_read(self.state.as_ptr(), off + 64);
-                crate::core::util::prefetch_read(self.params.as_ptr(), off + 64);
+                // SAFETY: off + 64 < n8 <= capacity — prefetch stays in bounds.
+                unsafe {
+                    crate::core::util::prefetch_read(self.state.as_ptr(), off + 64);
+                    crate::core::util::prefetch_read(self.params.as_ptr(), off + 64);
+                }
             }
 
             let sp = self.state.as_ptr();
