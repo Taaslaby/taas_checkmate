@@ -197,10 +197,10 @@ mod tests {
         let loaded = load_sparse_graph(&reader).unwrap();
         assert_eq!(loaded.num_neurons(), g.num_neurons());
         assert_eq!(loaded.num_synapses(), g.num_synapses());
-        assert_eq!(loaded.row_ptr, g.row_ptr);
-        assert_eq!(loaded.col_idx, g.col_idx);
-        assert_eq!(loaded.delays, g.delays);
-        assert_eq!(loaded.weights.as_slice(), g.weights.as_slice());
+        assert_eq!(loaded.row_ptr(), g.row_ptr());
+        assert_eq!(loaded.col_idx(), g.col_idx());
+        assert_eq!(loaded.delays(), g.delays());
+        assert_eq!(loaded.weights(), g.weights());
     }
 
     #[test]

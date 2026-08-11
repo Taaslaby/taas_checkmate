@@ -50,16 +50,17 @@ impl<'a> SynapseRow<'a> {
 /// Sparse directed graph in Compressed Sparse Row (CSR) format.
 ///
 /// Each neuron has outgoing synapses stored as contiguous ranges in `col_idx`.
+/// Fields are private — use accessor methods (row(), row_ptr(), etc.) to read.
 #[derive(Debug, Clone)]
 pub struct SparseGraph {
     /// CSR row-pointer: start indices of each neuron's outgoing synapses
-    pub row_ptr: Vec<u32>,
+    row_ptr: Vec<u32>,
     /// Target neuron global index per synapse
-    pub col_idx: Vec<u32>,
+    col_idx: Vec<u32>,
     /// Synaptic weight per synapse
-    pub weights: AlignedVec,
+    weights: AlignedVec,
     /// Axonal delay (steps, 0..MAX_DELAY_SLOTS) per synapse
-    pub delays: Vec<u8>,
+    delays: Vec<u8>,
     n_neurons: usize,
 }
 
@@ -242,6 +243,30 @@ impl SparseGraph {
     #[inline(always)]
     pub fn num_synapses(&self) -> usize {
         self.col_idx.len()
+    }
+
+    /// Raw CSR row-pointer array (n_neurons + 1 elements).
+    #[inline(always)]
+    pub fn row_ptr(&self) -> &[u32] {
+        &self.row_ptr
+    }
+
+    /// Raw target neuron indices per synapse.
+    #[inline(always)]
+    pub fn col_idx(&self) -> &[u32] {
+        &self.col_idx
+    }
+
+    /// Synaptic weights (may contain SIMD padding beyond num_synapses()).
+    #[inline(always)]
+    pub fn weights(&self) -> &[f32] {
+        self.weights.as_slice()
+    }
+
+    /// Axonal delays per synapse (steps, 0..MAX_DELAY_SLOTS).
+    #[inline(always)]
+    pub fn delays(&self) -> &[u8] {
+        &self.delays
     }
 
     /// Get outgoing synapses of a neuron by its global index.

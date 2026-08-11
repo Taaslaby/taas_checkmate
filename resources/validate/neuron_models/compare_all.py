@@ -14,13 +14,12 @@ Usage:
     PYTHON=.venv/bin/python3 validate/neuron_models/compare_all.py --neuron  # with NEURON
 """
 
-import sys, os, argparse, time
+import os, argparse, time
 import numpy as np
 
 # ── paths ──
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 NEURON_DIR = os.path.join(ROOT, 'validate', 'neuron_models')
-sys.path.insert(0, os.path.join(ROOT, 'resources', 'neurofly'))
 
 # ── NEURON loader ──
 _NEURON_LOADED = False

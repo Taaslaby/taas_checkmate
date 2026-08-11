@@ -5,7 +5,6 @@
 //! Generated bridges resolve the owning `pillars` dependency with
 //! `proc-macro-crate`, so renamed downstream dependencies work too.
 
-extern crate proc_macro;
 use proc_macro::TokenStream;
 
 use proc_macro2::TokenStream as TS2;

@@ -64,7 +64,7 @@ taas_checkmate/
 │   ├── docs/            ← Документация (INDEX, API_REFERENCE, PYTHON_API_RU, ...)
 │   ├── examples/        ← Примеры (spiking_gpt, spaun_pipeline, embodied_creature, ...)
 │   ├── validate/        ← NEURON-валидация (hh/izh/adex/fhn .mod + compare_all.py)
-│   └── neurofly/        ← FlyWire/MANC pipeline (подмодуль)
+│   └── (neurofly-подмодуль удалён — FlyWire/MANC pipeline живёт в crates/pillars-connectome)
 │
 ├── tests/               ← Integration tests (smoke API, neuron, kuramoto, sparse, ...)
 └── benches/             ← Criterion benchmarks (bench.rs, bench_all.rs, bench_lod_gnw.rs)

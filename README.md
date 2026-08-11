@@ -6,7 +6,7 @@
 [![SIMD](https://img.shields.io/badge/SIMD-f32x8-orange)]()
 [![CUDA](https://img.shields.io/badge/CUDA-12.0%2B-green)]()
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)]()
-[![Сахалыы](https://img.shields.io/badge/тыл-Сахалыы-green)](docs/README_SAKHA.md)
+[![Сахалыы](https://img.shields.io/badge/тыл-Сахалыы-green)](resources/docs/README_SAKHA.md)
 
 👉 **[Сахалыы документация (README_SAKHA.md)](resources/docs/README_SAKHA.md)**
 

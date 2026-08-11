@@ -36,13 +36,16 @@ name = "bench_formula"
 harness = false
 
 [features]
-default = ["rayon"]
+default = ["rayon", "hh-precise-gates"]
 rayon = ["dep:rayon"]
 # Переключатель точности: включает полиномиальную аппроксимацию exp()
 # в SimdLane (~1e-5 rel err вместо ~1 ULP). Модели не меняются —
 # exp() маршрутизируется на fast_exp() на этапе компиляции.
 fast-exp = []
-# Точный exp() в HH gates (вместо fast_exp). ~3x медленнее, но биофизически точнее.
+# Точный exp() в HH gates (вместо fast_exp). В дефолте по результатам аудита
+# точности (bench_hh_precision): fast_exp даёт линейный дрейф спайк-тайминга
+# ~3 мс/с (0.4 мс на 10 спайков), точный exp — 0.008 мс/с (390x лучше)
+# без измеримой потери производительности.
 hh-precise-gates = []
 
 [dev-dependencies]

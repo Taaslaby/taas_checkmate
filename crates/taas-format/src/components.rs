@@ -591,12 +591,12 @@ pub fn save_sparse_graph(graph: &pillars::api::SparseGraph, writer: &mut TaasWri
     writer.add_metadata("type", "SparseGraph");
     writer.add_metadata("n_neurons", &graph.num_neurons().to_string());
     writer.add_metadata("n_synapses", &graph.num_synapses().to_string());
-    let row_ptr: Vec<i64> = graph.row_ptr.iter().map(|&v| v as i64).collect();
-    let col_idx: Vec<i64> = graph.col_idx.iter().map(|&v| v as i64).collect();
+    let row_ptr: Vec<i64> = graph.row_ptr().iter().map(|&v| v as i64).collect();
+    let col_idx: Vec<i64> = graph.col_idx().iter().map(|&v| v as i64).collect();
     writer.add_i64("sg_row_ptr", "SparseGraph", &row_ptr);
     writer.add_i64("sg_col_idx", "SparseGraph", &col_idx);
-    writer.add_f32("sg_weights", "SparseGraph", graph.weights.as_slice());
-    writer.add_u8("sg_delays", "SparseGraph", &graph.delays);
+    writer.add_f32("sg_weights", "SparseGraph", graph.weights());
+    writer.add_u8("sg_delays", "SparseGraph", graph.delays());
 }
 
 /// Load a pillars `SparseGraph` (CSR) from a `.taas` archive.

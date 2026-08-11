@@ -112,11 +112,11 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
             if sp == 0 {
                 continue;
             }
-            let start = self.graph.row_ptr[pre] as usize;
-            let end = self.graph.row_ptr[pre + 1] as usize;
+            let start = self.graph.row_ptr()[pre] as usize;
+            let end = self.graph.row_ptr()[pre + 1] as usize;
             for si in start..end {
-                let post = self.graph.col_idx[si] as usize;
-                let w = self.graph.weights.as_slice()[si];
+                let post = self.graph.col_idx()[si] as usize;
+                let w = self.graph.weights()[si];
                 let rec = ReceptorType::from_u8(self.receptor_types[si]);
                 self.kinetics.jump(post, rec, w);
             }

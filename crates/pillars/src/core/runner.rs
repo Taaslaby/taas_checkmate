@@ -52,7 +52,11 @@ struct SendablePtrs {
     params: usize,
 }
 
+// SAFETY: usize-encoded pointers carry no provenance — the wrapper is pure
+// data. run_neuron_par guarantees disjoint memory access per thread.
 unsafe impl Send for SendablePtrs {}
+// SAFETY: read-only sharing is safe because each rayon thread accesses
+// disjoint neuron ranges (no mutable aliasing).
 unsafe impl Sync for SendablePtrs {}
 
 // ═══════════════════════════════════════════════════════════════
@@ -80,6 +84,8 @@ fn check_no_overlap(ranges: &[(usize, usize)]) {
 }
 
 impl SendablePtrs {
+    /// SAFETY: caller must ensure all pointers are valid for the duration of
+    /// parallel execution and that threads access disjoint ranges.
     #[inline(always)]
     unsafe fn new(
         v: *mut f32,
@@ -102,6 +108,8 @@ impl SendablePtrs {
         }
     }
 
+    // SAFETY: the stored usize was cast from a valid pointer in `new()`;
+    // the conversion back preserves the original pointer value.
     #[inline(always)]
     unsafe fn state_ptrs(&self) -> [*mut f32; 6] {
         [
@@ -114,16 +122,19 @@ impl SendablePtrs {
         ]
     }
 
+    // SAFETY: usize cast from valid *const f32 in `new()`.
     #[inline(always)]
     unsafe fn i_in_ptr(&self) -> *const f32 {
         self.i_in as *const f32
     }
 
+    // SAFETY: usize cast from valid *mut i32 in `new()`.
     #[inline(always)]
     unsafe fn spikes_ptr(&self) -> *mut i32 {
         self.spikes as *mut i32
     }
 
+    // SAFETY: usize cast from valid *const f32 in `new()`.
     #[inline(always)]
     unsafe fn params_ptr(&self) -> *const f32 {
         self.params as *const f32
@@ -301,6 +312,8 @@ pub unsafe fn run_neuron_ext<M: Model>(
         return;
     }
     let n8 = n & !7;
+    // SAFETY: params is valid for n elements (caller contract); element 0
+    // holds the global dt broadcast value.
     let dt = *params;
     let ptrs = [v, u, h, r, s, t];
 
@@ -312,18 +325,23 @@ pub unsafe fn run_neuron_ext<M: Model>(
             }
         }
 
-        // Load first M::N_STATE channels from the six pointers (rest stay zero).
-
+        // SAFETY: all state pointers are valid for n elements (caller contract);
+        // off + 8 <= n8 <= n, so all 8 lanes stay in bounds. read_unaligned
+        // is correct — SIMD loads tolerate any alignment.
         let mut state = [f32x8::zero(); MAX_STATES];
         for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
             state[k] = (p.add(off) as *const f32x8).read_unaligned();
         }
 
+        // SAFETY: i_in is valid for n elements; off + 8 <= n.
+        // read_unaligned is required — external buffers are not SIMD-aligned.
         let i_syn = (i_in.add(off) as *const f32x8)
             .read_unaligned()
             .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
             .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
 
+        // SAFETY: i_pre_in/i_post_in are valid for n elements when non-null
+        // (caller contract). off + 8 <= n.
         let i_pre_val = if i_pre_in.is_null() {
             f32x8::zero()
         } else {
@@ -351,10 +369,13 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
         M::step(&mut ctx);
 
+        // SAFETY: state pointers valid for n elements; off + 8 <= n.
+        // write_unaligned is correct — state buffers use raw pointers.
         for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
             (p.add(off) as *mut f32x8).write_unaligned(ctx.s(k));
         }
 
+        // SAFETY: spikes pointer valid for n elements; off + j < n.
         if M::HAS_SPIKE {
             let m = ctx.spike_mask().move_mask();
             if m == 0 {
@@ -369,9 +390,12 @@ pub unsafe fn run_neuron_ext<M: Model>(
         }
     }
 
+    // ── Scalar tail (n8..n) — one neuron at a time ──
     if n8 < n {
         for i in n8..n {
+            // SAFETY: i < n (loop bound), all pointers valid for n elements.
             let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+            // SAFETY: i_pre_in/i_post_in valid for n when non-null.
             let i_pre = if i_pre_in.is_null() {
                 0.0
             } else {
@@ -383,6 +407,7 @@ pub unsafe fn run_neuron_ext<M: Model>(
                 *i_post_in.add(i)
             };
 
+            // SAFETY: state pointers valid for n elements; i < n.
             let mut state = [0.0f32; MAX_STATES];
             for k in 0..M::N_STATE {
                 state[k] = *ptrs[k].add(i);
@@ -404,9 +429,11 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
             M::step(&mut ctx);
 
+            // SAFETY: i < n, all state pointers valid.
             for (k, p) in ptrs.iter().copied().take(M::N_STATE).enumerate() {
                 *p.add(i) = ctx.s(k);
             }
+            // SAFETY: spikes pointer valid for n elements.
             if M::HAS_SPIKE {
                 *spikes.add(i) = ctx.spike_mask().move_mask() as i32;
             }
@@ -468,21 +495,27 @@ pub unsafe fn run_neuron_par<M: Model>(
     (0..nc).into_par_iter().for_each(move |ci| {
         let off = ci * cs;
         let len = (n - off).min(cs);
+        // SAFETY: SendablePtrs built from live buffers (caller contract);
+        // each thread accesses disjoint [off, off+len) — no aliasing.
         let state_ptrs = unsafe { ptrs.state_ptrs() };
         let i_in_ptr = unsafe { ptrs.i_in_ptr() };
         let spikes_ptr = unsafe { ptrs.spikes_ptr() };
         let params_ptr = unsafe { ptrs.params_ptr() };
 
         let n8 = len & !7;
+        // SAFETY: params_ptr points to a valid params buffer; element 0 holds global dt.
         let dt = *params_ptr;
 
         for chunk_off in (0..n8).step_by(8) {
             let total_off = off + chunk_off;
+            // SAFETY: total_off + 8 <= off + n8 <= n; all state pointers valid for n.
+            // read_unaligned tolerates any alignment.
             let mut state = [f32x8::zero(); MAX_STATES];
             for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
                 state[k] = (p.add(total_off) as *const f32x8).read_unaligned();
             }
 
+            // SAFETY: i_in_ptr valid for n elements; total_off + 8 <= n.
             let i_syn = (i_in_ptr.add(total_off) as *const f32x8)
                 .read_unaligned()
                 .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
@@ -505,10 +538,12 @@ pub unsafe fn run_neuron_par<M: Model>(
 
             M::step(&mut ctx);
 
+            // SAFETY: state pointers valid; total_off + 8 <= n.
             for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
                 (p.add(total_off) as *mut f32x8).write_unaligned(ctx.s(k));
             }
 
+            // SAFETY: spikes_ptr valid for n elements.
             if M::HAS_SPIKE {
                 let m = ctx.spike_mask().move_mask();
                 if m == 0 {
@@ -523,10 +558,13 @@ pub unsafe fn run_neuron_par<M: Model>(
             }
         }
 
+        // ── Scalar tail (n8..len) — one neuron at a time ──
         if n8 < len {
             for j in n8..len {
                 let idx = off + j;
+                // SAFETY: idx < n; all pointers valid for n elements (disjoint range).
                 let ii = (*i_in_ptr.add(idx)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                // SAFETY: state_ptrs valid for n; idx < n.
                 let mut state = [0.0f32; MAX_STATES];
                 for k in 0..M::N_STATE {
                     state[k] = *state_ptrs[k].add(idx);
@@ -546,6 +584,7 @@ pub unsafe fn run_neuron_par<M: Model>(
                     _marker: PhantomData,
                 };
                 M::step(&mut ctx);
+                // SAFETY: idx < n.
                 for (k, p) in state_ptrs.iter().copied().take(M::N_STATE).enumerate() {
                     *p.add(idx) = ctx.s(k);
                 }

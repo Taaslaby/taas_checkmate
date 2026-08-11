@@ -8,12 +8,11 @@ Models: HH, HAAP, LIF, Izhikevich, AdEx, Morris-Lecar, FHN
 Measures: RMSE, relative error %, spike count
 """
 
-import os, sys, time, json, shutil, tempfile
+import os, time, json, shutil, tempfile
 import numpy as np
 
 NEURON_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(NEURON_DIR, '..', '..'))
-sys.path.insert(0, os.path.join(ROOT, 'resources', 'neurofly'))
 
 # ── NEURON loader (ASCII-safe: /tmp symlink) ──
 _H = None
