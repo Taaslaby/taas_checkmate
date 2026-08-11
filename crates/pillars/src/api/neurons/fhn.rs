@@ -1,7 +1,7 @@
 //! FitzHugh-Nagumo (FHN) neuron model — simplified Hodgkin-Huxley.
 //!
 //! Канон: `step_fhn` → `run_neuron::<FHNModel>` (волна 7; легаси
-//! `kernels::fhn_step` удалён). Перенесено из `core::neuron::fhn` (Фаза 9).
+//! `kernels::fhn_step` удалён). Перенесено из `core::neuron::fhn`.
 //!
 //! Equations:
 //!   dv/dt = v - v³/3 - w + I_ext

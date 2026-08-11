@@ -200,10 +200,10 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// [`membrane_depolarize`](crate::ops::membrane::membrane_depolarize),
     /// and the formula VM) — they take
     /// `dt` as a lane vector. The `ComputeNeuron` bridge instead feeds the
-    /// broadcast [`SimdContext::dtf`] into `StepContext::dt_simd()`.
+    /// broadcast [`SimdContext::dt_scalar`] into `StepContext::dt_simd()`.
     ///
     /// For **uniform dt** (the norm) both paths agree. If you make dt
-    /// per-lane, the SIMD chunks and the scalar tail (which uses `dtf()`)
+    /// per-lane, the SIMD chunks and the scalar tail (which uses `dt_scalar()`)
     /// will diverge for the same neuron — add a parity test
     /// (`test_population_simd_tail_parity`) when you do.
     #[inline(always)]
@@ -221,7 +221,7 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     /// (neuron 0's dt) before stepping. Used by the `ComputeNeuron` bridge
     /// (`StepContext::dt()`); all zoo models go through it.
     #[inline(always)]
-    pub fn dtf(&self) -> f32 {
+    pub fn dt_scalar(&self) -> f32 {
         self.dt_val
     }
 

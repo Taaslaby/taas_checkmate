@@ -7,7 +7,7 @@ use pillars::kernels::{decode, measure};
 use pyo3::prelude::*;
 
 // Высокоуровневые CSR-шаги (разреженная матрица + rayon) — канон
-// `pillars::kernels::phase` (Фаза 9).
+// `pillars::kernels::phase`.
 use pillars::kernels::phase::{kuramoto_step_sparse, t3_step_sparse};
 
 // ─── Kuramoto bindings ──────────────────────────────────

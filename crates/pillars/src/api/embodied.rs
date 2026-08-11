@@ -4,7 +4,7 @@
 //!
 //! Author / Concept: Atlasov Anton (Атласов Антон)
 //!
-//! Перенесено из `core::neuron::embodied` (Фаза 8) — композиция
+//! Перенесено из `core::neuron::embodied`— композиция
 //! `api::neurons::{DelayBuffer, atlasov::AtlasovState}`.
 
 use serde::{Deserialize, Serialize};

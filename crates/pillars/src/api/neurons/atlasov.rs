@@ -1,6 +1,6 @@
 //! # Atlasov Neuromotor Kernel — Discrete Ca²⁺ & Active Reset Muscle Engine
 //!
-//! Канон pillars::api (Фаза 7): step-функция и stateful-классы перенесены
+//! Канон pillars::api: step-функция и stateful-классы перенесены
 //! из core. Модель — `run_neuron::<AtlasovNeuromotorModel>` (single source
 //! of truth).
 //!

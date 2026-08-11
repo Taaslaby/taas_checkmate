@@ -277,7 +277,7 @@ impl<M: Model> NeuralPopulation<M> {
         let cap = self.capacity;
         // SAFETY: `params` is an allocated AlignedVec (never dangling when
         // n > 0); element 0 is within bounds. This is the broadcast dt used
-        // by `dtf()`/`dt_simd()` — see `SimdContext::dt` for the per-lane
+        // by `dt_scalar()`/`dt_simd()` — see `SimdContext::dt` for the per-lane
         // variant that no current model uses.
         let dt = unsafe { *self.params.as_ptr() };
         // SAFETY: NonNull from a live AlignedVec allocation — infallible;

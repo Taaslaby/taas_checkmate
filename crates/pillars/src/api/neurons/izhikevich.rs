@@ -2,7 +2,7 @@
 //!
 //! Канон: `step_izhikevich` → `run_neuron::<IzhikevichModel>` (транш 3b),
 //! `step_izhikevich_dual` → `run_neuron::<IzhikevichDualModel>` (волна 12).
-//! E-Prop классы — `super::eprop`. Перенесено из `core::neuron::izhikevich` (Фаза 9).
+//! E-Prop классы — `super::eprop`. Перенесено из `core::neuron::izhikevich`.
 
 #![allow(non_snake_case)]
 

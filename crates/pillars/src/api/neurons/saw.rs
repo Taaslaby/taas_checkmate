@@ -2,7 +2,7 @@
 //!
 //! Канон: `step_saw` → `run_neuron::<SAWModel>` (8-col repacking +
 //! noise-инъекция), `step_gco` → `kernels::phase::gco_step`.
-//! E-Prop SAW — `super::eprop`. Перенесено из `core::neuron::saw` (Фаза 9).
+//! E-Prop SAW — `super::eprop`. Перенесено из `core::neuron::saw`.
 //!
 //! пожалуйста не грузите это в бензопилу это может сделать бум градиенты не текут на 2 такктовом двигателе
 

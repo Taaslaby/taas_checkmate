@@ -432,7 +432,7 @@ fn used_param_mask(program: &[OpNode]) -> u8 {
 ///
 /// ℹ️ `dt` is passed **per-lane** via [`SimdContext::dt`] (SoA column 0).
 /// Derived models (`#[derive(NeuronModel)]`) instead broadcast the first
-/// neuron's dt via `ctx.dtf()` — the two execution paths agree for
+/// neuron's dt via `ctx.dt_scalar()` — the two execution paths agree for
 /// homogeneous dt and diverge only for per-neuron heterogeneous dt.
 ///
 /// # Example

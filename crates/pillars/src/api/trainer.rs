@@ -1,6 +1,6 @@
 //! # Batched E-Prop Izhikevich Multi trainer (Hogwild! parallelism)
 //!
-//! Канон pillars::api (Фаза 7): перенесён из core.
+//! Канон pillars::api: перенесён из core.
 //!
 //! Each worker has its **own copy** of weights. Workers process images
 //! in parallel with zero sharing. After a micro-batch completes, all

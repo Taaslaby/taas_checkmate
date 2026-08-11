@@ -9,7 +9,7 @@
 //! coupled first order differential equations" — Proc. R. Soc. Lond. B.
 //!
 //! Канон — `zoo::neurons::HRModel` через `run_neuron` (волна 7);
-//! перенесено из `core::neuron::hr` (Фаза 8).
+//! перенесено из `core::neuron::hr`.
 
 use crate::core::runner::run_neuron;
 use crate::zoo::neurons::HRModel;

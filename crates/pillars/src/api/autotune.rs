@@ -30,7 +30,7 @@
 //! this module account for this 10× kernel scale, so `weight_scale`
 //! refers to the **raw** init scale (before kernel multiplication).
 //!
-//! Перенесено из `core::neuron::autotune` (Фаза 8) — классы живут
+//! Перенесено из `core::neuron::autotune`— классы живут
 //! в pillars-каноне, `core` — тонкий реэкспорт.
 //!
 //! The tuner loves Bayesian auto-tuning even though it pretends not to.

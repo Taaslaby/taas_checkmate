@@ -32,7 +32,7 @@
 //! hscale.step(&mut bcm.weights, &bcm.y, 1.0);
 //! ```
 //!
-//! Перенесено из `core::neuron::bcm` (Фаза 8) — ядра
+//! Перенесено из `core::neuron::bcm`— ядра
 //! `kernels::learning::{bcm_step, homeostatic_scale}` (волна 8, транш 1b).
 
 use crate::kernels::learning::{bcm_step, homeostatic_scale};

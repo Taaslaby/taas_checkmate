@@ -15,7 +15,7 @@
 //! ## Namespaced sub-modules (kept for specific use)
 //! | Sub-module | Contents |
 //! |------------|----------|
-//! | `pillars` | **единый фасад**: Population-классы + все функции/классы подмодулей (Фаза 9) |
+//! | `pillars` | **единый фасад**: Population-классы + все функции/классы подмодулей|
 //! | `neurons` | raw per-model step functions (legacy low-level) |
 //! | `connectome` / `connectome_brain` / `lif_connectome` | connectome data + brain sim |
 //! | `t3` | T3 oscillators + decoders + spigrad |
@@ -350,7 +350,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "cuda")]
     export_class!(m, hh, hh_gpu::PyGpuHhLut);
 
-    // ─── pillars — единый фасад (Фаза 9) ──────────────────
+    // ─── pillars — единый фасад──────────────────
     let pillars = pillars::register(m)?;
     // Единый фасад: каждый публичный символ подмодулей также доступен через
     // `taas_checkmate.pillars` (без повторного root-экспорта — он уже есть).

@@ -30,7 +30,7 @@
 //! | [`measure`] | interference, coherence, band energy, winding, spike entropy |
 //! | [`dendrite`] | compartmentalized cable dendrites with 7 receptor types |
 //! | [`input`] | Poisson generator, BSA / TTFS / phase encoders |
-//! | [`io`] | min-truncating IO/gate compat adapters (Фаза 11 — бывший `kernels::io`) |
+//! | [`io`] | min-truncating IO/gate compat adapters— бывший `kernels::io`) |
 //! | [`fused`] | fused layer kernels — spike propagation + Izhikevich/LIF in one pass (RL) |
 //! | [`eprop`] | e-prop batch kernels — LIF/Izhikevich/AdEx/SAW eligibility traces (волна 5) |
 //! | [`wc`] | Wilson-Cowan rate dynamics — bit-identical port of `kernels::wc_step` (волна 7) |
@@ -79,7 +79,7 @@ pub fn wrap_phase(p: f32) -> f32 {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Flat compat surface (Фаза 11) — бывший публичный API крейта
+//  Flat compat surface— бывший публичный API крейта
 //  `taas-kernels`. Все batch-кернелы доступны как
 //  `pillars::kernels::<name>` без префикса подмодуля.
 // ═══════════════════════════════════════════════════════

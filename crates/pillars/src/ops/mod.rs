@@ -1,4 +1,4 @@
-//! # 🧬 Ops — Biological Primitives (The LEGO Bricks)
+//! #  Ops — Biological Primitives (The LEGO Bricks)
 //!
 //! Each op is a **pure function** `fn op<S: SimdLane>(arg1: S, arg2: S) -> S`.
 //! Same code compiles to both SIMD and scalar. No state. No memory access.

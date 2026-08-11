@@ -2,7 +2,7 @@
 //!
 //! Канон: `step_lif` → `run_neuron::<LIFModel>`, `step_lif_at` →
 //! `run_neuron::<LIFAtModel>` (волна 6; легаси `kernels::neuron::lif` удалён).
-//! E-Prop LIF — `super::EPropLIF`. Перенесено из `core::neuron::lif` (Фаза 9).
+//! E-Prop LIF — `super::EPropLIF`. Перенесено из `core::neuron::lif`.
 
 #![allow(non_snake_case)]
 

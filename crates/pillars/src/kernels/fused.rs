@@ -1,7 +1,7 @@
 //! # 🧮 Fused layer kernels — spike propagation + neuron dynamics, one SIMD pass
 //!
 //! Canonical port of the legacy `kernels::neuron::fused` batch kernels
-//! (Фаза 2/3 консолидации — single source of truth в pillars):
+//!/3 консолидации — single source of truth в pillars):
 //!
 //! | Function | Dynamics | Used by |
 //! |----------|----------|---------|

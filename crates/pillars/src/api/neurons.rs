@@ -18,7 +18,7 @@
 //! | [`SornNetwork`] | `kernels::learning` | реэкспорт |
 //! | [`AstrocyteState`] | `kernels::astrocyte` | реэкспорт |
 //!
-//! ## Подмодули (Фаза 7–8)
+//! ## Подмодули
 //!
 //! | Подмодуль | Классы | Ядро |
 //! |-----------|--------|------|
@@ -27,12 +27,12 @@
 //! | [`atlasov`] | AtlasovState + профили/конфиги + step | `run_neuron::<AtlasovNeuromotorModel>` |
 //! | [`bcm`] | BcmSynapse, HomeostaticScale | `kernels::learning::{bcm_step, homeostatic_scale}` |
 //! | [`hr`] | step_hr (repacking-адаптер) | `run_neuron::<HRModel>` |
-//! | [`lif`] | step_lif / step_lif_at (Фаза 9) | `run_neuron::<LIFModel/LIFAtModel>` |
-//! | [`izhikevich`] | step_izhikevich / step_izhikevich_dual (Фаза 9 / волна 12) | `run_neuron::<IzhikevichModel / IzhikevichDualModel>` |
-//! | [`saw`] | step_saw / step_gco (Фаза 9) | `run_neuron::<SAWModel>` / `kernels::phase::gco_step` |
-//! | [`adex`] | step_adex (Фаза 9) | `run_neuron::<AdExModel>` |
-//! | [`fhn`] | step_fhn (Фаза 9) | `run_neuron::<FHNModel>` |
-//! | [`wc`] | step_wc (Фаза 9) | `kernels::wc::wc_step` |
+//! | [`lif`] | step_lif / step_lif_at | `run_neuron::<LIFModel/LIFAtModel>` |
+//! | [`izhikevich`] | step_izhikevich / step_izhikevich_dual | `run_neuron::<IzhikevichModel / IzhikevichDualModel>` |
+//! | [`saw`] | step_saw / step_gco | `run_neuron::<SAWModel>` / `kernels::phase::gco_step` |
+//! | [`adex`] | step_adex | `run_neuron::<AdExModel>` |
+//! | [`fhn`] | step_fhn | `run_neuron::<FHNModel>` |
+//! | [`wc`] | step_wc | `kernels::wc::wc_step` |
 //!
 //! Также в модуле: [`DopamineSTDP`] (`kernels::dopamine`), [`DelayBuffer`] (NMJ-задержки),
 //! реэкспорты encoding ([`TtfsEncoder`], bsa/phase) и stats ([`SpikeRaster`], firing_rates, ISI, CV).
@@ -45,7 +45,7 @@ use crate::core::lane::SimdLane;
 use crate::core::util::{load8, load8_i32, store8};
 use crate::ops::plasticity::stp as pillars_stp;
 
-// ─── Подмодули (Фаза 7–9) ─────────────────────────────────
+// ─── Подмодули ─────────────────────────────────────────────
 
 pub mod adex;
 pub mod atlasov;

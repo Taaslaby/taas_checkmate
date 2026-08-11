@@ -1,6 +1,6 @@
 //! # ⬡ CSR sparse operations — propagation, Hamiltonian, STDP
 //!
-//! Порт `core::sparse` (Фаза 9): propagation, Hamiltonian, rate-step, STDP.
+//! Порт `core::sparse`: propagation, Hamiltonian, rate-step, STDP.
 //! Hamiltonian parallelized with rayon (cfg-gated).
 //!
 //! Ported from `toyon/c/engine_neuron.c`.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// Safe CSR row pointer access: clamp index and validate bounds.
 ///
 /// Внутри модуля не используется (функции индексируют `row_ptr.get()`
-/// напрямую) — публичный API для `core::sparse` и python-ABI (Фаза 9).
+/// напрямую) — публичный API для `core::sparse` и python-ABI.
 #[inline(always)]
 pub fn bound_row(row_ptr: &[i32], idx: usize, n: usize) -> usize {
     if idx >= row_ptr.len() {

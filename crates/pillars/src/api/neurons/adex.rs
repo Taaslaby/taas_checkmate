@@ -1,7 +1,7 @@
 //! AdEx (Adaptive Exponential) neuron — step-адаптер.
 //!
 //! Канон: `step_adex` → `run_neuron::<AdExModel>` (12-col repacking).
-//! E-Prop AdEx Multi — `super::eprop`. Перенесено из `core::neuron::adex` (Фаза 9).
+//! E-Prop AdEx Multi — `super::eprop`. Перенесено из `core::neuron::adex`.
 
 use crate::core::runner::run_neuron;
 use crate::zoo::neurons::AdExModel;

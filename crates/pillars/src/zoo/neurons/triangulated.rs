@@ -360,7 +360,7 @@ mod tests {
             unsafe {
                 let mut state = <TriangulatedModel as ComputeNeuron>::State::<f32>::from_ctx(&ctx);
                 let params = <TriangulatedModel as ComputeNeuron>::Params::<f32>::from_ctx(&ctx);
-                let mut sc = StepContext::new(ctx.i_syn, ctx.i_pre, ctx.i_post, ctx.dtf());
+                let mut sc = StepContext::new(ctx.i_syn, ctx.i_pre, ctx.i_post, ctx.dt_scalar());
                 <TriangulatedModel as ComputeNeuron>::step::<f32>(&mut state, &params, &mut sc);
                 let sm = sc.spike_mask();
                 total += sm.move_mask() as i32;

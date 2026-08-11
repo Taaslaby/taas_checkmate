@@ -1,4 +1,4 @@
-//! # 🦁 Zoo — Library of Ready-Made Models
+//! #  Zoo — Library of Ready-Made Models
 //!
 //! Pre-built neuron models, synapses, sensors and glia.
 //! Each model implements the [`Model`] trait.

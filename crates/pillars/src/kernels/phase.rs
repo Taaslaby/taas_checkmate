@@ -294,9 +294,9 @@ pub fn gco_step(
     }
 }
 
-// ─── Sparse/dense CSR Kuramoto & T3 steps (Фаза 9) ───────
+// ─── Sparse/dense CSR Kuramoto & T3 steps───────
 //
-// Перенесено из `core::kuramoto` (Фаза 9) — rayon-параллельные шаги
+// Перенесено из `core::kuramoto`— rayon-параллельные шаги
 // поверх `kuramoto_prepare` / `kuramoto_update` / `t3_update`.
 
 #[cfg(feature = "rayon")]

@@ -1,7 +1,7 @@
 //! Wilson-Cowan (WC) population model — excitatory-inhibitory rate dynamics.
 //!
 //! Канон: `step_wc` → `kernels::wc::wc_step` (волна 7, bit-identical порт).
-//! Перенесено из `core::neuron::wc` (Фаза 9).
+//! Перенесено из `core::neuron::wc`.
 //!
 //!  вилсон кованый ты родился слишком рано
 

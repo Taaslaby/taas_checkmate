@@ -1,7 +1,7 @@
 //! # 🔌 IO / gate compat adapters
 //!
 //! Min-truncating adapters moved verbatim from the deleted `taas-kernels`
-//! compat crate (Фаза 11). The canonical implementations live in
+//! compat crate. The canonical implementations live in
 //! [`crate::kernels::signal`] / [`crate::kernels::decode`] /
 //! [`crate::kernels::input`] (assert-семантика там жёстче); these wrappers
 //! keep the **min-семантику** (усечение по минимальной длине — контракт

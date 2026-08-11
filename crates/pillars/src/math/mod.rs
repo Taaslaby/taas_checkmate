@@ -1,4 +1,4 @@
-//! # 🧮 Math — Canonical per-lane primitives
+//! #  Math — Canonical per-lane primitives
 //!
 //! Pure math with no biological naming: `sigmoid`, `vtrap`, `fast_exp`.
 //! Biological primitives (ohmic, gate integration) live in [`crate::ops`].
