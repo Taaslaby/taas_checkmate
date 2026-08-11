@@ -3,4 +3,4 @@
 //! `PwmEncoder`, `LinearDecoder`, gates, and signal processing functions are
 //! implemented canonically in `pillars::kernels::io`.
 
-pub use crate::kernels::io::*;
+pub use pillars::kernels::io::*;

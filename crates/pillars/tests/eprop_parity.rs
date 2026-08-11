@@ -1,6 +1,6 @@
 //! # eprop_parity — pillars::kernels::eprop vs scalar formula references
 //!
-//! Волна 5 консолидации: `pillars::kernels::eprop` — канонический порт
+//!консолидации: `pillars::kernels::eprop` — канонический порт
 //! легаси `kernels::neuron::{lif,izhikevich,adex,saw}` e-prop batch-кернелов.
 //!
 //! Каждый тест гоняет pillars-версию и независимый скалярный эталон на

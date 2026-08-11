@@ -2,13 +2,13 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use std::sync::OnceLock;
-use taas_checkmate::kernels;
-use taas_checkmate::pillars::core::runner::run_neuron;
-use taas_checkmate::pillars::ops::triangulated::TriangLUT;
-use taas_checkmate::pillars::zoo::neurons::{
+use pillars::kernels;
+use pillars::core::runner::run_neuron;
+use pillars::ops::triangulated::TriangLUT;
+use pillars::zoo::neurons::{
     AdExModel, HHModel, IzhikevichModel, LIFAtModel, LIFModel, SAWModel,
 };
-use taas_checkmate::pillars::zoo::Model;
+use pillars::zoo::Model;
 
 static HH_LUT: OnceLock<TriangLUT> = OnceLock::new();
 
@@ -398,7 +398,7 @@ fn bench_kalman(c: &mut Criterion) {
 }
 
 fn bench_hh_poly(c: &mut Criterion) {
-    use taas_checkmate::kernels::neuron::hh::{build_channel_meta, standard_channels};
+    use pillars::kernels::hh_channels::{build_channel_meta, standard_channels};
     let channels = standard_channels();
     let meta = build_channel_meta(&channels);
     let n_gates: usize = meta.iter().map(|ch| ch.n_gates).sum();
@@ -468,10 +468,10 @@ fn bench_hh_lut(c: &mut Criterion) {
     // 4096×8B = 32KB, L1-resident) + `TriangulatedModel` inference step.
     // Legacy `kernels::neuron::hh::{build_luts, hh_lut_step, GateLut}` was
     // removed in the pillars consolidation (see DUPLICATION_MAP.md).
-    use taas_checkmate::pillars::ops::triangulated::{LutBuilder, LutConfig};
-    use taas_checkmate::pillars::zoo::neurons::TriangulatedModel;
-    use taas_checkmate::pillars::zoo::HHModel;
-    use taas_checkmate::pillars::NeuralPopulation;
+    use pillars::ops::triangulated::{LutBuilder, LutConfig};
+    use pillars::zoo::neurons::TriangulatedModel;
+    use pillars::zoo::HHModel;
+    use pillars::NeuralPopulation;
 
     let lut = HH_LUT.get_or_init(|| {
         let params = hh_lut_params();
@@ -523,11 +523,11 @@ fn bench_hh_lut(c: &mut Criterion) {
 }
 
 fn hh_lut_params() -> Vec<f32> {
-    use taas_checkmate::pillars::zoo::Model;
+    use pillars::zoo::Model;
     // HHModel::N_PARAMS = 12 (incl. CaV-T g_CaT / E_CaT columns).
     // Single-neuron SoA calibration buffer (n = 1).
     let n = 1;
-    let mut p = vec![0.0f32; n * taas_checkmate::pillars::zoo::HHModel::N_PARAMS];
+    let mut p = vec![0.0f32; n * pillars::zoo::HHModel::N_PARAMS];
     p[0] = 0.01; // dt
     p[n] = 120.0; // g_Na
     p[2 * n] = 50.0; // E_Na
@@ -731,7 +731,7 @@ fn hh_poly_run(
     g_leak: &[f32],
     e_leak: &[f32],
     c_m: &[f32],
-    meta: &[taas_checkmate::kernels::neuron::hh::ChannelMeta],
+    meta: &[pillars::kernels::hh_channels::ChannelMeta],
     g_max: &[f32],
     dt: f32,
     celsius: f32,

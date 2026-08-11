@@ -1,4 +1,4 @@
-//! # 🏛️ Pillars — Zero-Cost SIMD Engine for Neural Dynamics
+//! #  Pillars — Zero-Cost SIMD Engine for Neural Dynamics
 //!
 //! Every primitive compiles to **both** 8-wide SIMD (AVX2/NEON) and scalar
 //! (any CPU) from the **same source code** — chosen at monomorphization time.
@@ -6,12 +6,12 @@
 //! ## The Five Layers
 //!
 //! ```text
-//! 🚀  api/        Network orchestrator          Safe Rust, no raw pointers
-//! 🦁  zoo/        25+ ready-made models         impl Model + impl ComputeNeuron
-//! 🧬  ops/        Per-lane bio primitives       ohmic, gate, spike, plasticity (generic S)
-//! 🧰  kernels/    Batch f32x8 microkernels      flat &[f32] in, SIMD loop + tail out
-//! ⚙️  core/       SIMD engine                  SimdLane trait → f32x8 | f32
-//! 🖥️  Hardware                                 AVX2 | NEON | scalar
+//!   api/        Network orchestrator          Safe Rust, no raw pointers
+//!   zoo/        25+ ready-made models         impl Model + impl ComputeNeuron
+//!   ops/        Per-lane bio primitives       ohmic, gate, spike, plasticity (generic S)
+//!   kernels/    Batch f32x8 microkernels      flat &[f32] in, SIMD loop + tail out
+//!   core/       SIMD engine                   SimdLane trait → f32x8 | f32
+//!   Hardware                                  AVX2 | NEON | scalar
 //! ```
 //!
 //! ## Layer boundaries

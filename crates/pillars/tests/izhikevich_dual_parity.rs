@@ -1,6 +1,6 @@
 //! # Izhikevich Dual parity: `pillars::IzhikevichDualModel` vs scalar reference
 //!
-//! Консолидация (Фаза 2/3): legacy `kernels::neuron::izhikevich::izhikevich_dual_step`
+//! Консолидация/3): legacy `kernels::neuron::izhikevich::izhikevich_dual_step`
 //! больше НЕ вызывается из `safe.rs` — обёртка `safe::izhikevich_dual_step`
 //! делегирует канону `pillars::zoo::neurons::IzhikevichDualModel` (Sun et al. 2026).
 //! Живые потребители — `connectome/sim.rs` и `connectome/runner.rs` (через safe).
@@ -14,7 +14,7 @@
 //!    pillars `IzhikevichModel`), поэтому эталон — простой Euler, как легаси.
 //!
 //! ⚠️ **Coupling удаления:** эталон повторяет формулу легаси-кернела. Когда
-//! легаси `izhikevich_dual_step` будет удалён (Фаза 4), этот тест остаётся —
+//! легаси `izhikevich_dual_step` будет удалён, этот тест остаётся —
 //! он закрепляет поведение канона независимо от легаси.
 //!
 //! ⚠️ **Scalar tail (n % 8 ≠ 0):** канон через `run_neuron` использует SIMD-

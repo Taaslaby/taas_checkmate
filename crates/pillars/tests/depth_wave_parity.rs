@@ -1,6 +1,6 @@
 //! # DepthGCO parity — pillars `kernels::depth_wave::GcoState` vs inline legacy
 //!
-//! Волна 8, транш 1f: `neuron/depth_wave.rs` (264 строки) удалён, канон —
+//!: `neuron/depth_wave.rs` (264 строки) удалён, канон —
 //! `pillars::kernels::depth_wave::GcoState`. Путь `kernels::neuron::depth_wave`
 //! — compat-реэкспорт pillars.
 //!

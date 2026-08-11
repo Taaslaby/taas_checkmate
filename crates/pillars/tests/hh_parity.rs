@@ -1,6 +1,6 @@
 //! # HH engine parity — pillars `hh_channels` vs inline legacy reference
 //!
-//! Волна 8, транш 1e: движок легаси `kernels::neuron::hh` (`ChannelMeta`,
+//!: движок легаси `kernels::neuron::hh` (`ChannelMeta`,
 //! `build_channel_meta`, `hh_poly_step`, `fused_hh_poly_step`) портирован в
 //! `pillars::kernels::hh_channels` бит-в-бит. Легаси-файл удалён; путь
 //! `kernels::neuron::hh` — compat-реэкспорт pillars.

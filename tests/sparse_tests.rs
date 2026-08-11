@@ -3,7 +3,7 @@
 // Allow non_snake_case for mathematical variable names
 #![allow(non_snake_case)]
 
-use taas_checkmate::sparse;
+use pillars::kernels::csr as sparse;
 
 fn make_padded(n: usize) -> usize {
     n.div_ceil(8) * 8

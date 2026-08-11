@@ -8,13 +8,13 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use taas_checkmate::kernels;
-use taas_checkmate::pillars::core::lane::SimdLane;
-use taas_checkmate::pillars::core::runner::run_neuron;
-use taas_checkmate::pillars::core::util::{load8, load8_i32, store8};
-use taas_checkmate::pillars::ops::plasticity::stp as pillars_stp;
-use taas_checkmate::pillars::zoo::neurons::FHNModel;
-use taas_checkmate::pillars::zoo::Model;
+use pillars::kernels;
+use pillars::core::lane::SimdLane;
+use pillars::core::runner::run_neuron;
+use pillars::core::util::{load8, load8_i32, store8};
+use pillars::ops::plasticity::stp as pillars_stp;
+use pillars::zoo::neurons::FHNModel;
+use pillars::zoo::Model;
 use wide::f32x8;
 
 // ═══════════════════════════════════════════════════════════

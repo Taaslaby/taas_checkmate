@@ -1,6 +1,6 @@
 //! # Fused layer parity: `pillars::kernels::fused` vs scalar formula reference
 //!
-//! Консолидация (Фаза 2/3): legacy `kernels::neuron::fused` больше НЕ
+//! Консолидация/3): legacy `kernels::neuron::fused` больше НЕ
 //! вызывается из `safe.rs` — обёртки `safe::{fused_hidden_izhikevich_step,
 //! fused_output_lif_step, poisson_fused_hidden_step}` делегируют канону
 //! `pillars::kernels::fused`. Живой потребитель — hot path `train/rl.rs`
@@ -17,7 +17,7 @@
 //!    + та же динамика против эталона.
 //!
 //! ⚠️ **Coupling удаления:** эталон повторяет формулу легаси-кернелов
-//! (`kernels/neuron/fused.rs`). Когда легаси-кернел будет удалён (Фаза 4),
+//! (`kernels/neuron/fused.rs`). Когда легаси-кернел будет удалён,
 //! этот тест остаётся — он закрепляет поведение канона независимо от легаси.
 
 use pillars::kernels::fused::{

@@ -117,7 +117,7 @@ fn run_our_hh(
     g_leak: f32,
     e_leak: f32,
     c_m: f32,
-    channel_meta: &[taas_checkmate::kernels::neuron::hh::ChannelMeta],
+    channel_meta: &[pillars::kernels::hh_channels::ChannelMeta],
     g_max_per_neuron: &[f32],
     dt: f32,
     num_steps: usize,
@@ -133,7 +133,7 @@ fn run_our_hh(
     for _step in 0..steps {
         // Use the low-level unsafe API directly for fine-grained control
         unsafe {
-            taas_checkmate::kernels::neuron::hh::hh_poly_step(
+            pillars::kernels::hh_channels::hh_poly_step(
                 v.as_mut_ptr(),
                 gates.as_mut_ptr(),
                 i_exts.as_ptr(),
@@ -169,8 +169,8 @@ fn verify_vs_neuron() {
     let num_steps = reference.num_steps as usize;
 
     // Build channel metadata matching NEURON's HH
-    let channels = taas_checkmate::kernels::neuron::hh::standard_channels();
-    let channel_meta = taas_checkmate::kernels::neuron::hh::build_channel_meta(&channels);
+    let channels = pillars::kernels::hh_channels::standard_channels();
+    let channel_meta = pillars::kernels::hh_channels::build_channel_meta(&channels);
     let _n_channels = channel_meta.len();
     let _n_gates: usize = channel_meta.iter().map(|ch| ch.n_gates).sum();
 
@@ -212,7 +212,7 @@ fn verify_vs_neuron() {
         // Initialize our HH state to steady-state at V_init
         let v_init = -65.0f32;
         let mut v = vec![v_init];
-        let gate_init = taas_checkmate::kernels::neuron::hh::steady_state_gates(v_init, &channels);
+        let gate_init = pillars::kernels::hh_channels::steady_state_gates(v_init, &channels);
         let mut gates = gate_init.clone();
 
         let g_max_per_neuron = vec![120.0, 36.0]; // same for all channels
@@ -293,7 +293,7 @@ fn verify_vs_neuron() {
             let v_init = -65.0f32;
             let mut v = vec![v_init];
             let gate_init =
-                taas_checkmate::kernels::neuron::hh::steady_state_gates(v_init, &channels);
+                pillars::kernels::hh_channels::steady_state_gates(v_init, &channels);
             let mut gates = gate_init.clone();
             let g_max_per_neuron = vec![120.0, 36.0];
             let i_exts = vec![i_ext];
@@ -385,7 +385,7 @@ fn verify_vs_neuron() {
     let v_ref_rest = reference.v_traces[reference.num_steps as usize - 1];
     let v_init = -65.0f32;
     let mut v = vec![v_init];
-    let gate_init = taas_checkmate::kernels::neuron::hh::steady_state_gates(v_init, &channels);
+    let gate_init = pillars::kernels::hh_channels::steady_state_gates(v_init, &channels);
     let mut gates = gate_init.clone();
     let g_max_per_neuron = vec![120.0, 36.0];
     let i_exts = vec![0.0];
@@ -435,7 +435,7 @@ fn run_gpu_hh_trace(
     g_leak: f32,
     e_leak: f32,
     c_m: f32,
-    channel_meta: &[taas_checkmate::kernels::neuron::hh::ChannelMeta],
+    channel_meta: &[pillars::kernels::hh_channels::ChannelMeta],
     g_max_per_neuron: &[f32],
     dt: f32,
     num_steps: usize,
@@ -491,7 +491,7 @@ fn run_gpu_hh_trace(
 #[cfg(feature = "cuda")]
 #[test]
 fn verify_vs_neuron_gpu() {
-    use taas_checkmate::kernels::neuron::hh::{
+    use pillars::kernels::hh_channels::{
         build_channel_meta, standard_channels, steady_state_gates,
     };
 

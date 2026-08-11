@@ -1,6 +1,6 @@
 //! Parity: pillars-канон synapse-family vs inline legacy-эталоны.
 //!
-//! Волна 8, транш 1a: `delay`, `nmda`, `tsodyks_markram` переведены с
+//!: `delay`, `nmda`, `tsodyks_markram` переведены с
 //! легаси-кернелов `kernels/neuron/*` на pillars-канон
 //! (`pillars::kernels::delay`, `pillars::zoo::synapses::*`).
 //! Транш 3e: `safe.rs` удалён — тест замораживает pillars-канон напрямую

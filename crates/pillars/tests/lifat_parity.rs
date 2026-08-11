@@ -1,6 +1,6 @@
 //! # LIF-AT parity: локальный pillars-мост vs `run_neuron::<LIFAtModel>`
 //!
-//! Волна 6 консолидации: легаси-кернел `kernels::neuron::lif::lif_at_step`
+//!консолидации: легаси-кернел `kernels::neuron::lif::lif_at_step`
 //! удалён; канон — `pillars::zoo::neurons::LIFAtModel` (GLIF2). Транш 3e:
 //! `safe.rs` удалён — мост переупаковки легаси 7-колоночного SoA-лейаута
 //! `[dt, τ_m, v_rest, v_thresh, v_reset, τ_θ, β]×n` в pillars 8-колоночный

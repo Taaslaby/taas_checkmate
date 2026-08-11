@@ -12,7 +12,7 @@
 
 use pillars::kernels::hh_channels::build_channel_meta;
 use pillars::kernels::hh_channels::{standard_channels, steady_state_gates};
-// Flat compat surface бывшего крейта `taas-kernels` (Фаза 11) — канон pillars.
+// Flat compat surface бывшего крейта `taas-kernels`— канон pillars.
 use pillars::kernels::measure::lazy_sincos_update;
 use pillars::kernels::signal::sgd_step_simd;
 use pillars::kernels::{

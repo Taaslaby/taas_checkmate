@@ -34,7 +34,7 @@ fn bench_200m_neurons() {
     println!("═══ 200M Neuron HH Memory & Speed Bench ═══");
 
     // Define n_channels BEFORE allocation
-    let n_channels = taas_checkmate::kernels::neuron::hh::standard_channels().len();
+    let n_channels = pillars::kernels::hh_channels::standard_channels().len();
 
     let mem_before = mb_allocated();
     println!("RSS before: {}", format_bytes(mem_before));
@@ -69,14 +69,14 @@ fn bench_200m_neurons() {
     );
 
     // ── Build channel meta ──
-    let channels = taas_checkmate::kernels::neuron::hh::standard_channels();
-    let channel_meta = taas_checkmate::kernels::neuron::hh::build_channel_meta(&channels);
+    let channels = pillars::kernels::hh_channels::standard_channels();
+    let channel_meta = pillars::kernels::hh_channels::build_channel_meta(&channels);
 
     // ── 1 step ──
     println!("\nRunning 1 HH step...");
     let t_step = Instant::now();
     unsafe {
-        taas_checkmate::kernels::neuron::hh::hh_poly_step(
+        pillars::kernels::hh_channels::hh_poly_step(
             v.as_mut_ptr(),
             gates.as_mut_ptr(),
             i_ext.as_ptr(),

@@ -1,6 +1,6 @@
 //! # Parity test: kernels' math primitives vs pillars canon
 //!
-//! Фаза 1 консолидации: единственный источник `fast_exp`/`sigmoid`/
+//!консолидации: единственный источник `fast_exp`/`sigmoid`/
 //! `safety_clamp` — `pillars::math` / `pillars::kernels::signal`.
 //!
 //! Этот тест доказывает, что ре-экспорты из kernels **бит-идентичны**

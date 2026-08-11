@@ -4,7 +4,7 @@
 // Allow non_snake_case for mathematical variable names (I=current, v=voltage, etc.)
 #![allow(non_snake_case)]
 
-use taas_checkmate::neuron;
+use pillars::api::neurons as neuron;
 
 fn make_padded(n: usize) -> usize {
     n.div_ceil(8) * 8
@@ -2503,7 +2503,7 @@ fn test_hh_spike_detection_reverse_crossing() {
 fn test_fused_sparse_consistency() {
     // Verify that the fused kernel with active pre-syn list produces
     // the same output as direct (non-fused) computation.
-    use taas_checkmate::kernels;
+    use pillars::kernels;
 
     let nh = 8; // hidden neurons (padded)
     let ni = 16; // input neurons
@@ -2626,8 +2626,8 @@ fn test_fused_sparse_consistency() {
 
 #[test]
 fn test_hh_high_current_stability() {
-    let channels = taas_checkmate::kernels::neuron::hh::standard_channels();
-    let meta = taas_checkmate::kernels::neuron::hh::build_channel_meta(&channels);
+    let channels = pillars::kernels::hh_channels::standard_channels();
+    let meta = pillars::kernels::hh_channels::build_channel_meta(&channels);
     let n_gates: usize = meta.iter().map(|ch| ch.n_gates).sum();
 
     let n = 1;
@@ -2640,7 +2640,7 @@ fn test_hh_high_current_stability() {
     let g_max_per_neuron: Vec<f32> = channels.iter().map(|ch| ch.g_max).collect();
 
     unsafe {
-        taas_checkmate::kernels::neuron::hh::hh_poly_step(
+        pillars::kernels::hh_channels::hh_poly_step(
             v.as_mut_ptr(),
             gates.as_mut_ptr(),
             Ii.as_ptr(),
