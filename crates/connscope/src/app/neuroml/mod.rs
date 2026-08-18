@@ -1,8 +1,8 @@
 //! # Режим «NeuroML» (`app::neuroml`)
 //!
 //! Загрузка и прогон NeuroML-моделей (CPU SIMD / GPU CUDA): модалка
-//! «NeuroML → pillars» (см. `ui`), окно-IDE «Редактор» и поверхность
-//! «Морфология» (вкладка дерева egui_dock, рисуется через `cable_dock_view`).
+//! «NeuroML → pillars» (см. `ui`) и две вкладки дерева egui_dock — IDE
+//! «Редактор» (`editor_dock_view`) и «Морфология» (`cable_dock_view`).
 //!
 //! ```text
 //! NeuromlMode (режим)
@@ -72,10 +72,9 @@ pub(crate) struct NeuromlMode {
     /// Виджет «Морфология» (вкладка с деревом компартментов) — если
     /// загружена морфо-клетка.
     pub cable: Option<CableState>,
-    /// IDE-виджет «Редактор» (подсветка + валидация + ошибки).
+    /// IDE-виджет «Редактор» (подсветка + валидация + ошибки) — вкладка
+    /// [`crate::app::mode::Surface::Editor`] в дереве доков.
     pub editor: EditorState,
-    /// Окно «Редактор» открыто.
-    pub show_editor: bool,
 }
 
 impl Default for NeuromlMode {
@@ -95,16 +94,14 @@ impl Default for NeuromlMode {
             status: String::new(),
             cable: None,
             editor: EditorState::default(),
-            show_editor: false,
         }
     }
 }
 
 impl Mode for NeuromlMode {
-    /// Модалка «NeuroML → pillars» + окно «Редактор». Поверхность
-    /// «Морфология» рисует оболочка через `cable_dock_view` (вкладка дока).
+    /// Модалка «NeuroML → pillars». Вкладки «Редактор» и «Морфология» рисует
+    /// оболочка через `editor_dock_view` / `cable_dock_view` (дерево дока).
     fn windows(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame, services: &mut ShellServices) {
         self.neuroml_modal(ctx, frame, services);
-        self.editor_window(ctx);
     }
 }

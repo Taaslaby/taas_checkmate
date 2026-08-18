@@ -45,6 +45,11 @@ use local::{card_local_raster, card_local_rates, card_local_v};
 /// в нижней панели и в нативных окнах выглядели одинаково.
 const PLOT_HEIGHT: f32 = 230.0;
 
+/// Минимальная комфортная ширина одного плота в ряду. Если доступная ширина
+/// дока не вмещает столько колонок, плоты перестраиваются в столбик
+/// (вертикальная ориентация), а не сжимаются «в кучку».
+const MIN_PLOT_COL_WIDTH: f32 = 300.0;
+
 /// Цвет сетки плота из текущей темы (тёмная/светлая) — плоты сливаются
 /// с остальным интерфейсом, а не торчат белым прямоугольником.
 fn grid_color(ui: &egui::Ui) -> Color32 {
@@ -168,11 +173,23 @@ impl ConnectomeMode {
         if kinds.is_empty() {
             return;
         }
-        ui.columns(kinds.len(), |cols| {
-            for (i, k) in kinds.iter().enumerate() {
-                render_plot_card(&mut cols[i], *k, data, self.filters.color_mode, r);
+        // Адаптивная сетка: в узкой (вертикальной) ориентации дока плоты
+        // выстраиваются в столбик на всю ширину, в широкой — в ряд по столько
+        // колонок, сколько помещается с комфортной шириной карточки.
+        let cols = ((ui.available_width() / MIN_PLOT_COL_WIDTH).floor() as usize)
+            .clamp(1, kinds.len());
+        for row in kinds.chunks(cols) {
+            if row.len() == 1 {
+                render_plot_card(ui, row[0], data, self.filters.color_mode, r);
+            } else {
+                ui.columns(row.len(), |cols_ui| {
+                    for (i, k) in row.iter().enumerate() {
+                        render_plot_card(&mut cols_ui[i], *k, data, self.filters.color_mode, r);
+                    }
+                });
             }
-        });
+            ui.add_space(tokens::SP_SM);
+        }
     }
 
     /// Откреплённые плоттеры: **нативные окна ОС** (не внутри приложения).

@@ -12,9 +12,10 @@
 //! ? / F1   справка                 F        fit камеры
 //! Ctrl+O   открыть файл            + / = / − зум к центру канваса
 //! Ctrl+R   перезагрузить файл      H        левый рейл инструментов
-//! Ctrl+Shift+D  дамп раскладки     Ctrl+S   фокус на поиск нейрона
+//! Ctrl+Shift+D  дамп раскладки
 //! F12      консоль (вкладка дока)
 //! [ / ]    цикл вкладок рабочего пространства
+//! Ctrl+S   сохранить редактор NeuroML / фокус на поиск
 //! ```
 //!
 //! `F12` и `[`/`]` живут в оболочке: дерево `egui_dock` владеет она.
@@ -45,6 +46,9 @@ enum ShellAction {
     FocusConsole,
     /// Цикл вкладок рабочего пространства (`false` — назад, `true` — вперёд).
     CycleDock(bool),
+    /// Ctrl+S: сохранить редактор NeuroML, если он в фокусе, иначе —
+    /// фокус на поиск нейрона.
+    SaveOrSearch,
 }
 
 /// Таблица макросов оболочки: комбинация → действие. Порядок не важен —
@@ -83,6 +87,10 @@ const SHELL_SHORTCUTS: &[(KeyboardShortcut, ShellAction)] = &[
         KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::D),
         ShellAction::DumpLayout,
     ),
+    (
+        KeyboardShortcut::new(Modifiers::COMMAND, Key::S),
+        ShellAction::SaveOrSearch,
+    ),
 ];
 
 // ── клавиши режима коннектома ──────────────────────────────────
@@ -93,7 +101,6 @@ enum ModeAction {
     FitReset,
     ZoomIn,
     ZoomOut,
-    FocusSearch,
     /// Показать/скрыть левый рейл инструментов.
     ToggleRail,
 }
@@ -120,10 +127,6 @@ const MODE_SHORTCUTS: &[(KeyboardShortcut, ModeAction)] = &[
         KeyboardShortcut::new(Modifiers::NONE, Key::H),
         ModeAction::ToggleRail,
     ),
-    (
-        KeyboardShortcut::new(Modifiers::COMMAND, Key::S),
-        ModeAction::FocusSearch,
-    ),
 ];
 
 /// Реестр для модалки «Горячие клавиши»: (комбинация, описание).
@@ -138,7 +141,7 @@ pub(crate) const SHORTCUT_LIST: &[(&str, &str)] = &[
     ("H", "показать/скрыть левый рейл инструментов"),
     ("[ / ]", "предыдущая/следующая вкладка рабочего пространства"),
     ("? / F1", "эта справка"),
-    ("Ctrl+S", "фокус на поиск нейрона"),
+    ("Ctrl+S", "сохранить редактор NeuroML / фокус на поиск нейрона"),
     ("Ctrl+O", "открыть файл данных (.bin/.taas/.graphml/.npz)"),
     ("Ctrl+R", "перезагрузить текущий файл"),
     ("Ctrl+Shift+D", "дамп раскладки в connscope_profiler.json"),
@@ -186,6 +189,15 @@ impl ConnApp {
             Some(ShellAction::DumpLayout) => profiler::arm(),
             Some(ShellAction::FocusConsole) => self.focus_surface(Surface::Console),
             Some(ShellAction::CycleDock(forward)) => self.cycle_surface(forward),
+            Some(ShellAction::SaveOrSearch) => {
+                // Когда текст редактора NeuroML в фокусе — Ctrl+S сохраняет
+                // файл; в остальном интерфейсе — фокус на поиск нейрона.
+                if self.neuroml.editor.focused {
+                    self.neuroml.editor_save();
+                } else {
+                    ctx.memory_mut(|m| m.request_focus(Id::new(SEARCH_FIELD_ID)));
+                }
+            }
             None => {}
         }
     }
@@ -227,11 +239,6 @@ impl ConnectomeMode {
                 }) * 0.5;
                 self.zoom_step(factor, center);
                 ctx.request_repaint();
-            }
-            Some(ModeAction::FocusSearch) => {
-                // Поле отрисуется дальше по кадру в верхнем баре с этим же
-                // `id_salt` — focus запрошен заранее и подхватится.
-                ctx.memory_mut(|m| m.request_focus(Id::new(SEARCH_FIELD_ID)));
             }
             Some(ModeAction::ToggleRail) => self.rail_visible = !self.rail_visible,
             None => return false,

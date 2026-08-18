@@ -185,6 +185,7 @@ fn tok_color(t: Tok, accent: Color32) -> Color32 {
 pub(crate) fn build_job(
     text: &str,
     error_lines: &[u32],
+    cursor_line: u32,
     wrap_width: f32,
     font: FontId,
     accent: Color32,
@@ -206,10 +207,17 @@ pub(crate) fn build_job(
     }
     let mut sorted_errors = error_lines.to_vec();
     sorted_errors.sort_unstable();
+    let line_of_byte = |byte: usize| -> u32 {
+        // Число начал строк ≤ byte (линия 1 — 0..a1).
+        line_starts.partition_point(|&s| s <= byte) as u32
+    };
     let line_has_error = |byte: usize| -> bool {
-        // Число начал строк ≤ byte и есть 1-based номер строки (линия 1 — 0..a1).
-        let line = line_starts.partition_point(|&s| s <= byte);
-        sorted_errors.binary_search(&(line as u32)).is_ok()
+        sorted_errors.binary_search(&line_of_byte(byte)).is_ok()
+    };
+    // Подсветка строки курсора (1-based; 0 = нет). Фон рисуется в LayoutJob —
+    // под глифами, а не поверх, и прокручивается вместе с текстом.
+    let line_has_cursor = |byte: usize| -> bool {
+        cursor_line > 0 && line_of_byte(byte) == cursor_line
     };
 
     let base = TextFormat {
@@ -223,7 +231,13 @@ pub(crate) fn build_job(
     let mut cursor = 0usize;
     for (range, tok) in &tokens {
         if range.start > cursor {
-            push_section(&mut job, cursor..range.start, &base, line_has_error(cursor));
+            push_section(
+                &mut job,
+                cursor..range.start,
+                &base,
+                line_has_error(cursor),
+                line_has_cursor(cursor),
+            );
         }
         let mut fmt = TextFormat {
             font_id: font.clone(),
@@ -233,20 +247,41 @@ pub(crate) fn build_job(
         if *tok == Tok::Comment {
             fmt.italics = true;
         }
-        push_section(&mut job, range.clone(), &fmt, line_has_error(range.start));
+        push_section(
+            &mut job,
+            range.clone(),
+            &fmt,
+            line_has_error(range.start),
+            line_has_cursor(range.start),
+        );
         cursor = range.end;
     }
     if cursor < text.len() {
-        push_section(&mut job, cursor..text.len(), &base, line_has_error(cursor));
+        push_section(
+            &mut job,
+            cursor..text.len(),
+            &base,
+            line_has_error(cursor),
+            line_has_cursor(cursor),
+        );
     }
     job
 }
 
-fn push_section(job: &mut LayoutJob, range: Range<usize>, fmt: &TextFormat, err: bool) {
+fn push_section(
+    job: &mut LayoutJob,
+    range: Range<usize>,
+    fmt: &TextFormat,
+    err: bool,
+    cursor: bool,
+) {
     let mut f = fmt.clone();
     if err {
         // Фон строки с ошибкой — из danger-красного темы (альфа 0x90).
         f.background = Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 0x90);
+    } else if cursor {
+        // Строка курсора — едва заметная подсветка (как в IDE).
+        f.background = Color32::from_rgba_unmultiplied(0xFF, 0xFF, 0xFF, 8);
     }
     job.sections.push(LayoutSection {
         leading_space: 0.0,
@@ -287,7 +322,7 @@ mod tests {
     /// должен покрывать весь текст без перекрытий (иначе LayoutJob сломан).
     #[test]
     fn build_job_covers_all_text() {
-        let job = build_job(DOC, &[2], 200.0, FontId::monospace(12.5), TEST_ACCENT);
+        let job = build_job(DOC, &[2], 0, 200.0, FontId::monospace(12.5), TEST_ACCENT);
         let mut prev = 0usize;
         for s in &job.sections {
             let start = s.byte_range.start.0;
@@ -304,7 +339,7 @@ mod tests {
     #[test]
     fn error_background_targets_the_right_line() {
         // Ошибка только на строке 2 (<neuroml …>) — строка 3 чистая.
-        let job = build_job(DOC, &[2], 200.0, FontId::monospace(12.5), TEST_ACCENT);
+        let job = build_job(DOC, &[2], 0, 200.0, FontId::monospace(12.5), TEST_ACCENT);
         let section = |needle: &str| {
             job.sections
                 .iter()
@@ -315,6 +350,21 @@ mod tests {
         assert_ne!(section("neuroml").format.background, Color32::TRANSPARENT);
         // Имя тега на строке 3 — без фона.
         assert_eq!(section("izhikevichCell").format.background, Color32::TRANSPARENT);
+    }
+
+    /// Строка курсора получает фоновую подсветку, остальные — прозрачный фон.
+    #[test]
+    fn cursor_line_gets_background() {
+        let job = build_job(DOC, &[], 3, 200.0, FontId::monospace(12.5), TEST_ACCENT);
+        // Секция имени тега на строке 3 (<izhikevichCell …>) — с фоном курсора.
+        let section = |needle: &str| {
+            job.sections
+                .iter()
+                .find(|s| &DOC[s.byte_range.start.0..s.byte_range.end.0] == needle)
+                .unwrap_or_else(|| panic!("секция `{needle}` не найдена"))
+        };
+        assert_ne!(section("izhikevichCell").format.background, Color32::TRANSPARENT);
+        assert_eq!(section("neuroml").format.background, Color32::TRANSPARENT);
     }
 
     #[test]
@@ -419,7 +469,7 @@ mod tests {
     #[test]
     fn crlf_line_endings_cover_all_text() {
         let doc = "<a id=\"x\"/>\r\n<b id=\"y\"/>\r\n";
-        let job = build_job(doc, &[], 200.0, FontId::monospace(12.5), TEST_ACCENT);
+        let job = build_job(doc, &[], 0, 200.0, FontId::monospace(12.5), TEST_ACCENT);
         let mut prev = 0usize;
         for s in &job.sections {
             let start = s.byte_range.start.0;
@@ -453,7 +503,7 @@ mod tests {
             }
 
             // LayoutJob: секции покрывают весь текст без перекрытий.
-            let job = build_job(&s, &[], 120.0, FontId::monospace(12.5), TEST_ACCENT);
+            let job = build_job(&s, &[], 0, 120.0, FontId::monospace(12.5), TEST_ACCENT);
             let mut prev = 0usize;
             for sec in &job.sections {
                 let start = sec.byte_range.start.0;

@@ -32,8 +32,8 @@ use egui_phosphor::regular as ic;
 
 /// Докируемая поверхность рабочего пространства — вкладка в едином дереве
 /// `egui_dock`, которым владеет оболочка. ConnectomeMode рисует первые шесть,
-/// [`Surface::Morphology`] рисует shell из `NeuromlMode` (кросс-режимная
-/// поверхность).
+/// [`Surface::Morphology`] и [`Surface::Editor`] рисует shell из `NeuromlMode`
+/// (кросс-режимные поверхности).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Surface {
     /// Правая панель-инспектор нейрона/симуляции/фармы.
@@ -50,10 +50,12 @@ pub(crate) enum Surface {
     Sim,
     /// Дерево компартментов морфо-клетки (NeuroML).
     Morphology,
+    /// IDE-редактор NeuroML (подсветка, gutter, валидация, ошибки).
+    Editor,
 }
 
 impl Surface {
-    pub(crate) const ALL: [Surface; 7] = [
+    pub(crate) const ALL: [Surface; 8] = [
         Surface::Inspector,
         Surface::Atlas,
         Surface::Ego,
@@ -61,6 +63,7 @@ impl Surface {
         Surface::Console,
         Surface::Sim,
         Surface::Morphology,
+        Surface::Editor,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -72,6 +75,7 @@ impl Surface {
             Self::Console => "Консоль",
             Self::Sim => "Симуляция",
             Self::Morphology => "Морфология",
+            Self::Editor => "Редактор",
         }
     }
 
@@ -84,6 +88,7 @@ impl Surface {
             Self::Console => ic::TERMINAL,
             Self::Sim => ic::LIGHTNING,
             Self::Morphology => ic::TREE_STRUCTURE,
+            Self::Editor => ic::TEXT_T,
         }
     }
 }

@@ -138,8 +138,8 @@ impl Mode for ConnectomeMode {
             Surface::Plots => self.dock_tab_plots(ui),
             Surface::Console => self.console_view(ui),
             Surface::Sim => self.dock_tab_sim(ui),
-            // Рисует оболочка из NeuromlMode; сюда не приходит.
-            Surface::Morphology => {}
+            // Рисуют оболочка из NeuromlMode; сюда не приходят.
+            Surface::Morphology | Surface::Editor => {}
         }
     }
 

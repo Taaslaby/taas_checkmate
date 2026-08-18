@@ -1,8 +1,9 @@
 //! # Меню и модальные окна (`app::menu`)
 //!
-//! * **`menu_bar`** — «Файл / Вид / Справка» на дизайн-системе elegance:
-//!   режимная секция «Вид» отдаётся активному режиму (`Mode::view_menu`),
-//!   темы и акценты (со свотч-кружками), консоль, выход;
+//! * **`menu_bar`** — «Файл / Правка / Вид / Окна / Справка» на дизайн-системе
+//!   elegance: режимная секция «Вид» отдаётся активному режиму
+//!   (`Mode::view_menu`), темы и акценты (со свотч-кружками), «Окна» — список
+//!   поверхностей рабочего пространства (переоткрытие/фокус), выход;
 //! * **`modal_windows`** — модалки оболочки: «О программе», «Открыть файл»
 //!   и «Горячие клавиши» на встроенном [`egui::containers::Modal`]
 //!   (затемнение фона, Esc/клик мимо = закрыть). Модалки режимов
@@ -18,6 +19,7 @@ use elegance::{BuiltInTheme, Button as ElegButton, MenuBar, Modal, StatCard};
 use egui_phosphor::regular as ic;
 
 use crate::app::mode::Surface;
+use crate::app::neuroml::editor::EditorEdit;
 use crate::app::shell::shortcuts::SHORTCUT_LIST;
 use crate::app::tokens::{self, icon_label};
 use crate::app::{AccentPreset, ConnApp, DockPreset};
@@ -82,6 +84,26 @@ impl ConnApp {
                             ui.separator();
                             if menu_item(ui, ic::SIGN_OUT, "Выйти") {
                                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                        },
+                    );
+                    m.menu(
+                        icon_label(ic::PENCIL_SIMPLE, "Правка", tokens::ICON_SM),
+                        |ui| {
+                            ui.set_min_width(MENU_ITEM_W);
+                            menu_section(ui, "РЕДАКТОР NEUROML");
+                            if menu_item(ui, ic::ARROW_BEND_UP_LEFT, "Отменить (Ctrl+Z)") {
+                                self.focus_surface(Surface::Editor);
+                                self.neuroml.editor.pending_edit = Some(EditorEdit::Undo);
+                            }
+                            if menu_item(ui, ic::ARROW_BEND_UP_RIGHT, "Вернуть (Ctrl+Y)") {
+                                self.focus_surface(Surface::Editor);
+                                self.neuroml.editor.pending_edit = Some(EditorEdit::Redo);
+                            }
+                            ui.separator();
+                            if menu_item(ui, ic::FLOPPY_DISK, "Сохранить NeuroML (Ctrl+S)") {
+                                self.focus_surface(Surface::Editor);
+                                self.neuroml.editor_save();
                             }
                         },
                     );
@@ -151,6 +173,43 @@ impl ConnApp {
                             });
                         }
                     });
+                    m.menu(
+                        icon_label(ic::SQUARES_FOUR, "Окна", tokens::ICON_SM),
+                        |ui| {
+                            ui.set_min_width(MENU_ITEM_W);
+                            menu_section(ui, "ПОВЕРХНОСТИ");
+                            for s in Surface::ALL {
+                                let focused = self.focused_surface() == Some(s);
+                                let label = format!(
+                                    "{}  {}",
+                                    if focused { "●" } else { "○" },
+                                    s.label()
+                                );
+                                if ui
+                                    .add_sized(
+                                        [MENU_ITEM_W, MENU_ITEM_H],
+                                        egui::Button::new(icon_label(
+                                            s.icon(),
+                                            &label,
+                                            tokens::ICON_SM,
+                                        )),
+                                    )
+                                    .on_hover_text("Сфокусировать/вернуть вкладку")
+                                    .clicked()
+                                {
+                                    self.focus_surface(s);
+                                }
+                            }
+                            ui.separator();
+                            ui.label(
+                                egui::RichText::new(
+                                    "Закрытую вкладку можно вернуть отсюда; вкладки в плавающих окнах при закрытии тоже возвращаются в дерево.",
+                                )
+                                .weak()
+                                .small(),
+                            );
+                        },
+                    );
                     m.menu(
                         icon_label(ic::QUESTION, "Справка", tokens::ICON_SM),
                         |ui| {

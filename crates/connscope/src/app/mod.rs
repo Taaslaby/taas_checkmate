@@ -38,6 +38,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, vec2};
 use elegance::{BuiltInTheme, Theme};
+use egui_dock::tab_viewer::OnCloseResponse;
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 
 use crate::app::connectome::ConnectomeMode;
@@ -186,8 +187,6 @@ impl DockPreset {
 // ── Геометрические константы ──────────────────────────────────
 /// Масштаб «мира» → экран: 1.0 мировой единицы = `BASE` пикселей при zoom=1.
 const BASE: f32 = 720.0;
-/// Разрешение запечённой текстуры 2D-атласа (нейроны рисуются в битмап).
-const ATLAS: usize = 2048;
 /// Разрешение текстуры 3D-облака точек.
 const ATLAS_3D: usize = 1024;
 /// Размер миникарты в углу канваса.
@@ -255,6 +254,8 @@ struct ConnApp {
     dock: DockState<Surface>,
     /// Раскладка дока уже загружена из персистентного хранилища egui.
     dock_loaded: bool,
+    /// Вкладки, закрытые в плавающих окнах — вернуть их в дерево после рендера.
+    return_to_dock: Vec<Surface>,
 }
 
 impl Default for ConnApp {
@@ -281,6 +282,7 @@ impl Default for ConnApp {
             neuroml,
             dock: default_dock(),
             dock_loaded: false,
+            return_to_dock: Vec::new(),
         }
     }
 }
@@ -308,6 +310,11 @@ impl ConnApp {
         // (F — fit, +/− — зум, H — рейл, [ ] — док, F12 — консоль, Ctrl+S — поиск).
         self.handle_shortcuts(ui);
         self.mode.handle_shortcuts(&ctx);
+
+        // Редактор NeuroML — вкладка дока: сбрасываем флаг «текст в фокусе»
+        // каждый кадр, а `editor_dock_view` выставит его снова, если вкладка
+        // видна и поле имеет фокус (точное значение для Ctrl+S).
+        self.neuroml.editor.focused = false;
 
         // Профайлер раскладки: если хоткеем взведён захват — начинаем
         // собирать фактические Rect виджетов этого кадра.
@@ -390,6 +397,12 @@ impl ConnApp {
             .show_add_popup(false)
             .show_inside(ui, self);
         self.dock = state;
+        // Вернуть вкладки, закрытые в плавающих окнах, обратно в дерево.
+        for surface in self.return_to_dock.drain(..) {
+            if self.dock.find_tab(&surface).is_none() {
+                self.dock.push_to_focused_leaf(surface);
+            }
+        }
         self.save_dock_state(ui);
     }
 
@@ -411,12 +424,17 @@ impl ConnApp {
     }
 
     /// Сфокусировать вкладку рабочего пространства (активировать её в листе).
+    /// Если вкладку закрыли (или её убрал пресет) — возвращает её в фокусный
+    /// лист, чтобы пользователь никогда не оставался без способа вернуть
+    /// поверхность (защита от «закрыли всё»).
     fn focus_surface(&mut self, surface: Surface) {
         if let Some(path) = self.dock.find_tab(&surface) {
             if let Ok(leaf) = self.dock.leaf_mut(path.node_path()) {
                 leaf.active = path.tab;
             }
             self.dock.set_focused_node_and_surface(path.node_path());
+        } else {
+            self.dock.push_to_focused_leaf(surface);
         }
     }
 
@@ -464,7 +482,13 @@ impl TabViewer for ConnApp {
     type Tab = Surface;
 
     fn title(&mut self, surface: &mut Self::Tab) -> egui::WidgetText {
-        tokens::icon_label(surface.icon(), surface.label(), tokens::ICON_XS).into()
+        // Индикатор несохранённых изменений у вкладки «Редактор» (был в
+        // заголовке отдельного окна — теперь живёт в заголовке вкладки).
+        let mut label = surface.label().to_string();
+        if *surface == Surface::Editor && self.neuroml.editor.modified {
+            label.push_str(" ●");
+        }
+        tokens::icon_label(surface.icon(), &label, tokens::ICON_XS).into()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, surface: &mut Self::Tab) {
@@ -475,6 +499,7 @@ impl TabViewer for ConnApp {
             };
             match *surface {
                 Surface::Morphology => self.neuroml.cable_dock_view(ui),
+                Surface::Editor => self.neuroml.editor_dock_view(ui),
                 _ => self.mode.dock_surface(ui, *surface, &mut services),
             }
             services.focus_surface
@@ -488,14 +513,24 @@ impl TabViewer for ConnApp {
         egui::Id::new(("workspace_surface", surface.label()))
     }
 
-    /// Поверхности фиксированы: закрывать нельзя (иначе потеряешь инспектор/атлас).
+    /// Поверхность «закрывается» только из плавающего окна; на основных
+    /// вкладках кнопка скрыта (`show_close_buttons(false)`), так что `true`
+    /// здесь управляет именно окном.
     fn is_closeable(&self, _surface: &Self::Tab) -> bool {
-        false
+        true
     }
 
-    /// Не даём вытаскивать в отдельное окно — дерево остаётся в одной зоне.
+    /// Разрешаем вытаскивать вкладку в плавающее окно (undock).
     fn allowed_in_windows(&self, _surface: &mut Self::Tab) -> bool {
-        false
+        true
+    }
+
+    /// Закрытие плавающего окна не удаляет поверхность, а возвращает её в
+    /// дерево: запоминаем вкладку, `dock_area` кладёт её обратно в focused
+    /// leaf после рендера.
+    fn on_close(&mut self, surface: &mut Self::Tab) -> OnCloseResponse {
+        self.return_to_dock.push(*surface);
+        OnCloseResponse::Close
     }
 }
 
@@ -506,7 +541,7 @@ fn default_dock() -> DockState<Surface> {
     let [_, center] = dock.main_surface_mut().split_right(
         NodeIndex::root(),
         0.22,
-        vec![Surface::Atlas, Surface::Ego, Surface::Morphology],
+        vec![Surface::Atlas, Surface::Ego, Surface::Morphology, Surface::Editor],
     );
     dock.main_surface_mut().split_below(
         center,
@@ -610,4 +645,81 @@ fn load_logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
     Some(ctx.load_texture("neoMyelin_logo", color, egui::TextureOptions::LINEAR))
+}
+
+// ── Тесты раскладки рабочего пространства ─────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Минимальный `ConnApp` без загрузки данных — для чистых тестов дерева дока.
+    fn test_app() -> ConnApp {
+        ConnApp {
+            ui: UiState::default(),
+            mode: Box::new(ConnectomeMode::default()),
+            neuroml: NeuromlMode::default(),
+            dock: default_dock(),
+            dock_loaded: false,
+            return_to_dock: Vec::new(),
+        }
+    }
+
+    /// Все вкладки дерева, отсортированные по дискриминанту `Surface` —
+    /// канонический порядок совпадает с `Surface::ALL`.
+    fn sorted_tabs(dock: &DockState<Surface>) -> Vec<Surface> {
+        let mut v: Vec<Surface> = dock.iter_all_tabs().map(|(_, t)| *t).collect();
+        v.sort_by_key(|s| *s as u8);
+        v
+    }
+
+    #[test]
+    fn default_dock_has_each_surface_once() {
+        let tabs = sorted_tabs(&default_dock());
+        assert_eq!(tabs.len(), Surface::ALL.len(), "дубль/потеря вкладки: {tabs:?}");
+        for (i, surface) in Surface::ALL.iter().enumerate() {
+            assert_eq!(tabs[i], *surface, "вкладка {surface:?} не на месте/отсутствует");
+        }
+    }
+
+    #[test]
+    fn presets_have_expected_surfaces() {
+        let mut app = test_app();
+
+        app.apply_preset(DockPreset::Minimal);
+        assert_eq!(sorted_tabs(&app.dock), vec![Surface::Atlas]);
+
+        app.apply_preset(DockPreset::Tabs);
+        assert_eq!(sorted_tabs(&app.dock).len(), Surface::ALL.len());
+
+        app.apply_preset(DockPreset::Workspace);
+        assert_eq!(sorted_tabs(&app.dock).len(), Surface::ALL.len());
+    }
+
+    #[test]
+    fn focus_surface_activates_requested_tab() {
+        let mut app = test_app();
+        for surface in Surface::ALL {
+            app.focus_surface(surface);
+            assert_eq!(app.focused_surface(), Some(surface), "фокус {surface:?}");
+        }
+    }
+
+    #[test]
+    fn cycle_surface_wraps_forward_and_backward() {
+        let mut app = test_app();
+        app.focus_surface(Surface::Inspector);
+        app.cycle_surface(true);
+        assert_eq!(app.focused_surface(), Some(Surface::Atlas));
+        app.cycle_surface(false);
+        assert_eq!(app.focused_surface(), Some(Surface::Inspector));
+
+        // Назад с первой вкладки — оборачиваемся на последнюю.
+        app.focus_surface(Surface::ALL[0]);
+        app.cycle_surface(false);
+        assert_eq!(
+            app.focused_surface(),
+            Some(Surface::ALL[Surface::ALL.len() - 1])
+        );
+    }
 }

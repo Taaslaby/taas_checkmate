@@ -294,18 +294,17 @@ impl NeuromlMode {
                 // Окна «Редактор» (всегда) и «Морфология» (при наличии морфо-клетки).
                 ui.add_space(tokens::SP_SM);
                 ui.horizontal(|ui| {
-                    if !self.show_editor
-                        && crate::app::widgets::action_button(
-                            ui,
-                            ic::TEXT_T,
-                            "Редактор…",
-                            crate::app::widgets::ActionTone::Neutral,
-                            130.0,
-                        )
-                        .on_hover_text(
-                            "IDE-виджет: редактор NeuroML + подсветка + ошибки валидации",
-                        )
-                        .clicked()
+                    if crate::app::widgets::action_button(
+                        ui,
+                        ic::TEXT_T,
+                        "Редактор…",
+                        crate::app::widgets::ActionTone::Neutral,
+                        130.0,
+                    )
+                    .on_hover_text(
+                        "Фокус на вкладку «Редактор»: IDE + подсветка + ошибки валидации",
+                    )
+                    .clicked()
                     {
                         action = Some(NeuromlAction::OpenEditor);
                     }
@@ -380,13 +379,13 @@ impl NeuromlMode {
             NeuromlAction::Close => self.show = false,
             NeuromlAction::OpenCable => return Some(Surface::Morphology),
             NeuromlAction::OpenEditor => {
-                // Первый запуск редактора: подставить пример, чтобы было
+                // Первое открытие редактора: подставить пример, чтобы было
                 // с чего начать (а не пустой экран).
                 if self.editor.text.trim().is_empty() {
                     self.editor.load_text(SAMPLE_NML.to_string());
                     self.editor.validate_if_dirty();
                 }
-                self.show_editor = true;
+                return Some(Surface::Editor);
             }
         }
         None
