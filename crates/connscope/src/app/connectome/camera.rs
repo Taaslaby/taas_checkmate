@@ -1,0 +1,191 @@
+//! # Камера и проекции (`app::camera`)
+//!
+//! Всё, что переводит «мир» коннектома в экранные координаты и обратно:
+//!
+//! * **pan/zoom** — `to_screen` / `screen_to_world` / `world_rect` (2D-канвас);
+//! * **3D-ракурс** — `proj_point` (проекция нейрона через `atlas::project3d`),
+//!   `set_camera` (пресеты Дорсаль/Вентраль/…), `eff_persp` (орто vs перспектива);
+//! * **навигация** — `focus_on` (центрировать камеру на нейроне),
+//!   `minimap_rect` / `minimap_pan` (клик по миникарте = прыжок).
+
+use eframe::egui::{pos2, vec2, Rect, Vec2};
+
+use crate::app::connectome::ConnectomeMode;
+use crate::render::atlas::project3d;
+
+impl ConnectomeMode {
+    /// Мировые координаты → экранные (с учётом zoom и pan).
+    pub(crate) fn to_screen(&self, w: Vec2) -> Vec2 {
+        w * (self.camera.zoom * crate::app::BASE) + self.camera.pan
+    }
+
+    /// Экранные координаты → мировые.
+    pub(crate) fn screen_to_world(&self, s: Vec2) -> Vec2 {
+        (s - self.camera.pan) / (self.camera.zoom * crate::app::BASE)
+    }
+
+    /// Прямоугольник видимого «мира» для канваса данного размера.
+    pub(crate) fn world_rect(&self, canvas: Vec2) -> Rect {
+        let a = self.screen_to_world(Vec2::ZERO);
+        let b = self.screen_to_world(canvas);
+        Rect::from_min_max(pos2(a.x, a.y), pos2(b.x, b.y))
+    }
+
+    /// Экранная позиция нейрона в текущем виде: 3D-орбита или осевая проекция.
+    pub(crate) fn proj_point(&self, i: usize) -> Vec2 {
+        if self.camera.view3d {
+            let d = self.data.as_ref().unwrap();
+            project3d(
+                d.xs[i],
+                d.ys[i],
+                d.zs[i],
+                self.camera.yaw,
+                self.camera.pitch,
+                self.eff_persp(),
+            )
+            .0
+        } else {
+            self.data.as_ref().unwrap().world(i, self.camera.proj)
+        }
+    }
+
+    /// Прыжок камеры в стандартный ракурс (3D); сбрасывает кеш текстуры.
+    pub(crate) fn set_camera(&mut self, yaw: f32, pitch: f32) {
+        self.camera.yaw = yaw;
+        self.camera.pitch = pitch;
+        self.camera.atlas3d = None;
+    }
+
+    /// Вход в 3D с автокадрированием: центрирует мозг на канвасе и подбирает
+    /// zoom под меньшую сторону, чтобы облако целиком было в окне. Без этого
+    /// pan/zoom из 2D переносятся в 3D как есть — после фокуса на нейроне
+    /// облако оказывается «за окном», а ego-стрелки рисуются по пустоте.
+    pub(crate) fn enter_3d(&mut self, canvas: Vec2) {
+        self.camera.view3d = true;
+        let side = canvas.x.min(canvas.y).max(200.0);
+        self.camera.zoom = (0.82 * side / crate::app::BASE).clamp(0.3, 60.0);
+        self.camera.zoom_target = self.camera.zoom;
+        // Центр мозга (0.5, 0.5) → центр канваса.
+        self.camera.pan = canvas * 0.5 - vec2(0.5, 0.5) * (self.camera.zoom * crate::app::BASE);
+        self.camera.atlas = None;
+        self.camera.atlas3d = None;
+    }
+
+    /// Шаг зума хоткеями «+/−»: цель анимации × factor, якорь — центр канваса.
+    /// Размер канваса нужен, чтобы точка под центром оставалась на месте.
+    pub(crate) fn zoom_step(&mut self, factor: f32, canvas: Vec2) {
+        self.camera.zoom_anchor_world = self.screen_to_world(canvas * 0.5);
+        self.camera.zoom_anchor_screen = canvas * 0.5;
+        self.camera.zoom_target = (self.camera.zoom_target * factor).clamp(0.3, 60.0);
+    }
+
+    /// Сброс камеры «Fit/reset» (кнопка и хоткей F): мозг [0,1]² вписывается
+    /// в фактический канвас с полями и центрируется. В 3D — ещё и стартовый
+    /// ракурс. Анимируется плавно через zoom_target/pan_target.
+    pub(crate) fn reset_camera(&mut self) {
+        let canvas = self.camera.viewport.max(Vec2::new(400.0, 300.0));
+        let zoom = (0.84 * canvas.x.min(canvas.y) / crate::app::BASE).clamp(0.3, 60.0);
+        self.camera.zoom_target = zoom;
+        // Центр мозга (0.5, 0.5) → центр канваса.
+        self.camera.pan_target = Some(canvas * 0.5 - vec2(0.5, 0.5) * (zoom * crate::app::BASE));
+        if self.camera.view3d {
+            self.camera.yaw = 0.6;
+            self.camera.pitch = -0.3;
+            self.camera.yaw_vel = 0.0;
+            self.camera.pitch_vel = 0.0;
+            self.camera.atlas3d = None;
+        }
+    }
+
+    /// Мгновенный «fit» (без анимации): мозг по меньшей стороне канваса,
+    /// центр → центр. Используется на первом кадре после загрузки данных,
+    /// чтобы вид не начинался с «угла» и не выглядел криво на старте.
+    pub(crate) fn fit_now(&mut self, canvas: Vec2) {
+        let zoom = (0.84 * canvas.x.min(canvas.y) / crate::app::BASE).clamp(0.3, 60.0);
+        self.camera.zoom = zoom;
+        self.camera.zoom_target = zoom;
+        self.camera.pan = canvas * 0.5 - vec2(0.5, 0.5) * (zoom * crate::app::BASE);
+        self.camera.pan_target = None;
+    }
+
+    /// Эффективная сила перспективы: ортографический режим гасит её полностью.
+    pub(crate) fn eff_persp(&self) -> f32 {
+        if self.camera.ortho {
+            0.0
+        } else {
+            self.camera.persp
+        }
+    }
+
+    /// Центрирует камеру на нейроне (если у него есть 3D-позиция).
+    /// Используется поиском и консолью: `select <idx>` ведёт глаз к нейрону.
+    pub(crate) fn focus_on(&mut self, i: usize) {
+        let Some(d) = self.data.as_ref() else { return };
+        if !d.has_pos(i) {
+            return;
+        }
+        let w = d.world(i, self.camera.proj);
+        let center = self.camera.viewport * 0.5;
+        let c = self.screen_to_world(center);
+        self.camera.pan += (w - c) * (self.camera.zoom * crate::app::BASE);
+        self.camera.pan_target = None;
+    }
+
+    /// Наводит камеру атласа на окрестность выбранного нейрона (ego-bbox):
+    /// центрирует и подбирает zoom, чтобы все ego-соседи были видны.
+    /// «Координация» ego-графа и канваса — одна и та же проекция.
+    pub(crate) fn focus_ego(&mut self) {
+        let Some(d) = self.data.as_ref() else { return };
+        let Some(sel) = self.sel.selected else { return };
+        let mut ids: Vec<usize> = vec![sel];
+        for &(t, _, _) in &self.sel.ego {
+            if !ids.contains(&t) {
+                ids.push(t);
+            }
+        }
+        let (mut minx, mut maxx, mut miny, mut maxy) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        let mut any = false;
+        for &i in &ids {
+            if !d.has_pos(i) {
+                continue;
+            }
+            let w = d.world(i, self.camera.proj);
+            minx = minx.min(w.x);
+            maxx = maxx.max(w.x);
+            miny = miny.min(w.y);
+            maxy = maxy.max(w.y);
+            any = true;
+        }
+        if !any {
+            return;
+        }
+        let cx = (minx + maxx) / 2.0;
+        let cy = (miny + maxy) / 2.0;
+        let span = (maxx - minx).max(maxy - miny).max(1e-3);
+        // ~28% ширины канваса занимает окрестность.
+        self.camera.zoom = (0.28 / span).clamp(0.3, 60.0);
+        self.camera.zoom_target = self.camera.zoom;
+        self.camera.pan =
+            self.camera.viewport * 0.5 - vec2(cx, cy) * (self.camera.zoom * crate::app::BASE);
+    }
+
+    /// Прямоугольник миникарты в правом нижнем углу канваса.
+    pub(crate) fn minimap_rect(&self, canvas: Vec2) -> Rect {
+        Rect::from_min_size(
+            vec2(
+                canvas.x - crate::app::MINIMAP.x - 14.0,
+                canvas.y - crate::app::MINIMAP.y - 14.0,
+            )
+            .to_pos2(),
+            crate::app::MINIMAP,
+        )
+    }
+
+    /// Прыжок камеры по позиции на миникарте (мировой коэффициент 0..1).
+    pub(crate) fn minimap_pan(&mut self, canvas: Vec2, pointer_screen: Vec2) {
+        let mm = self.minimap_rect(canvas);
+        let wp =
+            ((pointer_screen - mm.min.to_vec2()) / mm.size()).clamp(Vec2::ZERO, vec2(1.0, 1.0));
+        self.camera.pan = canvas * 0.5 - wp * (self.camera.zoom * crate::app::BASE);
+    }
+}

@@ -1,0 +1,194 @@
+//! # Тонкий верхний бар (`app::top`)
+//!
+//! **Одна строка** (Blender/Adobe): вкладки режимов · глобальный поиск ·
+//! быстрые действия справа. Название приложения живёт в заголовке окна и
+//! намеренно не дублируется внутри тулбара. Всё «вьюпортное» (проекции,
+//! окраска, фильтры, настройки 3D) переехало в левый рейл инструментов
+//! (`app::rail`), графики и консоль — в нижний док (`app::panels`).
+//!
+//! ```text
+//! top_panel (40 px)
+//! ├── tool_shelf      модульная полка: режимы, будущие инструменты
+//! ├── search_group    поиск по типу/классу/НТ/ноге/body_id
+//! └── action_group    ⟳ Fit (F) · 🌐 3D · ? справка (F1)
+//! ```
+
+use eframe::egui::{self, Key};
+
+use egui_phosphor::regular as ic;
+
+use super::shortcuts::SEARCH_FIELD_ID;
+use crate::app::connectome::ConnectomeMode;
+use crate::app::mode::{ShellServices, Surface};
+use crate::app::tokens::{self, icon_label};
+
+impl ConnectomeMode {
+    // ── верхняя панель: одна строка ───────────────────────────
+    pub(crate) fn top_panel(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
+        // Фиксированная строка под чипы, поиск и action-кнопки.
+        // Для top используется отдельное spacing-правило: общий panel spacing
+        // 8×6 делал разные оптические центры у чипов и текстового поля.
+        egui::Panel::top("controls")
+            .exact_size(tokens::TOP_BAR_H)
+            .show(ui, |ui| {
+                super::profiler::record("top", ui.max_rect());
+                ui.spacing_mut().item_spacing = egui::vec2(tokens::TOP_GAP_X, tokens::TOP_GAP_Y);
+                ui.spacing_mut().button_padding = egui::vec2(tokens::SP_MD, tokens::SP_XS);
+                ui.horizontal_centered(|ui| {
+                    // Каждый блок занимает только свою ответственность:
+                    // добавление нового control не требует править всю строку.
+                    self.top_tool_shelf(ui, services);
+                    ui.separator();
+                    self.top_search_group(ui);
+                    ui.add_space(tokens::SP_MD);
+                    // Оставшееся место отдаём action-группе справа.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.top_action_group(ui, services);
+                    });
+                });
+            });
+    }
+
+    /// Модульная полка инструментов. Сейчас на ней находятся режимы атласа и
+    /// ego-графа; новые инструменты добавляются сюда отдельными модулями, не
+    /// превращая верхнюю строку в набор разрозненных кнопок.
+    fn top_tool_shelf(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
+        egui::Frame::new()
+            .fill(crate::app::shell::theme::BG_INSET)
+            .stroke(egui::Stroke::new(
+                1.0,
+                crate::app::shell::theme::STROKE_SOFT,
+            ))
+            .corner_radius(egui::CornerRadius::same(
+                crate::app::tokens::RADIUS_MD as u8,
+            ))
+            .inner_margin(egui::Margin::symmetric(4, 2))
+            .show(ui, |ui| {
+                self.top_mode_group(ui, services);
+            });
+    }
+
+    /// Левая группа тулбара: переключение на вкладки рабочего пространства
+    /// (Атлас / Ego) и открепление Ego-графа.
+    fn top_mode_group(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
+        let rect = self.mode_tabs(ui, services);
+        super::profiler::record("top_modes", rect);
+    }
+
+    /// Средняя группа тулбара: глобальный поиск.
+    fn top_search_group(&mut self, ui: &mut egui::Ui) {
+        let rect = self.quick_search(ui);
+        super::profiler::record("top_search_group", rect);
+    }
+
+    /// Правая группа тулбара: действия камеры и справка. Все кнопки — общий
+    /// [`widgets::icon_button`] (та же сигнальная подсветка, что в рейле),
+    /// активное состояние 3D подсвечивается акцентом, как в левом рейле.
+    fn top_action_group(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
+        if crate::app::widgets::icon_button(ui, ic::QUESTION, false, tokens::ICON_SM)
+            .on_hover_text("Горячие клавиши [F1]")
+            .clicked()
+        {
+            // Модалку «Горячие клавиши» рисует оболочка — просим её через сервисы.
+            *services.show_shortcuts = true;
+        }
+        if crate::app::widgets::icon_button(ui, ic::GLOBE, self.camera.view3d, tokens::ICON_SM)
+            .on_hover_text("3D-облако точек")
+            .clicked()
+        {
+            let size = ui.input(|i| {
+                i.raw
+                    .screen_rect
+                    .map_or(egui::vec2(1560.0, 960.0), |r| r.size())
+            });
+            self.camera.view3d = !self.camera.view3d;
+            if self.camera.view3d {
+                self.enter_3d(size);
+            }
+            self.camera.atlas = None;
+            self.camera.atlas3d = None;
+        }
+        if crate::app::widgets::icon_button(ui, ic::ARROW_CLOCKWISE, false, tokens::ICON_SM)
+            .on_hover_text("Вписать вид [F]")
+            .clicked()
+        {
+            self.reset_camera();
+        }
+        super::profiler::record("top_actions", ui.min_rect());
+    }
+
+    // ── вкладки режимов ───────────────────────────────────────
+    /// Атлас / Ego — теперь вкладки рабочего пространства: клик фокусирует
+    /// соответствующую вкладку в дереве доков (через `services.focus_surface`).
+    /// Рядом — открепление/прикрепление Ego-графа.
+    ///
+    /// Обычные `selectable_label` (как чипы), а не elegance `TabBar`: TabBar
+    /// жёстко 38px и в тонком баре не центрировался; чипы ровные.
+    fn mode_tabs(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) -> egui::Rect {
+        let mut rect = egui::Rect::NOTHING;
+        let atlas = ui
+            .selectable_label(false, icon_label(ic::COMPASS, "Атлас", tokens::ICON_XS))
+            .on_hover_text("Сфокусировать вкладку «Атлас»");
+        rect = rect.union(atlas.rect);
+        if atlas.clicked() {
+            services.focus_surface = Some(Surface::Atlas);
+        }
+        let ego = ui
+            .selectable_label(false, icon_label(ic::NETWORK, "Ego-граф", tokens::ICON_XS))
+            .on_hover_text("Сфокусировать вкладку «Ego-граф»");
+        rect = rect.union(ego.rect);
+        if ego.clicked() {
+            // Клик по «Ego-граф» прикрепляет вкладку (убирает окно).
+            self.ego_undocked = false;
+            services.focus_surface = Some(Surface::Ego);
+        }
+        // Ego-граф: открепить в окно / вернуть в таб.
+        let (txt, hint) = if self.ego_undocked {
+            (
+                icon_label(ic::ARROWS_OUT, "Прикрепить", tokens::ICON_XS),
+                "Вернуть Ego-граф в таб",
+            )
+        } else {
+            (
+                icon_label(ic::ARROWS_OUT, "Открепить", tokens::ICON_XS),
+                "Вытащить Ego-граф в перетаскиваемое окно (drag за заголовок)",
+            )
+        };
+        let undock = ui.button(txt).on_hover_text(hint);
+        rect = rect.union(undock.rect);
+        if undock.clicked() {
+            self.ego_undocked = !self.ego_undocked;
+        }
+        rect
+    }
+
+    // ── глобальный поиск ──────────────────────────────────────
+    /// Поиск нейрона по типу/классу/НТ/ноге/body_id + статус результата.
+    fn quick_search(&mut self, ui: &mut egui::Ui) -> egui::Rect {
+        let mut rect = egui::Rect::NOTHING;
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut self.sel.search)
+                .id_salt(SEARCH_FIELD_ID)
+                .desired_width(tokens::TOOL_SEARCH_W)
+                .hint_text("тип / класс / НТ / нога / body_id  (Ctrl+S)"),
+        );
+        rect = rect.union(resp.rect);
+        if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            self.search_neuron();
+        }
+        // Кнопка поиска — тот же единый `icon_button`, что у остальных
+        // тулбарных кнопок (рейл/ракурсы): без чужой палитры elegance.
+        let btn =
+            crate::app::widgets::icon_button(ui, ic::MAGNIFYING_GLASS, false, tokens::ICON_SM)
+                .on_hover_text("Найти [Enter]");
+        rect = rect.union(btn.rect);
+        if btn.clicked() {
+            self.search_neuron();
+        }
+        if !self.sel.search_status.is_empty() {
+            let r = ui.label(egui::RichText::new(&self.sel.search_status).weak().small());
+            rect = rect.union(r.rect);
+        }
+        rect
+    }
+}

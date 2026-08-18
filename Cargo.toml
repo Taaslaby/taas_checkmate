@@ -6,6 +6,7 @@ members = [
     "crates/t3",
     "crates/train",
     "crates/taas-format",
+    "crates/connscope",
 ]
 
 [workspace.package]
@@ -18,6 +19,25 @@ homepage = "https://taaslab.ai"
 readme = "README.md"
 keywords = ["neural", "simd", "spiking-neural-networks", "brain-simulation", "wavelets"]
 categories = ["science::neuroscience", "science::robotics", "algorithms::machine-learning"]
+# ── GUI (connscope) — единый источник версий egui-семейства ──────────
+# Правило: ОДИН минор egui на всё приложение (сейчас 0.35). Каждый плагин
+# мапится на свой egui минор; источник правды — `cargo tree -i egui` должен
+# показывать ровно одну версию. Не поднимай плагин до версии, требующей
+# более новый egui, не подняв одновременно eframe.
+[workspace.dependencies]
+# `persistence` — сохраняет egui Memory (панели + `insert_persisted`) на диск
+# между запусками; без неё персистентная раскладка дока жила бы только в сессии.
+eframe = { version = "0.35", features = ["wgpu", "persistence"] }
+egui-elegance = "0.14"
+egui_graphs = "0.31"
+egui-phosphor = { version = "0.13", default-features = false, features = ["regular", "bold"] }
+# egui_plot версионится независимо: 0.36 всё ещё собирается на egui 0.35.
+egui_plot = "0.36"
+egui-wgpu = "0.35"
+# Докинг для egui 0.35 (0.21 уже требует egui 0.36 / edition 2024 — не трогаем).
+# `serde` — персистентность DockState. Пока объявлен «на будущее»: ни один
+# крейт его ещё не использует.
+egui_dock = { version = "0.20", features = ["serde"] }
 
 [package]
 name = "taas-checkmate"

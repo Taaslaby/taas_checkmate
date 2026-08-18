@@ -1,0 +1,613 @@
+//! # Приложение connscope — ядро (`app`)
+//!
+//! Логика GUI-стенда живёт в папке `app/`, организованной как «воркбенч»:
+//! общая рамка приложения (`shell`) + режимы работы (`connectome`, `neuroml`):
+//!
+//! ```text
+//! app/
+//! ├── mod.rs            ← ConnApp (тонкая оболочка): UiState, диспетчеризация
+//! │                       кадра по режимам, run()
+//! ├── mode.rs           ← трейт Mode + ShellServices (контракт режима)
+//! ├── tokens.rs         ← дизайн-токены (общий UI-кит для всех режимов)
+//! ├── shell/            ← рамка приложения: меню, статус-бар, модалки,
+//! │                       профайлер, тема (консоль и поверхности режима —
+//! │                       в самом режиме, они работают с его данными)
+//! ├── connectome/       ← режим «Коннектом»: ConnectomeMode + все его
+//! │                       поверхности (canvas, ego, инспектор, симуляция,
+//! │                       плоттеры, док, рейл, верхняя панель, консоль)
+//! └── neuroml/          ← режим «NeuroML»: NeuromlMode — модалка загрузки +
+//!                         окно «Морфология» (дерево компартментов, клик,
+//!                         V(t) по компартментам, слайдер времени) +
+//!                         IDE-редактор (подсветка XML, валидация, ошибки)
+//! ```
+//!
+//! **Диспетчеризация кадра** (`ConnApp::ui_frame`): оболочка рисует своё
+//! (меню, статус-бар, модалки «О программе/Открыть/Горячие клавиши», тема),
+//! а каждую поверхность активного режима вызывает через трейт [`Mode`]:
+//!
+//! ```text
+//! menu_bar(view_menu) → mode.top_bar → mode.rail → hover_bar
+//! → modal_windows → mode.windows → neuroml.windows → dock_area(dock_surface)
+//! ```
+//!
+//! Рабочее пространство — единое дерево `egui_dock` в `CentralPanel`
+//! (см. [`DockPreset`]); панели `top/bottom` рисуются до него. Новый режим =
+//! новая структура с `impl Mode` — оболочка не меняется.
+
+use std::path::PathBuf;
+
+use eframe::egui::{self, vec2};
+use elegance::{BuiltInTheme, Theme};
+use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
+
+use crate::app::connectome::ConnectomeMode;
+use crate::app::mode::{Mode, ShellServices, Surface};
+use crate::app::neuroml::NeuromlMode;
+use crate::app::shell::theme;
+
+pub(crate) mod connectome;
+pub(crate) mod mode;
+pub(crate) mod neuroml;
+pub(crate) mod shell;
+pub(crate) mod tokens;
+pub(crate) mod widgets;
+
+/// Преустановленные акценты интерфейса — **единственный источник цвета
+/// акцента**. Каждый пресет задаёт `focus` (структурный акцент: табы,
+/// выделение, ползунки — и наши паинтерные кнопки через `theme::accent(ui)`)
+/// и `blue`/`blue_hover` (заливка кнопок elegance). Переключается в меню
+/// «Вид → Акцент».
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AccentPreset {
+    /// Синий — родной акцент elegance (палитру не трогаем).
+    Blue,
+    /// Фиолетовый.
+    Violet,
+    /// Золотой.
+    Gold,
+    /// Зелёный.
+    Green,
+    /// Розовый.
+    Rose,
+    /// Бирюзовый.
+    Cyan,
+}
+
+impl AccentPreset {
+    /// Подпись без эмодзи: цвет и так показан цветной точкой (`accent_dot`),
+    /// а глифы вроде 🔵/🩵 не входят в шрифты egui и рисуются квадратами.
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Blue => "Синий",
+            Self::Violet => "Фиолетовый",
+            Self::Gold => "Золотой",
+            Self::Green => "Зелёный",
+            Self::Rose => "Розовый",
+            Self::Cyan => "Бирюзовый",
+        }
+    }
+
+    pub(crate) const fn all() -> [AccentPreset; 6] {
+        [
+            Self::Blue,
+            Self::Violet,
+            Self::Gold,
+            Self::Green,
+            Self::Rose,
+            Self::Cyan,
+        ]
+    }
+
+    /// `(focus, blue, blue_hover)` — единственный источник цветов акцента.
+    ///
+    /// `focus` — структурный акцент (табы, выделение, активное), его же рисуют
+    /// паинтерные виджеты через `theme::accent(ui)`; `blue`/`blue_hover` —
+    /// чуть более тёмные варианты для заливки кнопок elegance и свотча в меню.
+    const fn palette(self) -> (egui::Color32, egui::Color32, egui::Color32) {
+        const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
+            egui::Color32::from_rgb(r, g, b)
+        }
+        match self {
+            Self::Blue => (
+                rgb(0x3b, 0x82, 0xf6),
+                rgb(0x25, 0x63, 0xeb),
+                rgb(0x1d, 0x4e, 0xd8),
+            ),
+            Self::Violet => (
+                rgb(0x8f, 0x7b, 0xfa),
+                rgb(0x7a, 0x5c, 0xf5),
+                rgb(0x6a, 0x4a, 0xe0),
+            ),
+            Self::Gold => (
+                rgb(0xf2, 0xb5, 0x44),
+                rgb(0xe8, 0xa0, 0x20),
+                rgb(0xd1, 0x8f, 0x16),
+            ),
+            // Сигнатурный «люминофор» neoMyelin — тот же зелёный, что раньше
+            // жил в `theme::ACCENT`.
+            Self::Green => (
+                rgb(0x5a, 0xd6, 0xb2),
+                rgb(0x2f, 0xbf, 0x7f),
+                rgb(0x27, 0xa5, 0x6c),
+            ),
+            Self::Rose => (
+                rgb(0xf4, 0x6f, 0x9e),
+                rgb(0xe8, 0x54, 0x8a),
+                rgb(0xd2, 0x3e, 0x76),
+            ),
+            Self::Cyan => (
+                rgb(0x29, 0xc7, 0xe0),
+                rgb(0x19, 0xb3, 0xcf),
+                rgb(0x14, 0x9a, 0xb3),
+            ),
+        }
+    }
+
+    /// Более тёмный вариант акцента — заливка кнопок elegance и свотч в меню.
+    pub(crate) const fn fill(self) -> egui::Color32 {
+        self.palette().1
+    }
+
+    /// Перекрашивает тему: `focus` (структурный акцент) + `blue`/`blue_hover`
+    /// (семантический акцент заливки). Единственная точка, где палитра elegance
+    /// видит наш акцент.
+    pub(crate) fn apply(self, theme: &mut Theme) {
+        let (focus, blue, blue_hover) = self.palette();
+        theme.palette.focus = focus;
+        theme.palette.blue = blue;
+        theme.palette.blue_hover = blue_hover;
+    }
+}
+
+/// Пресеты раскладки рабочего пространства (дерева `egui_dock`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DockPreset {
+    /// Blender-подобная: инспектор слева | центр (атлас/ego/морфология)
+    /// сверху + лента (плоттер/консоль/сим) снизу.
+    Workspace,
+    /// Только атлас — минимальный «чистый» вид.
+    Minimal,
+    /// Все поверхности вкладками в одном листе.
+    Tabs,
+}
+
+impl DockPreset {
+    pub(crate) const ALL: [DockPreset; 3] = [Self::Workspace, Self::Minimal, Self::Tabs];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Workspace => "Рабочий стол",
+            Self::Minimal => "Только атлас",
+            Self::Tabs => "Вкладки",
+        }
+    }
+}
+
+// ── Геометрические константы ──────────────────────────────────
+/// Масштаб «мира» → экран: 1.0 мировой единицы = `BASE` пикселей при zoom=1.
+const BASE: f32 = 720.0;
+/// Разрешение запечённой текстуры 2D-атласа (нейроны рисуются в битмап).
+const ATLAS: usize = 2048;
+/// Разрешение текстуры 3D-облака точек.
+const ATLAS_3D: usize = 1024;
+/// Размер миникарты в углу канваса.
+const MINIMAP: egui::Vec2 = vec2(180.0, 132.0);
+/// Шаг сетки координат на 2D-атласе (в мировых единицах).
+const GRID: f32 = 0.1;
+/// Лимит узлов для локальной симуляции (ego-окрестность не больше N).
+const MAX_SIM_NODES: usize = 60;
+
+/// Состояние оболочки: тема, акцент, модалки оболочки, путь к данным.
+/// Всё режимное состояние (камера, выбор, симуляция…) живёт в режимах —
+/// см. [`ConnectomeMode`] и [`NeuromlMode`].
+struct UiState {
+    /// Текущий путь к данным (для «Открыть файл» и Ctrl+R).
+    pub data_path: PathBuf,
+    /// Поле «путь» модалки «Открыть файл».
+    pub open_path: String,
+    /// Модалка «Открыть файл» открыта.
+    pub show_open: bool,
+    /// Модалка «О программе» открыта.
+    pub show_about: bool,
+    /// Тема (палитра elegance).
+    pub theme: BuiltInTheme,
+    /// Акцент поверх темы.
+    pub accent: AccentPreset,
+    /// Модалка «Горячие клавиши» открыта.
+    pub show_shortcuts: bool,
+    /// Сглаженный FPS (EMA по stable_dt) для статус-бара.
+    pub fps: f32,
+    /// Логотип neoMyelin (загружается один раз при старте, рисуется в «О программе»).
+    pub logo_tex: Option<egui::TextureHandle>,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            data_path: PathBuf::new(),
+            open_path: String::new(),
+            show_open: false,
+            show_about: false,
+            // Charcoal — нейтральный монохромный тёмный фон (без синевы
+            // дефолтного Slate 0x0f172a, который выглядел «дёшево»).
+            theme: BuiltInTheme::Charcoal,
+            // Сигнатурный «люминофор» — единый акцент по умолчанию.
+            accent: AccentPreset::Green,
+            show_shortcuts: false,
+            fps: 0.0,
+            logo_tex: None,
+        }
+    }
+}
+
+/// Оболочка приложения: тема/модалки/меню + активный режим + дерево доков.
+///
+/// Поля оболочки минимальны — всё остальное ушло в режимы (см. `mode.rs`).
+/// Единственное «состояние раскладки» здесь — `DockState<Surface>`: оно
+/// владеет кросс-режимными поверхностями (например «Морфология» из NeuromlMode).
+struct ConnApp {
+    ui: UiState,
+    /// Активный режим (контракт — трейт [`Mode`]).
+    mode: Box<dyn Mode>,
+    /// Режим «NeuroML» (модалка + редактор + поверхность «Морфология»).
+    neuroml: NeuromlMode,
+    /// Дерево доков рабочего пространства (владеет оболочка).
+    dock: DockState<Surface>,
+    /// Раскладка дока уже загружена из персистентного хранилища egui.
+    dock_loaded: bool,
+}
+
+impl Default for ConnApp {
+    fn default() -> Self {
+        let mut ui = UiState::default();
+        let mut mode = ConnectomeMode::default();
+        // Файл данных по умолчанию — рядом с крейтом; можно переопределить
+        // первым аргументом командной строки (`connscope <file>`).
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("../../resources/examples/data/manc_viz.bin");
+        let path = std::env::args().nth(1).map(PathBuf::from).unwrap_or(p);
+        ui.data_path = path.clone();
+        mode.load_data(&path);
+        // Файл NeuroML по умолчанию — пример exc↔inh рядом с ресурсами.
+        let mut neuroml = NeuromlMode::default();
+        let mut nml = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        nml.push("../../resources/examples/neuroml/exc_inh_loop.nml");
+        neuroml.path = nml;
+        // Стартовый вид камера сама «впишет» при первом кадре канваса
+        // (см. `fit_pending` в `load_data`) — жёсткий pan тут не нужен.
+        Self {
+            ui,
+            mode: Box::new(mode),
+            neuroml,
+            dock: default_dock(),
+            dock_loaded: false,
+        }
+    }
+}
+
+// ── Кадр приложения (eframe 0.35: `ui`, а не `update`) ─────────
+impl ConnApp {
+    /// Один кадр: диспетчеризация по режиму — оболочка рисует своё, режим —
+    /// свои поверхности (порядок фиксирован, см. документацию модуля).
+    ///
+    /// Не метод trait: вызывается из `eframe::App::ui` внутри `catch_unwind`,
+    /// чтобы паника в любом коде кадра (пикинг, ego, симуляция, атласы)
+    /// не убивала процесс.
+    fn ui_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
+        // Дизайн-система elegance: применяем тему (дёшево — пропускается,
+        // если тема не менялась), поверх неё — выбранный акцент,
+        // затем рисуем интерфейс.
+        let mut theme = self.ui.theme.theme();
+        self.ui.accent.apply(&mut theme);
+        theme.install(ui.ctx());
+
+        // Горячие клавиши: сначала оболочка (F1/? — справка, Ctrl+O — открыть,
+        // Ctrl+R — перезагрузить, Ctrl+Shift+D — профайлер), затем режим
+        // (F — fit, +/− — зум, H — рейл, [ ] — док, F12 — консоль, Ctrl+S — поиск).
+        self.handle_shortcuts(ui);
+        self.mode.handle_shortcuts(&ctx);
+
+        // Профайлер раскладки: если хоткеем взведён захват — начинаем
+        // собирать фактические Rect виджетов этого кадра.
+        shell::profiler::begin_frame();
+
+        // Покадровый тик режима (камера, живые потоки, repaint).
+        self.mode.frame_tick(&ctx);
+
+        // Сглаженный FPS для статус-бара (EMA).
+        let dt = ctx.input(|i| i.stable_dt).max(1e-4);
+        self.ui.fps = self.ui.fps * 0.9 + (1.0 / dt) * 0.1;
+
+        // Панели в порядке (Blender/Adobe-раскладка): меню, тонкий верхний
+        // бар, левый рейл инструментов, статус-бар; модалки/окна — поверх;
+        // рабочее пространство — единое дерево egui_dock в самом конце.
+        self.menu_bar(ui);
+
+        // Сервисы оболочки создаём в скоупе: `show_shortcuts` держит
+        // `&mut self.ui.*`, а `self.focus_surface` заимствует весь `self` —
+        // поэтому фокус читаем и применяем уже после того, как сервисы ушли.
+        let focus = {
+            let mut services = ShellServices {
+                show_shortcuts: &mut self.ui.show_shortcuts,
+                focus_surface: None,
+            };
+            self.mode.top_bar(ui, &mut services);
+            services.focus_surface
+        };
+        if let Some(surface) = focus {
+            self.focus_surface(surface);
+        }
+
+        self.mode.rail(ui);
+        self.hover_bar(ui);
+        self.modal_windows(&ctx, frame);
+
+        let focus = {
+            let mut services = ShellServices {
+                show_shortcuts: &mut self.ui.show_shortcuts,
+                focus_surface: None,
+            };
+            self.mode.windows(&ctx, frame, &mut services);
+            self.neuroml.windows(&ctx, frame, &mut services);
+            services.focus_surface
+        };
+        if let Some(surface) = focus {
+            self.focus_surface(surface);
+        }
+
+        // Рабочее пространство — единое дерево egui_dock (инспектор, атлас,
+        // ego, плоттер/консоль/сим, морфология) вместо фиксированных панелей.
+        egui::CentralPanel::default_margins().show(ui, |ui| {
+            shell::profiler::record("workspace", ui.max_rect());
+            self.dock_area(ui);
+        });
+
+        // Конец кадра профайлера: если шёл захват — пишем JSON-снапшот.
+        if let Some(json) = shell::profiler::end_frame() {
+            match std::fs::write("connscope_profiler.json", &json) {
+                Ok(()) => eprintln!("[profiler] dumped connscope_profiler.json"),
+                Err(e) => eprintln!("[profiler] write failed: {e}"),
+            }
+        }
+    }
+}
+
+// ── Рабочее пространство: единое дерево egui_dock ─────────────
+impl ConnApp {
+    /// Рендер дерева доков + загрузка/сохранение персистентной раскладки.
+    fn dock_area(&mut self, ui: &mut egui::Ui) {
+        self.load_dock_state(ui);
+        // Классический разъём заимствований: DockArea держит `&mut DockState`,
+        // а TabViewer — `&mut self`; вынимаем дерево на время рендера.
+        let mut state = std::mem::replace(&mut self.dock, DockState::new(Vec::new()));
+        DockArea::new(&mut state)
+            .id(egui::Id::new("workspace_dock"))
+            .style(theme::dock_style(ui))
+            .show_close_buttons(false)
+            .show_add_buttons(false)
+            .show_add_popup(false)
+            .show_inside(ui, self);
+        self.dock = state;
+        self.save_dock_state(ui);
+    }
+
+    fn load_dock_state(&mut self, ui: &egui::Ui) {
+        if self.dock_loaded {
+            return;
+        }
+        let id = egui::Id::new("workspace_dock_state");
+        if let Some(saved) = ui.ctx().data_mut(|d| d.get_persisted::<DockState<Surface>>(id)) {
+            self.dock = saved;
+        }
+        self.dock_loaded = true;
+    }
+
+    fn save_dock_state(&self, ui: &egui::Ui) {
+        let id = egui::Id::new("workspace_dock_state");
+        ui.ctx()
+            .data_mut(|d| d.insert_persisted(id, self.dock.clone()));
+    }
+
+    /// Сфокусировать вкладку рабочего пространства (активировать её в листе).
+    fn focus_surface(&mut self, surface: Surface) {
+        if let Some(path) = self.dock.find_tab(&surface) {
+            if let Ok(leaf) = self.dock.leaf_mut(path.node_path()) {
+                leaf.active = path.tab;
+            }
+            self.dock.set_focused_node_and_surface(path.node_path());
+        }
+    }
+
+    /// Вкладка рабочего пространства в фокусе (для `[`/`]`/F12).
+    fn focused_surface(&self) -> Option<Surface> {
+        let path = self.dock.focused_leaf()?;
+        let leaf = self.dock[path].get_leaf()?;
+        leaf.tabs.get(leaf.active.0).copied()
+    }
+
+    /// Цикл вкладок рабочего пространства (`[` назад, `]` вперёд).
+    /// Если вкладки, которой нет в дереве (пресет «Только атлас»), — no-op.
+    fn cycle_surface(&mut self, forward: bool) {
+        let cur = self
+            .focused_surface()
+            .and_then(|s| Surface::ALL.iter().position(|&x| x == s));
+        let target = match cur {
+            Some(i) => {
+                let n = Surface::ALL.len();
+                let d = if forward { 1 } else { n - 1 };
+                Surface::ALL[(i + d) % n]
+            }
+            None => {
+                if forward {
+                    Surface::ALL[0]
+                } else {
+                    Surface::ALL[Surface::ALL.len() - 1]
+                }
+            }
+        };
+        self.focus_surface(target);
+    }
+
+    /// Применить пресет раскладки (перестраивает дерево с нуля).
+    fn apply_preset(&mut self, preset: DockPreset) {
+        self.dock = match preset {
+            DockPreset::Workspace => default_dock(),
+            DockPreset::Minimal => DockState::new(vec![Surface::Atlas]),
+            DockPreset::Tabs => DockState::new(Surface::ALL.to_vec()),
+        };
+    }
+}
+
+impl TabViewer for ConnApp {
+    type Tab = Surface;
+
+    fn title(&mut self, surface: &mut Self::Tab) -> egui::WidgetText {
+        tokens::icon_label(surface.icon(), surface.label(), tokens::ICON_XS).into()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, surface: &mut Self::Tab) {
+        let focus_request = {
+            let mut services = ShellServices {
+                show_shortcuts: &mut self.ui.show_shortcuts,
+                focus_surface: None,
+            };
+            match *surface {
+                Surface::Morphology => self.neuroml.cable_dock_view(ui),
+                _ => self.mode.dock_surface(ui, *surface, &mut services),
+            }
+            services.focus_surface
+        };
+        if let Some(surface) = focus_request {
+            self.focus_surface(surface);
+        }
+    }
+
+    fn id(&mut self, surface: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(("workspace_surface", surface.label()))
+    }
+
+    /// Поверхности фиксированы: закрывать нельзя (иначе потеряешь инспектор/атлас).
+    fn is_closeable(&self, _surface: &Self::Tab) -> bool {
+        false
+    }
+
+    /// Не даём вытаскивать в отдельное окно — дерево остаётся в одной зоне.
+    fn allowed_in_windows(&self, _surface: &mut Self::Tab) -> bool {
+        false
+    }
+}
+
+/// Дефолтная «рабочая» раскладка: инспектор слева, центр (атлас/ego/морфология)
+/// + нижняя лента (плоттер/консоль/сим) справа.
+fn default_dock() -> DockState<Surface> {
+    let mut dock = DockState::new(vec![Surface::Inspector]);
+    let [_, center] = dock.main_surface_mut().split_right(
+        NodeIndex::root(),
+        0.22,
+        vec![Surface::Atlas, Surface::Ego, Surface::Morphology],
+    );
+    dock.main_surface_mut().split_below(
+        center,
+        0.72,
+        vec![Surface::Plots, Surface::Console, Surface::Sim],
+    );
+    dock
+}
+
+impl eframe::App for ConnApp {
+    /// Один кадр — обёрнут в `catch_unwind`: паника в любом коде кадра
+    /// (пикинг, ego, симуляция, атласы) больше не убивает процесс; причина
+    /// попадает в `connscope_panic.log` через panic hook из `main`.
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.ui_frame(ui, frame);
+        }));
+        if result.is_err() {
+            eprintln!("[connscope] frame crashed, continuing");
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+/// Точка входа GUI: окно 1560×960 с загруженным VNC.
+///
+/// Рендерер — **wgpu**: нужен для шейдерного облака точек
+/// (`splat`). Формат поверхности берём из `CreationContext::wgpu_render_state`.
+#[allow(clippy::field_reassign_with_default)] // gpu_target_format известен только из cc
+pub fn run() -> Result<(), eframe::Error> {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1560.0, 960.0])
+            .with_title("neoMyelin — Excel для коннектомики")
+            .with_icon(window_icon()),
+        renderer: eframe::Renderer::Wgpu,
+        ..Default::default()
+    };
+    eframe::run_native(
+        "neoMyelin",
+        options,
+        Box::new(|cc| {
+            // Иконочный шрифт Phosphor (Regular + Bold): добавляем через
+            // `add_font` поверх существующих шрифтов с наивысшим приоритетом —
+            // глифы иконок берутся из него, буквы/кириллица — из основных
+            // шрифтов. Bold нужен: elegance сам делает заголовки карточек
+            // `.strong()`, и жирный глиф иконки ищется в bold-наборе.
+            // Ничего не затираем (в отличие от `set_fonts`).
+            for (name, variant) in [
+                ("phosphor", egui_phosphor::Variant::Regular),
+                ("phosphor-bold", egui_phosphor::Variant::Bold),
+            ] {
+                cc.egui_ctx.add_font(egui::epaint::text::FontInsert::new(
+                    name,
+                    egui::FontData::from_static(variant.font_bytes()),
+                    vec![egui::epaint::text::InsertFontFamily {
+                        family: egui::FontFamily::Proportional,
+                        priority: egui::epaint::text::FontPriority::Highest,
+                    }],
+                ));
+            }
+            // Шрифты (Plex/JetBrains Mono) + палитра «прибора» — после
+            // Phosphor: наборы глифов не пересекаются, порядок не важен.
+            shell::theme::install(&cc.egui_ctx);
+            let mut app = ConnApp::default();
+            // Логотип neoMyelin — декодируем PNG один раз в текстуру (белый,
+            // тонируется под тему в «О программе»).
+            app.ui.logo_tex = load_logo_texture(&cc.egui_ctx);
+            // Headless-отладка вёрстки: NEOMYELIN_PROFILE_LAYOUT=1 → захватить
+            // первый кадр и написать connscope_profiler.json (без GUI-кликов).
+            if std::env::var_os("NEOMYELIN_PROFILE_LAYOUT").is_some() {
+                shell::profiler::arm();
+            }
+            // Формат поверхности нужен пайплайну облака точек (wgpu паникует
+            // на неверном формате) — берём его из RenderState при старте
+            // и передаём режиму через трейт.
+            app.mode
+                .set_gpu_target_format(cc.wgpu_render_state.as_ref().map(|rs| rs.target_format));
+            Ok(Box::new(app))
+        }),
+    )
+}
+
+/// Иконка окна (таскбар/заголовок): белый знак neoMyelin на тёмно-индиго фоне.
+fn window_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/branding/neoMyelin_icon.png"
+    )))
+    .expect("neoMyelin_icon.png должен декодироваться")
+}
+
+/// Декод PNG-словознака neoMyelin в текстуру egui (белый на прозрачном —
+/// в «О программе» тонируется под цвет текста темы).
+fn load_logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/branding/neoMyelin.png"
+    ));
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+    Some(ctx.load_texture("neoMyelin_logo", color, egui::TextureOptions::LINEAR))
+}

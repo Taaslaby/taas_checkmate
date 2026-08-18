@@ -1,0 +1,48 @@
+[package]
+name = "connscope"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "neoMyelin — interactive connectome explorer (Excel-for-connectomics on the checkmate engine)"
+
+[[bin]]
+name = "connscope"
+path = "src/main.rs"
+
+[features]
+# GPU-бэкенд NeuroML-симуляции (pillars-cuda: NVRTC + CUDA driver).
+# По умолчанию ВЫКЛЮЧЕН — дефолтная сборка не требует CUDA toolchain.
+cuda = ["dep:pillars-cuda"]
+
+[dependencies]
+pillars = { path = "../pillars" }
+pillars-connectome = { path = "../pillars-connectome" }
+pillars-cuda = { path = "../pillars-cuda", optional = true }
+eframe = { workspace = true }
+egui-elegance = { workspace = true }
+egui_graphs = { workspace = true }
+egui-phosphor = { workspace = true }
+egui_plot = { workspace = true }
+egui-wgpu = { workspace = true }
+egui_dock = { workspace = true }
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
+petgraph = { version = "0.8", default-features = false, features = ["stable_graph"] }
+# Прямые форматы коннектомов без конвертации: GraphML (XML), npz/npy (zip+numpy),
+# csv.gz аннотации flywire.
+roxmltree = "0.20"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = "1"
+csv = "1"
+# Нативный файл-пикер: задаём родителя (handle окна) — иначе диалог
+# Windows уходит за wgpu-окно и его не видно.
+rfd = "0.15"
+# Декод PNG логотипа (neoMyelin) в текстуру для окна «О программе».
+# Только PNG — не тащим avif/webp/gif-декодеры в бинарник.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Drug library: TOML data (resources/pharma/drugs.toml) embedded at compile time.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+ratatui = "0.30.2"
+crossterm = "0.29.0"
