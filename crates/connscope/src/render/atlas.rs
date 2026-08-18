@@ -1,14 +1,12 @@
 //! Атласы: 2D-текстура по осевой проекции и 3D-орбитальное облако точек.
 
-use eframe::egui::{vec2, Color32, Vec2};
+use eframe::egui::{vec2, Color32, Rect, Vec2};
 
 use crate::core::color::{color_for, ColorMode};
 use crate::io::data::{MancData, Proj};
 
-/// Фон атласа (тот же тёмный индиго, что был раньше).
-const BG: (f32, f32, f32) = (14.0 / 255.0, 14.0 / 255.0, 24.0 / 255.0);
-
-/// 2D-атлас: проекция точек в текстуру `size×size`.
+/// 2D-атлас: проекция точек в текстуру `size[0]×size[1]`, покрывающую
+/// мировую область `world_rect` (bbox данных с полями).
 ///
 /// Каждая точка — **гауссов сплат** радиусом `splat_radius` текселей
 /// (σ = 0.9 текселя): одиночный нейрон остаётся круглой точкой, а не
@@ -18,20 +16,27 @@ const BG: (f32, f32, f32) = (14.0 / 255.0, 14.0 / 255.0, 24.0 / 255.0);
 /// * `alpha = 1 − exp(−k·Σвес)`, k = 0.8 — плотные скопления плавно
 ///   насыщаются до непрозрачного, а не выжигаются в белую кашу;
 /// * `color = Σцвет·вес / max(Σвес, ε)` — средневзвешенный цвет пятна;
-/// * композит поверх тёмного фона.
+/// * прозрачный фон — цвет панели просвечивает (без «запечённого» квадрата).
+///
+/// Стороны текстуры пропорциональны `world_rect` (единый масштаб по осям),
+/// поэтому сплэты остаются круглыми, а при отрисовке обратно в `world_rect`
+/// вид не растягивается.
 pub fn build_atlas(
     data: &MancData,
     proj: Proj,
-    size: usize,
+    size: [usize; 2],
+    world_rect: Rect,
     show_nt: &[bool; 7],
     class_filter: i8,
     min_deg: usize,
     mode: ColorMode,
     splat_radius: f32,
 ) -> Vec<Color32> {
+    let sw = size[0].max(1);
+    let sh = size[1].max(1);
     // Float-накопители: premultiplied color·weight и weight.
-    let mut c_sum = vec![[0.0f32; 3]; size * size];
-    let mut w_sum = vec![0.0f32; size * size];
+    let mut c_sum = vec![[0.0f32; 3]; sw * sh];
+    let mut w_sum = vec![0.0f32; sw * sh];
 
     let sigma = 0.9f32;
     let radius = splat_radius.max(0.5);
@@ -44,6 +49,8 @@ pub fn build_atlas(
         *k = (-(r * r) * inv_2s2).exp();
     }
     let center_w = 1.0f32;
+    let rw = world_rect.width().max(1e-6);
+    let rh = world_rect.height().max(1e-6);
 
     for i in 0..data.n {
         if !data.has_pos(i)
@@ -54,23 +61,29 @@ pub fn build_atlas(
             continue;
         }
         let w = data.world(i, proj);
+        // Нормализуем точку в [0,1] внутри world_rect; за пределами — мимо.
+        let u = (w.x - world_rect.min.x) / rw;
+        let v = (w.y - world_rect.min.y) / rh;
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            continue;
+        }
         let c = color_for(data, i, mode);
         let col = [
             c.r() as f32 / 255.0,
             c.g() as f32 / 255.0,
             c.b() as f32 / 255.0,
         ];
-        let cx = (w.x.clamp(0.0, 1.0) * (size as f32 - 1.0)).round() as isize;
-        let cy = (w.y.clamp(0.0, 1.0) * (size as f32 - 1.0)).round() as isize;
+        let cx = (u * (sw as f32 - 1.0)).round() as isize;
+        let cy = (v * (sh as f32 - 1.0)).round() as isize;
         for dy in -reach..=reach {
             let py = cy + dy;
-            if py < 0 || py as usize >= size {
+            if py < 0 || py as usize >= sh {
                 continue;
             }
             let wy = kernel[dy.unsigned_abs() % kernel.len()];
             for dx in -reach..=reach {
                 let px_x = cx + dx;
-                if px_x < 0 || px_x as usize >= size {
+                if px_x < 0 || px_x as usize >= sw {
                     continue;
                 }
                 let wx = kernel[dx.unsigned_abs() % kernel.len()];
@@ -82,7 +95,7 @@ pub fn build_atlas(
                 if g < 1e-4 {
                     continue;
                 }
-                let idx = py as usize * size + px_x as usize;
+                let idx = py as usize * sw + px_x as usize;
                 w_sum[idx] += g;
                 c_sum[idx][0] += col[0] * g;
                 c_sum[idx][1] += col[1] * g;
@@ -91,7 +104,7 @@ pub fn build_atlas(
         }
     }
 
-    // Тонмаппинг плотности + композит над фоном.
+    // Тонмаппинг плотности + прозрачный фон (тема просвечивает).
     let k = 0.8f32;
     let eps = 1e-6;
     c_sum
@@ -99,14 +112,14 @@ pub fn build_atlas(
         .zip(&w_sum)
         .map(|(c, &w)| {
             if w <= eps {
-                return Color32::from_rgb(14, 14, 24);
+                return Color32::TRANSPARENT;
             }
             let alpha = 1.0 - (-k * w).exp();
             let inv = 1.0 / w.max(eps);
-            let r = (c[0] * inv * alpha + BG.0 * (1.0 - alpha)) * 255.0;
-            let g = (c[1] * inv * alpha + BG.1 * (1.0 - alpha)) * 255.0;
-            let b = (c[2] * inv * alpha + BG.2 * (1.0 - alpha)) * 255.0;
-            Color32::from_rgb(r as u8, g as u8, b as u8)
+            let r = (c[0] * inv * 255.0) as u8;
+            let g = (c[1] * inv * 255.0) as u8;
+            let b = (c[2] * inv * 255.0) as u8;
+            Color32::from_rgba_unmultiplied(r, g, b, (alpha * 255.0) as u8)
         })
         .collect()
 }
@@ -314,17 +327,32 @@ pub fn build_atlas_3d_trace(
 // ── Тесты ─────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
-    use eframe::egui::Color32;
+    use eframe::egui::{pos2, Color32, Rect};
 
     use super::{build_atlas, build_atlas_3d, build_atlas_3d_trace, hsv, project3d, rotate_dir};
     use crate::core::color::ColorMode;
     use crate::io::data::{tiny_data, Proj};
 
+    /// Мировая область, покрывающая все точки `tiny_data` (x 0.1..0.9, y 0.2..0.8).
+    fn tiny_rect() -> Rect {
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
+    }
+
     #[test]
     fn test_build_atlas_size() {
         let d = tiny_data();
-        // Новый сигнатурный параметр — радиус гауссова сплата в текселях.
-        let px = build_atlas(&d, Proj::Xy, 32, &[true; 7], -1, 0, ColorMode::Nt, 2.5);
+        // Текстура [w,h] + мировой bbox; радиус гауссова сплата в текселях.
+        let px = build_atlas(
+            &d,
+            Proj::Xy,
+            [32, 32],
+            tiny_rect(),
+            &[true; 7],
+            -1,
+            0,
+            ColorMode::Nt,
+            2.5,
+        );
         assert_eq!(px.len(), 32 * 32);
         assert_ne!(px[0], Color32::from_rgb(255, 255, 255));
     }
@@ -332,7 +360,17 @@ mod tests {
     #[test]
     fn test_build_atlas_gaussian_dot_and_density() {
         let d = tiny_data();
-        let px = build_atlas(&d, Proj::Xy, 64, &[true; 7], -1, 0, ColorMode::Nt, 2.5);
+        let px = build_atlas(
+            &d,
+            Proj::Xy,
+            [64, 64],
+            tiny_rect(),
+            &[true; 7],
+            -1,
+            0,
+            ColorMode::Nt,
+            2.5,
+        );
         // Есть непустые (ярче фона) пиксели — атлас не пустой.
         let any_lit = px.iter().any(|&c| c.r() > 20 || c.g() > 20 || c.b() > 30);
         assert!(any_lit, "атлас должен содержать точки ярче фона");

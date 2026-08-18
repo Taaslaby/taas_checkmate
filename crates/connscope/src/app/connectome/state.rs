@@ -34,16 +34,11 @@ pub(crate) struct CameraState {
     /// Last viewport size, used by search/focus actions outside the canvas.
     pub viewport: Vec2,
     pub zoom: f32,
-    /// Целевой zoom для плавной анимации (scroll задаёт цель, кадр лерпает).
-    pub zoom_target: f32,
-    /// Мировая точка под курсором-«якорем» на время анимации зума.
-    pub zoom_anchor_world: Vec2,
-    /// Экранная точка якоря (курсор) на время анимации зума.
-    pub zoom_anchor_screen: Vec2,
     /// Целевой pan для плавного центрирования (double-click по нейрону).
     pub pan_target: Option<Vec2>,
-    /// Текущий power-of-two бакет магнификации тексела атласа (для перепека).
-    pub atlas_bucket: i32,
+    /// Разрешение запечки 2D-атласа `[w, h]` — соразмерно экранному размеру
+    /// bbox данных; при его смене атлас перепекается.
+    pub atlas_res: [usize; 2],
     pub proj: Proj,
     /// `true` = орбитальное 3D-облако, `false` = плоские 2D-проекции.
     pub view3d: bool,
@@ -110,11 +105,8 @@ impl Default for CameraState {
             pan: Vec2::ZERO,
             viewport: Vec2::new(800.0, 600.0),
             zoom: 1.0,
-            zoom_target: 1.0,
-            zoom_anchor_world: Vec2::ZERO,
-            zoom_anchor_screen: Vec2::ZERO,
             pan_target: None,
-            atlas_bucket: 0,
+            atlas_res: [0, 0],
             proj: Proj::Xz,
             view3d: false,
             ortho: true,

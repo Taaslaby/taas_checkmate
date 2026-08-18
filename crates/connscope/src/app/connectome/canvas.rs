@@ -43,41 +43,38 @@ impl ConnectomeMode {
         let pointer_screen = resp.interact_pointer_pos().map(|p| p - origin);
         let pointer_world = pointer_screen.map(|s| self.screen_to_world(s));
 
-        // Зум под курсором (scroll): цель анимации + якорь «мир под курсором».
+        // Зум под курсором (scroll): мгновенный, с точным якорем «мир под
+        // курсором». Без сглаживания — сглаженный зум «догонял» цель после
+        // скрола, и вид жил своей жизнью. Каждый кадр скролла умножает zoom
+        // ровно на дельту, а панорама пересчитывается так, чтобы якорь не
+        // смещался.
         let zoom_delta = ui.input(|i| i.zoom_delta());
         if (zoom_delta - 1.0).abs() > 1e-4 {
-            self.camera.zoom_anchor_world =
+            let anchor_world =
                 pointer_world.unwrap_or_else(|| self.screen_to_world(size * 0.5));
-            self.camera.zoom_anchor_screen = pointer_screen.unwrap_or(size * 0.5);
-            self.camera.zoom_target = (self.camera.zoom_target * zoom_delta).clamp(0.3, 60.0);
+            let anchor_screen = pointer_screen.unwrap_or(size * 0.5);
+            self.camera.zoom = (self.camera.zoom * zoom_delta).clamp(0.3, 60.0);
+            self.camera.pan =
+                anchor_screen - anchor_world * (self.camera.zoom * crate::app::BASE);
+            // Ручное управление отменяет плавное центрирование.
+            self.camera.pan_target = None;
         }
-        // Плавная анимация зума (~120 мс): лерпаем zoom к цели и каждый кадр
-        // держим якорь под курсором — та же математика, что раньше применялась
-        // мгновенно, просто растянута во времени.
-        if (self.camera.zoom - self.camera.zoom_target).abs() > 1e-3 {
+        // Плавное центрирование (double-click по нейрону) — единственная
+        // анимация: зум уже мгновенный, а панорама мягко едет к цели.
+        if let Some(target) = self.camera.pan_target {
             let dt = ui.input(|i| i.stable_dt).clamp(0.001, 0.1);
             let t = 1.0 - (-dt / 0.04).exp();
-            self.camera.zoom += (self.camera.zoom_target - self.camera.zoom) * t;
-            self.camera.pan = self.camera.zoom_anchor_screen
-                - self.camera.zoom_anchor_world * (self.camera.zoom * crate::app::BASE);
-            ui.ctx().request_repaint();
-        } else {
-            self.camera.zoom = self.camera.zoom_target;
-            // Плавное центрирование (double-click по нейрону / fit).
-            if let Some(target) = self.camera.pan_target {
-                let dt = ui.input(|i| i.stable_dt).clamp(0.001, 0.1);
-                let t = 1.0 - (-dt / 0.04).exp();
-                self.camera.pan += (target - self.camera.pan) * t;
-                if (self.camera.pan - target).length() < 0.5 {
-                    self.camera.pan = target;
-                    self.camera.pan_target = None;
-                }
-                ui.ctx().request_repaint();
+            self.camera.pan += (target - self.camera.pan) * t;
+            if (self.camera.pan - target).length() < 0.5 {
+                self.camera.pan = target;
+                self.camera.pan_target = None;
             }
+            ui.ctx().request_repaint();
         }
         // Пан средней кнопкой мыши.
         if resp.dragged_by(PointerButton::Middle) {
             self.camera.pan += resp.drag_delta();
+            self.camera.pan_target = None;
         }
 
         // Миникарта: drag/клик по ней = прыжок камеры.
@@ -153,6 +150,7 @@ impl ConnectomeMode {
                             });
                     if !drag_on_node {
                         self.camera.pan += resp.drag_delta();
+                        self.camera.pan_target = None;
                     }
                 }
                 if resp.clicked() {
@@ -247,6 +245,9 @@ impl ConnectomeMode {
             origin + self.to_screen(Vec2::ZERO),
             origin + self.to_screen(vec2(1.0, 1.0)),
         );
+        // Магнификация 2D-атласа (экранные px на тексель) — считается в ветке
+        // 2D ниже, а используется в блоке векторных точек после if/else.
+        let mut tex_mag = 0.0f32;
         if self.camera.view3d {
             if self.camera.use_gpu3d {
                 // ⚡ Шейдерный рендер (wgpu): гауссовы сплэты, отсортированные
@@ -321,49 +322,69 @@ impl ConnectomeMode {
                 }
             }
         } else {
-            // 2D-проекция: текстура + UV-обрезка под видимую область.
-            // Радиус сплата подстраивается под зум: атлас фиксирован 2048²,
-            // и при увеличении тексел растягивается на экране → квадраты.
-            // Перепекаем при пересечении power-of-two «бакетов» магнификации,
-            // радиус = base/2^бакет (кламп 1..6) — точка на экране ~постоянна.
-            let m = self.camera.zoom * crate::app::BASE / crate::app::ATLAS as f32;
-            let bucket = if m <= 1.0 {
-                0
+            // 2D-проекция: текстура печётся по bbox данных (с полями), а не по
+            // всему миру [0,1]² — мозг заполняет атлас целиком, без пустых
+            // полей и без растяжения (единый масштаб по обеим осям).
+            let bbox = self.atlas_bbox();
+            let world_scale = self.camera.zoom * crate::app::BASE;
+            let screen_w = bbox.width() * world_scale;
+            let screen_h = bbox.height() * world_scale;
+            let long_side = screen_w.max(screen_h).clamp(256.0, 2048.0);
+            let res_long = (long_side as u32).next_power_of_two().min(2048) as usize;
+            // Стороны текстуры пропорциональны bbox — сплэты остаются
+            // круглыми (а не эллипсами), и вид не растягивается при отрисовке.
+            let (res_x, res_y) = if screen_w >= screen_h {
+                (
+                    res_long,
+                    ((res_long as f32 * screen_h / screen_w.max(1.0)).round() as usize)
+                        .clamp(64, 2048),
+                )
             } else {
-                m.log2().floor().max(0.0) as i32
+                (
+                    ((res_long as f32 * screen_w / screen_h.max(1.0)).round() as usize)
+                        .clamp(64, 2048),
+                    res_long,
+                )
             };
-            if self.camera.atlas.is_none() || self.camera.atlas_bucket != bucket {
-                let radius = (2.5 / (1u32 << bucket.min(6)) as f32).clamp(1.0, 6.0);
+            let res = [res_x, res_y];
+            if self.camera.atlas.is_none() || self.camera.atlas_res != res {
                 let px = build_atlas(
                     data,
                     self.camera.proj,
-                    crate::app::ATLAS,
+                    res,
+                    bbox,
                     &self.filters.show_nt,
                     self.filters.class_filter,
                     self.filters.min_deg,
                     self.filters.color_mode,
-                    radius,
+                    2.5,
                 );
-                let img = egui::ColorImage::new([crate::app::ATLAS, crate::app::ATLAS], px);
+                let img = egui::ColorImage::new(res, px);
                 self.camera.atlas = Some(painter.ctx().load_texture(
                     "manc_atlas",
                     img,
-                    if bucket >= 1 {
-                        egui::TextureOptions::NEAREST
-                    } else {
-                        egui::TextureOptions::LINEAR
-                    },
+                    egui::TextureOptions::LINEAR,
                 ));
-                self.camera.atlas_bucket = bucket;
+                self.camera.atlas_res = res;
             }
-            let world = self.world_rect(size);
+            // Экранный прямоугольник bbox: рисуем полный UV 1:1 — без
+            // UV-обрезки, из-за которой вид растягивался/плыл.
+            let atlas_screen = Rect::from_min_max(
+                origin + self.to_screen(bbox.min.to_vec2()),
+                origin + self.to_screen(bbox.max.to_vec2()),
+            );
+            // Магнификация = экранные px длинной стороны на тексель.
+            tex_mag = long_side / res_long as f32;
             if let Some(tex) = &self.camera.atlas {
-                let u0 = (world.min.x).clamp(0.0, 1.0);
-                let u1 = (world.max.x).clamp(0.0, 1.0);
-                let v0 = 1.0 - (world.max.y).clamp(0.0, 1.0);
-                let v1 = 1.0 - (world.min.y).clamp(0.0, 1.0);
-                let uv = Rect::from_min_max(pos2(u0, v0), pos2(u1, v1));
-                painter.image(tex.id(), atlas_rect, uv, Color32::WHITE);
+                // Гасим текстуру при магнификации (tex_mag > 1): она уже
+                // размыта, её сменяют резкие векторные точки ниже.
+                let tex_alpha = (255.0 * (1.0 - (tex_mag - 1.0).clamp(0.0, 1.0))) as u8;
+                painter.image(
+                    tex.id(),
+                    atlas_screen,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    Color32::from_white_alpha(tex_alpha),
+                );
             }
         }
 
@@ -393,10 +414,11 @@ impl ConnectomeMode {
             }
         }
 
-        // Точки при сильном зуме (только 2D — в 3D облако рисует текстура):
-        // включаются, когда тексел атласа растянут ≥4 экранных пикселей
-        // (радиус сплата уже у дна клампа 1.0 — дальше спасают векторные круги).
-        if !self.camera.view3d && self.camera.atlas_bucket >= 1 {
+        // Точки при зуме (только 2D — в 3D облако рисует текстура):
+        // включаются, как только тексел атласа растянут ≥1 экранный пиксель —
+        // ровно тогда же начинает гаситься текстура выше. Векторные круги
+        // остаются резкими на любом зуме, текстура им не мешает.
+        if !self.camera.view3d && tex_mag >= 1.0 {
             let wr = self.world_rect(size);
             let pad = 0.02;
             let r = (1.35 * self.camera.zoom).clamp(0.8, 3.0);
@@ -414,16 +436,7 @@ impl ConnectomeMode {
                 }
                 let c = origin + self.to_screen(w);
                 let col = crate::core::color::color_for(data, i, self.filters.color_mode);
-                painter.circle_filled(
-                    c,
-                    r,
-                    Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 235),
-                );
-                painter.circle_stroke(
-                    c,
-                    r + 0.35,
-                    Stroke::new(0.55, Color32::from_rgba_unmultiplied(235, 250, 246, 110)),
-                );
+                draw_soft_splat(painter, c, r, col);
             }
         }
 
@@ -755,6 +768,22 @@ impl ConnectomeMode {
                 c,
             );
         }
+    }
+}
+
+/// Мягкий гауссов сплат: концентрические круги с падающей альфой — как
+/// запечённая точка атласа, а не жёсткий «шар» с обводкой. Внешний слой
+/// почти прозрачный (гало), ядро плотное.
+fn draw_soft_splat(painter: &egui::Painter, center: Pos2, r: f32, color: Color32) {
+    // (доля радиуса, альфа) от внешнего края к центру. Плотное ядро + короткий
+    // спад — как у запечённого гауссова сплата (σ≈0.9), без широкого «размытого» гало.
+    const LAYERS: [(f32, u8); 4] = [(1.0, 55), (0.6, 150), (0.32, 225), (0.14, 250)];
+    for (k, a) in LAYERS {
+        painter.circle_filled(
+            center,
+            r * k,
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a),
+        );
     }
 }
 

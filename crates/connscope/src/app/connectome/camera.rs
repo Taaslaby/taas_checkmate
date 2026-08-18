@@ -64,47 +64,93 @@ impl ConnectomeMode {
         self.camera.view3d = true;
         let side = canvas.x.min(canvas.y).max(200.0);
         self.camera.zoom = (0.82 * side / crate::app::BASE).clamp(0.3, 60.0);
-        self.camera.zoom_target = self.camera.zoom;
         // Центр мозга (0.5, 0.5) → центр канваса.
         self.camera.pan = canvas * 0.5 - vec2(0.5, 0.5) * (self.camera.zoom * crate::app::BASE);
         self.camera.atlas = None;
         self.camera.atlas3d = None;
     }
 
-    /// Шаг зума хоткеями «+/−»: цель анимации × factor, якорь — центр канваса.
+    /// Шаг зума хоткеями «+/−»: мгновенно × factor, якорь — центр канваса.
     /// Размер канваса нужен, чтобы точка под центром оставалась на месте.
     pub(crate) fn zoom_step(&mut self, factor: f32, canvas: Vec2) {
-        self.camera.zoom_anchor_world = self.screen_to_world(canvas * 0.5);
-        self.camera.zoom_anchor_screen = canvas * 0.5;
-        self.camera.zoom_target = (self.camera.zoom_target * factor).clamp(0.3, 60.0);
+        let anchor_world = self.screen_to_world(canvas * 0.5);
+        let anchor_screen = canvas * 0.5;
+        self.camera.zoom = (self.camera.zoom * factor).clamp(0.3, 60.0);
+        self.camera.pan = anchor_screen - anchor_world * (self.camera.zoom * crate::app::BASE);
     }
 
-    /// Сброс камеры «Fit/reset» (кнопка и хоткей F): мозг [0,1]² вписывается
-    /// в фактический канвас с полями и центрируется. В 3D — ещё и стартовый
-    /// ракурс. Анимируется плавно через zoom_target/pan_target.
+    /// Сброс камеры «Fit/reset» (кнопка и хоткей F). В 2D — фит по bbox мозга
+    /// (`fit_now`), в 3D — мир [0,1]³ по меньшей стороне + стартовый ракурс.
+    /// Мгновенно (без «догоняющей» анимации — вид предсказуем).
     pub(crate) fn reset_camera(&mut self) {
         let canvas = self.camera.viewport.max(Vec2::new(400.0, 300.0));
-        let zoom = (0.84 * canvas.x.min(canvas.y) / crate::app::BASE).clamp(0.3, 60.0);
-        self.camera.zoom_target = zoom;
-        // Центр мозга (0.5, 0.5) → центр канваса.
-        self.camera.pan_target = Some(canvas * 0.5 - vec2(0.5, 0.5) * (zoom * crate::app::BASE));
         if self.camera.view3d {
+            let zoom = (0.84 * canvas.x.min(canvas.y) / crate::app::BASE).clamp(0.3, 60.0);
+            self.camera.zoom = zoom;
+            // Центр мозга (0.5, 0.5) → центр канваса.
+            self.camera.pan = canvas * 0.5 - vec2(0.5, 0.5) * (zoom * crate::app::BASE);
             self.camera.yaw = 0.6;
             self.camera.pitch = -0.3;
             self.camera.yaw_vel = 0.0;
             self.camera.pitch_vel = 0.0;
             self.camera.atlas3d = None;
+        } else {
+            self.fit_now(canvas);
+        }
+        self.camera.pan_target = None;
+    }
+
+    /// 2D-bbox видимых точек в текущей проекции; если данных/точек нет —
+    /// весь мир [0,1]². Нужен, чтобы «fit» центрировал сам мозг, а не пустой
+    /// квадрат мира: после изотропной нормализации мозг занимает лишь часть
+    /// [0,1]² (0.51:0.63:1), и фит по [0,1]² оставлял его мелким и «кривым»
+    /// в центре пустого канваса.
+    fn proj_bbox(&self) -> Rect {
+        let Some(d) = self.data.as_ref() else {
+            return Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        };
+        let mut min = Vec2::splat(f32::MAX);
+        let mut max = Vec2::splat(f32::MIN);
+        let mut any = false;
+        for i in 0..d.n {
+            if !d.has_pos(i) {
+                continue;
+            }
+            let w = d.world(i, self.camera.proj);
+            min = min.min(w);
+            max = max.max(w);
+            any = true;
+        }
+        if any {
+            Rect::from_min_max(pos2(min.x, min.y), pos2(max.x, max.y))
+        } else {
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
         }
     }
 
-    /// Мгновенный «fit» (без анимации): мозг по меньшей стороне канваса,
-    /// центр → центр. Используется на первом кадре после загрузки данных,
-    /// чтобы вид не начинался с «угла» и не выглядел криво на старте.
+    /// Bbox данных с полями (~4%) для запечки 2D-атласа: крайние точки не
+    /// обрезаются на границе текстуры. Считается по всем позициям независимо
+    /// от фильтров — атлас не «прыгает» при смене NT/класса/степени.
+    pub(crate) fn atlas_bbox(&self) -> Rect {
+        let bbox = self.proj_bbox();
+        let side = bbox.size().x.max(bbox.size().y);
+        let pad = (side * 0.04).max(0.02);
+        Rect::from_min_max(
+            pos2(bbox.min.x - pad, bbox.min.y - pad),
+            pos2(bbox.max.x + pad, bbox.max.y + pad),
+        )
+    }
+
+    /// Мгновенный «fit» (без анимации): вписывает bbox мозга в канвас с
+    /// полями, сохраняя пропорции (единый масштаб — без растягивания).
+    /// Используется на первом кадре после загрузки данных и в «Fit/reset».
     pub(crate) fn fit_now(&mut self, canvas: Vec2) {
-        let zoom = (0.84 * canvas.x.min(canvas.y) / crate::app::BASE).clamp(0.3, 60.0);
+        let bbox = self.proj_bbox();
+        let span = bbox.size().x.max(bbox.size().y).max(1e-3);
+        let zoom = (0.84 * canvas.x.min(canvas.y) / (span * crate::app::BASE)).clamp(0.3, 60.0);
+        let center = bbox.center().to_vec2();
         self.camera.zoom = zoom;
-        self.camera.zoom_target = zoom;
-        self.camera.pan = canvas * 0.5 - vec2(0.5, 0.5) * (zoom * crate::app::BASE);
+        self.camera.pan = canvas * 0.5 - center * (zoom * crate::app::BASE);
         self.camera.pan_target = None;
     }
 
@@ -164,7 +210,6 @@ impl ConnectomeMode {
         let span = (maxx - minx).max(maxy - miny).max(1e-3);
         // ~28% ширины канваса занимает окрестность.
         self.camera.zoom = (0.28 / span).clamp(0.3, 60.0);
-        self.camera.zoom_target = self.camera.zoom;
         self.camera.pan =
             self.camera.viewport * 0.5 - vec2(cx, cy) * (self.camera.zoom * crate::app::BASE);
     }
