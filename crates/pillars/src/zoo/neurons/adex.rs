@@ -21,32 +21,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum AdExParamIdx {
-    DT = 0,          // ms
-    Inv_Tau_M = 1,   // 1/τ_m (ms⁻¹)
-    Inv_Tau_W = 2,   // 1/τ_w (ms⁻¹)
-    V_Rest = 3,      // mV
-    V_Thresh = 4,    // mV
-    V_Reset = 5,     // mV
-    Delta_T = 6,     // mV — slope factor
-    Inv_Delta_T = 7, // 1/Δ_T (mV⁻¹)
-    A = 8,           // nS — subthreshold adaptation
-    B = 9,           // nA — spike-triggered adaptation
-    Tau_Ref = 10,    // ms
-    V_Peak = 11,     // mV — spike peak threshold (> V_thresh)
-}
-
-impl From<AdExParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: AdExParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Adaptive Exponential Integrate-and-Fire Neuron.
 ///
@@ -171,18 +146,18 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0; n * AdExModel::N_PARAMS];
         for i in 0..n {
-            p[AdExParamIdx::DT as usize * n + i] = 0.05;
-            p[AdExParamIdx::Inv_Tau_M as usize * n + i] = 1.0 / 5.0;
-            p[AdExParamIdx::Inv_Tau_W as usize * n + i] = 1.0 / 100.0;
-            p[AdExParamIdx::V_Rest as usize * n + i] = -65.0;
-            p[AdExParamIdx::V_Thresh as usize * n + i] = -50.0;
-            p[AdExParamIdx::V_Reset as usize * n + i] = -65.0;
-            p[AdExParamIdx::Delta_T as usize * n + i] = 2.0;
-            p[AdExParamIdx::Inv_Delta_T as usize * n + i] = 0.5;
-            p[AdExParamIdx::A as usize * n + i] = 0.5;
-            p[AdExParamIdx::B as usize * n + i] = 7.0;
-            p[AdExParamIdx::Tau_Ref as usize * n + i] = 2.0;
-            p[AdExParamIdx::V_Peak as usize * n + i] = 0.0;
+            p[AdExModelParamIdx::dt as usize * n + i] = 0.05;
+            p[AdExModelParamIdx::inv_tau_m as usize * n + i] = 1.0 / 5.0;
+            p[AdExModelParamIdx::inv_tau_w as usize * n + i] = 1.0 / 100.0;
+            p[AdExModelParamIdx::v_rest as usize * n + i] = -65.0;
+            p[AdExModelParamIdx::v_thresh as usize * n + i] = -50.0;
+            p[AdExModelParamIdx::v_reset as usize * n + i] = -65.0;
+            p[AdExModelParamIdx::delta_t as usize * n + i] = 2.0;
+            p[AdExModelParamIdx::inv_delta_t as usize * n + i] = 0.5;
+            p[AdExModelParamIdx::a as usize * n + i] = 0.5;
+            p[AdExModelParamIdx::b as usize * n + i] = 7.0;
+            p[AdExModelParamIdx::tau_ref as usize * n + i] = 2.0;
+            p[AdExModelParamIdx::v_peak as usize * n + i] = 0.0;
         }
         p
     }

@@ -22,6 +22,35 @@ use crate::zoo::Model;
 /// Opaque handle returned by [`Network::add_population`](crate::api::Network::add_population).
 pub type PopulationId = usize;
 
+/// Per-compartment membrane potentials of a **cable** population (a
+/// morphologically-detailed cell discretized into compartments). Point-neuron
+/// populations (`LIF`, `HH`, …) don't have compartments and expose `None`.
+///
+/// The voltages are stored **neuron-major flat**: `v[neuron * n_comps + comp]`
+/// (mV). `n_neurons`/`n_comps` let the caller recover the 2-D shape.
+#[derive(Debug, Clone, Copy)]
+pub struct CableVoltage<'a> {
+    pub n_neurons: usize,
+    pub n_comps: usize,
+    /// Neuron-major flat: `v[neuron * n_comps + comp]` (mV).
+    pub v: &'a [f32],
+}
+
+/// Per-compartment intracellular Ca²⁺ concentrations of a **cable** population
+/// (a morphologically-detailed cell with a tracked `species`). Point-neuron
+/// populations and cable populations without a Ca²⁺ pool expose `None`.
+///
+/// The concentrations are stored **neuron-major flat**:
+/// `ca[neuron * n_comps + comp]` (mM). `n_neurons`/`n_comps` let the caller
+/// recover the 2-D shape.
+#[derive(Debug, Clone, Copy)]
+pub struct CableCa<'a> {
+    pub n_neurons: usize,
+    pub n_comps: usize,
+    /// Neuron-major flat: `ca[neuron * n_comps + comp]` (mM).
+    pub ca: &'a [f32],
+}
+
 /// Abstract interface for a neuron population.
 ///
 /// Enables heterogeneous populations (LIF + HH + Izhikevich) in one
@@ -61,6 +90,20 @@ pub trait Population: 'static + Send + Sync {
     /// through `&mut dyn Population`. Implementors must erase `self`; without
     /// it, [`Network::pop_typed_mut`](crate::api::Network::pop_typed_mut) silently returns `None`.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Per-compartment membrane potentials, for cable populations (see
+    /// [`CableVoltage`]). Defaults to `None` — point-neuron populations have
+    /// no compartments; only morphologically-detailed populations override it.
+    fn cable_voltage(&self) -> Option<CableVoltage<'_>> {
+        None
+    }
+
+    /// Per-compartment intracellular Ca²⁺ concentrations, for cable
+    /// populations that track a Ca²⁺ `species` (see [`CableCa`]). Defaults to
+    /// `None` — point-neuron populations and Ca-less cables don't override it.
+    fn cable_ca(&self) -> Option<CableCa<'_>> {
+        None
+    }
 }
 
 impl<M: Model + 'static + Send + Sync> Population for NeuralPopulation<M> {

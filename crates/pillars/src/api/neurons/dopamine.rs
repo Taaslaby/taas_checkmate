@@ -96,4 +96,3 @@ impl DopamineSTDP {
         self.eligibility.fill(0.0);
     }
 }
-

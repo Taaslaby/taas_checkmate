@@ -13,10 +13,13 @@
 //! On spike: V = V_reset, u += delta_u (adaptation bump)
 //! ```
 //!
+//! Gate steady states are standard Boltzmann sigmoids (`k` = slope factor, a
+//! divisor): `u_∞ = 1/(1+exp(−(V−V_half_u)/k_u))` (opens on depolarization) and
+//! `h_∞ = 1/(1+exp(+(V−V_half_h)/k_h))` (opens on hyperpolarization).
+//!
 //! Ideal for Drosophila VNC motor neurons: slow adaptation prevents runaway
 //! firing, while h-current provides rebound after inhibition (walking CPG).
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::HAAPModel;
 use std::cell::RefCell;
 
@@ -48,8 +51,13 @@ fn pack_haap(params: &[f32], n: usize) -> Vec<f32> {
     p
 }
 
-/// Compute sigmoid gating: `1/(1 + exp(-(V - V_half) / k))`.
-/// If `invert` is true, uses `1/(1 + exp(-(V_half - V) / k))` for h-current.
+/// Boltzmann gate: `1 / (1 + exp(-(V - V_half) / k))`.
+///
+/// `k` is the slope factor (divisor). With `invert = true` the sign flips to
+/// `1 / (1 + exp(-(V_half - V) / k))` = `1/(1+exp((V−V_half)/k))`, used for the
+/// h-current (opens on hyperpolarization instead of depolarization). Because
+/// `k` divides, the exponent argument stays small for physiological `V` and
+/// `exp` cannot overflow; the clamp is a safety net for pathological inputs.
 fn sigmoid(V: f32, V_half: f32, k: f32, invert: bool) -> f32 {
     let arg = if invert {
         (V_half - V) / k.max(1e-6)
@@ -308,21 +316,17 @@ impl HaapState {
     pub fn step(&mut self, Ii: &[f32]) -> Vec<i32> {
         assert_eq!(Ii.len(), self.n, "HaapState::step: Ii length mismatch");
         let mut spikes = vec![0i32; self.n];
-        let n = self.n;
-        unsafe {
-            run_neuron::<HAAPModel>(
-                self.v.as_mut_ptr(),
-                self.u.as_mut_ptr(),
-                self.h.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                Ii.as_ptr(),
-                spikes.as_mut_ptr(),
-                self.packed.as_ptr(),
-                n,
-            );
-        }
+        crate::core::runner::run_neuron_slices::<HAAPModel>(
+            crate::core::runner::NeuronState {
+                v: Some(&mut self.v),
+                u: Some(&mut self.u),
+                h: Some(&mut self.h),
+                ..Default::default()
+            },
+            Ii,
+            &mut spikes,
+            &self.packed,
+        );
         spikes
     }
 
@@ -408,20 +412,17 @@ pub fn step_haap(
                 p[c * n + i] = params[c * n + i];
             }
         }
-        unsafe {
-            run_neuron::<HAAPModel>(
-                v.as_mut_ptr(),
-                u_state.as_mut_ptr(),
-                h_state.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                Ii.as_ptr(),
-                spikes.as_mut_ptr(),
-                p.as_ptr(),
-                n,
-            );
-        }
+        crate::core::runner::run_neuron_slices::<HAAPModel>(
+            crate::core::runner::NeuronState {
+                v: Some(v),
+                u: Some(u_state),
+                h: Some(h_state),
+                ..Default::default()
+            },
+            Ii,
+            spikes,
+            &p[..],
+        );
     });
 }
 
@@ -443,6 +444,9 @@ mod tests {
 
     #[test]
     fn haap_spikes_with_current() {
+        // Biological steady-state init: at rest u_∞(−65) ≈ 0.0025 (M closed),
+        // h_∞(−65) ≈ 0.16 (HCN mostly closed), so the cell is quiescent — a
+        // constant I=15 overcomes the small resting outward current and spikes.
         let mut state = HaapState::new(16, &HaapProfile::vnc());
         let mut total_spikes = 0i32;
         for _ in 0..2000 {
@@ -485,5 +489,62 @@ mod tests {
 
         assert_eq!(state.n, 8);
         assert!((state.v[0] - (-70.0)).abs() < 0.1);
+    }
+
+    /// The gate sigmoid must follow the standard Boltzmann convention — `k` is
+    /// the slope factor (divisor), M opens on depolarization, HCN on
+    /// hyperpolarization — matching the model's name ("hyperpolarization-
+    /// activated" rebound) and purpose (adaptation + rebound). Values are
+    /// hand-derived from the formulas below; this test locks the convention so
+    /// a future rewrite cannot silently invert or re-shape the gates again.
+    #[test]
+    fn sigmoid_matches_biological_convention() {
+        // u gate (M-current): 1/(1+exp(−(V+35)/5)) — opens on depolarization.
+        let u_at = |v: f32| sigmoid(v, -35.0, 5.0, false);
+        assert!((u_at(-100.0) - 0.0).abs() < 1e-5, "u(−100) ≈ 0");
+        assert!((u_at(-65.0) - 0.002_47).abs() < 1e-4, "u(−65)");
+        assert!((u_at(-35.0) - 0.5).abs() < 1e-6, "u(−35) = 0.5");
+        assert!((u_at(0.0) - 0.999_1).abs() < 1e-3, "u(0) ≈ 1");
+
+        // h gate (HCN): 1/(1+exp((V+75)/6)) — opens on hyperpolarization.
+        let h_at = |v: f32| sigmoid(v, -75.0, 6.0, true);
+        assert!((h_at(-100.0) - 0.985_0).abs() < 1e-3, "h(−100) ≈ 1");
+        assert!((h_at(-65.0) - 0.159_0).abs() < 1e-3, "h(−65)");
+        assert!((h_at(-75.0) - 0.5).abs() < 1e-6, "h(−75) = 0.5");
+        assert!((h_at(0.0) - 0.0).abs() < 1e-4, "h(0) ≈ 0");
+    }
+
+    /// The model is named after its signature behaviour: hyperpolarization-
+    /// activated rebound. Hyperpolarizing the cell must OPEN the h-current
+    /// (`h` rises), and releasing the inhibition must let that open h-current
+    /// depolarize `V` back past the inhibited level — the CPG rebound.
+    #[test]
+    fn haap_hcn_opens_on_hyperpolarization_and_rebounds() {
+        let mut state = HaapState::new(16, &HaapProfile::vnc());
+        let h_rest = state.h[0];
+
+        // 100 ms of inhibition → V hyperpolarizes, HCN gate opens.
+        let inhibit = vec![-10.0f32; state.n];
+        for _ in 0..2000 {
+            let _ = state.step(&inhibit);
+        }
+        let h_inhibited = state.h[0];
+        assert!(
+            h_inhibited > h_rest + 0.05,
+            "HCN must open on hyperpolarization (h {h_rest:.3} → {h_inhibited:.3})"
+        );
+
+        // Release inhibition → the open h-current rebounds V upward.
+        let v_inhibited = state.v[0];
+        let zero = vec![0.0f32; state.n];
+        let mut peak = v_inhibited;
+        for _ in 0..400 {
+            let _ = state.step(&zero);
+            peak = peak.max(state.v[0]);
+        }
+        assert!(
+            peak > v_inhibited + 10.0,
+            "rebound should depolarize past the inhibited level (peak {peak:.2} vs {v_inhibited:.2})"
+        );
     }
 }

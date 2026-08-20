@@ -1,6 +1,6 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, NeuralPopulation, finite_fields, positive};
+use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::VSNModel;
 
 /// Builder for Variable Spiking Neuron (VSN) populations with surrogate gradient state.
@@ -151,4 +151,3 @@ impl ModelBuilder for VSNBuilder {
         VSNBuilder::try_build(self)
     }
 }
-

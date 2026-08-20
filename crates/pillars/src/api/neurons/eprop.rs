@@ -28,6 +28,9 @@ pub struct EPropIzhikevich {
     pub eligibility: Vec<f32>,
     pub psi: Vec<f32>,
     pub n: usize,
+    /// Logical (unpadded) neuron count — the buffer-length contract for `step`
+    /// and `update_weights` (callers pass `n`-length buffers, not padded).
+    n_logical: usize,
     pub dt: f32,
     pub tau_e: f32,
     pub a: f32,
@@ -46,6 +49,7 @@ impl EPropIzhikevich {
             eligibility: vec![0.0; n_pad],
             psi: vec![0.0; n_pad],
             n: n_pad,
+            n_logical: n,
             dt,
             tau_e,
             a: 0.02,
@@ -58,8 +62,28 @@ impl EPropIzhikevich {
 
     /// One step of Izhikevich dynamics + eligibility trace update.
     /// Uses SIMD `f32x8` kernel — ~8× faster than scalar loop.
+    ///
+    /// # Panics
+    /// If any of `I`/`spikes`/`pre_spikes` differs from the logical neuron
+    /// count — mismatched buffers are a caller error and were previously
+    /// silently truncated.
     pub fn step(&mut self, I: &[f32], spikes: &mut [i32], pre_spikes: &[i32]) -> usize {
-        let n = self.n.min(I.len()).min(spikes.len()).min(pre_spikes.len());
+        assert_eq!(
+            I.len(),
+            self.n_logical,
+            "E-Prop step: I length must equal neuron count"
+        );
+        assert_eq!(
+            spikes.len(),
+            self.n_logical,
+            "E-Prop step: spikes length must equal neuron count"
+        );
+        assert_eq!(
+            pre_spikes.len(),
+            self.n_logical,
+            "E-Prop step: pre_spikes length must equal neuron count"
+        );
+        let n = self.n_logical;
         let n8 = n & !7;
         if n8 == 0 {
             return 0;
@@ -153,8 +177,21 @@ impl EPropIzhikevich {
     }
 
     /// Apply E-Prop weight update.
+    ///
+    /// # Panics
+    /// If `weights`/`learning_signals` differs from the logical neuron count.
     pub fn update_weights(&self, weights: &mut [f32], learning_signals: &[f32], lr: f32) {
-        let n = self.n.min(weights.len()).min(learning_signals.len());
+        assert_eq!(
+            weights.len(),
+            self.n_logical,
+            "E-Prop update: weights length must equal neuron count"
+        );
+        assert_eq!(
+            learning_signals.len(),
+            self.n_logical,
+            "E-Prop update: learning_signals length must equal neuron count"
+        );
+        let n = self.n_logical;
         let chunks = n / 8;
         if chunks > 0 {
             #[cfg(feature = "rayon")]
@@ -376,6 +413,9 @@ pub struct EPropSaw {
     pub eligibility: Vec<f32>,
     pub psi: Vec<f32>,
     pub n: usize,
+    /// Logical (unpadded) neuron count — the buffer-length contract for `step`
+    /// and `update_weights` (callers pass `n`-length buffers, not padded).
+    n_logical: usize,
     pub dt: f32,
     pub tau_e: f32,
     pub a: f32,
@@ -392,6 +432,7 @@ impl EPropSaw {
             eligibility: vec![0.0; n_pad],
             psi: vec![0.0; n_pad],
             n: n_pad,
+            n_logical: n,
             dt,
             tau_e,
             a: 0.02,
@@ -402,8 +443,28 @@ impl EPropSaw {
 
     /// One step of SAW dynamics + eligibility trace update.
     /// Uses SIMD `f32x8` kernel.
+    ///
+    /// # Panics
+    /// If any of `I`/`spikes`/`pre_spikes` differs from the logical neuron
+    /// count — mismatched buffers are a caller error and were previously
+    /// silently truncated.
     pub fn step(&mut self, I: &[f32], spikes: &mut [i32], pre_spikes: &[i32]) -> usize {
-        let n = self.n.min(I.len()).min(spikes.len()).min(pre_spikes.len());
+        assert_eq!(
+            I.len(),
+            self.n_logical,
+            "E-Prop step: I length must equal neuron count"
+        );
+        assert_eq!(
+            spikes.len(),
+            self.n_logical,
+            "E-Prop step: spikes length must equal neuron count"
+        );
+        assert_eq!(
+            pre_spikes.len(),
+            self.n_logical,
+            "E-Prop step: pre_spikes length must equal neuron count"
+        );
+        let n = self.n_logical;
         let n8 = n & !7;
         if n8 == 0 {
             return 0;
@@ -491,8 +552,21 @@ impl EPropSaw {
     }
 
     /// Apply E-Prop weight update.
+    ///
+    /// # Panics
+    /// If `weights`/`learning_signals` differs from the logical neuron count.
     pub fn update_weights(&self, weights: &mut [f32], learning_signals: &[f32], lr: f32) {
-        let n = self.n.min(weights.len()).min(learning_signals.len());
+        assert_eq!(
+            weights.len(),
+            self.n_logical,
+            "E-Prop update: weights length must equal neuron count"
+        );
+        assert_eq!(
+            learning_signals.len(),
+            self.n_logical,
+            "E-Prop update: learning_signals length must equal neuron count"
+        );
+        let n = self.n_logical;
         let chunks = n / 8;
         if chunks > 0 {
             #[cfg(feature = "rayon")]
@@ -835,5 +909,53 @@ mod tests {
     #[should_panic(expected = "overflows SIMD padding")]
     fn eprop_multi_rejects_padding_overflow() {
         let _ = EPropIzhikevichMulti::new(1, usize::MAX, 1.0, 20.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "I length must equal neuron count")]
+    fn eprop_izhikevich_rejects_mismatched_I() {
+        let mut pop = EPropIzhikevich::new(8, 1.0, 20.0);
+        let mut spikes = vec![0i32; 8];
+        pop.step(&[0.0f32; 7], &mut spikes, &[0i32; 8]);
+    }
+
+    #[test]
+    #[should_panic(expected = "spikes length must equal neuron count")]
+    fn eprop_izhikevich_rejects_mismatched_spikes() {
+        let mut pop = EPropIzhikevich::new(8, 1.0, 20.0);
+        let mut spikes = vec![0i32; 7];
+        pop.step(&[0.0f32; 8], &mut spikes, &[0i32; 8]);
+    }
+
+    #[test]
+    #[should_panic(expected = "pre_spikes length must equal neuron count")]
+    fn eprop_izhikevich_rejects_mismatched_pre_spikes() {
+        let mut pop = EPropIzhikevich::new(8, 1.0, 20.0);
+        let mut spikes = vec![0i32; 8];
+        pop.step(&[0.0f32; 8], &mut spikes, &[0i32; 7]);
+    }
+
+    #[test]
+    #[should_panic(expected = "weights length must equal neuron count")]
+    fn eprop_izhikevich_rejects_mismatched_weights() {
+        let pop = EPropIzhikevich::new(8, 1.0, 20.0);
+        let mut weights = vec![0.0f32; 7];
+        pop.update_weights(&mut weights, &[1.0f32; 8], 0.1);
+    }
+
+    #[test]
+    #[should_panic(expected = "learning_signals length must equal neuron count")]
+    fn eprop_saw_rejects_mismatched_learning_signals() {
+        let pop = EPropSaw::new(8, 1.0, 20.0);
+        let mut weights = vec![0.0f32; 8];
+        pop.update_weights(&mut weights, &[1.0f32; 7], 0.1);
+    }
+
+    #[test]
+    #[should_panic(expected = "I length must equal neuron count")]
+    fn eprop_saw_rejects_mismatched_I() {
+        let mut pop = EPropSaw::new(8, 1.0, 20.0);
+        let mut spikes = vec![0i32; 8];
+        pop.step(&[0.0f32; 7], &mut spikes, &[0i32; 8]);
     }
 }

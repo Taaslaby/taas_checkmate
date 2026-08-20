@@ -1,8 +1,11 @@
-//! # 🚀 API — High-Level Network Interface
+//! #  API — High-Level Network Interface
 //!
 //! === BOUNDARY: Safe Rust ===
 //! This is the **only layer** that users (Python, C++, or Rust script) should touch.
-//! Every `unsafe` block, raw pointer, and SIMD intrinsic lives below this layer.
+//! Every `unsafe` block, raw pointer, and SIMD intrinsic lives below this layer
+//! (`core::runner::run_neuron_slices` / `kernels::synapse::stp_step_batch` /
+//! `zoo::sensors::chordotonal_step_slices` / `kernels::hh_channels::hh_poly_step_slices`
+//! are the safe fronts; the raw-pointer kernels themselves stay in `core`/`kernels`).
 //!
 //! ## Layers
 //!
@@ -57,6 +60,7 @@
 pub mod autotune;
 pub mod builder;
 pub mod compact;
+pub mod conductance;
 pub mod cpe;
 pub mod delay;
 pub mod embodied;
@@ -64,9 +68,11 @@ pub mod formula;
 pub mod graph;
 pub mod human_hand;
 pub mod network;
+pub mod neuroml;
 pub mod neurons;
 pub mod population;
 pub mod push;
+pub mod synapse;
 pub mod trainer;
 
 pub use crate::core::population::NeuralPopulation;
@@ -75,6 +81,7 @@ pub use builder::{
     LIFBuilder, ModelBuilder, UniversalBuilder, VSNBuilder,
 };
 pub use compact::{compact_spikes, compact_spikes_into};
+pub use conductance::{ConductancePopulation, MarkovChannel, MarkovPopulation};
 pub use delay::DelayBuffer;
 pub use formula::{
     run_program, validate_program, FormulaModel, OpKind, OpNode, I_SYN, MAX_FORMULA_MODELS, N_REGS,
@@ -84,5 +91,6 @@ pub use graph::{SparseGraph, SynapseRow, MAX_DELAY_SLOTS};
 pub use human_hand::{
     HumanHandProfile, HumanHandState, HumanMuscle, HumanMuscleSpec, HUMAN_SPECIFIC_TENSION_PA,
 };
-pub use network::{Edge, Network};
+pub use network::{Edge, Network, SigmoidGradedSynapse};
 pub use population::{Population, PopulationId};
+pub use synapse::{PlasticityProfile, SynapseKinetics};

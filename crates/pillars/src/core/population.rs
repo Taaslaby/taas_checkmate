@@ -68,6 +68,23 @@ use crate::{load_state_scalar, load_state_simd, save_state_scalar, save_state_si
 /// (e.g., HH with 500 pA), consider removing the clamp or adjusting the range.
 pub const I_SYN_CLAMP_RANGE: (f32, f32) = (-100.0, 100.0);
 
+/// Apply the model's input-current clamp policy.
+///
+/// [`Model::CLAMP_I_SYN`] defaults to `true` (clamp `i_syn` to
+/// [`I_SYN_CLAMP_RANGE`]); models annotated `#[no_clamp]` (e.g.
+/// `AlphaLifModel`, whose input is a conductance in mV-equivalent units that
+/// legitimately exceeds ±100) override it to `false` and pass the raw value
+/// through. The `if` is resolved at compile time — zero runtime cost.
+#[inline(always)]
+pub(crate) fn clamp_i_syn<M: Model, S: SimdLane>(x: S) -> S {
+    if M::CLAMP_I_SYN {
+        x.max(S::splat(I_SYN_CLAMP_RANGE.0))
+            .min(S::splat(I_SYN_CLAMP_RANGE.1))
+    } else {
+        x
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  NeuralPopulation — High-Level Safe API
 // ═══════════════════════════════════════════════════════════════
@@ -293,7 +310,7 @@ impl<M: Model> NeuralPopulation<M> {
         let params_ptr = unsafe { NonNull::new_unchecked(self.params.as_ptr() as *mut f32) };
 
         for i in 0..self.n {
-            let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+            let ii = clamp_i_syn::<M, f32>(i_in[i]);
             let sp = self.state.as_ptr();
             let state = load_state_scalar!(sp, cap, i);
 
@@ -362,9 +379,8 @@ impl<M: Model> NeuralPopulation<M> {
             // SAFETY: off + 8 <= n (see contract above); `i_in` may be any
             // user slice, so read_unaligned is required (i_in is NOT
             // guaranteed 32-byte aligned).
-            let i_syn = unsafe { (i_in.as_ptr().add(off) as *const SimdType).read_unaligned() }
-                .max(SimdType::splat(I_SYN_CLAMP_RANGE.0))
-                .min(SimdType::splat(I_SYN_CLAMP_RANGE.1));
+            let i_syn_raw = unsafe { (i_in.as_ptr().add(off) as *const SimdType).read_unaligned() };
+            let i_syn = clamp_i_syn::<M, SimdType>(i_syn_raw);
 
             // SAFETY: buses are AlignedVecs of `capacity` — off + 8 <= n8
             //     <= capacity, so all 8 lanes are within the padded buffer.
@@ -410,7 +426,7 @@ impl<M: Model> NeuralPopulation<M> {
         // step_scalar — a fresh scalar context per neuron.
         if n8 < self.n {
             for i in n8..self.n {
-                let ii = i_in[i].clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                let ii = clamp_i_syn::<M, f32>(i_in[i]);
                 let sp = self.state.as_ptr();
                 let state = load_state_scalar!(sp, cap, i);
 

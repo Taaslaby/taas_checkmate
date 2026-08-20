@@ -18,8 +18,8 @@ use std::ptr::NonNull;
 /// - the legacy raw runners `run_neuron*` accept exactly 6 state pointers by
 ///   signature — models with more states must use `NeuralPopulation`.
 ///
-/// 16 covers multi-compartment dendrites, glia and future models.
-pub const MAX_STATES: usize = 16;
+/// 32 covers multi-compartment dendrites, glia, learnable-transformer (25 states) and future models.
+pub const MAX_STATES: usize = 32;
 
 /// Heuristic cap for debug-build param-index checks in [`SimdContext::p`] /
 /// [`SimdContext::pf`]. Not a hard engine limit — no model uses more than a
@@ -164,6 +164,26 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
     #[inline(always)]
     pub fn pf_enum<E: Into<usize> + Copy>(&self, e: E) -> f32 {
         self.pf(e.into())
+    }
+
+    /// Broadcast parameter access — read the scalar at column `i` element 0
+    /// and splat it across the lane.
+    ///
+    /// For parameters that are constant across the population (marked
+    /// `#[broadcast]` in the model), this loads **4 bytes** instead of the
+    /// full `S::SIZE × 4`-byte column — an ~8× cut in param read traffic in
+    /// the hot loop. The value is assumed identical for every neuron; the
+    /// caller (the `#[broadcast]` contract) guarantees element 0 is the
+    /// canonical value.
+    ///
+    /// # Safety (caller contract)
+    /// `i` must be a valid param column index (`< M::N_PARAMS`).
+    #[inline(always)]
+    pub fn pb(&self, i: usize) -> S {
+        self.assert_param_index(i);
+        // SAFETY: `assert_param_index` proves `i` addresses an allocated
+        // column; element 0 is within bounds (runner guarantees `n >= 1`).
+        unsafe { S::splat(*self.params_ptr.as_ptr().add(i * self.n)) }
     }
 
     #[inline(always)]
@@ -330,12 +350,9 @@ impl<'a, S: SimdLane> SimdContext<'a, S> {
         self.spike_mask
     }
 
-    // ─── Biological opcodes → context_ops.rs ───────────────────────
-    //
-    // `leak_integrate`, `fire_reset`, `refractory_clamp`, `refractory_timer`,
-    // `lif_step`, `ohmic_current`, `ohmic_const`, `membrane_depolarize`,
-    // `edge_spike` вынесены в [`super::context_ops`] — ядро (этот файл)
-    // отвечает только за state/params/шины, а не за готовую биофизику.
+    // Biological opcodes (`leak_integrate`, `fire_reset`, `lif_step`, …)
+    // удалены: модели перешли на типизированный `ComputeNeuron` + свободные
+    // функции `ops::*`; этот файл отвечает только за state/params/шины.
 }
 
 // ═══════════════════════════════════════════════════════════════

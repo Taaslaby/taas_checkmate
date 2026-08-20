@@ -1,6 +1,6 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, NeuralPopulation, finite_fields, positive};
+use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::IzhikevichModel;
 
 /// Pre-configured Izhikevich neuron patterns from the 2003 paper.
@@ -199,4 +199,3 @@ impl ModelBuilder for IzhikevichBuilder {
         IzhikevichBuilder::try_build(self)
     }
 }
-

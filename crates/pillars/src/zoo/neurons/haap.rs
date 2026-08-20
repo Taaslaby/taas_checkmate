@@ -1,4 +1,4 @@
-//! ⚡ HAAP — Hyperpolarization-Activated Adaptive Pulse-Bursting
+//! HAAP — Hyperpolarization-Activated Adaptive Pulse-Bursting
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 //!
@@ -17,43 +17,24 @@
 //! dh/dt = (h_∞(V) − h) · inv_tau_h     (Forward Euler)
 //! Spike: V ≥ V_thresh → V = V_reset, u += delta_u
 //! ```
+//!
+//! # Gate steady states (standard Boltzmann — `k` is the slope factor, a divisor)
+//! ```text
+//! u_∞(V) = 1 / (1 + exp(−(V − V_half_u) / k_u))   M-current (opens on depolarization)
+//! h_∞(V) = 1 / (1 + exp(+(V − V_half_h) / k_h))   HCN (opens on hyperpolarization)
+//! ```
+//! This is the biologically correct convention, matching the model's name and
+//! purpose: `h` gives hyperpolarization-activated rebound, `u` gives
+//! depolarization-activated spike-frequency adaptation. Because `k` divides,
+//! the exponent argument stays small for physiological `V` (|arg| ≲ 40) and
+//! cannot overflow.
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod haap` mirrors the file module
 
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum HAAParamIdx {
-    DT = 0,        // ms
-    Inv_Cm = 1,    // 1/µF
-    G_L = 2,       // mS/cm²
-    E_L = 3,       // mV
-    G_M = 4,       // mS/cm² — M-current
-    E_K = 5,       // mV
-    G_H = 6,       // mS/cm² — h-current
-    E_H = 7,       // mV
-    Inv_Tau_U = 8, // 1/τ_u (ms⁻¹)
-    Inv_Tau_H = 9, // 1/τ_h (ms⁻¹)
-    V_Half_U = 10, // mV
-    K_U = 11,      // slope
-    V_Half_H = 12, // mV
-    K_H = 13,      // slope
-    V_Thresh = 14, // mV
-    V_Reset = 15,  // mV
-    Delta_U = 16,  // u bump on spike
-}
-
-impl From<HAAParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: HAAParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Hyperpolarization-activated adaptive bursting neuron.
 ///
@@ -139,20 +120,22 @@ pub mod haap {
             let dv = (ctx.i_syn - i_total) * params.inv_cm;
             let v_new = state.v + dv * dt;
 
-            // ─── Gate kinetics via pure SIMD sigmoids ──────────────────
-            // u_∞ = 1/(1+exp(-k_u·(V − V_half_u)))  — opening on depolarization
-            // Args clamped to ±50 (like the legacy core haap): the SIMD exp is
-            // only reliable up to ~±87 (wide returns 0.0 at +88!) while expf
-            // overflows to +inf — clamping makes the sigmoid saturate the same
-            // way on CPU SIMD and CUDA (both give u_∞ ≈ 0 at rest).
-            let u_arg = (-params.k_u * (v_new - params.v_half_u))
+            // ─── Gate kinetics (standard Boltzmann: `k` = slope factor, a divisor) ──
+            // u_∞ = 1/(1+exp(−(V − V_half_u)/k_u))   M-current opens on depolarization
+            // h_∞ = 1/(1+exp(+(V − V_half_h)/k_h))   HCN opens on hyperpolarization
+            //
+            // With `k` dividing, |arg| stays ≲ 40 for physiological V, so exp
+            // cannot overflow — the earlier "steepness" rewrite (k as a
+            // multiplier) produced ±300 arguments, which was the real source of
+            // the overflow it then "fixed" with clamping. The ±50 clamp below
+            // is a pure safety net for pathological V (far outside biophysics).
+            let u_arg = (-(v_new - params.v_half_u) / params.k_u)
                 .max(S::splat(-50.0))
                 .min(S::splat(50.0));
             let u_inf = one / (one + u_arg.exp());
             let u_new = (state.u + dt * (u_inf - state.u) * params.inv_tau_u).clamp01();
 
-            // h_∞ = 1/(1+exp(+k_h·(V − V_half_h)))  — opening on hyperpolarization
-            let h_arg = (params.k_h * (v_new - params.v_half_h))
+            let h_arg = ((v_new - params.v_half_h) / params.k_h)
                 .max(S::splat(-50.0))
                 .min(S::splat(50.0));
             let h_inf = one / (one + h_arg.exp());
@@ -187,25 +170,39 @@ mod tests {
         let inv_tau_h = 1.0 / 200.0;
         let mut p = vec![0.0f32; n * 17];
         for i in 0..n {
-            p[HAAParamIdx::DT as usize * n + i] = dt;
-            p[HAAParamIdx::Inv_Cm as usize * n + i] = 1.0;
-            p[HAAParamIdx::G_L as usize * n + i] = 0.1;
-            p[HAAParamIdx::E_L as usize * n + i] = -65.0;
-            p[HAAParamIdx::G_M as usize * n + i] = 0.5;
-            p[HAAParamIdx::E_K as usize * n + i] = -80.0;
-            p[HAAParamIdx::G_H as usize * n + i] = 0.3;
-            p[HAAParamIdx::E_H as usize * n + i] = -30.0;
-            p[HAAParamIdx::Inv_Tau_U as usize * n + i] = inv_tau_u;
-            p[HAAParamIdx::Inv_Tau_H as usize * n + i] = inv_tau_h;
-            p[HAAParamIdx::V_Half_U as usize * n + i] = -35.0;
-            p[HAAParamIdx::K_U as usize * n + i] = 5.0;
-            p[HAAParamIdx::V_Half_H as usize * n + i] = -75.0;
-            p[HAAParamIdx::K_H as usize * n + i] = 6.0;
-            p[HAAParamIdx::V_Thresh as usize * n + i] = -40.0;
-            p[HAAParamIdx::V_Reset as usize * n + i] = -55.0;
-            p[HAAParamIdx::Delta_U as usize * n + i] = 0.02;
+            p[HAAPModelParamIdx::dt as usize * n + i] = dt;
+            p[HAAPModelParamIdx::inv_cm as usize * n + i] = 1.0;
+            p[HAAPModelParamIdx::g_l as usize * n + i] = 0.1;
+            p[HAAPModelParamIdx::e_l as usize * n + i] = -65.0;
+            p[HAAPModelParamIdx::g_m as usize * n + i] = 0.5;
+            p[HAAPModelParamIdx::e_k as usize * n + i] = -80.0;
+            p[HAAPModelParamIdx::g_h as usize * n + i] = 0.3;
+            p[HAAPModelParamIdx::e_h as usize * n + i] = -30.0;
+            p[HAAPModelParamIdx::inv_tau_u as usize * n + i] = inv_tau_u;
+            p[HAAPModelParamIdx::inv_tau_h as usize * n + i] = inv_tau_h;
+            p[HAAPModelParamIdx::v_half_u as usize * n + i] = -35.0;
+            p[HAAPModelParamIdx::k_u as usize * n + i] = 5.0;
+            p[HAAPModelParamIdx::v_half_h as usize * n + i] = -75.0;
+            p[HAAPModelParamIdx::k_h as usize * n + i] = 6.0;
+            p[HAAPModelParamIdx::v_thresh as usize * n + i] = -40.0;
+            p[HAAPModelParamIdx::v_reset as usize * n + i] = -55.0;
+            p[HAAPModelParamIdx::delta_u as usize * n + i] = 0.02;
         }
         p
+    }
+
+    /// Resting membrane potential (mV) used by the tests — the leak reversal.
+    const REST_V: f32 = -65.0;
+
+    /// Boltzmann steady-state gates at `v` for the VNC profile used by
+    /// `make_vnc_params`: `u_∞ = 1/(1+exp(−(v+35)/5))`,
+    /// `h_∞ = 1/(1+exp((v+75)/6))`. A cell at rest sits at its gating
+    /// equilibrium (matching NEURON's `INITIAL` block), so tests initialise
+    /// from these values rather than the arbitrary old `u=0, h=1`.
+    fn rest_gates(v: f32) -> (f32, f32) {
+        let u = 1.0 / (1.0 + (-(v + 35.0) / 5.0).exp());
+        let h = 1.0 / (1.0 + ((v + 75.0) / 6.0).exp());
+        (u, h)
     }
 
     #[test]
@@ -213,9 +210,10 @@ mod tests {
         let n = 8;
         let dt = 0.05;
         let params = make_vnc_params(n, dt);
-        let mut v = vec![-65.0; n];
-        let mut u = vec![0.0; n];
-        let mut h = vec![1.0; n];
+        let (u0, h0) = rest_gates(REST_V);
+        let mut v = vec![REST_V; n];
+        let mut u = vec![u0; n];
+        let mut h = vec![h0; n];
         let mut dummy = vec![0.0; n];
         let Ii = vec![15.0; n];
         let mut spikes = vec![0i32; n];
@@ -245,9 +243,10 @@ mod tests {
         let n = 8;
         let dt = 0.05;
         let params = make_vnc_params(n, dt);
-        let mut v = vec![-65.0; n];
-        let mut u = vec![0.0; n];
-        let mut h = vec![1.0; n];
+        let (u0, h0) = rest_gates(REST_V);
+        let mut v = vec![REST_V; n];
+        let mut u = vec![u0; n];
+        let mut h = vec![h0; n];
         let mut dummy = vec![0.0; n];
         let Ii = vec![-10.0; n];
         let mut spikes = vec![0i32; n];
@@ -279,9 +278,10 @@ mod tests {
         let n = 13;
         let dt = 0.05;
         let params = make_vnc_params(n, dt);
-        let mut v = vec![-65.0; n];
-        let mut u = vec![0.0; n];
-        let mut h = vec![1.0; n];
+        let (u0, h0) = rest_gates(REST_V);
+        let mut v = vec![REST_V; n];
+        let mut u = vec![u0; n];
+        let mut h = vec![h0; n];
         let mut dummy = vec![0.0; n];
         let Ii = vec![15.0; n];
         let mut spikes = vec![0i32; n];
@@ -311,9 +311,10 @@ mod tests {
         let n = 8;
         let dt = 0.05;
         let params = make_vnc_params(n, dt);
-        let mut v = vec![-65.0; n];
-        let mut u = vec![0.0; n];
-        let mut h = vec![1.0; n];
+        let (u0, h0) = rest_gates(REST_V);
+        let mut v = vec![REST_V; n];
+        let mut u = vec![u0; n];
+        let mut h = vec![h0; n];
         let mut dummy = vec![0.0; n];
         let Ii = vec![0.0; n];
         let mut spikes = vec![0i32; n];
@@ -346,9 +347,10 @@ mod tests {
         let n = 8;
         let dt = 0.05;
         let params = make_vnc_params(n, dt);
-        let mut v = vec![-65.0; n];
-        let mut u = vec![0.0; n];
-        let mut h = vec![1.0; n];
+        let (u0, h0) = rest_gates(REST_V);
+        let mut v = vec![REST_V; n];
+        let mut u = vec![u0; n];
+        let mut h = vec![h0; n];
         let mut dummy = vec![0.0; n];
         let Ii = vec![1000.0; n];
         let mut spikes = vec![0i32; n];

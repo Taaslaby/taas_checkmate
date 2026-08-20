@@ -20,7 +20,9 @@
 #![allow(clippy::module_inception)]
 
 mod adex;
+mod alpha_lif;
 mod atlasov_neuromotor;
+mod beam;
 mod fhn;
 mod glif3;
 mod glif4;
@@ -28,12 +30,14 @@ mod haap;
 mod hh;
 mod hr;
 mod izhikevich;
+mod izhikevich_2007;
 mod izhikevich_dual;
 mod lif;
 mod lifat;
 mod morris_lecar;
 mod rate;
 mod saw;
+mod transformer;
 mod triangulated;
 mod vsn;
 mod wc;
@@ -45,41 +49,43 @@ mod wc;
 /// `{Model}StateIdx` index enums (kill magic column numbers):
 /// `pop.fill_param(LIFModelParamIdx::Dt.into(), 0.5)`.
 pub use adex::ADEX_CUDA_SOURCE;
-pub use adex::{
-    AdExModel, AdExModelParamIdx, AdExModelStateIdx, AdExParamIdx, AdExParams, AdExState,
+pub use adex::{AdExModel, AdExModelParamIdx, AdExModelStateIdx, AdExParams, AdExState};
+pub use alpha_lif::ALPHA_LIF_CUDA_SOURCE;
+pub use alpha_lif::{
+    AlphaLifModel, AlphaLifModelParamIdx, AlphaLifModelStateIdx, AlphaLifParams, AlphaLifState,
 };
 pub use atlasov_neuromotor::ATLASOV_NEUROMOTOR_CUDA_SOURCE;
 pub use atlasov_neuromotor::{
-    AtlasParamIdx, AtlasovNeuromotorModel, AtlasovNeuromotorModelParamIdx,
-    AtlasovNeuromotorModelStateIdx, AtlasovNeuromotorParams, AtlasovNeuromotorState,
+    AtlasovNeuromotorModel, AtlasovNeuromotorModelParamIdx, AtlasovNeuromotorModelStateIdx,
+    AtlasovNeuromotorParams, AtlasovNeuromotorState,
 };
+pub use beam::{BeamModel, BeamModelParamIdx, BeamModelStateIdx, BEAM_CUDA_SOURCE};
 pub use fhn::FHNModel;
 pub use fhn::FHN_CUDA_SOURCE;
 pub use fhn::{FHNModelParamIdx, FHNModelStateIdx};
 pub use glif3::GLIF3_CUDA_SOURCE;
-pub use glif3::{
-    GLIF3Model, GLIF3ModelParamIdx, GLIF3ModelStateIdx, GLIF3ParamIdx, GLIF3Params, GLIF3State,
-};
+pub use glif3::{GLIF3Model, GLIF3ModelParamIdx, GLIF3ModelStateIdx, GLIF3Params, GLIF3State};
 pub use glif4::GLIF4_CUDA_SOURCE;
-pub use glif4::{
-    GLIF4Model, GLIF4ModelParamIdx, GLIF4ModelStateIdx, GLIF4ParamIdx, GLIF4Params, GLIF4State,
-};
+pub use glif4::{GLIF4Model, GLIF4ModelParamIdx, GLIF4ModelStateIdx, GLIF4Params, GLIF4State};
 pub use haap::HAAP_CUDA_SOURCE;
-pub use haap::{
-    HAAPModel, HAAPModelParamIdx, HAAPModelStateIdx, HAAPParams, HAAPState, HAAParamIdx,
-};
+pub use haap::{HAAPModel, HAAPModelParamIdx, HAAPModelStateIdx, HAAPParams, HAAPState};
 pub use hh::HH_CUDA_SOURCE;
 pub use hh::{
-    GateParams, HHModel, HHModelParamIdx, HHModelStateIdx, HHParamIdx, HHParams, HHState, GATE_H,
-    GATE_M, GATE_N,
+    GateParams, HHModel, HHModelParamIdx, HHModelStateIdx, HHParams, HHState, GATE_H, GATE_M,
+    GATE_N,
 };
 pub use hr::HRModel;
 pub use hr::HR_CUDA_SOURCE;
 pub use hr::{HRModelParamIdx, HRModelStateIdx};
 pub use izhikevich::IZHIKEVICH_CUDA_SOURCE;
 pub use izhikevich::{
-    IzhParamIdx, IzhikevichModel, IzhikevichModelParamIdx, IzhikevichModelStateIdx,
-    IzhikevichParams, IzhikevichState,
+    IzhikevichModel, IzhikevichModelParamIdx, IzhikevichModelStateIdx, IzhikevichParams,
+    IzhikevichState,
+};
+pub use izhikevich_2007::IZHIKEVICH_2007_CUDA_SOURCE;
+pub use izhikevich_2007::{
+    Izhikevich2007Model, Izhikevich2007ModelParamIdx, Izhikevich2007ModelStateIdx,
+    Izhikevich2007Params, Izhikevich2007State,
 };
 pub use izhikevich_dual::IZHIKEVICH_DUAL_CUDA_SOURCE;
 pub use izhikevich_dual::{
@@ -92,17 +98,20 @@ pub use lifat::LIFAT_CUDA_SOURCE;
 pub use lifat::{LIFAtModel, LIFAtModelParamIdx, LIFAtModelStateIdx, LIFAtParams, LIFAtState};
 pub use morris_lecar::MORRIS_LECAR_CUDA_SOURCE;
 pub use morris_lecar::{
-    MLParamIdx, MorrisLecarModel, MorrisLecarModelParamIdx, MorrisLecarModelStateIdx,
-    MorrisLecarParams, MorrisLecarState,
+    MorrisLecarModel, MorrisLecarModelParamIdx, MorrisLecarModelStateIdx, MorrisLecarParams,
+    MorrisLecarState,
 };
 pub use rate::RATE_CUDA_SOURCE;
 pub use rate::{RateModel, RateModelParamIdx, RateModelStateIdx, RateParams, RateState};
 pub use saw::SAWModel;
 pub use saw::SAW_CUDA_SOURCE;
 pub use saw::{SAWModelParamIdx, SAWModelStateIdx};
+pub use transformer::{
+    TransformerModel, TransformerModelParamIdx, TransformerModelStateIdx, TRANSFORMER_CUDA_SOURCE,
+};
 pub use triangulated::TriangulatedModel;
 pub use vsn::VSN_CUDA_SOURCE;
-pub use vsn::{VSNModel, VSNModelParamIdx, VSNModelStateIdx, VSNParamIdx, VSNParams, VSNState};
+pub use vsn::{VSNModel, VSNModelParamIdx, VSNModelStateIdx, VSNParams, VSNState};
 pub use wc::WCModel;
 pub use wc::WC_CUDA_SOURCE;
 pub use wc::{WCModelParamIdx, WCModelStateIdx};

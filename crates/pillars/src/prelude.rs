@@ -52,8 +52,8 @@ pub use crate::zoo::{
 #[cfg(feature = "rayon")]
 pub use crate::core::run_neuron_par;
 pub use crate::core::{
-    run_neuron, run_neuron_ext, ComputeNeuron, Cond, NeuralPopulation, SimdContext, SimdLane,
-    StepContext,
+    run_neuron, run_neuron_ext, run_neuron_slices, ComputeNeuron, Cond, NeuralPopulation,
+    NeuronState, SimdContext, SimdLane, StepContext,
 };
 
 // ═══ Layer 4: math/ — canonical per-lane primitives ═════════
@@ -83,7 +83,8 @@ pub use crate::kernels::dendrite::{CableDendriteState, DendriteConfig, DendriteD
 pub use crate::kernels::dopamine::{dopamine_traces_step, dopamine_weight_update};
 pub use crate::kernels::hh_channels::{
     cat_c_alpha, cat_c_beta, k_n_alpha, k_n_beta, na_h_alpha, na_h_beta, na_m_alpha, na_m_beta,
-    pacemaking_channels, standard_channels, steady_state_gates, ChannelSpec, GateSpec, RateFn,
+    pacemaking_channels, standard_channels, steady_state_gates, ChannelSpec, ClosedForm,
+    GateKinetics, GateSpec,
 };
 pub use crate::kernels::input::{bsa_encode, phase_encode, PoissonGenerator, TtfsEncoder};
 pub use crate::kernels::learning::{

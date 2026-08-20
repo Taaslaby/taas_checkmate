@@ -595,20 +595,20 @@ mod tests {
 
     fn make_hh_params_for_lut() -> Vec<f32> {
         use crate::zoo::neurons::HHModel;
-        use crate::zoo::neurons::HHParamIdx;
+        use crate::zoo::neurons::HHModelParamIdx;
         let n = 1;
         let mut p = vec![0.0; n * HHModel::N_PARAMS];
         for i in 0..n {
-            p[HHParamIdx::DT as usize * n + i] = 0.01;
-            p[HHParamIdx::G_Na as usize * n + i] = 120.0;
-            p[HHParamIdx::E_Na as usize * n + i] = 50.0;
-            p[HHParamIdx::G_K as usize * n + i] = 36.0;
-            p[HHParamIdx::E_K as usize * n + i] = -77.0;
-            p[HHParamIdx::G_Leak as usize * n + i] = 0.3;
-            p[HHParamIdx::E_Leak as usize * n + i] = -54.387;
-            p[HHParamIdx::Q10 as usize * n + i] = 1.0;
-            p[HHParamIdx::V_Thresh as usize * n + i] = 0.0;
-            p[HHParamIdx::Inv_Cm as usize * n + i] = 1.0;
+            p[HHModelParamIdx::dt as usize * n + i] = 0.01;
+            p[HHModelParamIdx::g_Na as usize * n + i] = 120.0;
+            p[HHModelParamIdx::E_Na as usize * n + i] = 50.0;
+            p[HHModelParamIdx::g_K as usize * n + i] = 36.0;
+            p[HHModelParamIdx::E_K as usize * n + i] = -77.0;
+            p[HHModelParamIdx::g_Leak as usize * n + i] = 0.3;
+            p[HHModelParamIdx::E_Leak as usize * n + i] = -54.387;
+            p[HHModelParamIdx::q10 as usize * n + i] = 1.0;
+            p[HHModelParamIdx::v_thresh as usize * n + i] = 0.0;
+            p[HHModelParamIdx::inv_cm as usize * n + i] = 1.0;
         }
         p
     }

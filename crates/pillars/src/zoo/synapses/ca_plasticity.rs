@@ -14,26 +14,7 @@ use crate::ops::spike::spike_to_float;
 use pillars_macros::NeuronModel;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum CaPlastParamIdx {
-    DT = 0,         // ms
-    Inv_Tau_Ca = 1, // 1/τ_ca (ms⁻¹)
-    Alpha = 2,      // Ca²⁺ influx per spike
-    Eta = 3,        // learning rate
-    Target = 4,     // target Ca²⁺ product
-    W_Init = 5,     // initial weight
-}
-
-impl From<CaPlastParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: CaPlastParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Calcium-based synaptic plasticity rule.
 ///
@@ -134,12 +115,12 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0f32; n * 6];
         for i in 0..n {
-            p[CaPlastParamIdx::DT as usize * n + i] = 1.0;
-            p[CaPlastParamIdx::Inv_Tau_Ca as usize * n + i] = 1.0 / 20.0;
-            p[CaPlastParamIdx::Alpha as usize * n + i] = 0.1;
-            p[CaPlastParamIdx::Eta as usize * n + i] = 0.01;
-            p[CaPlastParamIdx::Target as usize * n + i] = 0.01;
-            p[CaPlastParamIdx::W_Init as usize * n + i] = 0.5;
+            p[CaPlasticityModelParamIdx::dt as usize * n + i] = 1.0;
+            p[CaPlasticityModelParamIdx::inv_tau_ca as usize * n + i] = 1.0 / 20.0;
+            p[CaPlasticityModelParamIdx::alpha as usize * n + i] = 0.1;
+            p[CaPlasticityModelParamIdx::eta as usize * n + i] = 0.01;
+            p[CaPlasticityModelParamIdx::target as usize * n + i] = 0.01;
+            p[CaPlasticityModelParamIdx::w_init as usize * n + i] = 0.5;
         }
         p
     }
@@ -227,7 +208,7 @@ mod tests {
         let n = 8;
         let mut p = make_params(n);
         for i in 0..n {
-            p[CaPlastParamIdx::Eta as usize * n + i] = 1.0;
+            p[CaPlasticityModelParamIdx::eta as usize * n + i] = 1.0;
         }
         let mut ca_pre = vec![0.0; n];
         let mut ca_post = vec![0.0; n];

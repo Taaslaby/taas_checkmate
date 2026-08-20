@@ -5,6 +5,5 @@
 mod astrocyte;
 
 pub use astrocyte::{
-    AstroParamIdx, AstrocyteModel, AstrocyteModelParamIdx, AstrocyteModelStateIdx, AstrocyteParams,
-    AstrocyteState,
+    AstrocyteModel, AstrocyteModelParamIdx, AstrocyteModelStateIdx, AstrocyteParams, AstrocyteState,
 };

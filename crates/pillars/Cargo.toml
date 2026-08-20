@@ -7,6 +7,7 @@ license.workspace = true
 description = "Pillars — reusable SIMD bio primitives for neural computation"
 
 [dependencies]
+roxmltree = "0.20"
 wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 rand = "0.8"
@@ -33,6 +34,10 @@ required-features = ["rayon"]
 
 [[bench]]
 name = "bench_formula"
+harness = false
+
+[[bench]]
+name = "bench_cable"
 harness = false
 
 [features]

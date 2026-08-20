@@ -26,8 +26,8 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use wide::f32x8;
 
-// Import I_SYN_CLAMP_RANGE from population module
-use super::population::I_SYN_CLAMP_RANGE;
+// Import the model-aware clamp helper from population module
+use super::population::clamp_i_syn;
 
 // ═══════════════════════════════════════════════════════════════
 //  SendablePtrs — Type-Safe Pointer Wrapper for Rayon
@@ -45,6 +45,7 @@ use super::population::I_SYN_CLAMP_RANGE;
 /// Raw pointers (*mut T, *const T) are !Send by default. Encoding as usize
 /// allows the closure to be Send, with the safety contract enforced by the
 /// caller (run_neuron_par ensures disjoint memory access per thread).
+#[cfg(feature = "rayon")]
 #[derive(Copy, Clone)]
 struct SendablePtrs {
     state: [usize; 6],
@@ -55,16 +56,18 @@ struct SendablePtrs {
 
 // SAFETY: usize-encoded pointers carry no provenance — the wrapper is pure
 // data. run_neuron_par guarantees disjoint memory access per thread.
+#[cfg(feature = "rayon")]
 unsafe impl Send for SendablePtrs {}
 // SAFETY: read-only sharing is safe because each rayon thread accesses
 // disjoint neuron ranges (no mutable aliasing).
+#[cfg(feature = "rayon")]
 unsafe impl Sync for SendablePtrs {}
 
 // ═══════════════════════════════════════════════════════════════
 //  Memory Overlap Detection (Debug Mode)
 // ═══════════════════════════════════════════════════════════════
 
-#[cfg(debug_assertions)]
+#[cfg(all(feature = "rayon", debug_assertions))]
 fn check_no_overlap(ranges: &[(usize, usize)]) {
     for i in 0..ranges.len() {
         for j in (i + 1)..ranges.len() {
@@ -84,6 +87,7 @@ fn check_no_overlap(ranges: &[(usize, usize)]) {
     }
 }
 
+#[cfg(feature = "rayon")]
 impl SendablePtrs {
     /// SAFETY: caller must ensure all pointers are valid for the duration of
     /// parallel execution and that threads access disjoint ranges.
@@ -238,6 +242,89 @@ macro_rules! save_state_simd {
 //  Low-Level Runner Functions
 // ═══════════════════════════════════════════════════════════════
 
+/// The six SoA state buffers of [`run_neuron`], as optional slices.
+///
+/// `None` slots map to null pointers in the kernel — the same contract as
+/// [`run_neuron`] (a model with fewer than 6 state channels leaves the rest
+/// empty). The safe entry point [`run_neuron_slices`] turns this into the raw
+/// pointer call, so callers never touch pointers themselves.
+#[derive(Default)]
+pub struct NeuronState<'a> {
+    /// State channel 0 (usually membrane voltage).
+    pub v: Option<&'a mut [f32]>,
+    /// State channel 1 (usually recovery / adaptation).
+    pub u: Option<&'a mut [f32]>,
+    /// State channel 2.
+    pub h: Option<&'a mut [f32]>,
+    /// State channel 3.
+    pub r: Option<&'a mut [f32]>,
+    /// State channel 4.
+    pub s: Option<&'a mut [f32]>,
+    /// State channel 5.
+    pub t: Option<&'a mut [f32]>,
+}
+
+/// Safe front-end to [`run_neuron`] — slice-based, no raw pointers.
+///
+/// The six state slots plus `i_in`/`spikes` share one length `n` (the
+/// population size of this chunk); `params` is the SoA parameter block of
+/// length `n × M::N_PARAMS` (column-major, same as [`run_neuron`]).
+/// `None`/empty state slots are treated as absent state channels, exactly
+/// like null pointers in [`run_neuron`]. This is the only sanctioned way for
+/// higher layers (`api/`) to step a raw model — the `unsafe` lives here, once.
+///
+/// # Panics
+/// If the per-neuron buffers disagree on length, or `params` is too short.
+#[inline]
+pub fn run_neuron_slices<M: Model>(
+    state: NeuronState<'_>,
+    i_in: &[f32],
+    spikes: &mut [i32],
+    params: &[f32],
+) {
+    let lengths = [
+        state.v.as_ref().map_or(0, |s| s.len()),
+        state.u.as_ref().map_or(0, |s| s.len()),
+        state.h.as_ref().map_or(0, |s| s.len()),
+        state.r.as_ref().map_or(0, |s| s.len()),
+        state.s.as_ref().map_or(0, |s| s.len()),
+        state.t.as_ref().map_or(0, |s| s.len()),
+        i_in.len(),
+        spikes.len(),
+    ];
+    let n = lengths.iter().copied().max().unwrap_or(0);
+    for (slot, &len) in lengths.iter().enumerate() {
+        assert!(
+            len == 0 || len == n,
+            "run_neuron_slices: buffer {slot} length {len} != n {n}"
+        );
+    }
+    assert!(
+        params.len() >= n * M::N_PARAMS,
+        "run_neuron_slices: params length {} < n·N_PARAMS {} (n={n}, N_PARAMS={})",
+        params.len(),
+        n * M::N_PARAMS,
+        M::N_PARAMS,
+    );
+    let mut_ptr = |s: Option<&mut [f32]>| s.map_or(std::ptr::null_mut(), |s| s.as_mut_ptr());
+    // SAFETY: all slices were length-checked above, so every non-null pointer
+    // is valid for `n` elements — the exact contract of `run_neuron`.
+    unsafe {
+        run_neuron::<M>(
+            mut_ptr(state.v),
+            mut_ptr(state.u),
+            mut_ptr(state.h),
+            mut_ptr(state.r),
+            mut_ptr(state.s),
+            mut_ptr(state.t),
+            i_in.as_ptr(),
+            spikes.as_mut_ptr(),
+            params.as_ptr(),
+            n,
+        )
+    }
+}
+
 /// Legacy raw runner — accepts exactly **6 state pointers** (v,u,h,r,s,t).
 ///
 /// Models with more than 6 states must use [`NeuralPopulation`](crate::core::NeuralPopulation)
@@ -341,10 +428,8 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
             // SAFETY: i_in is valid for n elements; off + 8 <= n.
             // read_unaligned is required — external buffers are not SIMD-aligned.
-            let i_syn = (i_in.add(off) as *const f32x8)
-                .read_unaligned()
-                .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
-                .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
+            let i_syn_raw = (i_in.add(off) as *const f32x8).read_unaligned();
+            let i_syn = clamp_i_syn::<M, f32x8>(i_syn_raw);
 
             // SAFETY: i_pre_in/i_post_in are valid for n elements when non-null
             // (caller contract). off + 8 <= n.
@@ -394,15 +479,15 @@ pub unsafe fn run_neuron_ext<M: Model>(
                     }
                 }
             }
-    }
+        }
     }
 
     // ── Scalar tail (n8..n) — one neuron at a time ──
     if n8 < n {
         for i in n8..n {
-        unsafe {
+            unsafe {
                 // SAFETY: i < n (loop bound), all pointers valid for n elements.
-                let ii = (*i_in.add(i)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                let ii = clamp_i_syn::<M, f32>(*i_in.add(i));
                 // SAFETY: i_pre_in/i_post_in valid for n when non-null.
                 let i_pre = if i_pre_in.is_null() {
                     0.0
@@ -423,7 +508,8 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
                 let mut ctx = SimdContext::<f32> {
                     state,
-                    params_ptr: NonNull::new(params as *mut f32).expect("params_ptr must be non-null"),
+                    params_ptr: NonNull::new(params as *mut f32)
+                        .expect("params_ptr must be non-null"),
                     param_count: M::N_PARAMS,
                     n,
                     off: i,
@@ -445,7 +531,7 @@ pub unsafe fn run_neuron_ext<M: Model>(
                 if M::HAS_SPIKE {
                     *spikes.add(i) = ctx.spike_mask().move_mask() as i32;
                 }
-    }
+            }
         }
     }
 }
@@ -518,7 +604,7 @@ pub unsafe fn run_neuron_par<M: Model>(
         let dt = unsafe { *params_ptr };
 
         for chunk_off in (0..n8).step_by(8) {
-        unsafe {
+            unsafe {
                 let total_off = off + chunk_off;
                 // SAFETY: total_off + 8 <= off + n8 <= n; all state pointers valid for n.
                 // read_unaligned tolerates any alignment.
@@ -528,10 +614,8 @@ pub unsafe fn run_neuron_par<M: Model>(
                 }
 
                 // SAFETY: i_in_ptr valid for n elements; total_off + 8 <= n.
-                let i_syn = (i_in_ptr.add(total_off) as *const f32x8)
-                    .read_unaligned()
-                    .max(f32x8::splat(I_SYN_CLAMP_RANGE.0))
-                    .min(f32x8::splat(I_SYN_CLAMP_RANGE.1));
+                let i_syn_raw = (i_in_ptr.add(total_off) as *const f32x8).read_unaligned();
+                let i_syn = clamp_i_syn::<M, f32x8>(i_syn_raw);
 
                 let mut ctx = SimdContext::<f32x8> {
                     state,
@@ -568,16 +652,16 @@ pub unsafe fn run_neuron_par<M: Model>(
                         }
                     }
                 }
-    }
+            }
         }
 
         // ── Scalar tail (n8..len) — one neuron at a time ──
         if n8 < len {
             for j in n8..len {
-        unsafe {
+                unsafe {
                     let idx = off + j;
                     // SAFETY: idx < n; all pointers valid for n elements (disjoint range).
-                    let ii = (*i_in_ptr.add(idx)).clamp(I_SYN_CLAMP_RANGE.0, I_SYN_CLAMP_RANGE.1);
+                    let ii = clamp_i_syn::<M, f32>(*i_in_ptr.add(idx));
                     // SAFETY: state_ptrs valid for n; idx < n.
                     let mut state = [0.0f32; MAX_STATES];
                     for k in 0..M::N_STATE {
@@ -605,7 +689,7 @@ pub unsafe fn run_neuron_par<M: Model>(
                     if M::HAS_SPIKE {
                         *spikes_ptr.add(idx) = ctx.spike_mask().move_mask() as i32;
                     }
-    }
+                }
             }
         }
     });
@@ -691,6 +775,50 @@ mod tests {
             );
         }
         // Should not crash with n=0
+    }
+
+    /// `#[no_clamp]` (`CLAMP_I_SYN = false`) в legacy-раннере: `i_syn = 500`
+    /// должен пройти без клампа в `g` (state 1). Покрывает SIMD-блок и хвост.
+    #[test]
+    fn test_run_neuron_no_clamp_passes_input_through() {
+        use crate::zoo::neurons::AlphaLifModel;
+        let n = 9;
+        // Params: dt, time_factor, v_rest, v_thresh, v_reset, refr_steps, syn_decay
+        let mut params = vec![0.0f32; n * 7];
+        for i in 0..n {
+            params[i] = 0.1;
+            params[n + i] = 0.1 / 20.0;
+            params[2 * n + i] = -52.0;
+            params[3 * n + i] = -45.0;
+            params[4 * n + i] = -52.0;
+            params[5 * n + i] = 22.0;
+            params[6 * n + i] = 1.0 - 0.1 / 5.0;
+        }
+        let mut v = vec![-52.0f32; n];
+        let mut g = vec![0.0f32; n];
+        let mut refr = vec![22.0f32; n];
+        let i_in = vec![500.0f32; n];
+        let mut spikes = vec![0i32; n];
+        unsafe {
+            run_neuron::<AlphaLifModel>(
+                v.as_mut_ptr(),
+                g.as_mut_ptr(),
+                refr.as_mut_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                i_in.as_ptr(),
+                spikes.as_mut_ptr(),
+                params.as_ptr(),
+                n,
+            );
+        }
+        for (i, &gi) in g.iter().enumerate() {
+            assert!(
+                (gi - 500.0).abs() < 1e-3,
+                "legacy runner neuron {i}: g={gi}, ожидался неклампированный вход 500"
+            );
+        }
     }
 
     #[test]

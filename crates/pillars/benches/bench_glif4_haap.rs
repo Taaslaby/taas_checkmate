@@ -36,7 +36,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use pillars::prelude::*;
-use pillars::zoo::{GLIF4ParamIdx, HAAParamIdx};
+use pillars::zoo::{GLIF4ModelParamIdx, HAAPModelParamIdx};
 
 // ═══════════════════════════════════════════════════════════════
 //  Constants
@@ -54,17 +54,17 @@ fn make_glif4_params(n: usize) -> Vec<f32> {
     let inv_tau_theta = 1.0 / 30.0;
     let mut p = vec![0.0f32; n * GLIF4Model::N_PARAMS];
     for i in 0..n {
-        p[GLIF4ParamIdx::DT as usize * n + i] = 1.0;
-        p[GLIF4ParamIdx::G_Leak as usize * n + i] = 0.1;
-        p[GLIF4ParamIdx::E_Leak as usize * n + i] = -65.0;
-        p[GLIF4ParamIdx::V_Thresh_0 as usize * n + i] = -50.0;
-        p[GLIF4ParamIdx::V_Reset as usize * n + i] = -65.0;
-        p[GLIF4ParamIdx::Inv_Tau_AHP as usize * n + i] = inv_tau_ahp;
-        p[GLIF4ParamIdx::Delta_G as usize * n + i] = 0.01;
-        p[GLIF4ParamIdx::E_AHP as usize * n + i] = -80.0;
-        p[GLIF4ParamIdx::Inv_Tau_Theta as usize * n + i] = inv_tau_theta;
-        p[GLIF4ParamIdx::Delta_Theta as usize * n + i] = 3.0;
-        p[GLIF4ParamIdx::Tau_Ref as usize * n + i] = 2.0;
+        p[GLIF4ModelParamIdx::dt as usize * n + i] = 1.0;
+        p[GLIF4ModelParamIdx::g_leak as usize * n + i] = 0.1;
+        p[GLIF4ModelParamIdx::e_leak as usize * n + i] = -65.0;
+        p[GLIF4ModelParamIdx::v_thresh_0 as usize * n + i] = -50.0;
+        p[GLIF4ModelParamIdx::v_reset as usize * n + i] = -65.0;
+        p[GLIF4ModelParamIdx::inv_tau_ahp as usize * n + i] = inv_tau_ahp;
+        p[GLIF4ModelParamIdx::delta_g as usize * n + i] = 0.01;
+        p[GLIF4ModelParamIdx::e_ahp as usize * n + i] = -80.0;
+        p[GLIF4ModelParamIdx::inv_tau_theta as usize * n + i] = inv_tau_theta;
+        p[GLIF4ModelParamIdx::delta_theta as usize * n + i] = 3.0;
+        p[GLIF4ModelParamIdx::tau_ref as usize * n + i] = 2.0;
     }
     p
 }
@@ -74,23 +74,23 @@ fn make_haap_params(n: usize) -> Vec<f32> {
     let inv_tau_h = 1.0 / 200.0;
     let mut p = vec![0.0f32; n * HAAPModel::N_PARAMS];
     for i in 0..n {
-        p[HAAParamIdx::DT as usize * n + i] = 0.05;
-        p[HAAParamIdx::Inv_Cm as usize * n + i] = 1.0;
-        p[HAAParamIdx::G_L as usize * n + i] = 0.1;
-        p[HAAParamIdx::E_L as usize * n + i] = -65.0;
-        p[HAAParamIdx::G_M as usize * n + i] = 0.5;
-        p[HAAParamIdx::E_K as usize * n + i] = -80.0;
-        p[HAAParamIdx::G_H as usize * n + i] = 0.3;
-        p[HAAParamIdx::E_H as usize * n + i] = -30.0;
-        p[HAAParamIdx::Inv_Tau_U as usize * n + i] = inv_tau_u;
-        p[HAAParamIdx::Inv_Tau_H as usize * n + i] = inv_tau_h;
-        p[HAAParamIdx::V_Half_U as usize * n + i] = -35.0;
-        p[HAAParamIdx::K_U as usize * n + i] = 5.0;
-        p[HAAParamIdx::V_Half_H as usize * n + i] = -75.0;
-        p[HAAParamIdx::K_H as usize * n + i] = 6.0;
-        p[HAAParamIdx::V_Thresh as usize * n + i] = -40.0;
-        p[HAAParamIdx::V_Reset as usize * n + i] = -55.0;
-        p[HAAParamIdx::Delta_U as usize * n + i] = 0.02;
+        p[HAAPModelParamIdx::dt as usize * n + i] = 0.05;
+        p[HAAPModelParamIdx::inv_cm as usize * n + i] = 1.0;
+        p[HAAPModelParamIdx::g_l as usize * n + i] = 0.1;
+        p[HAAPModelParamIdx::e_l as usize * n + i] = -65.0;
+        p[HAAPModelParamIdx::g_m as usize * n + i] = 0.5;
+        p[HAAPModelParamIdx::e_k as usize * n + i] = -80.0;
+        p[HAAPModelParamIdx::g_h as usize * n + i] = 0.3;
+        p[HAAPModelParamIdx::e_h as usize * n + i] = -30.0;
+        p[HAAPModelParamIdx::inv_tau_u as usize * n + i] = inv_tau_u;
+        p[HAAPModelParamIdx::inv_tau_h as usize * n + i] = inv_tau_h;
+        p[HAAPModelParamIdx::v_half_u as usize * n + i] = -35.0;
+        p[HAAPModelParamIdx::k_u as usize * n + i] = 5.0;
+        p[HAAPModelParamIdx::v_half_h as usize * n + i] = -75.0;
+        p[HAAPModelParamIdx::k_h as usize * n + i] = 6.0;
+        p[HAAPModelParamIdx::v_thresh as usize * n + i] = -40.0;
+        p[HAAPModelParamIdx::v_reset as usize * n + i] = -55.0;
+        p[HAAPModelParamIdx::delta_u as usize * n + i] = 0.02;
     }
     p
 }

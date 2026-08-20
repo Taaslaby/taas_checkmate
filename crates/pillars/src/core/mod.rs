@@ -27,7 +27,6 @@
 //! | `lane_f32.rs` | Scalar | `SimdLane for f32` — scalar fallback |
 //! | `cond.rs` | Blend | `Cond<S>` — `.then().else_()` chain |
 //! | `context.rs` | Execution | `SimdContext<S>` — state + params + buses (ядро) |
-//! | `context_ops.rs` | Bio prims | Биологические опкоды `SimdContext` (leak_integrate, fire_reset, …) |
 //! | `compute.rs` | Typed API | `ComputeNeuron` + `StepContext` |
 //! | `population.rs` | Runner | `NeuralPopulation` (макросы load/save, unbounded states) |
 //! | `runner.rs` | Legacy | `run_neuron*` — raw-pointer runners (≤6 состояний по сигнатуре) |
@@ -59,7 +58,6 @@ pub mod buf;
 pub mod compute;
 pub mod cond;
 pub mod context;
-pub mod context_ops;
 pub mod lane;
 pub mod lane_f32;
 pub mod lane_f32x8;
@@ -83,4 +81,4 @@ pub use lane::SimdLane;
 pub use population::NeuralPopulation;
 #[cfg(feature = "rayon")]
 pub use runner::run_neuron_par;
-pub use runner::{run_neuron, run_neuron_ext};
+pub use runner::{run_neuron, run_neuron_ext, run_neuron_slices, NeuronState};

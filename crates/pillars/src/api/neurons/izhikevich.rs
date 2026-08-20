@@ -6,7 +6,6 @@
 
 #![allow(non_snake_case)]
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::{IzhikevichDualModel, IzhikevichModel};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -125,20 +124,17 @@ fn process_chunk(
         params[40 + j] = tau_ref;
         params[48 + j] = 30.0; // legacy v_th (hardcoded)
     }
-    unsafe {
-        run_neuron::<IzhikevichModel>(
-            v8.as_mut_ptr(),
-            u8.as_mut_ptr(),
-            refr8.as_mut_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<IzhikevichModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(u8),
+            h: Some(refr8),
+            ..Default::default()
+        },
+        &I8[..],
+        sp8,
+        &params,
+    );
     // ── Legacy STDP side-output: trace (НЕ состояние pillars-модели).
     for j in 0..8 {
         if refr8[j] > 0.0 {
@@ -291,20 +287,19 @@ fn process_chunk_dual(
         params[64 + j] = tau_m;
         params[72 + j] = w_m;
     }
-    unsafe {
-        run_neuron::<IzhikevichDualModel>(
-            v8.as_mut_ptr(),
-            u8.as_mut_ptr(),
-            refr8.as_mut_ptr(),
-            tr8.as_mut_ptr(),
-            m8.as_mut_ptr(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<IzhikevichDualModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(u8),
+            h: Some(refr8),
+            r: Some(tr8),
+            s: Some(m8),
+            ..Default::default()
+        },
+        &I8[..],
+        sp8,
+        &params,
+    );
 }
 
 #[cfg(test)]

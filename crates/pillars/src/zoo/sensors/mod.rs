@@ -17,4 +17,4 @@
 //! | [`chordotonal`] | mechanical stretch | Drosophila scolopidial mechanoreceptors (SIMD-accelerated) |
 
 pub mod chordotonal;
-pub use chordotonal::chordotonal_step;
+pub use chordotonal::{chordotonal_step, chordotonal_step_slices};

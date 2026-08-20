@@ -9,7 +9,7 @@ use proc_macro2::TokenStream as TS2;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Ident};
 
-use super::util::{base_name, no_spike, pillars_path, role, Role};
+use super::util::{base_name, is_broadcast, no_clamp, no_spike, pillars_path, role, Role};
 
 pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -27,12 +27,18 @@ pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
 
     let mut sf: Vec<Ident> = Vec::new();
     let mut pf: Vec<Ident> = Vec::new();
+    // Parallel to `pf`: true if the param is `#[broadcast]` (constant across
+    // the population → read as a scalar splat instead of a column load).
+    let mut pf_bc: Vec<bool> = Vec::new();
 
     for f in fields.iter() {
         let id = f.ident.clone().expect("named field");
         match role(&f.attrs) {
             Some(Role::State) => sf.push(id),
-            Some(Role::Param) => pf.push(id),
+            Some(Role::Param) => {
+                pf.push(id);
+                pf_bc.push(is_broadcast(&f.attrs));
+            }
             None => panic!("field `{}` needs #[state] or #[param]", id),
         }
     }
@@ -43,12 +49,14 @@ pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
     let ns = sf.len();
     let np = pf.len();
     let has_spike = !no_spike(&input.attrs);
+    let clamp_i_syn = !no_clamp(&input.attrs);
 
     // Type names: LIF → LIFState, LIFParams (not LIFModelState)
     let sn = Ident::new(&format!("{}State", base), name.span());
     let pn = Ident::new(&format!("{}Params", base), name.span());
-    // Index enums: use the FULL model name (LIFModelParamIdx) so they never
-    // collide with the hand-written short enums (IzhParamIdx, HHParamIdx, …).
+    // Index enums: use the FULL model name (LIFModelParamIdx). The old
+    // hand-written short enums (IzhParamIdx, HHParamIdx, …) were removed —
+    // these generated enums are now the single source of truth.
     let param_enum = Ident::new(&format!("{}ParamIdx", name), name.span());
     let state_enum = Ident::new(&format!("{}StateIdx", name), name.span());
 
@@ -96,11 +104,18 @@ pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // Params from_ctx
+    // Params from_ctx — `#[broadcast]` params read via `ctx.pb` (scalar splat,
+    // 4 bytes) instead of `ctx.p` (full S::SIZE-lane column load).
     let p_from_ctx: TS2 = pf
         .iter()
         .enumerate()
-        .map(|(i, id)| quote! { #id: ctx.p(#i), })
+        .map(|(i, id)| {
+            if pf_bc[i] {
+                quote! { #id: ctx.pb(#i), }
+            } else {
+                quote! { #id: ctx.p(#i), }
+            }
+        })
         .collect();
 
     // Params pack_row / pack_soa
@@ -234,6 +249,7 @@ pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
             const N_PARAMS: usize = #np;
             const N_STATE: usize = #ns;
             const HAS_SPIKE: bool = #has_spike;
+            const CLAMP_I_SYN: bool = #clamp_i_syn;
 
             #[inline(always)]
             fn step<S: #pillars::core::lane::SimdLane>(ctx: &mut #pillars::core::context::SimdContext<S>) {

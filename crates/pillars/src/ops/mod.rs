@@ -15,7 +15,6 @@
 //! | `gate` | Gate kinetics | `gate_integrate(g, g_inf, inv_tau, dt)` |
 //! | `adaptation` | Adaptation | `m_current(v, v_half, k, g_max, e_k)` |
 //! | `calcium` | Ca²⁺ dynamics | `calcium_step(ca, spike, alpha, inv_tau, dt)` |
-//! | `synapse` | Synaptic current | `dual_exp_step(g1, g2, spike, ...)` |
 //! | `polynomial` | Horner forms | `v * (0.04 * v + 5.0) + 140` (Izhikevich poly) |
 //! | `triangulated` | LUT inference | `quantize_v() + lookup()` |
 //! | `channels` | Ion channels | `kir`, `hcn`, `gap`, `glucl`, `km`, `leak` |
@@ -48,7 +47,6 @@ pub mod plasticity;
 pub mod polynomial;
 pub mod refractory;
 pub mod spike;
-pub mod synapse;
 pub mod triangulated;
 
 pub use adaptation::*;
@@ -64,4 +62,3 @@ pub use plasticity::*;
 pub use polynomial::*;
 pub use refractory::*;
 pub use spike::*;
-pub use synapse::*;

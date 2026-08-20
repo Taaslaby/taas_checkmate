@@ -172,27 +172,21 @@ impl ChordotonalState {
         let mut stretches_padded = stretches.to_vec();
         stretches_padded.resize(self.n_padded, 0.0);
 
-        let (_d_loads_padded, d_loads_ptr) = if let Some(dl) = d_loads {
+        let d_loads_padded = d_loads.map(|dl| {
             let mut padded = dl.to_vec();
             padded.resize(self.n_padded, 0.0);
-            let ptr = padded.as_ptr();
-            (padded, ptr)
-        } else {
-            (vec![], std::ptr::null())
-        };
+            padded
+        });
 
-        unsafe {
-            crate::zoo::sensors::chordotonal_step(
-                self.v_sens.as_mut_ptr(),
-                self.adapt.as_mut_ptr(),
-                self.rates.as_mut_ptr(),
-                loads_padded.as_ptr(),
-                stretches_padded.as_ptr(),
-                d_loads_ptr,
-                self.params.as_ptr(),
-                self.n_padded,
-            );
-        }
+        crate::zoo::sensors::chordotonal_step_slices(
+            &mut self.v_sens,
+            &mut self.adapt,
+            &mut self.rates,
+            &loads_padded,
+            &stretches_padded,
+            d_loads_padded.as_deref(),
+            &self.params,
+        );
     }
 
     /// Get firing rates for the first `n` sensors.
@@ -200,4 +194,3 @@ impl ChordotonalState {
         &self.rates[..self.n]
     }
 }
-

@@ -12,29 +12,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum GLIF3ParamIdx {
-    DT = 0,          // ms
-    G_Leak = 1,      // mS/cm²
-    E_Leak = 2,      // mV
-    V_Thresh = 3,    // mV
-    V_Reset = 4,     // mV
-    Inv_Tau_AHP = 5, // 1/τ_ahp (ms⁻¹)
-    Delta_G = 6,     // g_ahp increment
-    E_AHP = 7,       // mV
-    Tau_Ref = 8,     // ms
-}
-
-impl From<GLIF3ParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: GLIF3ParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Generalized LIF with after-spike hyperpolarizing current.
 ///
@@ -138,15 +116,15 @@ mod tests {
         let inv_tau_ahp = 1.0 / 50.0;
         let mut p = vec![0.0f32; n * 9];
         for i in 0..n {
-            p[GLIF3ParamIdx::DT as usize * n + i] = 1.0;
-            p[GLIF3ParamIdx::G_Leak as usize * n + i] = 0.1;
-            p[GLIF3ParamIdx::E_Leak as usize * n + i] = -65.0;
-            p[GLIF3ParamIdx::V_Thresh as usize * n + i] = -50.0;
-            p[GLIF3ParamIdx::V_Reset as usize * n + i] = -65.0;
-            p[GLIF3ParamIdx::Inv_Tau_AHP as usize * n + i] = inv_tau_ahp;
-            p[GLIF3ParamIdx::Delta_G as usize * n + i] = 0.01;
-            p[GLIF3ParamIdx::E_AHP as usize * n + i] = -80.0;
-            p[GLIF3ParamIdx::Tau_Ref as usize * n + i] = tau_ref;
+            p[GLIF3ModelParamIdx::dt as usize * n + i] = 1.0;
+            p[GLIF3ModelParamIdx::g_leak as usize * n + i] = 0.1;
+            p[GLIF3ModelParamIdx::e_leak as usize * n + i] = -65.0;
+            p[GLIF3ModelParamIdx::v_thresh as usize * n + i] = -50.0;
+            p[GLIF3ModelParamIdx::v_reset as usize * n + i] = -65.0;
+            p[GLIF3ModelParamIdx::inv_tau_ahp as usize * n + i] = inv_tau_ahp;
+            p[GLIF3ModelParamIdx::delta_g as usize * n + i] = 0.01;
+            p[GLIF3ModelParamIdx::e_ahp as usize * n + i] = -80.0;
+            p[GLIF3ModelParamIdx::tau_ref as usize * n + i] = tau_ref;
         }
         p
     }
@@ -276,7 +254,7 @@ mod tests {
         let n = 8;
         let mut params = make_params(n, 2.0);
         for i in 0..n {
-            params[GLIF3ParamIdx::Delta_G as usize * n + i] = 0.1;
+            params[GLIF3ModelParamIdx::delta_g as usize * n + i] = 0.1;
         }
         let mut v = vec![-65.0; n];
         let mut g = vec![0.0; n];

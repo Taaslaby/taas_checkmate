@@ -22,7 +22,7 @@ mod derive;
 mod dual;
 mod util;
 
-#[proc_macro_derive(NeuronModel, attributes(state, param, no_spike))]
+#[proc_macro_derive(NeuronModel, attributes(state, param, no_spike, no_clamp, broadcast))]
 pub fn derive_neuron_model(input: TokenStream) -> TokenStream {
     derive::derive_neuron_model_impl(input)
 }

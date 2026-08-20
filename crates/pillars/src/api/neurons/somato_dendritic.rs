@@ -100,20 +100,16 @@ impl SomatoDendriticNeuron {
         }
 
         // 4. LIF step for all neurons (pillars LIFModel канон)
-        unsafe {
-            crate::core::runner::run_neuron::<crate::zoo::neurons::LIFModel>(
-                self.v.as_mut_ptr(),
-                self.refractory.as_mut_ptr(), // state 1 (refractory)
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                self.I_soma.as_ptr(),
-                self.spikes.as_mut_ptr(),
-                self.params.as_ptr(),
-                self.n,
-            );
-        }
+        crate::core::runner::run_neuron_slices::<crate::zoo::neurons::LIFModel>(
+            crate::core::runner::NeuronState {
+                v: Some(&mut self.v),
+                u: Some(&mut self.refractory), // state 1 (refractory)
+                ..Default::default()
+            },
+            &self.I_soma,
+            &mut self.spikes,
+            &self.params,
+        );
     }
 
     /// Обновить LIF параметры нейрона `nrn`.
@@ -185,4 +181,3 @@ impl SomatoDendriticNeuron {
         self.dendrite.dend_current(nrn)
     }
 }
-

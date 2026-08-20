@@ -8,7 +8,7 @@
 //! - **Horner**: v·(0.04·v + 5.0) + 140 — polynomial optimization
 //! - **Per-type threshold**: params.v_thresh from calibration v2
 //!
-//! The `IzhParamIdx` enum is available for manual param setting via `fill_param()`.
+//! The `IzhikevichModelParamIdx` enum is generated for manual param setting via `fill_param()`.
 //!
 //! # Dual-source (CPU SIMD + CUDA)
 //! The `#[dual_neuron]` wrapper emits `IZHIKEVICH_CUDA_SOURCE: &str` — the
@@ -18,27 +18,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum IzhParamIdx {
-    DT = 0,       // ms
-    A = 1,        // recovery time scale
-    B = 2,        // recovery sensitivity
-    C = 3,        // v_reset (mV)
-    D = 4,        // u bump on spike
-    Tau_Ref = 5,  // ms
-    V_Thresh = 6, // mV (per-type from calibration v2)
-}
-
-impl From<IzhParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: IzhParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 #[dual_neuron]
 pub mod izhikevich {
@@ -154,13 +134,13 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0; n * IzhikevichModel::N_PARAMS];
         for i in 0..n {
-            p[IzhParamIdx::DT as usize * n + i] = 0.5;
-            p[IzhParamIdx::A as usize * n + i] = 0.02;
-            p[IzhParamIdx::B as usize * n + i] = 0.2;
-            p[IzhParamIdx::C as usize * n + i] = -65.0;
-            p[IzhParamIdx::D as usize * n + i] = 8.0;
-            p[IzhParamIdx::Tau_Ref as usize * n + i] = 2.0;
-            p[IzhParamIdx::V_Thresh as usize * n + i] = 30.0;
+            p[IzhikevichModelParamIdx::dt as usize * n + i] = 0.5;
+            p[IzhikevichModelParamIdx::a as usize * n + i] = 0.02;
+            p[IzhikevichModelParamIdx::b as usize * n + i] = 0.2;
+            p[IzhikevichModelParamIdx::c as usize * n + i] = -65.0;
+            p[IzhikevichModelParamIdx::d as usize * n + i] = 8.0;
+            p[IzhikevichModelParamIdx::tau_ref as usize * n + i] = 2.0;
+            p[IzhikevichModelParamIdx::v_thresh as usize * n + i] = 30.0;
         }
         p
     }

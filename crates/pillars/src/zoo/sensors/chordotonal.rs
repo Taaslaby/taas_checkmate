@@ -154,6 +154,50 @@ pub unsafe fn chordotonal_step(
     }
 }
 
+/// Safe slice-based front-end to [`chordotonal_step`] — the raw-pointer kernel
+/// stays in `zoo`, callers (e.g. `api/`) never touch pointers themselves.
+///
+/// `n` is the state length (`v_sens`); every other buffer must be at least
+/// that long (`loads`/`stretches`/`params` are padded by the caller to the
+/// SIMD block width, same as the raw kernel expects). `d_loads` is optional
+/// (velocity sensitivity); `None` maps to a null pointer.
+///
+/// # Panics
+/// If any non-optional buffer is shorter than `v_sens`.
+pub fn chordotonal_step_slices(
+    v_sens: &mut [f32],
+    adapt: &mut [f32],
+    rates: &mut [f32],
+    loads: &[f32],
+    stretches: &[f32],
+    d_loads: Option<&[f32]>,
+    params: &[f32],
+) {
+    let n = v_sens.len();
+    assert!(
+        adapt.len() >= n && rates.len() >= n,
+        "chordotonal_step_slices: state shorter than v_sens"
+    );
+    assert!(
+        loads.len() >= n && stretches.len() >= n && params.len() >= n * 9,
+        "chordotonal_step_slices: input/params shorter than v_sens"
+    );
+    let d_ptr = d_loads.map_or(std::ptr::null(), |s| s.as_ptr());
+    // SAFETY: lengths checked above — every pointer is valid for `n` elements.
+    unsafe {
+        chordotonal_step(
+            v_sens.as_mut_ptr(),
+            adapt.as_mut_ptr(),
+            rates.as_mut_ptr(),
+            loads.as_ptr(),
+            stretches.as_ptr(),
+            d_ptr,
+            params.as_ptr(),
+            n,
+        )
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════════

@@ -12,31 +12,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum GLIF4ParamIdx {
-    DT = 0,            // ms
-    G_Leak = 1,        // mS/cm²
-    E_Leak = 2,        // mV
-    V_Thresh_0 = 3,    // mV — baseline threshold
-    V_Reset = 4,       // mV
-    Inv_Tau_AHP = 5,   // 1/τ_ahp (ms⁻¹)
-    Delta_G = 6,       // g_ahp increment on spike
-    E_AHP = 7,         // mV
-    Inv_Tau_Theta = 8, // 1/τ_θ (ms⁻¹)
-    Delta_Theta = 9,   // θ increment on spike (mV)
-    Tau_Ref = 10,      // ms
-}
-
-impl From<GLIF4ParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: GLIF4ParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Generalized LIF with adaptive threshold θ + after-spike current.
 ///
@@ -157,17 +133,17 @@ mod tests {
         let inv_tau_theta = 1.0 / 30.0;
         let mut p = vec![0.0f32; n * 11];
         for i in 0..n {
-            p[GLIF4ParamIdx::DT as usize * n + i] = 1.0;
-            p[GLIF4ParamIdx::G_Leak as usize * n + i] = 0.1;
-            p[GLIF4ParamIdx::E_Leak as usize * n + i] = -65.0;
-            p[GLIF4ParamIdx::V_Thresh_0 as usize * n + i] = -50.0;
-            p[GLIF4ParamIdx::V_Reset as usize * n + i] = -65.0;
-            p[GLIF4ParamIdx::Inv_Tau_AHP as usize * n + i] = inv_tau_ahp;
-            p[GLIF4ParamIdx::Delta_G as usize * n + i] = 0.01;
-            p[GLIF4ParamIdx::E_AHP as usize * n + i] = -80.0;
-            p[GLIF4ParamIdx::Inv_Tau_Theta as usize * n + i] = inv_tau_theta;
-            p[GLIF4ParamIdx::Delta_Theta as usize * n + i] = 3.0;
-            p[GLIF4ParamIdx::Tau_Ref as usize * n + i] = tau_ref;
+            p[GLIF4ModelParamIdx::dt as usize * n + i] = 1.0;
+            p[GLIF4ModelParamIdx::g_leak as usize * n + i] = 0.1;
+            p[GLIF4ModelParamIdx::e_leak as usize * n + i] = -65.0;
+            p[GLIF4ModelParamIdx::v_thresh_0 as usize * n + i] = -50.0;
+            p[GLIF4ModelParamIdx::v_reset as usize * n + i] = -65.0;
+            p[GLIF4ModelParamIdx::inv_tau_ahp as usize * n + i] = inv_tau_ahp;
+            p[GLIF4ModelParamIdx::delta_g as usize * n + i] = 0.01;
+            p[GLIF4ModelParamIdx::e_ahp as usize * n + i] = -80.0;
+            p[GLIF4ModelParamIdx::inv_tau_theta as usize * n + i] = inv_tau_theta;
+            p[GLIF4ModelParamIdx::delta_theta as usize * n + i] = 3.0;
+            p[GLIF4ModelParamIdx::tau_ref as usize * n + i] = tau_ref;
         }
         p
     }
@@ -320,8 +296,8 @@ mod tests {
         let n = 8;
         let mut params = make_params(n, 2.0);
         for i in 0..n {
-            params[GLIF4ParamIdx::Delta_G as usize * n + i] = 0.1;
-            params[GLIF4ParamIdx::Delta_Theta as usize * n + i] = 1.0;
+            params[GLIF4ModelParamIdx::delta_g as usize * n + i] = 0.1;
+            params[GLIF4ModelParamIdx::delta_theta as usize * n + i] = 1.0;
         }
         let mut v = vec![-65.0; n];
         let mut theta = vec![0.0; n];

@@ -3,7 +3,6 @@
 //! Канон: `step_adex` → `run_neuron::<AdExModel>` (12-col repacking).
 //! E-Prop AdEx Multi — `super::eprop`. Перенесено из `core::neuron::adex`.
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::AdExModel;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -127,20 +126,17 @@ fn process_chunk(
         params[80 + j] = tau_ref;
         params[88 + j] = v_thresh[i + j]; // v_peak := v_thresh
     }
-    unsafe {
-        run_neuron::<AdExModel>(
-            v8.as_mut_ptr(),
-            u8.as_mut_ptr(),
-            refr8.as_mut_ptr(), // state 2 = refractory
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<AdExModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(u8),
+            h: Some(refr8), // state 2 = refractory
+            ..Default::default()
+        },
+        &I8[..],
+        sp8,
+        &params,
+    );
 }
 
 #[cfg(test)]

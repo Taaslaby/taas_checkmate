@@ -42,34 +42,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum MLParamIdx {
-    DT = 0,
-    Inv_C = 1,
-    G_L = 2,
-    E_L = 3,
-    G_Ca = 4,
-    E_Ca = 5,
-    G_K = 6,
-    E_K = 7,
-    V1 = 8,
-    V2 = 9,
-    V3 = 10,
-    V4 = 11,
-    Phi = 12,
-    V_Thresh = 13,
-}
-
-impl From<MLParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: MLParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Morris-Lecar (1981) two-variable conductance-based model.
 ///
@@ -216,20 +189,20 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0; n * MorrisLecarModel::N_PARAMS];
         for i in 0..n {
-            p[MLParamIdx::DT as usize * n + i] = 1.0;
-            p[MLParamIdx::Inv_C as usize * n + i] = 1.0 / 20.0;
-            p[MLParamIdx::G_L as usize * n + i] = 2.0;
-            p[MLParamIdx::E_L as usize * n + i] = -60.0;
-            p[MLParamIdx::G_Ca as usize * n + i] = 4.4;
-            p[MLParamIdx::E_Ca as usize * n + i] = 120.0;
-            p[MLParamIdx::G_K as usize * n + i] = 8.0;
-            p[MLParamIdx::E_K as usize * n + i] = -84.0;
-            p[MLParamIdx::V1 as usize * n + i] = -1.2;
-            p[MLParamIdx::V2 as usize * n + i] = 18.0;
-            p[MLParamIdx::V3 as usize * n + i] = 2.0;
-            p[MLParamIdx::V4 as usize * n + i] = 30.0;
-            p[MLParamIdx::Phi as usize * n + i] = 0.04;
-            p[MLParamIdx::V_Thresh as usize * n + i] = 0.0;
+            p[MorrisLecarModelParamIdx::dt as usize * n + i] = 1.0;
+            p[MorrisLecarModelParamIdx::inv_C as usize * n + i] = 1.0 / 20.0;
+            p[MorrisLecarModelParamIdx::g_L as usize * n + i] = 2.0;
+            p[MorrisLecarModelParamIdx::E_L as usize * n + i] = -60.0;
+            p[MorrisLecarModelParamIdx::g_Ca as usize * n + i] = 4.4;
+            p[MorrisLecarModelParamIdx::E_Ca as usize * n + i] = 120.0;
+            p[MorrisLecarModelParamIdx::g_K as usize * n + i] = 8.0;
+            p[MorrisLecarModelParamIdx::E_K as usize * n + i] = -84.0;
+            p[MorrisLecarModelParamIdx::V1 as usize * n + i] = -1.2;
+            p[MorrisLecarModelParamIdx::V2 as usize * n + i] = 18.0;
+            p[MorrisLecarModelParamIdx::V3 as usize * n + i] = 2.0;
+            p[MorrisLecarModelParamIdx::V4 as usize * n + i] = 30.0;
+            p[MorrisLecarModelParamIdx::phi as usize * n + i] = 0.04;
+            p[MorrisLecarModelParamIdx::v_thresh as usize * n + i] = 0.0;
         }
         p
     }

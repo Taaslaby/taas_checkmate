@@ -817,6 +817,13 @@ fn new_fused_hh(
     total
 }
 
+/// Cross-check the fused HH kernel (`fused_hh_poly_step`, explicit-Euler
+/// membrane) against `run_neuron::<HHModel>` (implicit-Euler membrane, as
+/// NEURON does by default). These are **different membrane integrators**, so
+/// spike counts drift by a few percent at dt=0.05 — the fused kernel is a
+/// legacy fast path; its bit-exact correctness is covered by `hh_parity.rs`
+/// (vs the legacy reference) and HHModel's by `hh_vs_neuron.rs` (vs NEURON).
+/// This test therefore only asserts coarse agreement, not bit-exact parity.
 #[test]
 fn parity_fused_hh_standard() {
     use pillars::kernels::hh_channels::{
@@ -863,7 +870,16 @@ fn parity_fused_hh_standard() {
                 4000,
             );
 
-            assert_parity(&format!("HH n={n} I={i_val}"), old, new);
+            // Explicit vs implicit Euler are expected to drift in spike count;
+            // allow the integrator difference (bit-exact parity lives in
+            // hh_parity.rs).
+            let max = old.max(new).max(1) as f64;
+            let rel = (old - new).abs() as f64 / max;
+            assert!(
+                rel < 0.10,
+                "HH n={n} I={i_val}: spike-count drift too large: fused={old}, hh_model={new} (rel {:.2}%)",
+                rel * 100.0
+            );
         }
     }
 }

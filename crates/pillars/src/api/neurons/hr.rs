@@ -11,7 +11,6 @@
 //! Канон — `zoo::neurons::HRModel` через `run_neuron` (волна 7);
 //! перенесено из `core::neuron::hr`.
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::HRModel;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -50,20 +49,17 @@ fn process_chunk(
         params[56 + j] = xr[i + j];
         params[64 + j] = 1.0; // v_thresh
     }
-    unsafe {
-        run_neuron::<HRModel>(
-            x8.as_mut_ptr(),
-            y8.as_mut_ptr(),
-            z8.as_mut_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<HRModel>(
+        crate::core::runner::NeuronState {
+            v: Some(x8),
+            u: Some(y8),
+            h: Some(z8),
+            ..Default::default()
+        },
+        I8,
+        sp8,
+        &params,
+    );
 }
 
 /// Step `n` Hindmarsh-Rose neurons. `n` must be a multiple of 8.

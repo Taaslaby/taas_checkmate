@@ -1,8 +1,8 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, NeuralPopulation, finite_fields, positive};
-use crate::zoo::neurons::HHModel;
+use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::q10_from_celsius_s;
+use crate::zoo::neurons::HHModel;
 
 // ═══════════════════════════════════════════════════════════════
 
@@ -255,4 +255,3 @@ impl ModelBuilder for HHBuilder {
 // ═══════════════════════════════════════════════════════════════
 //  HAAP Builder
 // ═══════════════════════════════════════════════════════════════
-

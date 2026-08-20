@@ -1,6 +1,6 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, NeuralPopulation, finite_fields, positive};
+use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::HAAPModel;
 
 /// Builder for Hyperpolarization-Activated Adaptive Pulse-Bursting (HAAP) populations.
@@ -127,10 +127,19 @@ impl HAAPBuilder {
         pop.fill_param(15, self.v_reset);
         pop.fill_param(16, self.delta_u);
 
-        // States (3)
+        // States (3). The gates start at their Boltzmann steady state at
+        // `v_init` (the same equations the step function integrates toward),
+        // so an unstimulated population sits at its resting equilibrium
+        // instead of spending a long (tau_h ~ 200 ms) initialization transient.
+        // Args are clamped to ±50 like the step function's safety net.
+        let u_arg = (-(self.v_init - self.v_half_u) / self.k_u).clamp(-50.0, 50.0);
+        let u0 = 1.0 / (1.0 + u_arg.exp());
+        let h_arg = ((self.v_init - self.v_half_h) / self.k_h).clamp(-50.0, 50.0);
+        let h0 = 1.0 / (1.0 + h_arg.exp());
+
         pop.fill_state(0, self.v_init);
-        pop.fill_state(1, 0.0); // u
-        pop.fill_state(2, 0.0); // h
+        pop.fill_state(1, u0); // u — M-current (opens on depolarization)
+        pop.fill_state(2, h0); // h — HCN (opens on hyperpolarization)
 
         pop
     }
@@ -161,6 +170,8 @@ impl HAAPBuilder {
         positive("inv_cm", self.inv_cm)?;
         positive("tau_u", self.tau_u)?;
         positive("tau_h", self.tau_h)?;
+        positive("k_u", self.k_u)?;
+        positive("k_h", self.k_h)?;
         for (field, value) in [("g_l", self.g_l), ("g_m", self.g_m), ("g_h", self.g_h)] {
             if value < 0.0 {
                 return Err(BuildError::InvalidValue {
@@ -187,4 +198,3 @@ impl ModelBuilder for HAAPBuilder {
 // ═══════════════════════════════════════════════════════════════
 //  Universal Population Builder
 // ═══════════════════════════════════════════════════════════════
-

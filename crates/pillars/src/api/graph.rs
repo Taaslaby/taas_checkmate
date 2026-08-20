@@ -28,12 +28,17 @@ pub const MAX_DELAY_SLOTS: usize = 32;
 /// A row in the sparse graph — the outgoing synapses of one neuron.
 #[derive(Debug, Clone, Copy)]
 pub struct SynapseRow<'a> {
+    /// Global index of the first synapse of this row (CSR row start) — lets
+    /// callers address per-edge side data (e.g. plasticity state) by edge.
+    pub start: usize,
     /// Target neuron global indices
     pub col: &'a [u32],
     /// Synaptic weights
     pub weights: &'a [f32],
     /// Axonal delays in steps (0..MAX_DELAY_SLOTS)
     pub delays: &'a [u8],
+    /// Synapse type per synapse: `0` = static current, `1..` = kinetic id.
+    pub syn_types: &'a [u8],
 }
 
 impl<'a> SynapseRow<'a> {
@@ -61,6 +66,9 @@ pub struct SparseGraph {
     weights: AlignedVec,
     /// Axonal delay (steps, 0..MAX_DELAY_SLOTS) per synapse
     delays: Vec<u8>,
+    /// Synapse type per synapse: `0` = static current, `1..` = registered
+    /// kinetic profile id (see `Network::register_kinetics`).
+    syn_types: Vec<u8>,
     n_neurons: usize,
 }
 
@@ -78,9 +86,30 @@ impl SparseGraph {
         weights: &[f32],
         delays: &[u8],
     ) -> Self {
+        let syn_types = vec![0u8; from.len()];
+        Self::from_triplets_with_types(n_neurons, from, to, weights, delays, &syn_types)
+    }
+
+    /// Build a CSR graph from triplets with per-synapse types.
+    ///
+    /// `syn_types` assigns each synapse a type: `0` = static current (the
+    /// default), `1..` = a registered kinetic-synapse profile id.
+    pub fn from_triplets_with_types(
+        n_neurons: usize,
+        from: &[u32],
+        to: &[u32],
+        weights: &[f32],
+        delays: &[u8],
+        syn_types: &[u8],
+    ) -> Self {
         assert_eq!(from.len(), to.len(), "from/to length mismatch");
         assert_eq!(from.len(), weights.len(), "from/weights length mismatch");
         assert_eq!(from.len(), delays.len(), "from/delays length mismatch");
+        assert_eq!(
+            from.len(),
+            syn_types.len(),
+            "from/syn_types length mismatch"
+        );
         let n_syn = from.len();
 
         // Validate bounds
@@ -103,16 +132,16 @@ impl SparseGraph {
             );
         }
 
-        // Build (from, to, weight, delay) and sort by from
-        let mut triplets: Vec<(u32, u32, f32, u8)> = Vec::with_capacity(n_syn);
+        // Build (from, to, weight, delay, syn_type) and sort by from
+        let mut triplets: Vec<(u32, u32, f32, u8, u8)> = Vec::with_capacity(n_syn);
         for i in 0..n_syn {
-            triplets.push((from[i], to[i], weights[i], delays[i]));
+            triplets.push((from[i], to[i], weights[i], delays[i], syn_types[i]));
         }
         triplets.sort_unstable_by_key(|t| t.0);
 
         // Count outgoing synapses per neuron
         let mut counts = vec![0u64; n_neurons];
-        for &(f, _, _, _) in &triplets {
+        for &(f, _, _, _, _) in &triplets {
             counts[f as usize] = counts[f as usize]
                 .checked_add(1)
                 .expect("SparseGraph: outgoing synapse count overflow");
@@ -146,14 +175,16 @@ impl SparseGraph {
         let mut col_idx = vec![0u32; total];
         let mut weights_vec = vec![0.0f32; total];
         let mut delays_vec = vec![0u8; total];
+        let mut syn_types_vec = vec![0u8; total];
 
         // Second pass: place each edge using cursor = row_ptr copy
         let mut cursor = row_ptr.clone(); // cursor[i] = next write pos for neuron i
-        for (f, t, w, d) in triplets {
+        for (f, t, w, d, st) in triplets {
             let pos = cursor[f as usize] as usize;
             col_idx[pos] = t;
             weights_vec[pos] = w;
             delays_vec[pos] = d;
+            syn_types_vec[pos] = st;
             cursor[f as usize] += 1;
         }
 
@@ -162,6 +193,7 @@ impl SparseGraph {
             col_idx,
             weights: AlignedVec::from_slice(&weights_vec),
             delays: delays_vec,
+            syn_types: syn_types_vec,
             n_neurons,
         }
     }
@@ -229,6 +261,8 @@ impl SparseGraph {
             col_idx,
             weights: AlignedVec::from_slice(weights),
             delays: delays.to_vec(),
+            // `.taas` snapshots always carry static (delta) synapses.
+            syn_types: vec![0u8; weights.len()],
             n_neurons,
         }
     }
@@ -269,6 +303,12 @@ impl SparseGraph {
         &self.delays
     }
 
+    /// Synapse types per synapse (`0` = static, `1..` = kinetic profile id).
+    #[inline(always)]
+    pub fn syn_types(&self) -> &[u8] {
+        &self.syn_types
+    }
+
     /// Get outgoing synapses of a neuron by its global index.
     #[inline(always)]
     pub fn row(&self, i: usize) -> SynapseRow<'_> {
@@ -280,9 +320,11 @@ impl SparseGraph {
         let start = self.row_ptr[i] as usize;
         let end = self.row_ptr[i + 1] as usize;
         SynapseRow {
+            start,
             col: &self.col_idx[start..end],
             weights: &self.weights.as_slice()[start..end],
             delays: &self.delays[start..end],
+            syn_types: &self.syn_types[start..end],
         }
     }
 

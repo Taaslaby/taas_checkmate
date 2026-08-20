@@ -1,4 +1,4 @@
-# 🧠 Pillars — Zero-Cost SIMD Neural Dynamics
+#  Pillars — Zero-Cost SIMD Neural Dynamics
 
 High-performance neural simulation engine with SIMD-first architecture and type-safe model construction.
 
@@ -190,6 +190,5 @@ If you use Pillars in research, please cite:
   title = {Pillars: Zero-Cost SIMD Neural Dynamics},
   author = {TaaS Team},
   year = {2024},
-  url = {https://github.com/yourusername/taas_checkmate}
 }
 ```

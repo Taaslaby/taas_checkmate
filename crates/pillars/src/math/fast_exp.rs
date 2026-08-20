@@ -84,15 +84,31 @@ pub fn fast_exp_simd(x: f32x8) -> f32x8 {
 
 /// SIMD fast exponential — polynomial, **bit-identical to scalar [`fast_exp`]**.
 ///
-/// Тот же алгоритм: range reduction через `floor`, полином Тейлора 6-й степени
-/// для 2^f на [0,1), масштабирование через экспонентное поле IEEE-754.
-/// Каждый лейн выполняет ту же последовательность mul/add, что и скаляр —
-/// результаты совпадают бит-в-бит (критично для SIMD/скаляр консистентности
-/// и для переключателя точности `fast-exp`).
+/// Runtime-dispatch entry: on x86_64 with AVX2 available this uses the native
+/// `core::arch` implementation ([`fast_exp_poly_avx2`]); otherwise falls back
+/// to the portable `wide::f32x8` version ([`fast_exp_poly_wide`]). Both are
+/// bit-identical to scalar [`fast_exp`] and to each other, so switching SIMD
+/// width at runtime does not change results.
 ///
 /// Относительная ошибка < 2e-5 для |x| < 87 (полином 6-й степени).
 #[inline(always)]
 pub fn fast_exp_poly_simd(x: f32x8) -> f32x8 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Один раз вызывает CPUID, дальше — дешёвая загрузка кэшированного флага.
+        // Позволяет портабельной сборке (без `target-cpu=native`) получать
+        // настоящий AVX2-путь на машинах, где он есть.
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return unsafe { fast_exp_poly_avx2(x) };
+        }
+    }
+    fast_exp_poly_wide(x)
+}
+
+/// Portable `wide::f32x8` polynomial — the implementation behind the fallback
+/// path of [`fast_exp_poly_simd`]. Bit-identical to scalar [`fast_exp`].
+#[inline(always)]
+fn fast_exp_poly_wide(x: f32x8) -> f32x8 {
     use wide::{f32x8 as V, i32x8, CmpGt, CmpLt};
 
     let log2e = std::f32::consts::LOG2_E;
@@ -111,6 +127,9 @@ pub fn fast_exp_poly_simd(x: f32x8) -> f32x8 {
     // Horner через mul_add (FMA) — та же структура, что в scalar fast_exp:
     // оба пути дают идентичные биты (fused-семантика), и оба получают
     // аппаратный FMA на AVX2+FMA без контракции со стороны LLVM.
+    // ВАЖНО: wide::mul_add fused ТОЛЬКО при сборке с fma — зеркалим это
+    // в fast_exp_poly_avx2 через #[cfg(target_feature = "fma")], чтобы
+    // обе реализации совпадали бит-в-бит при любой сборке.
     let poly = V::splat(c6).mul_add(f, V::splat(c5));
     let poly = poly.mul_add(f, V::splat(c4));
     let poly = poly.mul_add(f, V::splat(c3));
@@ -133,6 +152,78 @@ pub fn fast_exp_poly_simd(x: f32x8) -> f32x8 {
     let scale = over.blend(V::splat(f32::INFINITY), under.blend(V::splat(0.0), valid));
 
     poly * scale
+}
+
+/// Native AVX2 polynomial — same algorithm as [`fast_exp_poly_wide`], expressed
+/// with `core::arch` intrinsics on 256-bit lanes. Selected at runtime by
+/// [`fast_exp_poly_simd`] via `is_x86_feature_detected!("avx2")`, so a binary
+/// built for the baseline target still gets the wide SIMD path on AVX2 CPUs.
+///
+/// # Safety
+/// Caller must have verified `avx2` support via `is_x86_feature_detected!`.
+///
+/// # Bit-identity contract
+/// - `mul_add`: mirrors `wide` — fused `vfmadd` only when the whole crate is
+///   built with `fma` (same `#[cfg]` as the scalar [`fast_exp`] switch);
+/// - floor/cmp/trunc: `vroundps`/`vcmpps`/`vcvttps_epi32` match wide's AVX
+///   implementations exactly.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn fast_exp_poly_avx2(x: f32x8) -> f32x8 {
+    use core::arch::x86_64::*;
+
+    let arr = x.to_array();
+    let v = _mm256_loadu_ps(arr.as_ptr());
+
+    let c1 = _mm256_set1_ps(std::f32::consts::LN_2);
+    let c2 = _mm256_set1_ps(0.240_226_5_f32);
+    let c3 = _mm256_set1_ps(0.055_504_11_f32);
+    let c4 = _mm256_set1_ps(0.009_618_129_f32);
+    let c5 = _mm256_set1_ps(0.001_333_356_f32);
+    let c6 = _mm256_set1_ps(0.000_154_035_3_f32);
+
+    // Range reduction: n = floor(x·log2e), f ∈ [0, 1)
+    let t = _mm256_mul_ps(v, _mm256_set1_ps(std::f32::consts::LOG2_E));
+    let n_f = _mm256_floor_ps(t);
+    let f = _mm256_sub_ps(t, n_f);
+
+    // Horner — fused only under the same crate-level cfg as wide/scalar.
+    #[cfg(all(target_arch = "x86_64", target_feature = "fma"))]
+    let poly = {
+        let p = _mm256_fmadd_ps(c6, f, c5);
+        let p = _mm256_fmadd_ps(p, f, c4);
+        let p = _mm256_fmadd_ps(p, f, c3);
+        let p = _mm256_fmadd_ps(p, f, c2);
+        let p = _mm256_fmadd_ps(p, f, c1);
+        _mm256_fmadd_ps(p, f, _mm256_set1_ps(1.0))
+    };
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "fma")))]
+    let poly = {
+        let p = _mm256_add_ps(_mm256_mul_ps(c6, f), c5);
+        let p = _mm256_add_ps(_mm256_mul_ps(p, f), c4);
+        let p = _mm256_add_ps(_mm256_mul_ps(p, f), c3);
+        let p = _mm256_add_ps(_mm256_mul_ps(p, f), c2);
+        let p = _mm256_add_ps(_mm256_mul_ps(p, f), c1);
+        _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(1.0))
+    };
+
+    // Scale 2^n via exponent field: bits = (n + 127) << 23 (same as wide path)
+    let n = _mm256_cvttps_epi32(n_f);
+    let biased = _mm256_add_epi32(n, _mm256_set1_epi32(127));
+    let valid = _mm256_castsi256_ps(_mm256_slli_epi32(biased, 23));
+
+    // Overflow/underflow guards — mirror of scalar `if n < -126 / n > 127`
+    let under = _mm256_cmp_ps(n_f, _mm256_set1_ps(-126.0), _CMP_LT_OQ);
+    let over = _mm256_cmp_ps(n_f, _mm256_set1_ps(127.0), _CMP_GT_OQ);
+    let zero = _mm256_setzero_ps();
+    let inf = _mm256_set1_ps(f32::INFINITY);
+    // over ? INF : (under ? 0 : valid) — same nesting as wide `blend` chain
+    let scale = _mm256_blendv_ps(_mm256_blendv_ps(valid, zero, under), inf, over);
+
+    let out = _mm256_mul_ps(poly, scale);
+    let mut res = [0.0f32; 8];
+    _mm256_storeu_ps(res.as_mut_ptr(), out);
+    f32x8::from(res)
 }
 
 #[cfg(test)]
@@ -278,5 +369,68 @@ mod tests {
         assert_eq!(under, 0.0, "exp(-100) should underflow to 0, got {}", under);
         let mid = super::fast_exp_poly_simd(f32x8::splat(1.0)).to_array()[0];
         assert!((mid - std::f32::consts::E).abs() < 1e-4, "exp(1) = {}", mid);
+    }
+
+    // ─── AVX2-лист: бит-идентичность и dispatch ───
+
+    /// AVX2-лист обязан быть бит-в-бит равен wide-пути на всём рабочем
+    /// диапазоне — иначе runtime-диспетчер изменит результаты симуляции
+    /// в зависимости от CPU. Прогоняется только на машинах с AVX2
+    /// (в CI — ubuntu-latest x86_64 с AVX2).
+    #[test]
+    fn test_fast_exp_poly_avx2_bit_identical_to_wide() {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if !std::arch::is_x86_feature_detected!("avx2") {
+                eprintln!("no AVX2 on this machine — skipping");
+                return;
+            }
+            let mut worst: (usize, f32, u32, u32) = (0, 0.0, 0, 0);
+            for i in -8700..=8800 {
+                let x = i as f32 / 100.0;
+                let wide = super::fast_exp_poly_wide(f32x8::splat(x));
+                // SAFETY: проверено is_x86_feature_detected!("avx2") выше
+                let avx2 = unsafe { super::fast_exp_poly_avx2(f32x8::splat(x)) };
+                for lane in 0..8 {
+                    let w = wide.to_array()[lane];
+                    let a = avx2.to_array()[lane];
+                    if w.to_bits() != a.to_bits() {
+                        let d = (w - a).abs();
+                        if d > worst.1 {
+                            worst = (lane, d, w.to_bits(), a.to_bits());
+                        }
+                    }
+                }
+            }
+            assert_eq!(
+                worst.1, 0.0,
+                "AVX2-лист расходится с wide: lane={} |Δ|={} wide={:08x} avx2={:08x}",
+                worst.0, worst.1, worst.2, worst.3
+            );
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            eprintln!("not x86_64 — skipping (no AVX2 path)");
+        }
+    }
+
+    /// Диспетчер на AVX2-машине обязан отдавать ровно те же биты, что и
+    /// wide-путь (т.е. `fast_exp_poly_simd` = `fast_exp_poly_wide` всегда,
+    /// независимо от выбранного пути).
+    #[test]
+    fn test_fast_exp_poly_simd_dispatch_matches_wide() {
+        for i in -8700..=8800 {
+            let x = i as f32 / 100.0;
+            let dispatched = super::fast_exp_poly_simd(f32x8::splat(x)).to_array()[0];
+            let wide = super::fast_exp_poly_wide(f32x8::splat(x)).to_array()[0];
+            assert_eq!(
+                dispatched.to_bits(),
+                wide.to_bits(),
+                "dispatch mismatch at x={}: {:08x} vs {:08x}",
+                x,
+                dispatched.to_bits(),
+                wide.to_bits()
+            );
+        }
     }
 }

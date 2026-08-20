@@ -1,10 +1,5 @@
 //! Neuron population classes.
 
-use crate::core::lane::SimdLane;
-use crate::core::util::{load8, load8_i32, store8};
-use crate::ops::plasticity::stp as pillars_stp;
-use wide::f32x8;
-
 // ═══════════════════════════════════════════════════════════
 //  Short-Term Plasticity (Tsodyks-Markram) + LFP proxy
 // ═══════════════════════════════════════════════════════════
@@ -65,56 +60,19 @@ impl ShortTermPlasticity {
         if n == 0 {
             return;
         }
-        let (x, u) = (&mut self.x[..n], &mut self.u[..n]);
-        let (tau_d, tau_f, u0, a) = (
+        // Batch SIMD kernel lives in `kernels::synapse` (the batch layer);
+        // `api` only adapts the population buffers to it.
+        crate::kernels::synapse::stp_step_batch(
+            &mut self.u[..n],
+            &mut self.x[..n],
+            &pre_spikes[..n],
             &self.tau_d[..n],
             &self.tau_f[..n],
             &self.u0[..n],
             &self.a[..n],
+            &mut I_out[..n],
+            self.dt,
         );
-        let i_out = &mut I_out[..n];
-        let pre = &pre_spikes[..n];
-
-        let n8 = n & !7;
-        let dt_s = f32x8::splat(self.dt);
-        let zero_s = f32x8::splat(0.0);
-        let one_s = f32x8::splat(1.0);
-
-        for off in (0..n8).step_by(8) {
-            unsafe {
-                let uu = load8(u.as_ptr(), off);
-                let xx = load8(x.as_ptr(), off);
-                let sp = load8_i32(pre.as_ptr(), off);
-                let td = load8(tau_d.as_ptr(), off).max(f32x8::splat(1e-10));
-                let tf = load8(tau_f.as_ptr(), off).max(f32x8::splat(1e-10));
-                let u0v = load8(u0.as_ptr(), off);
-                let av = load8(a.as_ptr(), off);
-                let (un, xn) = pillars_stp::stp_step(uu, xx, sp, u0v, one_s / td, one_s / tf, dt_s);
-                // s = 1 где pre_spike, иначе 0; I_out += s·a·u_new·x_new
-                let s = sp.cmp_gt(zero_s).blend(one_s, zero_s);
-                let mut io = load8(i_out.as_ptr(), off);
-                io += s * av * un * xn;
-                store8(u.as_mut_ptr(), off, un);
-                store8(x.as_mut_ptr(), off, xn);
-                store8(i_out.as_mut_ptr(), off, io);
-            }
-        }
-        // Скалярный tail — тот же lane-канон на f32.
-        for i in n8..n {
-            let s = if pre[i] != 0 { 1.0f32 } else { 0.0f32 };
-            let (un, xn) = pillars_stp::stp_step(
-                u[i],
-                x[i],
-                s,
-                u0[i],
-                1.0 / tau_d[i].max(1e-10),
-                1.0 / tau_f[i].max(1e-10),
-                self.dt,
-            );
-            u[i] = un;
-            x[i] = xn;
-            i_out[i] += s * a[i] * un * xn;
-        }
     }
 
     pub fn reset(&mut self) {
@@ -161,4 +119,3 @@ pub fn compute_lfp(
         }
     }
 }
-

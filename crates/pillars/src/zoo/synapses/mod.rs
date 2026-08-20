@@ -15,12 +15,12 @@ pub mod nmda;
 pub mod tsodyks_markram;
 
 pub use ca_plasticity::{
-    CaPlastParamIdx, CaPlasticityModel, CaPlasticityModelParamIdx, CaPlasticityModelStateIdx,
-    CaPlasticityParams, CaPlasticityState,
+    CaPlasticityModel, CaPlasticityModelParamIdx, CaPlasticityModelStateIdx, CaPlasticityParams,
+    CaPlasticityState,
 };
 pub use exp2syn::{
-    exp2syn_factor, Exp2SynModel, Exp2SynModelParamIdx, Exp2SynModelStateIdx, Exp2SynParamIdx,
-    Exp2SynParams, Exp2SynState,
+    exp2syn_factor, Exp2SynModel, Exp2SynModelParamIdx, Exp2SynModelStateIdx, Exp2SynParams,
+    Exp2SynState,
 };
 pub use nmda::nmda_mg_block_step;
 pub use tsodyks_markram::tsodyks_markram_step;

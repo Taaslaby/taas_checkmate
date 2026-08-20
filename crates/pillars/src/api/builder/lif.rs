@@ -1,6 +1,6 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, NeuralPopulation, finite_fields, positive};
+use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::LIFModel;
 
 /// Builder for Leaky Integrate-and-Fire neuron populations.
@@ -135,4 +135,3 @@ impl ModelBuilder for LIFBuilder {
         LIFBuilder::try_build(self)
     }
 }
-

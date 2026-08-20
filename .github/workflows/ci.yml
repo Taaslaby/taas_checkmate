@@ -42,7 +42,7 @@ jobs:
       # headers at build time — covered by the dedicated `python` job below.
       # Same strategy as the `windows` job's `--exclude pillars-cuda`.
       - name: Clippy (all features, no CUDA)
-        run: cargo clippy --features "t3,train,connectome,karmac,unity" -- -D warnings
+        run: cargo clippy --features "t3,train,connectome,karmac" -- -D warnings
 
       # Opt-in precise-exp mode for HH gates — compiled nowhere else, so a
       # regression here would rot silently. Default build keeps fast_exp.
@@ -53,16 +53,26 @@ jobs:
         run: cargo build --no-default-features
 
       - name: Build (all features, no CUDA)
-        run: cargo build --features "t3,train,connectome,karmac,unity"
+        run: cargo build --features "t3,train,connectome,karmac"
 
       - name: Run tests (no features)
         run: cargo test --no-default-features
 
       - name: Run tests (all features, no CUDA)
-        run: cargo test --features "t3,train,connectome,karmac,unity"
+        run: cargo test --features "t3,train,connectome,karmac"
 
       - name: Run kernel progonator tests (integration)
         run: cargo test -p pillars --test kernel_progon
+
+      # wide::f32x8 blend selects by sign bit on AVX (blendvps) but by any
+      # non-zero bit on the SSE fallback — masks that are not sign-bit masks
+      # (e.g. plain 1.0) silently diverge per target. The default env
+      # RUSTFLAGS overrides .cargo/config.toml, so this job stays on SSE;
+      # run the lib tests once on AVX2 to catch such target-specific drift.
+      - name: Run tests (AVX2, native CPU)
+        run: cargo test -p pillars --lib
+        env:
+          RUSTFLAGS: "-C target-cpu=native -D warnings"
 
       - name: Bench check (compilation only)
         run: cargo bench --no-default-features --bench bench -- --list
@@ -99,6 +109,7 @@ jobs:
           maturin build
           pip install --force-reinstall --no-deps target/wheels/*.whl
           python tests/test_smoke_api.py
+          python tests/test_neuroml_bridge.py
 
   windows:
     # Windows (MSVC) migration guard — no nvcc on these runners, so

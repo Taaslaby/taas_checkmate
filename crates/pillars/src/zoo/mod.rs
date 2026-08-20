@@ -52,6 +52,15 @@ pub trait Model {
     const N_PARAMS: usize;
     const N_STATE: usize;
     const HAS_SPIKE: bool;
+    /// Whether the runner should clamp `i_syn` to
+    /// [`I_SYN_CLAMP_RANGE`](crate::core::population::I_SYN_CLAMP_RANGE).
+    ///
+    /// The default (`true`) protects exponential models (AdEx, HH) from
+    /// overflow and unrealistic firing rates. Models whose input is a
+    /// *conductance* in mV-equivalent units (e.g. `AlphaLifModel`, where
+    /// recurrent `delayed` can legitimately exceed ±100) opt out via the
+    /// `#[no_clamp]` struct attribute.
+    const CLAMP_I_SYN: bool = true;
     /// # Inlining contract
     ///
     /// IMPLEMENTATIONS must annotate `step` with `#[inline(always)]`.

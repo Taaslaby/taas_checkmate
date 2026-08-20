@@ -11,12 +11,14 @@
 //! (`pillars::math::fast_exp::{fast_exp, fast_exp_poly_simd}` = pillars poly) — как и
 //! легаси через `use super::{fast_exp, fast_exp_simd}`.
 //!
-//! ## Документированные расхождения (проверяются, не прячутся)
+//! ## Мембранный интегратор унифицирован (implicit Euler везде)
 //!
-//! - SIMD-путь `hh_poly_step` — explicit Euler; скалярный хвост — implicit Euler.
-//! - `fused_hh_poly_step_simd` клампит Ii к ±100, но НЕ v_new;
-//!   `fused_hh_poly_step_scalar` клампит Ii к ±100 И v_new к [-100, 50].
-//! - `q10_from_celsius` — guard-зона `|c−6.3| ≤ 0.1` → 1.0.
+//! Прежние расхождения «SIMD explicit Euler / скалярный implicit Euler» и
+//! разный кламп `fused` v_new устранены: оба пути теперь derivimplicit (тот же
+//! метод, что `HHModel`/NEURON). Один и тот же нейрон больше не меняет динамику
+//! от попадания в SIMD-блок или скалярный хвост (см. n=8/9/15 parity-тесты ниже).
+//!
+//! - `q10_from_celsius` — guard-зона `|c−6.3| ≤ 0.1` → 1.0 (сохранена).
 //! - Spec-слой (rate-функции) НЕ тестируется здесь: pillars-канон использует
 //!   `fast_exp`, легаси — `.exp()` — это принятое ранее расхождение (волна 1),
 //!   движок от spec-слоя не зависит (свои inline α/β через fast_exp).
@@ -210,7 +212,8 @@ mod legacy {
                 break;
             }
             let vi = load8(v, i);
-            let mut I_ion = zero;
+            let mut sum_g = zero;
+            let mut sum_gE = zero;
             let mut gi = 0;
 
             for (ch_idx, ch) in channel_meta.iter().enumerate() {
@@ -250,13 +253,18 @@ mod legacy {
                     }
                     gi += 1;
                 }
-                I_ion += g_ch * (vi - e_rev_v);
+                sum_g += g_ch;
+                sum_gE += g_ch * e_rev_v;
             }
 
-            let I_leak = load8(g_leak, i) * (vi - load8(E_leak, i));
+            let g_leak_v = load8(g_leak, i);
+            let e_leak_v = load8(E_leak, i);
+            sum_g += g_leak_v;
+            sum_gE += g_leak_v * e_leak_v;
+
             let cm = load8(C_m, i);
-            let dV = (load8(Ii, i) - I_ion - I_leak) / cm;
-            let v_new = vi + dV * dt_v;
+            let inv_dt = cm / dt_v;
+            let v_new = (vi * inv_dt + load8(Ii, i) + sum_gE) / (inv_dt + sum_g);
             store8(v, i, v_new);
         }
     }
@@ -440,6 +448,47 @@ mod legacy {
         (alpha, beta)
     }
 
+    // Скалярные зеркала factored fused-гейтов — та же формула, что и SIMD-версии
+    // выше (общий `exp_v10` + константы `EXP_V10_*`), чтобы хвост бит-совместимо
+    // совпадал с SIMD-блоком (раньше хвост считал гейты напрямую).
+    #[inline(always)]
+    fn na_m_alpha_beta_scalar_fused(v: f32, exp_v10: f32) -> (f32, f32) {
+        let vp40 = v + 40.0;
+        let exp_nm_alpha = exp_v10 * EXP_V10_NA_M_ALPHA;
+        let ratio = -vp40 / 10.0;
+        let vtrap_val = if ratio.abs() < 1e-6 {
+            10.0 - (-vp40) * 0.5
+        } else {
+            (-vp40) / (exp_nm_alpha - 1.0)
+        };
+        let alpha = 0.1 * vtrap_val;
+        let beta = 4.0 * fast_exp(-(v + 65.0) / 18.0);
+        (alpha, beta)
+    }
+
+    #[inline(always)]
+    fn na_h_alpha_beta_scalar_fused(v: f32, exp_v10: f32) -> (f32, f32) {
+        let alpha = 0.07 * fast_exp(-(v + 65.0) / 20.0);
+        let exp_nh_beta = exp_v10 * EXP_V10_NA_H_BETA;
+        let beta = 1.0 / (1.0 + exp_nh_beta);
+        (alpha, beta)
+    }
+
+    #[inline(always)]
+    fn k_n_alpha_beta_scalar_fused(v: f32, exp_v10: f32) -> (f32, f32) {
+        let vp55 = v + 55.0;
+        let exp_kn_alpha = exp_v10 * EXP_V10_KN_ALPHA;
+        let ratio = -vp55 / 10.0;
+        let vtrap_val = if ratio.abs() < 1e-6 {
+            10.0 - (-vp55) * 0.5
+        } else {
+            (-vp55) / (exp_kn_alpha - 1.0)
+        };
+        let alpha = 0.01 * vtrap_val;
+        let beta = 0.125 * fast_exp(-(v + 65.0) / 80.0);
+        (alpha, beta)
+    }
+
     /// Fused SIMD HH step + reverse zero-crossing spike detection.
     #[inline]
     pub unsafe fn fused_hh_poly_step_simd(
@@ -471,7 +520,8 @@ mod legacy {
 
             let exp_v10 = fast_exp_simd((-vi) * v10_inv);
 
-            let mut I_ion = zero;
+            let mut sum_g = zero;
+            let mut sum_gE = zero;
             let mut gi = 0;
 
             for (ch_idx, ch) in channel_meta.iter().enumerate() {
@@ -511,16 +561,23 @@ mod legacy {
                     }
                     gi += 1;
                 }
-                I_ion += g_ch * (vi - e_rev_v);
+                sum_g += g_ch;
+                sum_gE += g_ch * e_rev_v;
             }
 
-            let I_leak = load8(g_leak, i) * (vi - load8(E_leak, i));
+            let g_leak_v = load8(g_leak, i);
+            let e_leak_v = load8(E_leak, i);
+            sum_g += g_leak_v;
+            sum_gE += g_leak_v * e_leak_v;
+
             let cm = load8(C_m, i);
+            let inv_dt = cm / dt_v;
             let ii_clamped = load8(Ii, i)
                 .max(f32x8::splat(-100.0))
                 .min(f32x8::splat(100.0));
-            let dV = (ii_clamped - I_ion - I_leak) / cm;
-            let v_new = vi + dV * dt_v;
+            let v_new = ((vi * inv_dt + ii_clamped + sum_gE) / (inv_dt + sum_g))
+                .max(f32x8::splat(-100.0))
+                .min(f32x8::splat(50.0));
             store8(v, i, v_new);
 
             let spike_mask = v_old.cmp_ge(zero) & v_new.cmp_lt(zero);
@@ -559,7 +616,9 @@ mod legacy {
         for i in 0..n {
             let v_old = *v.add(i);
             let vi = v_old;
-            let mut I_ion = 0.0;
+            let exp_v10 = fast_exp(-vi * (1.0 / 10.0));
+            let mut sum_g = 0.0f32;
+            let mut sum_gE = 0.0f32;
             let mut gi = 0;
 
             for (ch_idx, ch) in channel_meta.iter().enumerate() {
@@ -568,21 +627,9 @@ mod legacy {
                 for gate_idx in 0..ch.n_gates {
                     let power = ch.powers[gate_idx];
                     let (alpha, beta) = match ch.gate_type[gate_idx] {
-                        GateType::NaM => {
-                            let a = 0.1 * vtrap_scalar(-(vi + 40.0), 10.0);
-                            let b = 4.0 * fast_exp(-(vi + 65.0) / 18.0);
-                            (a, b)
-                        }
-                        GateType::NaH => {
-                            let a = 0.07 * fast_exp(-(vi + 65.0) / 20.0);
-                            let b = 1.0 / (1.0 + fast_exp(-(vi + 35.0) / 10.0));
-                            (a, b)
-                        }
-                        GateType::Kn => {
-                            let a = 0.01 * vtrap_scalar(-(vi + 55.0), 10.0);
-                            let b = 0.125 * fast_exp(-(vi + 65.0) / 80.0);
-                            (a, b)
-                        }
+                        GateType::NaM => na_m_alpha_beta_scalar_fused(vi, exp_v10),
+                        GateType::NaH => na_h_alpha_beta_scalar_fused(vi, exp_v10),
+                        GateType::Kn => k_n_alpha_beta_scalar_fused(vi, exp_v10),
                         GateType::CatC => {
                             let m_inf = 1.0 / (1.0 + fast_exp(-(vi + 56.0) / 6.2));
                             (m_inf / 0.6, (1.0 - m_inf) / 0.6)
@@ -597,12 +644,19 @@ mod legacy {
                     g_ch *= (*p).powi(power as i32);
                     gi += 1;
                 }
-                I_ion += g_ch * (vi - ch.e_rev);
+                sum_g += g_ch;
+                sum_gE += g_ch * ch.e_rev;
             }
-            let I_leak = *g_leak.add(i) * (vi - *E_leak.add(i));
+            let g_leak_i = *g_leak.add(i);
+            let e_leak_i = *E_leak.add(i);
+            sum_g += g_leak_i;
+            sum_gE += g_leak_i * e_leak_i;
+
+            let cm_i = *C_m.add(i);
+            let inv_dt = cm_i / dt;
             let ii_clamped = (*Ii.add(i)).clamp(-100.0, 100.0);
-            let dV = (ii_clamped - I_ion - I_leak) / *C_m.add(i);
-            let v_new = (vi + dV * dt).clamp(-100.0, 50.0);
+            let v_new =
+                ((vi * inv_dt + ii_clamped + sum_gE) / (inv_dt + sum_g)).clamp(-100.0, 50.0);
             *v.add(i) = v_new;
 
             *spikes.add(i) = if v_old >= 0.0 && v_new < 0.0 { 1 } else { 0 };
@@ -791,9 +845,19 @@ fn custom_layout_channels() -> Vec<hh::ChannelSpec> {
     vec![hh::ChannelSpec {
         name: "CustomX",
         gates: vec![hh::GateSpec {
-            label: "q", // не m/h/n/c → fallback NaM в обоих build_channel_meta
-            alpha: hh::na_m_alpha,
-            beta: hh::na_m_beta,
+            label: "q", // не m/h/n/c → fallback GateType::NaM в legacy build_channel_meta
+            kinetics: hh::GateKinetics::Rates {
+                forward: hh::RateForm::Closed(hh::ClosedForm::ExpLinear {
+                    rate: 0.1,
+                    midpoint: 40.0,
+                    scale: 10.0,
+                }),
+                reverse: hh::RateForm::Closed(hh::ClosedForm::Exp {
+                    rate: 4.0,
+                    midpoint: 65.0,
+                    scale: 18.0,
+                }),
+            },
             power: 2, // не 1/3/4 → powf-ветка
         }],
         E_rev: 40.0,
@@ -958,6 +1022,170 @@ fn q10_from_celsius_parity() {
             hh::q10_from_celsius(c),
             legacy::q10_from_celsius(c),
             &format!("q10({c})"),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SIMD-блок vs скалярный хвост: ИДЕНТИЧНЫЕ лейны
+// ═══════════════════════════════════════════════════════════
+//  Унифицированный мембранный интегратор гарантирует: один и тот же нейрон
+//  (идентичное состояние/параметры/вход) эволюционирует одинаково, попал ли он
+//  в SIMD-блок (индекс < 8) или в скалярный хвост (индекс ≥ 8 при n%8 ≠ 0).
+//  Раньше SIMD-блок шёл explicit Euler, а хвост — implicit Euler, и нейрон
+//  менял динамику от размера популяции.
+
+/// Все n нейронов с идентичным состоянием/параметрами/входом; прогон через
+/// `hh_poly_step`. Возвращает max |V[i] − V[0]| по i (SIMD vs хвост).
+fn run_identical_lanes_poly(n: usize, dt: f32, celsius: f32, steps: usize, ii_val: f32) -> f32 {
+    let channels = hh::standard_channels();
+    let n_channels = channels.len();
+    let n_gates: usize = channels.iter().map(|c| c.gates.len()).sum();
+
+    let mut v = vec![-65.0f32; n];
+    let mut gates = vec![0.0f32; n * n_gates];
+    for g in 0..n_gates {
+        let q = 0.2 + g as f32 * 0.1;
+        for i in 0..n {
+            gates[g * n + i] = q;
+        }
+    }
+    let ii = vec![ii_val; n];
+    let g_leak = vec![0.3f32; n];
+    let e_leak = vec![-54.3f32; n];
+    let c_m = vec![1.0f32; n];
+    // Канальный лейаут: [ch0×n][ch1×n] (как `ConductancePopulation`).
+    let mut g_max = Vec::with_capacity(n * n_channels);
+    for ch in &channels {
+        for _ in 0..n {
+            g_max.push(ch.g_max);
+        }
+    }
+    let meta = hh::build_channel_meta(&channels);
+
+    for _ in 0..steps {
+        unsafe {
+            hh::hh_poly_step(
+                v.as_mut_ptr(),
+                gates.as_mut_ptr(),
+                ii.as_ptr(),
+                g_leak.as_ptr(),
+                e_leak.as_ptr(),
+                c_m.as_ptr(),
+                n,
+                &meta,
+                g_max.as_ptr(),
+                dt,
+                celsius,
+            );
+        }
+    }
+
+    let mut max_dv = 0.0f32;
+    for i in 1..n {
+        max_dv = max_dv.max((v[i] - v[0]).abs());
+    }
+    max_dv
+}
+
+/// То же для `fused_hh_poly_step` (со спайк-детекцией).
+fn run_identical_lanes_fused(n: usize, dt: f32, celsius: f32, steps: usize, ii_val: f32) -> f32 {
+    let channels = hh::pacemaking_channels();
+    let n_channels = channels.len();
+    let n_gates: usize = channels.iter().map(|c| c.gates.len()).sum();
+
+    let mut v = vec![-65.0f32; n];
+    let mut gates = vec![0.0f32; n * n_gates];
+    for g in 0..n_gates {
+        let q = 0.2 + g as f32 * 0.1;
+        for i in 0..n {
+            gates[g * n + i] = q;
+        }
+    }
+    let ii = vec![ii_val; n];
+    let g_leak = vec![0.3f32; n];
+    let e_leak = vec![-54.3f32; n];
+    let c_m = vec![1.0f32; n];
+    let mut g_max = Vec::with_capacity(n * n_channels);
+    for ch in &channels {
+        for _ in 0..n {
+            g_max.push(ch.g_max);
+        }
+    }
+    let meta = hh::build_channel_meta(&channels);
+    let mut spikes = vec![0i32; n];
+
+    for _ in 0..steps {
+        unsafe {
+            hh::fused_hh_poly_step(
+                v.as_mut_ptr(),
+                gates.as_mut_ptr(),
+                ii.as_ptr(),
+                g_leak.as_ptr(),
+                e_leak.as_ptr(),
+                c_m.as_ptr(),
+                n,
+                &meta,
+                g_max.as_ptr(),
+                dt,
+                celsius,
+                spikes.as_mut_ptr(),
+            );
+        }
+    }
+
+    let mut max_dv = 0.0f32;
+    for i in 1..n {
+        max_dv = max_dv.max((v[i] - v[0]).abs());
+    }
+    max_dv
+}
+
+#[test]
+fn hh_poly_step_simd_tail_identical_lanes() {
+    for n in [9usize, 15] {
+        let dv = run_identical_lanes_poly(n, 0.05, 24.0, 100, 1.0);
+        println!("hh_poly_step n={n}: max |ΔV| SIMD/tail = {dv:.3e} mV");
+        assert!(
+            dv < 1e-3,
+            "n={n}: SIMD-блок и хвост должны совпадать, max |ΔV| = {dv:.3e} mV"
+        );
+    }
+}
+
+#[test]
+fn fused_hh_poly_step_simd_tail_identical_lanes() {
+    for n in [9usize, 15] {
+        let dv = run_identical_lanes_fused(n, 0.05, 24.0, 100, 1.0);
+        println!("fused_hh_poly_step n={n}: max |ΔV| SIMD/tail = {dv:.3e} mV");
+        assert!(
+            dv < 1e-3,
+            "n={n}: SIMD-блок и хвост должны совпадать, max |ΔV| = {dv:.3e} mV"
+        );
+    }
+}
+
+/// Экстремальный ток (1000 нА → кламп в ±100 в fused; без клампа в poly)
+/// не должен расщеплять SIMD-блок и хвост: один и тот же нейрон даёт одну
+/// траекторию при n=8 (полный блок), 9/15 (блок+хвост), 17 (2 блока+хвост).
+#[test]
+fn hh_poly_step_extreme_input_simd_tail_identical_lanes() {
+    for n in [8usize, 9, 15, 17] {
+        let dv = run_identical_lanes_poly(n, 0.05, 24.0, 100, 1000.0);
+        assert!(
+            dv < 1e-3,
+            "poly n={n}: SIMD/хвост расходятся при экстремальном токе, max |ΔV| = {dv:.3e} mV"
+        );
+    }
+}
+
+#[test]
+fn fused_hh_poly_step_extreme_input_simd_tail_identical_lanes() {
+    for n in [8usize, 9, 15, 17] {
+        let dv = run_identical_lanes_fused(n, 0.05, 24.0, 100, 1000.0);
+        assert!(
+            dv < 1e-3,
+            "fused n={n}: SIMD/хвост расходятся при экстремальном токе, max |ΔV| = {dv:.3e} mV"
         );
     }
 }

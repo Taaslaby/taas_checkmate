@@ -13,29 +13,7 @@ use crate::core::lane::SimdLane;
 use pillars_macros::NeuronModel;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum AstroParamIdx {
-    DT = 0,          // ms
-    Inv_Tau_Ca = 1,  // 1/τ_ca (ms⁻¹)
-    Inv_Tau_Glu = 2, // 1/τ_glu (ms⁻¹)
-    Inv_Tau_K = 3,   // 1/τ_k (ms⁻¹)
-    Alpha_Ca = 4,    // Ca²⁺ influx per unit input
-    Alpha_Glu = 5,   // Glu influx per unit input
-    Alpha_K = 6,     // K⁺ influx per unit input
-    Mu = 7,          // volume transmission gain factor
-    G_Gap = 8,       // gap junction strength
-}
-
-impl From<AstroParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: AstroParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Astrocyte: hidden-state glial modulation.
 ///
@@ -162,15 +140,15 @@ mod tests {
         let inv_tau_k = 1.0 / 100.0;
         let mut p = vec![0.0f32; n * 9];
         for i in 0..n {
-            p[AstroParamIdx::DT as usize * n + i] = 1.0;
-            p[AstroParamIdx::Inv_Tau_Ca as usize * n + i] = inv_tau_ca;
-            p[AstroParamIdx::Inv_Tau_Glu as usize * n + i] = inv_tau_glu;
-            p[AstroParamIdx::Inv_Tau_K as usize * n + i] = inv_tau_k;
-            p[AstroParamIdx::Alpha_Ca as usize * n + i] = 0.1;
-            p[AstroParamIdx::Alpha_Glu as usize * n + i] = 0.5;
-            p[AstroParamIdx::Alpha_K as usize * n + i] = 0.3;
-            p[AstroParamIdx::Mu as usize * n + i] = 0.5;
-            p[AstroParamIdx::G_Gap as usize * n + i] = 0.1;
+            p[AstrocyteModelParamIdx::dt as usize * n + i] = 1.0;
+            p[AstrocyteModelParamIdx::inv_tau_ca as usize * n + i] = inv_tau_ca;
+            p[AstrocyteModelParamIdx::inv_tau_glu as usize * n + i] = inv_tau_glu;
+            p[AstrocyteModelParamIdx::inv_tau_k as usize * n + i] = inv_tau_k;
+            p[AstrocyteModelParamIdx::alpha_ca as usize * n + i] = 0.1;
+            p[AstrocyteModelParamIdx::alpha_glu as usize * n + i] = 0.5;
+            p[AstrocyteModelParamIdx::alpha_k as usize * n + i] = 0.3;
+            p[AstrocyteModelParamIdx::mu as usize * n + i] = 0.5;
+            p[AstrocyteModelParamIdx::g_gap as usize * n + i] = 0.1;
         }
         p
     }

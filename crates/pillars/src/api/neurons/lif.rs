@@ -6,7 +6,6 @@
 
 #![allow(non_snake_case)]
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::{LIFAtModel, LIFModel};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -121,20 +120,17 @@ fn process_chunk_lifat(
         params[48 + j] = beta[i + j];
         params[56 + j] = tau_ref;
     }
-    unsafe {
-        run_neuron::<LIFAtModel>(
-            v8.as_mut_ptr(),
-            th8.as_mut_ptr(),
-            refr8.as_mut_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<LIFAtModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(th8),
+            h: Some(refr8),
+            ..Default::default()
+        },
+        &I8[..],
+        sp8,
+        &params,
+    );
 }
 
 // ─── LIF ─────────────────────────────────────────────────
@@ -224,20 +220,16 @@ fn process_chunk_lif(
         params[32 + j] = v_reset[i + j];
         params[40 + j] = tau_ref;
     }
-    unsafe {
-        run_neuron::<LIFModel>(
-            v8.as_mut_ptr(),
-            refr8.as_mut_ptr(), // state 1 (refractory)
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<LIFModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(refr8), // state 1 (refractory)
+            ..Default::default()
+        },
+        &I8[..],
+        sp8,
+        &params,
+    );
 }
 
 #[cfg(test)]

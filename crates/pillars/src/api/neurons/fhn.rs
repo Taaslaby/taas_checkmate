@@ -10,7 +10,6 @@
 //! **Spike semantics (edge-triggered):** one spike per rising crossing of
 //! `v_thresh`, no back-to-back bursts inside the plateau (AGENTS.md rule 6).
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::FHNModel;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -104,20 +103,17 @@ fn process_chunk(
         params[32 + j] = V_THRESH;
         was_below[j] = if v8[j] < V_THRESH { 1.0 } else { 0.0 };
     }
-    unsafe {
-        run_neuron::<FHNModel>(
-            v8.as_mut_ptr(),
-            w8.as_mut_ptr(),
-            was_below.as_mut_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<FHNModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(w8),
+            h: Some(&mut was_below[..]),
+            ..Default::default()
+        },
+        I8,
+        sp8,
+        &params,
+    );
 }
 
 #[cfg(test)]

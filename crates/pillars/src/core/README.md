@@ -1,4 +1,4 @@
-# ⚙️ Core — Zero-Cost SIMD Engine
+# Core — Zero-Cost SIMD Engine
 
 **Граница: Rust-генерики → аппаратные инструкции.**
 
@@ -33,7 +33,6 @@ SimdLane trait (генерик S: SimdLane)
 | [`lane_f32.rs`](lane_f32.rs) | `SimdLane for f32` — скалярный fallback (хвосты) | ✅ safe |
 | [`cond.rs`](cond.rs) | `Cond<S>` — читаемый branchless `cond().then().else_()` | ✅ safe |
 | [`context.rs`](context.rs) | `SimdContext<S>` — state/params/шины; `MAX_STATES = 16` | ⚠️ unsafe |
-| [`context_ops.rs`](context_ops.rs) | Био-опкоды `SimdContext` (leak_integrate, fire_reset, lif_step, …) | ✅ safe |
 | [`compute.rs`](compute.rs) | `ComputeNeuron` + `StepContext` — типизированный API моделей | ✅ safe |
 | [`population.rs`](population.rs) | `NeuralPopulation` — безопасный SoA-раннер (главный вход) | ⚠️ unsafe внутри |
 | [`runner.rs`](runner.rs) | `run_neuron*` — legacy raw-pointer раннеры (≤6 состояний) + макросы load/save_state | 🔒 unsafe |
@@ -154,7 +153,6 @@ ctx.set_s(0, ctx.s(0) + (ctx.p(2) - ctx.s(0) + ctx.i()) * ctx.p(1) * ctx.dt());
 ```
 
 Био-опкоды (`leak_integrate`, `fire_reset`, `lif_step`, `edge_spike`, …)
-живут в `context_ops.rs` — читаемые имена, но индексы руками.
 
 ---
 
@@ -176,7 +174,6 @@ cargo test -p pillars --lib core::lane_tests
 cargo test -p pillars --lib core::context::tests
 
 # Био-опкоды (leak_integrate, fire_reset, lif_step, …):
-cargo test -p pillars --lib core::context_ops::tests
 
 # Популяция и раннеры:
 cargo test -p pillars --lib core::population

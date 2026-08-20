@@ -14,28 +14,7 @@ use crate::core::lane::SimdLane; // used by the surrogate_output helper below
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum VSNParamIdx {
-    DT = 0,             // ms
-    Inv_Tau_M = 1,      // 1/τ_m (ms⁻¹)
-    V_Rest = 2,         // mV
-    V_Thresh = 3,       // mV
-    V_Reset = 4,        // mV
-    Tau_Ref = 5,        // ms
-    Beta = 6,           // leakage mixing factor
-    Surrogate_Gain = 7, // gain for surrogate gradient
-}
-
-impl From<VSNParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: VSNParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Variable Spiking Neuron with a stored surrogate gradient.
 ///
@@ -146,14 +125,14 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0f32; n * 8];
         for i in 0..n {
-            p[VSNParamIdx::DT as usize * n + i] = 0.5;
-            p[VSNParamIdx::Inv_Tau_M as usize * n + i] = 1.0 / 10.0;
-            p[VSNParamIdx::V_Rest as usize * n + i] = -70.0;
-            p[VSNParamIdx::V_Thresh as usize * n + i] = -54.0;
-            p[VSNParamIdx::V_Reset as usize * n + i] = -70.0;
-            p[VSNParamIdx::Tau_Ref as usize * n + i] = 2.0;
-            p[VSNParamIdx::Beta as usize * n + i] = 0.9;
-            p[VSNParamIdx::Surrogate_Gain as usize * n + i] = 10.0;
+            p[VSNModelParamIdx::dt as usize * n + i] = 0.5;
+            p[VSNModelParamIdx::inv_tau_m as usize * n + i] = 1.0 / 10.0;
+            p[VSNModelParamIdx::v_rest as usize * n + i] = -70.0;
+            p[VSNModelParamIdx::v_thresh as usize * n + i] = -54.0;
+            p[VSNModelParamIdx::v_reset as usize * n + i] = -70.0;
+            p[VSNModelParamIdx::tau_ref as usize * n + i] = 2.0;
+            p[VSNModelParamIdx::beta as usize * n + i] = 0.9;
+            p[VSNModelParamIdx::surrogate_gain as usize * n + i] = 10.0;
         }
         p
     }
@@ -233,8 +212,8 @@ mod tests {
         let mut p_high = make_params(n);
         let mut p_low = make_params(n);
         for i in 0..n {
-            p_high[VSNParamIdx::Beta as usize * n + i] = 0.99;
-            p_low[VSNParamIdx::Beta as usize * n + i] = 0.01;
+            p_high[VSNModelParamIdx::beta as usize * n + i] = 0.99;
+            p_low[VSNModelParamIdx::beta as usize * n + i] = 0.01;
         }
         let mut v_high = vec![-70.0; n];
         let mut v_low = vec![-70.0; n];

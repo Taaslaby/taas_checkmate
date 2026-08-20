@@ -25,7 +25,7 @@ use crate::ops::spike::spike_to_float;
 /// Принимает SIMD-маску (NaN от `cmp_ge`), скалярную маску `-1.0` или
 /// арифметический флаг `1.0` — как и остальные plasticity-опы.
 /// ⚠️ Внутри НЕЛЬЗЯ блендить сырым `spike.cond()`: для флоата `1.0`
-/// знаковый бит = 0 и SIMD-blend счёл бы спайк ложью (см. ops::synapse).
+/// знаковый бит = 0 и SIMD-blend счёл бы спайк ложью (см. ops::spike::spike_to_float).
 /// Поэтому сначала нормализуем через `spike_to_float`, потом строим маску.
 #[inline(always)]
 pub fn stp_step<S: SimdLane>(

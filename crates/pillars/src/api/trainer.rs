@@ -148,6 +148,9 @@ impl EPropTrainer {
         seed: u64,
         num_workers: usize,
     ) -> Self {
+        assert!(ni > 0, "EPropTrainer: ni must be > 0");
+        assert!(nh > 0, "EPropTrainer: nh must be > 0");
+        assert!(no > 0, "EPropTrainer: no must be > 0");
         let nw = num_workers.max(1);
 
         // Workers: identical init via same seed
@@ -180,6 +183,33 @@ impl EPropTrainer {
             lr_in,
             lr_out,
             workers,
+        }
+    }
+
+    /// Validate a batch before processing: `images` must be exactly
+    /// `targets.len() * ni` elements and every target must index an output
+    /// class in `[0, no)`. Rejects caller shape errors up front instead of
+    /// panicking deep inside `train_one` (or slicing the wrong span).
+    fn validate_batch(&self, images: &[f32], targets: &[i32]) {
+        let expected = self
+            .ni
+            .checked_mul(targets.len())
+            .expect("EPropTrainer: batch size overflows");
+        assert_eq!(
+            images.len(),
+            expected,
+            "EPropTrainer: images.len() = {} does not match targets.len() * ni = {} * {} = {}",
+            images.len(),
+            targets.len(),
+            self.ni,
+            expected
+        );
+        for (idx, &t) in targets.iter().enumerate() {
+            assert!(
+                t >= 0 && (t as usize) < self.no,
+                "EPropTrainer: target {idx} = {t} out of range [0, {})",
+                self.no
+            );
         }
     }
 
@@ -367,6 +397,7 @@ impl EPropTrainer {
         if n == 0 {
             return (0.0, 0);
         }
+        self.validate_batch(images, targets);
         let nw = self.workers.len();
         let chunk_size = n.div_ceil(nw);
 
@@ -451,6 +482,7 @@ impl EPropTrainer {
         if n == 0 {
             return (0.0, 0);
         }
+        self.validate_batch(images, targets);
         let worker = &mut self.workers[0];
         let mut tl = 0.0f32;
         let mut tc = 0u32;
@@ -593,5 +625,63 @@ mod tests {
         let (loss, corr) = t.train_batch(&[], &[]);
         assert_eq!(loss, 0.0);
         assert_eq!(corr, 0);
+    }
+
+    /// Малый тренер для negative-тестов форм (ni=4, nh=4, no=3).
+    fn small_trainer() -> EPropTrainer {
+        EPropTrainer::new(4, 4, 3, 2, 100.0, 1.0, 20.0, 0.05, 0.02, 3.0, 0.5, 42, 2)
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match targets.len() * ni")]
+    fn train_batch_rejects_short_images() {
+        let mut t = small_trainer();
+        let _ = t.train_batch(&[0.0f32; 7], &[0i32, 1]); // 7 != 2*4=8
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match targets.len() * ni")]
+    fn train_batch_rejects_extra_images() {
+        let mut t = small_trainer();
+        let _ = t.train_batch(&[0.0f32; 9], &[0i32, 1]); // 9 != 8
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn train_batch_rejects_negative_label() {
+        let mut t = small_trainer();
+        let _ = t.train_batch(&[0.0f32; 8], &[-1i32, 0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn train_batch_rejects_label_at_or_above_no() {
+        let mut t = small_trainer();
+        let _ = t.train_batch(&[0.0f32; 8], &[0i32, 3]); // no=3 → 3 вне диапазона
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match targets.len() * ni")]
+    fn train_sequential_rejects_mismatched_images() {
+        let mut t = small_trainer();
+        let _ = t.train_sequential(&[0.0f32; 4], &[0i32, 1]); // 4 != 8
+    }
+
+    #[test]
+    #[should_panic(expected = "ni must be > 0")]
+    fn trainer_rejects_zero_ni() {
+        let _ = EPropTrainer::new(0, 4, 3, 2, 100.0, 1.0, 20.0, 0.05, 0.02, 3.0, 0.5, 42, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "nh must be > 0")]
+    fn trainer_rejects_zero_nh() {
+        let _ = EPropTrainer::new(4, 0, 3, 2, 100.0, 1.0, 20.0, 0.05, 0.02, 3.0, 0.5, 42, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "no must be > 0")]
+    fn trainer_rejects_zero_no() {
+        let _ = EPropTrainer::new(4, 4, 0, 2, 100.0, 1.0, 20.0, 0.05, 0.02, 3.0, 0.5, 42, 2);
     }
 }

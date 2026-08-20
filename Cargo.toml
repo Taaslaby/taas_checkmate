@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/pillars", "crates/pillars-macros", "crates/pillars-cuda",
     "crates/pillars-connectome",
+    "crates/pillars-grow",
     "crates/t3",
     "crates/train",
     "crates/taas-format",
@@ -19,6 +20,7 @@ homepage = "https://taaslab.ai"
 readme = "README.md"
 keywords = ["neural", "simd", "spiking-neural-networks", "brain-simulation", "wavelets"]
 categories = ["science::neuroscience", "science::robotics", "algorithms::machine-learning"]
+
 # ── GUI (connscope) — единый источник версий egui-семейства ──────────
 # Правило: ОДИН минор egui на всё приложение (сейчас 0.35). Каждый плагин
 # мапится на свой egui минор; источник правды — `cargo tree -i egui` должен
@@ -103,15 +105,26 @@ name = "bench_spikegpt_forward"
 harness = false
 
 [[example]]
-name = "spikegpt_infer"
-
-[[example]]
 name = "cognitive_arena"
 required-features = ["karmac"]
 
 [[example]]
 name = "hide_seek_arena"
 required-features = ["karmac"]
+
+[[example]]
+name = "my_neuron_cuda"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_hh_gpu"
+required-features = ["cuda"]
+
+[[example]]
+name = "mnist_grad"
+
+[[example]]
+name = "mnist_10_digits"
 
 [features]
 default = ["t3", "format"]
@@ -144,8 +157,5 @@ cuda = ["t3", "connectome",
 # Python bindings
 python = ["dep:pyo3", "dep:numpy", "dep:pillars-connectome", "connectome", "t3", "format", "taas-train/connectome", "karmac"]
 
-# Unity C ABI (inlined in main crate, like python)
-unity = ["connectome"]
-
 # Everything
-all = ["t3", "train", "format", "connectome", "karmac", "wasm", "cuda", "python", "unity"]
+all = ["t3", "train", "format", "connectome", "karmac", "wasm", "cuda", "python"]

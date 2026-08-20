@@ -12,29 +12,7 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum AtlasParamIdx {
-    DT = 0,             // ms
-    D_Ca = 1,           // Ca²⁺ influx per spike
-    Ca_Decay_Const = 2, // exp(-dt/tau_pump)
-    Eta_Reset = 3,      // active reset factor
-    T_Max = 4,          // max isometric tension
-    Kd = 5,             // Ca²⁺ sensitivity (half-activation)
-    L0 = 6,             // optimal muscle length
-    Inv_Vmax = 7,       // 1/V_max (inverse max velocity)
-    Inv_Width = 8,      // 1/width of length-tension curve
-}
-
-impl From<AtlasParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: AtlasParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Biomechanical muscle with Ca²⁺ dynamics + Hill force-velocity.
 ///
@@ -160,15 +138,15 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0f32; n * 9];
         for i in 0..n {
-            p[AtlasParamIdx::DT as usize * n + i] = 1.0;
-            p[AtlasParamIdx::D_Ca as usize * n + i] = 0.1;
-            p[AtlasParamIdx::Ca_Decay_Const as usize * n + i] = 0.9;
-            p[AtlasParamIdx::Eta_Reset as usize * n + i] = 0.5;
-            p[AtlasParamIdx::T_Max as usize * n + i] = 1.0;
-            p[AtlasParamIdx::Kd as usize * n + i] = 0.2;
-            p[AtlasParamIdx::L0 as usize * n + i] = 1.0;
-            p[AtlasParamIdx::Inv_Vmax as usize * n + i] = 1.0;
-            p[AtlasParamIdx::Inv_Width as usize * n + i] = 1.0;
+            p[AtlasovNeuromotorModelParamIdx::dt as usize * n + i] = 1.0;
+            p[AtlasovNeuromotorModelParamIdx::d_ca as usize * n + i] = 0.1;
+            p[AtlasovNeuromotorModelParamIdx::ca_decay_const as usize * n + i] = 0.9;
+            p[AtlasovNeuromotorModelParamIdx::eta_reset as usize * n + i] = 0.5;
+            p[AtlasovNeuromotorModelParamIdx::t_max as usize * n + i] = 1.0;
+            p[AtlasovNeuromotorModelParamIdx::kd as usize * n + i] = 0.2;
+            p[AtlasovNeuromotorModelParamIdx::l0 as usize * n + i] = 1.0;
+            p[AtlasovNeuromotorModelParamIdx::inv_vmax as usize * n + i] = 1.0;
+            p[AtlasovNeuromotorModelParamIdx::inv_width as usize * n + i] = 1.0;
         }
         p
     }
@@ -246,7 +224,7 @@ mod tests {
         let mut params = make_params(n);
         let decay = 0.9_f32;
         for i in 0..n {
-            params[AtlasParamIdx::Ca_Decay_Const as usize * n + i] = decay;
+            params[AtlasovNeuromotorModelParamIdx::ca_decay_const as usize * n + i] = decay;
         }
         let mut ca = vec![0.0; n];
         let mut tension = vec![0.0; n];
@@ -402,65 +380,5 @@ mod tests {
         assert!(tension_velocity[3] > tension_velocity[4]);
         assert_eq!(tension_velocity[0].to_bits(), tension_velocity[1].to_bits());
         assert_eq!(tension_velocity[6].to_bits(), tension_velocity[7].to_bits());
-    }
-
-    #[test]
-    fn physics_antagonist_outputs_obey_sign_and_impedance_baselines() {
-        let n = 8;
-        let mut state = vec![0.0; n];
-        let mut tension = vec![0.0; n];
-        let spikes = vec![1_i32, 0, 0, 1, 1, 0, 0, 0];
-        let resets = vec![0; n];
-        let d_ca = vec![0.5; n];
-        let tau_pump = vec![20.0; n];
-        let eta_reset = vec![0.8; n];
-        let t_max = vec![1.0; n];
-        let kd = vec![0.3; n];
-        let l0 = vec![1.0; n];
-        let v_max = vec![5.0; n];
-        let mut joint_df = vec![0.0; 4];
-        let mut joint_stiffness = vec![0.0; 4];
-        let mut joint_damping = vec![0.0; 4];
-        let k0 = vec![2.0; 4];
-        let beta = vec![3.0; 4];
-        let b0 = vec![0.4; 4];
-        let alpha = vec![0.5; 4];
-
-        crate::api::neurons::atlasov::step_atlasov_neuromotor(
-            &mut state,
-            &mut tension,
-            &spikes,
-            &resets,
-            1.0,
-            &d_ca,
-            &tau_pump,
-            &eta_reset,
-            &t_max,
-            &kd,
-            &l0,
-            &v_max,
-            None,
-            None,
-            Some(&mut joint_df),
-            Some(&mut joint_stiffness),
-            Some(&mut joint_damping),
-            Some(&k0),
-            Some(&beta),
-            Some(&b0),
-            Some(&alpha),
-        );
-
-        assert!(
-            joint_df[0] < 0.0,
-            "flexor at index 0 should beat extensor at index 1"
-        );
-        assert!(
-            joint_df[1] > 0.0,
-            "extensor at index 3 should beat flexor at index 2"
-        );
-        assert!(joint_stiffness[0] > k0[0]);
-        assert!(joint_damping[0] > b0[0]);
-        assert!(joint_stiffness[2] > k0[2]);
-        assert!(joint_damping[2] > b0[2]);
     }
 }

@@ -1,6 +1,6 @@
 //! Builder module.
 
-use super::{BuildError, ModelBuilder, positive, validate_specs};
+use super::{positive, validate_specs, BuildError, ModelBuilder};
 use crate::core::population::NeuralPopulation;
 use crate::zoo::Model;
 
@@ -14,14 +14,14 @@ use crate::zoo::Model;
 /// use pillars::prelude::*;
 ///
 /// let pop = UniversalBuilder::<VSNModel>::new(1000)
-///     .param(VSNParamIdx::DT, 0.5)
-///     .param(VSNParamIdx::Inv_Tau_M, 0.1)
-///     .param(VSNParamIdx::V_Rest, -70.0)
-///     .param(VSNParamIdx::V_Thresh, -54.0)
-///     .param(VSNParamIdx::V_Reset, -70.0)
-///     .param(VSNParamIdx::Tau_Ref, 2.0)
-///     .param(VSNParamIdx::Beta, 0.9)
-///     .param(VSNParamIdx::Surrogate_Gain, 10.0)
+///     .param(VSNModelParamIdx::dt, 0.5)
+///     .param(VSNModelParamIdx::inv_tau_m, 0.1)
+///     .param(VSNModelParamIdx::v_rest, -70.0)
+///     .param(VSNModelParamIdx::v_thresh, -54.0)
+///     .param(VSNModelParamIdx::v_reset, -70.0)
+///     .param(VSNModelParamIdx::tau_ref, 2.0)
+///     .param(VSNModelParamIdx::beta, 0.9)
+///     .param(VSNModelParamIdx::surrogate_gain, 10.0)
 ///     .state(0, -70.0)
 ///     .build();
 /// ```
@@ -98,4 +98,3 @@ impl<M: Model> ModelBuilder for UniversalBuilder<M> {
 // ═══════════════════════════════════════════════════════════════
 //  VSN Builder
 // ═══════════════════════════════════════════════════════════════
-

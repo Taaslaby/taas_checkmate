@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# 🔬 ASM Check — Disassembly Toolkit for Pillars
+#  ASM Check — Disassembly Toolkit for Pillars
 # ═══════════════════════════════════════════════════════════════
 #
 # Usage:

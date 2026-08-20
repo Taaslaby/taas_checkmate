@@ -120,7 +120,11 @@ mod tests {
 
     #[test]
     fn test_edge_spike_sustained() {
-        let is_above = f32x8::splat(1.0); // still above
+        // is_above MUST be a hardware mask (NaN or -1.0, sign bit set) —
+        // wide::blend selects by SIGN BIT on the AVX path (blendvps), but by
+        // ANY NON-ZERO BIT on the SSE fallback (generic_bit_blend). A plain
+        // 1.0 is not a valid mask and gives different results per target.
+        let is_above = f32x8::splat(-1.0); // still above (true mask)
         let was_below = f32x8::splat(0.0); // was NOT below → not an edge
         let (spike, flag) = edge_spike(is_above, was_below);
         assert_eq!(spike.move_mask(), 0, "sustained above should NOT spike");

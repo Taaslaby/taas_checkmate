@@ -18,7 +18,11 @@ use super::lane::SimdLane;
 
 /// A comparison mask — produced by `cmp_ge`, `cmp_gt`, etc.
 ///
-/// Masks use hardware convention: NaN = true, 0.0 = false.
+/// Masks use hardware convention: **sign bit set** = true, 0.0 = false
+/// (NaN and -1.0 are both valid true-masks; 1.0 is NOT — `wide::blend`
+/// selects by sign bit on the AVX path (`blendvps`) but by any non-zero
+/// bit on the SSE fallback (`generic_bit_blend`), so only sign-bit masks
+/// are portable across targets).
 #[derive(Copy, Clone)]
 pub struct Cond<S: SimdLane>(pub S);
 

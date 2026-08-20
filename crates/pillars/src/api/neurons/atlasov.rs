@@ -18,7 +18,6 @@
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::AtlasovNeuromotorModel;
 
 /// Обработать чанк из 8 мышечных каналов через pillars-модель.
@@ -68,20 +67,19 @@ fn process_chunk(
         st_len[j] = lengths.map_or(l0[j], |l| l[off + j]);
         st_vel[j] = velocities.map_or(0.0, |v| v[off + j]);
     }
-    unsafe {
-        run_neuron::<AtlasovNeuromotorModel>(
-            ca.as_mut_ptr(),
-            tens.as_mut_ptr(),
-            st_rst.as_mut_ptr(),
-            st_len.as_mut_ptr(),
-            st_vel.as_mut_ptr(),
-            std::ptr::null_mut(),
-            i_in.as_ptr(),
-            spk_out.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<AtlasovNeuromotorModel>(
+        crate::core::runner::NeuronState {
+            v: Some(&mut ca[..]),
+            u: Some(&mut tens[..]),
+            h: Some(&mut st_rst[..]),
+            r: Some(&mut st_len[..]),
+            s: Some(&mut st_vel[..]),
+            ..Default::default()
+        },
+        &i_in[..],
+        &mut spk_out[..],
+        &params[..],
+    );
 }
 
 /// Обработать сустав `j` (agonista-antagonist tug-of-war).
@@ -861,5 +859,69 @@ mod tests {
         let state = config.build_state();
         assert_eq!(state.n_muscles, channels);
         assert!(state.t_max.contains(&2e-4), "TDT tension must exist");
+    }
+
+    /// Антагонистичная пара: флексор (чётный) тянет сустав в одну сторону,
+    /// экстензор (нечётный) — в другую. Здесь проверяется знак крутящего
+    /// момента и то, что жёсткость/демпфирование растут с активацией
+    /// (zoo-модель; шаг — api-мост, поэтому тест живёт здесь, а не в zoo).
+    #[test]
+    fn physics_antagonist_outputs_obey_sign_and_impedance_baselines() {
+        let n = 8;
+        let mut state = vec![0.0; n];
+        let mut tension = vec![0.0; n];
+        let spikes = vec![1_i32, 0, 0, 1, 1, 0, 0, 0];
+        let resets = vec![0; n];
+        let d_ca = vec![0.5; n];
+        let tau_pump = vec![20.0; n];
+        let eta_reset = vec![0.8; n];
+        let t_max = vec![1.0; n];
+        let kd = vec![0.3; n];
+        let l0 = vec![1.0; n];
+        let v_max = vec![5.0; n];
+        let mut joint_df = vec![0.0; 4];
+        let mut joint_stiffness = vec![0.0; 4];
+        let mut joint_damping = vec![0.0; 4];
+        let k0 = vec![2.0; 4];
+        let beta = vec![3.0; 4];
+        let b0 = vec![0.4; 4];
+        let alpha = vec![0.5; 4];
+
+        step_atlasov_neuromotor(
+            &mut state,
+            &mut tension,
+            &spikes,
+            &resets,
+            1.0,
+            &d_ca,
+            &tau_pump,
+            &eta_reset,
+            &t_max,
+            &kd,
+            &l0,
+            &v_max,
+            None,
+            None,
+            Some(&mut joint_df),
+            Some(&mut joint_stiffness),
+            Some(&mut joint_damping),
+            Some(&k0),
+            Some(&beta),
+            Some(&b0),
+            Some(&alpha),
+        );
+
+        assert!(
+            joint_df[0] < 0.0,
+            "flexor at index 0 should beat extensor at index 1"
+        );
+        assert!(
+            joint_df[1] > 0.0,
+            "extensor at index 3 should beat flexor at index 2"
+        );
+        assert!(joint_stiffness[0] > k0[0]);
+        assert!(joint_damping[0] > b0[0]);
+        assert!(joint_stiffness[2] > k0[2]);
+        assert!(joint_damping[2] > b0[2]);
     }
 }

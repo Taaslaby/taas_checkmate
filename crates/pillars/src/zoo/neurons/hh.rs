@@ -1,4 +1,4 @@
-//! ⚡ HH — Hodgkin-Huxley (1952) squid axon model
+//! HH — Hodgkin-Huxley (1952) squid axon model
 //!
 //! Standard NaV + KV + leak, with Q10 temperature correction.
 //! **Continuous biophysical model** — no artificial V reset.
@@ -25,7 +25,8 @@
 //! - `#[derive(NeuronModel)]` — typed state/param fields
 //! - `ComputeNeuron` — pure SIMD step, no raw ctx.s(0) indexing
 //! - `cube()`, `powi::<4>()` — hardware vmulps, zero branches
-//! - `ohmic_gated`/`ohmic_current` — NEURON convention (FMA)
+//! - gates via **exponential Euler** (`cnexp`), membrane via **implicit Euler**
+//!   (`derivimplicit`) — both as NEURON does by default
 //! - `edge_spike` — continuous detection, no V reset
 //!
 //! # Biophysical Validation
@@ -43,36 +44,11 @@
 use pillars_macros::dual_neuron;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
 
 /// Type-safe parameter indices for HHModel (SoA column-major layout).
 ///
 /// Order matches `#[param]` field order in `HHModel` struct.
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum HHParamIdx {
-    DT = 0,       // ms — time step
-    G_Na = 1,     // mS/cm² — Na⁺ max conductance
-    E_Na = 2,     // mV — Na⁺ reversal potential
-    G_K = 3,      // mS/cm² — K⁺ max conductance
-    E_K = 4,      // mV — K⁺ reversal potential
-    G_Leak = 5,   // mS/cm² — leak conductance
-    E_Leak = 6,   // mV — leak reversal potential
-    Q10 = 7,      // (scalar) — precomputed Q10 temperature factor
-    V_Thresh = 8, // mV — spike detection threshold
-    Inv_Cm = 9,   // 1/µF — inverse membrane capacitance
-    G_CaT = 10,   // mS/cm² — CaV-T (T-type Ca²⁺) max conductance (0 for standard HH)
-    E_CaT = 11,   // mV — CaV-T reversal potential (≈ +120 for pacemaking)
-}
-
-impl From<HHParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: HHParamIdx) -> Self {
-        idx as usize
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  Dual-source HH — one source → CPU SIMD + CUDA.
 //  `#[dual_neuron]` transpiles the SAME `ComputeNeuron::step` body into a
@@ -84,7 +60,7 @@ impl From<HHParamIdx> for usize {
 pub mod hh {
     use crate::core::compute::{ComputeNeuron, StepContext};
     use crate::core::lane::SimdLane;
-    use crate::ops::{edge_spike, membrane_depolarize, ohmic_current, ohmic_gated};
+    use crate::ops::edge_spike;
     use pillars_macros::NeuronModel;
 
     // ═══════════════════════════════════════════════════════════════
@@ -323,28 +299,33 @@ pub mod hh {
             // CaV-T gate: constant τ form — one fast_exp, no α/β split
             let c_new = compute_cat_gate_state(state.v, state.c, dt_q10);
 
-            // ─── Ionic Currents via ops::ohmic (NEURON convention) ───
-            // Na⁺: g_Na·m³·h·(V-E_Na)  — cube() = 2× vmulps
-            // K⁺:  g_K·n⁴·(V-E_K)      — powi::<4>() = 2× vmulps
-            // CaT: g_CaT·c·(V-E_CaT)    — 0 for standard HH, 0.5 for pacemaking
-            // Leak: g_L·(V-E_L)          — 1× vmulps
+            // ─── Effective conductances (NEURON derivimplicit) ───────
+            // Na⁺: g_Na·m³·h  — cube() = 2× vmulps
+            // K⁺:  g_K·n⁴      — powi::<4>() = 2× vmulps
+            // CaT: g_CaT·c      — 0 for standard HH, 0.5 for pacemaking
+            // Leak: g_L
             let gating_na = m_new.cube() * h_new; // m³h
             let gating_k = n_new.powi::<4>(); // n⁴
 
-            let i_na = ohmic_gated(params.g_Na, state.v, params.E_Na, gating_na);
-            let i_k = ohmic_gated(params.g_K, state.v, params.E_K, gating_k);
-            let i_cat = ohmic_gated(params.g_CaT, state.v, params.E_CaT, c_new);
-            let i_leak = ohmic_current(params.g_Leak, state.v, params.E_Leak);
+            let g_na_eff = params.g_Na * gating_na;
+            let g_k_eff = params.g_K * gating_k;
+            let g_cat_eff = params.g_CaT * c_new;
+            let g_sum = g_na_eff + g_k_eff + g_cat_eff + params.g_Leak;
+            let g_e_sum = g_na_eff * params.E_Na
+                + g_k_eff * params.E_K
+                + g_cat_eff * params.E_CaT
+                + params.g_Leak * params.E_Leak;
 
-            // ─── Membrane Integration (ops::membrane) ─────────────────
-            // V' = V + (I_inj - ΣI_ion) · inv_Cm · dt
-            let v_new = membrane_depolarize(
-                state.v,
-                ctx.i_syn,
-                i_na + i_k + i_cat + i_leak,
-                params.inv_cm,
-                ctx.dt_simd(),
-            );
+            // ─── Membrane Integration: implicit Euler (NEURON derivimplicit) ──
+            // NEURON's default integration for HH solves V **implicitly** — the
+            // ohmic currents are linear in V, so it's a closed-form solve (no
+            // Newton, no branch):
+            //   C·(V'−V)/dt = I_inj − Σ g_i·(V'−E_i)
+            //   V' = (C/dt·V + I_inj + Σ g_i·E_i) / (C/dt + Σ g_i)
+            // This is unconditionally stable and stays accurate at larger dt,
+            // unlike the old forward Euler (which needed dt≈0.01 ms for HH).
+            let c_over_dt = S::one() / (params.inv_cm * ctx.dt_simd());
+            let v_new = (c_over_dt * state.v + ctx.i_syn + g_e_sum) / (c_over_dt + g_sum);
 
             // ─── Spike Detection (Edge-Triggered, No V Reset!) ───────
             // ❌ No v_reset — HH is continuous biophysical model.
@@ -381,18 +362,18 @@ mod tests {
         let q10 = 3.0_f32.powf((celsius - 6.3) / 10.0);
         let mut p = vec![0.0f32; num * HHModel::N_PARAMS];
         for i in 0..num {
-            p[HHParamIdx::DT as usize * num + i] = 0.01;
-            p[HHParamIdx::G_Na as usize * num + i] = 120.0;
-            p[HHParamIdx::E_Na as usize * num + i] = 50.0;
-            p[HHParamIdx::G_K as usize * num + i] = 36.0;
-            p[HHParamIdx::E_K as usize * num + i] = -77.0;
-            p[HHParamIdx::G_Leak as usize * num + i] = 0.3;
-            p[HHParamIdx::E_Leak as usize * num + i] = -54.387;
-            p[HHParamIdx::Q10 as usize * num + i] = q10;
-            p[HHParamIdx::V_Thresh as usize * num + i] = 0.0;
-            p[HHParamIdx::Inv_Cm as usize * num + i] = 1.0;
-            p[HHParamIdx::G_CaT as usize * num + i] = 0.0; // standard HH: no CaT
-            p[HHParamIdx::E_CaT as usize * num + i] = 120.0;
+            p[HHModelParamIdx::dt as usize * num + i] = 0.01;
+            p[HHModelParamIdx::g_Na as usize * num + i] = 120.0;
+            p[HHModelParamIdx::E_Na as usize * num + i] = 50.0;
+            p[HHModelParamIdx::g_K as usize * num + i] = 36.0;
+            p[HHModelParamIdx::E_K as usize * num + i] = -77.0;
+            p[HHModelParamIdx::g_Leak as usize * num + i] = 0.3;
+            p[HHModelParamIdx::E_Leak as usize * num + i] = -54.387;
+            p[HHModelParamIdx::q10 as usize * num + i] = q10;
+            p[HHModelParamIdx::v_thresh as usize * num + i] = 0.0;
+            p[HHModelParamIdx::inv_cm as usize * num + i] = 1.0;
+            p[HHModelParamIdx::g_CaT as usize * num + i] = 0.0; // standard HH: no CaT
+            p[HHModelParamIdx::E_CaT as usize * num + i] = 120.0;
         }
         p
     }
@@ -660,8 +641,8 @@ mod tests {
         for idx in 0..HHModel::N_PARAMS {
             pop.fill_param(idx, make_params(1, 6.3)[idx]);
         }
-        pop.fill_param(HHParamIdx::G_CaT.into(), 0.5);
-        pop.fill_param(HHParamIdx::E_CaT.into(), 120.0);
+        pop.fill_param(HHModelParamIdx::g_CaT.into(), 0.5);
+        pop.fill_param(HHModelParamIdx::E_CaT.into(), 120.0);
 
         let i_in = vec![0.0f32; 8];
         let mut spikes = vec![0i32; 8];

@@ -22,7 +22,7 @@
 use crate::core::population::NeuralPopulation;
 
 #[cfg(test)]
-use crate::zoo::neurons::{LIFModel, VSNModel};
+use crate::zoo::neurons::VSNModel;
 #[cfg(test)]
 use crate::zoo::Model;
 
@@ -219,6 +219,30 @@ mod tests {
         assert_eq!(pop.len(), 80);
     }
 
+    /// HAAPBuilder must start u/h at the model's resting Boltzmann equilibrium
+    /// (not the arbitrary old `u=0, h=0`), so an unstimulated population sits
+    /// at its steady state without a long h-transient (tau_h ~ 200 ms).
+    #[test]
+    fn test_haap_builder_initializes_gates_at_resting_equilibrium() {
+        let pop = HAAPBuilder::new(4).build();
+        // Defaults: v_init=-70, v_half_u=-35, k_u=5, v_half_h=-75, k_h=6.
+        let u0: f32 = 1.0 / (1.0 + (-(-70.0f32 + 35.0) / 5.0).exp());
+        let h0: f32 = 1.0 / (1.0 + ((-70.0f32 + 75.0) / 6.0).exp());
+        // HCN opens on hyperpolarization; at v_init=-70 (above v_half_h=-75) it
+        // sits partway open (~0.303), not at the old hardcoded 0.
+        assert!((h0 - 0.303).abs() < 0.01, "sanity: h_inf ≈ 0.303, got {h0}");
+        assert!((u0 - 0.0).abs() < 0.01, "sanity: u_inf ≈ 0, got {u0}");
+
+        let v = pop.state_slice(0);
+        let u = pop.state_slice(1);
+        let h = pop.state_slice(2);
+        for i in 0..4 {
+            assert_eq!(v[i], -70.0, "v[{i}]");
+            assert!((u[i] - u0).abs() < 1e-6, "u[{i}] = {} vs {u0}", u[i]);
+            assert!((h[i] - h0).abs() < 1e-6, "h[{i}] = {} vs {h0}", h[i]);
+        }
+    }
+
     #[test]
     fn test_generic_model_builder_trait() {
         fn build_any<B: ModelBuilder>(builder: B) -> usize {
@@ -297,17 +321,17 @@ mod tests {
 
     #[test]
     fn test_universal_builder() {
-        use crate::zoo::VSNParamIdx;
+        use crate::zoo::VSNModelParamIdx;
 
         let pop = UniversalBuilder::<VSNModel>::new(50)
-            .param(VSNParamIdx::DT, 0.5)
-            .param(VSNParamIdx::Inv_Tau_M, 0.1)
-            .param(VSNParamIdx::V_Rest, -70.0)
-            .param(VSNParamIdx::V_Thresh, -54.0)
-            .param(VSNParamIdx::V_Reset, -70.0)
-            .param(VSNParamIdx::Tau_Ref, 2.0)
-            .param(VSNParamIdx::Beta, 0.9)
-            .param(VSNParamIdx::Surrogate_Gain, 10.0)
+            .param(VSNModelParamIdx::dt, 0.5)
+            .param(VSNModelParamIdx::inv_tau_m, 0.1)
+            .param(VSNModelParamIdx::v_rest, -70.0)
+            .param(VSNModelParamIdx::v_thresh, -54.0)
+            .param(VSNModelParamIdx::v_reset, -70.0)
+            .param(VSNModelParamIdx::tau_ref, 2.0)
+            .param(VSNModelParamIdx::beta, 0.9)
+            .param(VSNModelParamIdx::surrogate_gain, 10.0)
             .state(0usize, -70.0)
             .build();
         assert_eq!(pop.len(), 50);

@@ -13,26 +13,7 @@ use crate::core::lane::SimdLane;
 use pillars_macros::NeuronModel;
 
 // ═══════════════════════════════════════════════════════════════
-//  ParamIdx Enum (for manual fill_param / slice access)
 // ═══════════════════════════════════════════════════════════════
-
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum Exp2SynParamIdx {
-    DT = 0,       // ms
-    Inv_Tau1 = 1, // 1/τ₁ (ms⁻¹) — rise rate
-    Inv_Tau2 = 2, // 1/τ₂ (ms⁻¹) — decay rate
-    E_Rev = 3,    // mV — reversal potential
-    Factor = 4,   // normalization factor
-    Unused = 5,   // padding
-}
-
-impl From<Exp2SynParamIdx> for usize {
-    #[inline(always)]
-    fn from(idx: Exp2SynParamIdx) -> Self {
-        idx as usize
-    }
-}
 
 /// Dual-exponential synapse: two exponentials, conductance g = (B − A)⁺.
 ///
@@ -99,7 +80,7 @@ impl Exp2SynModel {
     #[inline(always)]
     pub fn current<S: SimdLane>(ctx: &SimdContext<S>, v: S) -> S {
         let g = Self::conductance(ctx);
-        g * (ctx.p_enum(Exp2SynParamIdx::E_Rev) - v)
+        g * (ctx.p_enum(Exp2SynModelParamIdx::e_rev) - v)
     }
 }
 
@@ -131,12 +112,12 @@ mod tests {
         let factor = exp2syn_factor(tau1, tau2);
         let mut p = vec![0.0f32; n * 6];
         for i in 0..n {
-            p[Exp2SynParamIdx::DT as usize * n + i] = 1.0;
-            p[Exp2SynParamIdx::Inv_Tau1 as usize * n + i] = inv_tau1;
-            p[Exp2SynParamIdx::Inv_Tau2 as usize * n + i] = inv_tau2;
-            p[Exp2SynParamIdx::E_Rev as usize * n + i] = 0.0;
-            p[Exp2SynParamIdx::Factor as usize * n + i] = factor;
-            p[Exp2SynParamIdx::Unused as usize * n + i] = 0.0;
+            p[Exp2SynModelParamIdx::dt as usize * n + i] = 1.0;
+            p[Exp2SynModelParamIdx::inv_tau1 as usize * n + i] = inv_tau1;
+            p[Exp2SynModelParamIdx::inv_tau2 as usize * n + i] = inv_tau2;
+            p[Exp2SynModelParamIdx::e_rev as usize * n + i] = 0.0;
+            p[Exp2SynModelParamIdx::factor as usize * n + i] = factor;
+            p[Exp2SynModelParamIdx::unused as usize * n + i] = 0.0;
         }
         p
     }

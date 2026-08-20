@@ -33,6 +33,21 @@ pub fn no_spike(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("no_spike"))
 }
 
+/// Detect `#[no_clamp]` struct attribute → `CLAMP_I_SYN = false`.
+///
+/// Models whose `i_syn` is not a clamped physical current but e.g. a
+/// conductance in mV-equivalent units opt out of the ±100 input clamp.
+pub fn no_clamp(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("no_clamp"))
+}
+
+/// Detect `#[broadcast]` field attribute → the param is constant across the
+/// population, so `from_ctx` reads it as a broadcast scalar ([`pb`](crate::core::context::SimdContext::pb))
+/// instead of a per-neuron column load.
+pub fn is_broadcast(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("broadcast"))
+}
+
 /// Strip common suffixes like "Model" from type names.
 pub fn base_name(name: &Ident) -> Ident {
     let s = name.to_string();

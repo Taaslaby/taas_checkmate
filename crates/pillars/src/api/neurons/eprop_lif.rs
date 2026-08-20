@@ -187,4 +187,3 @@ impl EPropLIF {
         self.refractory.fill(0.0);
     }
 }
-

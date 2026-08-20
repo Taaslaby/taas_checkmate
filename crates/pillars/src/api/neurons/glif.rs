@@ -116,21 +116,17 @@ impl Glif3State {
             let min_len = self.n.min(ext.len());
             self.Ii[..min_len].copy_from_slice(&ext[..min_len]);
         }
-        let n = self.n;
-        unsafe {
-            crate::core::runner::run_neuron::<crate::zoo::neurons::GLIF3Model>(
-                self.v.as_mut_ptr(),
-                self.g_ahp.as_mut_ptr(),
-                self.refractory.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                self.Ii.as_ptr(),
-                self.spikes.as_mut_ptr(),
-                self.packed.as_ptr(),
-                n,
-            );
-        }
+        crate::core::runner::run_neuron_slices::<crate::zoo::neurons::GLIF3Model>(
+            crate::core::runner::NeuronState {
+                v: Some(&mut self.v),
+                u: Some(&mut self.g_ahp),
+                h: Some(&mut self.refractory),
+                ..Default::default()
+            },
+            &self.Ii,
+            &mut self.spikes,
+            &self.packed,
+        );
     }
 
     /// Reset all state variables.
@@ -242,21 +238,18 @@ impl Glif4State {
             let min_len = self.n.min(ext.len());
             self.Ii[..min_len].copy_from_slice(&ext[..min_len]);
         }
-        let n = self.n;
-        unsafe {
-            crate::core::runner::run_neuron::<crate::zoo::neurons::GLIF4Model>(
-                self.v.as_mut_ptr(),
-                self.theta.as_mut_ptr(),
-                self.g_ahp.as_mut_ptr(),
-                self.refractory.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                self.Ii.as_ptr(),
-                self.spikes.as_mut_ptr(),
-                self.packed.as_ptr(),
-                n,
-            );
-        }
+        crate::core::runner::run_neuron_slices::<crate::zoo::neurons::GLIF4Model>(
+            crate::core::runner::NeuronState {
+                v: Some(&mut self.v),
+                u: Some(&mut self.theta),
+                h: Some(&mut self.g_ahp),
+                r: Some(&mut self.refractory),
+                ..Default::default()
+            },
+            &self.Ii,
+            &mut self.spikes,
+            &self.packed,
+        );
     }
 
     /// Reset all state variables.
@@ -298,4 +291,3 @@ impl Glif4State {
         }
     }
 }
-

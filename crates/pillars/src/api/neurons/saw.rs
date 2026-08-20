@@ -8,7 +8,6 @@
 
 #![allow(non_snake_case)]
 
-use crate::core::runner::run_neuron;
 use crate::zoo::neurons::SAWModel;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -133,20 +132,18 @@ fn process_chunk(
         params[48 + j] = 30.0; // legacy v_th
         params[56 + j] = -65.0; // legacy v_reset
     }
-    unsafe {
-        run_neuron::<SAWModel>(
-            v8.as_mut_ptr(),
-            u8.as_mut_ptr(),
-            tr8.as_mut_ptr(),   // state 2 = ψ-wave trace
-            refr8.as_mut_ptr(), // state 3
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            I8.as_ptr(),
-            sp8.as_mut_ptr(),
-            params.as_ptr(),
-            8,
-        );
-    }
+    crate::core::runner::run_neuron_slices::<SAWModel>(
+        crate::core::runner::NeuronState {
+            v: Some(v8),
+            u: Some(u8),
+            h: Some(tr8),   // state 2 = ψ-wave trace
+            r: Some(refr8), // state 3
+            ..Default::default()
+        },
+        I8,
+        sp8,
+        &params,
+    );
     // Шум впрыскивается после обновления и детекции спайка (как в легаси).
     if noise_amp != 0.0 {
         for j in 0..8 {
@@ -198,10 +195,10 @@ pub fn step_gco(
         crate::kernels::phase::gco_step(
             &mut v[i..i + 8],
             &mut u[i..i + 8],
-            &mut h_real[i..i + 8],
-            &mut h_imag[i..i + 8],
-            &mut I_ext[i..i + 8],
-            &mut speed[i..i + 8],
+            &h_real[i..i + 8],
+            &h_imag[i..i + 8],
+            &I_ext[i..i + 8],
+            &speed[i..i + 8],
             dt,
         );
     }
