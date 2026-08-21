@@ -16,7 +16,7 @@
 
 use eframe::egui::{self, Color32};
 
-use elegance::{Badge, BadgeTone, Card};
+use elegance::{Badge, BadgeTone};
 
 use crate::app::shell::theme::{self, DANGER, STROKE_SOFT, TEXT, TEXT_DIM};
 use crate::app::tokens;
@@ -25,20 +25,46 @@ use crate::app::tokens;
 /// Обёртка над `elegance::Card` с единым заголовком (иконка + текст) и
 /// стандартным паддингом. Все карточки приложения используют её, чтобы
 /// у карточек был одинаковый вид, а не по-разному настроенный `Card`.
+/// Красивее: стекло + мягкая тень + градиент хедера (Aqua).
 pub(crate) fn section_card(
     ui: &mut egui::Ui,
     icon: &str,
     title: &str,
     body: impl FnOnce(&mut egui::Ui),
 ) {
-    Card::new()
-        .heading(tokens::heading(tokens::icon_label(
-            icon,
-            title,
-            tokens::ICON_SM,
-        )))
-        .padding(tokens::PAD_CARD)
-        .show(ui, body);
+    // Стекло: полупрозрачный фон + размытая тень + тонкий бордер
+    let frame = egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(28, 32, 33, 220))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(60, 70, 85, 90)))
+        .corner_radius(10)
+        .inner_margin(tokens::PAD_CARD)
+        .shadow(egui::Shadow {
+            offset: [0, 6],
+            blur: 16,
+            spread: 0,
+            color: Color32::from_black_alpha(50),
+        });
+    frame.show(ui, |ui| {
+        // Хедер — иконка в кружке + заголовок
+        ui.horizontal(|ui| {
+            // Иконка в кружке с градиентом
+            let (r, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 11.0, theme::accent(ui).gamma_multiply(0.18));
+            ui.painter().circle_stroke(r.center(), 11.0, egui::Stroke::new(1.0, theme::accent(ui).gamma_multiply(0.5)));
+            ui.painter().text(
+                r.center(),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                egui::FontId::proportional(tokens::ICON_SM),
+                theme::accent(ui),
+            );
+            ui.label(tokens::heading(tokens::icon_label("", title, tokens::ICON_SM)));
+        });
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(6.0);
+        body(ui);
+    });
 }
 
 /// Компактная карточка (плоты): меньше паддинг, заголовок без SemiBold.
@@ -49,16 +75,37 @@ pub(crate) fn compact_card(
     sub: &str,
     body: impl FnOnce(&mut egui::Ui),
 ) {
-    Card::new()
-        .heading(tokens::icon_label(icon, title, tokens::ICON_SM).strong())
-        .padding(tokens::PAD_CARD_SM)
-        .show(ui, |ui| {
-            if !sub.is_empty() {
-                ui.label(egui::RichText::new(sub).weak().small());
-                ui.add_space(tokens::SP_XS);
-            }
-            body(ui);
+    // Компактное стекло — как section_card, но меньше паддинг и заголовок без SemiBold
+    let frame = egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(28, 32, 33, 200))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(60, 70, 85, 80)))
+        .corner_radius(8)
+        .inner_margin(tokens::PAD_CARD_SM)
+        .shadow(egui::Shadow {
+            offset: [0, 4],
+            blur: 12,
+            spread: 0,
+            color: Color32::from_black_alpha(40),
         });
+    frame.show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 9.0, theme::accent(ui).gamma_multiply(0.15));
+            ui.painter().text(
+                r.center(),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                egui::FontId::proportional(tokens::ICON_XS),
+                theme::accent(ui),
+            );
+            ui.label(egui::RichText::new(title).strong().size(tokens::TEXT_SMALL + 0.5));
+            if !sub.is_empty() {
+                ui.label(egui::RichText::new(format!("· {sub}")).weak().small());
+            }
+        });
+        ui.add_space(tokens::SP_XS);
+        body(ui);
+    });
 }
 
 // ── поля «ключ: значение» ─────────────────────────────────────
@@ -127,18 +174,41 @@ pub(crate) fn badge_grid(ui: &mut egui::Ui, cols: usize, badges: &[(&str, BadgeT
 }
 
 // ── строка легенды ────────────────────────────────────────────
-/// Цветной квадрат-свотч + имя + опциональный счётчик. Свотч рисуется
-/// краской, а не символом «██» (его нет в шрифте).
+/// Цветной квадрат-свотч + имя + опциональный счётчик. Свотч — скевоморф:
+/// градиент + блик + тень, как старый Apple.
 pub(crate) fn legend_swatch(ui: &mut egui::Ui, name: &str, color: Color32, count: Option<u64>) {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(
             egui::vec2(tokens::SWATCH, tokens::SWATCH),
             egui::Sense::hover(),
         );
+        // Тень
+        ui.painter().rect_filled(
+            rect.translate(egui::vec2(0.0, 1.0)),
+            egui::CornerRadius::same(tokens::RADIUS_SM as u8),
+            Color32::from_black_alpha(30),
+        );
+        // Градиент — светлее сверху
         ui.painter().rect_filled(
             rect,
             egui::CornerRadius::same(tokens::RADIUS_SM as u8),
             color,
+        );
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + rect.height() * 0.45)),
+            egui::CornerRadius {
+                nw: tokens::RADIUS_SM as u8,
+                ne: tokens::RADIUS_SM as u8,
+                sw: 0,
+                se: 0,
+            },
+            Color32::from_white_alpha(22),
+        );
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(tokens::RADIUS_SM as u8),
+            egui::Stroke::new(1.0, Color32::from_white_alpha(18)),
+            egui::StrokeKind::Inside,
         );
         ui.label(egui::RichText::new(name).size(tokens::LEGEND_TEXT));
         if let Some(c) = count {
@@ -259,6 +329,20 @@ pub(crate) fn action_button(
         rect,
         egui::CornerRadius::same(tokens::RADIUS_MD as u8),
         fill,
+    );
+    // Inner highlight — Aqua gloss (старый Apple), 1px сверху
+    painter.rect_filled(
+        egui::Rect::from_min_max(
+            rect.min,
+            egui::pos2(rect.max.x, rect.min.y + 1.2),
+        ),
+        egui::CornerRadius {
+            nw: tokens::RADIUS_MD as u8,
+            ne: tokens::RADIUS_MD as u8,
+            sw: 0,
+            se: 0,
+        },
+        Color32::from_white_alpha(18),
     );
     if stroke.width > 0.0 {
         painter.rect_stroke(
