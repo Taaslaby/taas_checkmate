@@ -4,8 +4,9 @@ fn main() {
     #[cfg(target_os = "windows")]
     {
         let mut res = winresource::WindowsResource::new();
-        // App icon — neoMyelin (fallback to TAAS skeuo if missing)
-        res.set_icon("../../resources/branding/icon_taas_skeuo.ico");
+        // App icon — beta (white) vs release (blue) — с флагом b
+        // b htkbp = beta mode, используем app_beta.ico (из C:/Users/anton/Desktop/s/beta.svg)
+        res.set_icon("../../resources/branding/app_beta.ico");
         // File associations — .taas (TAAS native), .nml (NeuroML), .swc (morphology)
         res.set_manifest(
             r#"
