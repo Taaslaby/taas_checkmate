@@ -144,13 +144,11 @@ impl PlotLib {
     /// умолчанию и не должен блокировать автовключение плотов симуляции
     /// (иначе после первого прогона растр/частоты не появятся).
     pub fn enable_kind_if_none(&mut self, local: bool) {
-        let any = CATALOG
-            .iter()
-            .any(|d| {
-                d.local == local
-                    && d.kind != PlotKind::BuilderScope
-                    && self.states[d.kind as usize].enabled
-            });
+        let any = CATALOG.iter().any(|d| {
+            d.local == local
+                && d.kind != PlotKind::BuilderScope
+                && self.states[d.kind as usize].enabled
+        });
         if !any {
             for d in CATALOG.iter().filter(|d| d.local == local) {
                 self.states[d.kind as usize].enabled = true;

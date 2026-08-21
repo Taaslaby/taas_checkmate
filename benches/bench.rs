@@ -1,14 +1,12 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use std::sync::OnceLock;
-use pillars::kernels;
 use pillars::core::runner::run_neuron;
+use pillars::kernels;
 use pillars::ops::triangulated::TriangLUT;
-use pillars::zoo::neurons::{
-    AdExModel, HHModel, IzhikevichModel, LIFAtModel, LIFModel, SAWModel,
-};
+use pillars::zoo::neurons::{AdExModel, HHModel, IzhikevichModel, LIFAtModel, LIFModel, SAWModel};
 use pillars::zoo::Model;
+use std::sync::OnceLock;
 
 static HH_LUT: OnceLock<TriangLUT> = OnceLock::new();
 

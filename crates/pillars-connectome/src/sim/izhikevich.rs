@@ -82,7 +82,6 @@ pub fn step_izhikevich_dual_pillars(
     );
 }
 
-
 /// Pad a Vec to `n_padded` by replicating the last element.
 pub fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {
     let mut padded = v.to_vec();
@@ -355,4 +354,3 @@ pub fn sim_izhikevich_synaptic(
     }
     spike_buffer
 }
-

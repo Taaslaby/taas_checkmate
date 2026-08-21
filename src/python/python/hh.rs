@@ -116,7 +116,12 @@ impl PyHhLut {
     /// Leak conductances.
     #[getter]
     pub fn g_leak<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        PyArray1::from_vec(py, self.pop.param_slice(HHModelParamIdx::g_Leak.into()).to_vec())
+        PyArray1::from_vec(
+            py,
+            self.pop
+                .param_slice(HHModelParamIdx::g_Leak.into())
+                .to_vec(),
+        )
     }
 
     /// Set leak conductances.
@@ -142,7 +147,12 @@ impl PyHhLut {
     /// Leak reversal potentials.
     #[getter]
     pub fn E_leak<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        PyArray1::from_vec(py, self.pop.param_slice(HHModelParamIdx::E_Leak.into()).to_vec())
+        PyArray1::from_vec(
+            py,
+            self.pop
+                .param_slice(HHModelParamIdx::E_Leak.into())
+                .to_vec(),
+        )
     }
 
     /// Set leak reversal potentials.
@@ -178,7 +188,11 @@ impl PyHhLut {
     #[getter]
     pub fn g_max_arr<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
         let mut arr = Vec::with_capacity(self.n_channels * self.n);
-        let chans = [HHModelParamIdx::g_Na, HHModelParamIdx::g_K, HHModelParamIdx::g_CaT];
+        let chans = [
+            HHModelParamIdx::g_Na,
+            HHModelParamIdx::g_K,
+            HHModelParamIdx::g_CaT,
+        ];
         for ch in chans.iter().take(self.n_channels) {
             arr.extend_from_slice(self.pop.param_slice((*ch).into()));
         }
@@ -194,7 +208,11 @@ impl PyHhLut {
         let slice = ro
             .as_slice()
             .map_err(|e| PyValueError::new_err(format!("g_max_arr: {e}")))?;
-        let chans = [HHModelParamIdx::g_Na, HHModelParamIdx::g_K, HHModelParamIdx::g_CaT];
+        let chans = [
+            HHModelParamIdx::g_Na,
+            HHModelParamIdx::g_K,
+            HHModelParamIdx::g_CaT,
+        ];
         if slice.len() == self.n_channels {
             // Broadcast per-channel to all neurons
             for (ch_i, &val) in slice.iter().enumerate() {
@@ -222,7 +240,11 @@ impl PyHhLut {
     /// Standard: [0]=NaV (+50 mV), [1]=KV (-77 mV).
     #[getter]
     pub fn E_rev_arr<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        let chans = [HHModelParamIdx::E_Na, HHModelParamIdx::E_K, HHModelParamIdx::E_CaT];
+        let chans = [
+            HHModelParamIdx::E_Na,
+            HHModelParamIdx::E_K,
+            HHModelParamIdx::E_CaT,
+        ];
         let arr: Vec<f32> = chans
             .iter()
             .take(self.n_channels)
@@ -244,7 +266,11 @@ impl PyHhLut {
                 slice.len()
             )));
         }
-        let chans = [HHModelParamIdx::E_Na, HHModelParamIdx::E_K, HHModelParamIdx::E_CaT];
+        let chans = [
+            HHModelParamIdx::E_Na,
+            HHModelParamIdx::E_K,
+            HHModelParamIdx::E_CaT,
+        ];
         for (ch_i, &val) in slice.iter().enumerate() {
             self.pop.fill_param(chans[ch_i].into(), val);
         }

@@ -255,8 +255,7 @@ impl ConnectomeMode {
                 return;
             };
             if full {
-                run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh, pk)
-                    .map(SimOutcome::Full)
+                run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh, pk).map(SimOutcome::Full)
             } else {
                 cli::run_local_sim(d, drive, model, steps, bias, pulse, gh, pk)
             }

@@ -54,7 +54,10 @@ fn main() {
         68.75,
     )
     .expect("GPU worker init (NVRTC + device alloc + CSC build)");
-    println!("[gpu] init={:.3}s (NVRTC compile + CSR upload)", t1.elapsed().as_secs_f64());
+    println!(
+        "[gpu] init={:.3}s (NVRTC compile + CSR upload)",
+        t1.elapsed().as_secs_f64()
+    );
 
     // ── CPU воркер (эталон) ──
     let n_neurons = conn.n_neurons;
@@ -72,11 +75,17 @@ fn main() {
 
     println!(
         "[gpu] t={t_run_s}s spikes={} active={} wall={:.3}s (ratio {:.3}x)",
-        gout.total_spikes, gout.active_neurons, gpu_s, t_run_s as f64 / gpu_s
+        gout.total_spikes,
+        gout.active_neurons,
+        gpu_s,
+        t_run_s as f64 / gpu_s
     );
     println!(
         "[cpu] t={t_run_s}s spikes={} active={} wall={:.3}s (ratio {:.3}x)",
-        cout.total_spikes, cout.active_neurons, cpu_s, t_run_s as f64 / cpu_s
+        cout.total_spikes,
+        cout.active_neurons,
+        cpu_s,
+        t_run_s as f64 / cpu_s
     );
     println!("[speedup] {:.2}x", cpu_s / gpu_s);
 

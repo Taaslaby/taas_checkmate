@@ -103,10 +103,14 @@ fn main() {
     let sim_ms_of_brain = t_run_ms * n_trials as f32;
     let realtime_ratio = sim_ms_of_brain as f64 / (sim_s * 1000.0);
 
-    println!("[sim] model=HH dt={DT_MS}ms t_run={t_run_ms}ms n_trials={n_trials} n_steps={n_steps}");
+    println!(
+        "[sim] model=HH dt={DT_MS}ms t_run={t_run_ms}ms n_trials={n_trials} n_steps={n_steps}"
+    );
     println!(
         "[sim] sim_time={:.3}s total_spikes={} active_neurons={}",
-        sim_s, total_spikes, active.len()
+        sim_s,
+        total_spikes,
+        active.len()
     );
     println!(
         "[sim] realtime_ratio={:.4}x (мозг работает в {:.1} раз быстрее реального времени)",

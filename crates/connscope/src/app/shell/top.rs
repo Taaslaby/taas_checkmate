@@ -172,7 +172,8 @@ impl ConnectomeMode {
         // Явный accessible description — в egui попадает в WidgetInfo via
         // on_hover_text + id.
         let hover_rect = resp.rect;
-        resp.clone().on_hover_text("Поиск по типу, классу, нейротрансмиттеру, ноге или body_id");
+        resp.clone()
+            .on_hover_text("Поиск по типу, классу, нейротрансмиттеру, ноге или body_id");
         rect = rect.union(hover_rect);
         if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             self.search_neuron();

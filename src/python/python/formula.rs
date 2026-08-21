@@ -41,7 +41,7 @@
 use std::collections::HashMap;
 
 use numpy::{PyArray1, PyArrayMethods};
-use pillars::api::formula::{self, OpKind, OpNode, FormulaModel, I_SYN, N_REGS, P0, S0, TEMP0};
+use pillars::api::formula::{self, FormulaModel, OpKind, OpNode, I_SYN, N_REGS, P0, S0, TEMP0};
 use pillars::ops::spike::spike_to_float;
 use pillars::prelude::*;
 use pyo3::exceptions::PyValueError;
@@ -264,11 +264,32 @@ fn value_error(msg: impl Into<String>) -> PyErr {
 fn is_reserved_name(name: &str) -> bool {
     matches!(
         name,
-        "I" | "name" | "ops" | "n_ops" | "n_states" | "n_params"
-            | "state" | "param" | "compile" | "simulate"
-            | "leak" | "ohmic" | "add" | "mul" | "div" | "cmp_ge" | "cmp_gt"
-            | "blend" | "gate_step" | "sigmoid" | "exp" | "fire_reset"
-            | "refr_clamp" | "refr_timer" | "const_" | "stimulus" | "scope"
+        "I" | "name"
+            | "ops"
+            | "n_ops"
+            | "n_states"
+            | "n_params"
+            | "state"
+            | "param"
+            | "compile"
+            | "simulate"
+            | "leak"
+            | "ohmic"
+            | "add"
+            | "mul"
+            | "div"
+            | "cmp_ge"
+            | "cmp_gt"
+            | "blend"
+            | "gate_step"
+            | "sigmoid"
+            | "exp"
+            | "fire_reset"
+            | "refr_clamp"
+            | "refr_timer"
+            | "const_"
+            | "stimulus"
+            | "scope"
     )
 }
 
@@ -441,8 +462,10 @@ impl PyNeuronBuilder {
                     OpKind::Const => format!("{out} <- Const({})", op.c),
                     OpKind::Stimulus => format!("{out} <- Stimulus"),
                     _ => {
-                        let ins: Vec<String> =
-                            op.in_regs[..arity].iter().map(|r| self.reg_name(*r)).collect();
+                        let ins: Vec<String> = op.in_regs[..arity]
+                            .iter()
+                            .map(|r| self.reg_name(*r))
+                            .collect();
                         format!("{out} <- {kind}({})", ins.join(", "))
                     }
                 };
@@ -479,7 +502,9 @@ impl PyNeuronBuilder {
             return Err(value_error("formula: at most 4 states (s0..s3)"));
         }
         if name.is_empty() || self.states.iter().any(|(n, _)| *n == name) {
-            return Err(value_error(format!("formula: duplicate/empty state name '{name}'")));
+            return Err(value_error(format!(
+                "formula: duplicate/empty state name '{name}'"
+            )));
         }
         if is_reserved_name(&name) {
             return Err(value_error(format!(
@@ -505,7 +530,9 @@ impl PyNeuronBuilder {
             return Err(value_error("formula: at most 8 params (p0..p7)"));
         }
         if name.is_empty() || self.params.iter().any(|(n, _)| *n == name) {
-            return Err(value_error(format!("formula: duplicate/empty param name '{name}'")));
+            return Err(value_error(format!(
+                "formula: duplicate/empty param name '{name}'"
+            )));
         }
         if is_reserved_name(&name) {
             return Err(value_error(format!(
@@ -541,15 +568,22 @@ impl PyNeuronBuilder {
         if let Some(i) = self.states.iter().position(|(n, _)| *n == name) {
             return Ok(self.state_by_idx(i));
         }
-        Err(PyErr::new::<pyo3::exceptions::PyAttributeError, _>(format!(
-            "'Neuron' object has no param/state named '{name}'"
-        )))
+        Err(PyErr::new::<pyo3::exceptions::PyAttributeError, _>(
+            format!("'Neuron' object has no param/state named '{name}'"),
+        ))
     }
 
     // ─── Опкоды ──────────────────────────────────────────────
 
     #[pyo3(signature = (v, i, inv_tau, v_rest, into=None))]
-    fn leak(&mut self, v: &PyReg, i: &PyReg, inv_tau: &PyReg, v_rest: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn leak(
+        &mut self,
+        v: &PyReg,
+        i: &PyReg,
+        inv_tau: &PyReg,
+        v_rest: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::Leak, &[v, i, inv_tau, v_rest], 0.0, 0.0, into)
     }
     #[pyo3(signature = (g, v, e, into=None))]
@@ -577,11 +611,23 @@ impl PyNeuronBuilder {
         self.emit(OpKind::CmpGt, &[a, b], 0.0, 0.0, into)
     }
     #[pyo3(signature = (mask, a, b, into=None))]
-    fn blend(&mut self, mask: &PyReg, a: &PyReg, b: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn blend(
+        &mut self,
+        mask: &PyReg,
+        a: &PyReg,
+        b: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::Blend, &[mask, a, b], 0.0, 0.0, into)
     }
     #[pyo3(signature = (g, g_inf, inv_tau, into=None))]
-    fn gate_step(&mut self, g: &PyReg, g_inf: &PyReg, inv_tau: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn gate_step(
+        &mut self,
+        g: &PyReg,
+        g_inf: &PyReg,
+        inv_tau: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::GateStep, &[g, g_inf, inv_tau], 0.0, 0.0, into)
     }
     #[pyo3(signature = (x, v_half, k, into=None))]
@@ -594,16 +640,33 @@ impl PyNeuronBuilder {
     }
     /// Спайк: v ≥ thresh → reset. Ставит спайк-флаг, который читает refr_timer.
     #[pyo3(signature = (v, thresh, reset, into=None))]
-    fn fire_reset(&mut self, v: &PyReg, thresh: &PyReg, reset: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn fire_reset(
+        &mut self,
+        v: &PyReg,
+        thresh: &PyReg,
+        reset: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::FireReset, &[v, thresh, reset], 0.0, 0.0, into)
     }
     #[pyo3(signature = (v, refr, reset, into=None))]
-    fn refr_clamp(&mut self, v: &PyReg, refr: &PyReg, reset: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn refr_clamp(
+        &mut self,
+        v: &PyReg,
+        refr: &PyReg,
+        reset: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::RefrClamp, &[v, refr, reset], 0.0, 0.0, into)
     }
     /// Таймер рефрактерности: использует спайк-флаг последнего fire_reset.
     #[pyo3(signature = (refr, tau_ref, into=None))]
-    fn refr_timer(&mut self, refr: &PyReg, tau_ref: &PyReg, into: Option<&PyReg>) -> PyResult<PyReg> {
+    fn refr_timer(
+        &mut self,
+        refr: &PyReg,
+        tau_ref: &PyReg,
+        into: Option<&PyReg>,
+    ) -> PyResult<PyReg> {
         self.emit(OpKind::RefrTimer, &[refr, tau_ref], 0.0, 0.0, into)
     }
     #[pyo3(signature = (value, into=None))]
@@ -640,7 +703,11 @@ impl PyNeuronBuilder {
             if !self.states.iter().any(|(n, _)| n == k) {
                 return Err(value_error(format!(
                     "simulate: unknown state '{k}' — known: {}",
-                    self.states.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                    self.states
+                        .iter()
+                        .map(|(n, _)| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )));
             }
         }
@@ -648,7 +715,11 @@ impl PyNeuronBuilder {
             if !self.params.iter().any(|(n, _)| n == k) {
                 return Err(value_error(format!(
                     "simulate: unknown param '{k}' — known: {}",
-                    self.params.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                    self.params
+                        .iter()
+                        .map(|(n, _)| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )));
             }
         }
@@ -657,12 +728,7 @@ impl PyNeuronBuilder {
             None => params
                 .get("dt")
                 .copied()
-                .or_else(|| {
-                    self.params
-                        .iter()
-                        .find(|(n, _)| n == "dt")
-                        .map(|(_, d)| *d)
-                })
+                .or_else(|| self.params.iter().find(|(n, _)| n == "dt").map(|(_, d)| *d))
                 .ok_or_else(|| {
                     value_error("simulate: dt required — pass dt=... or declare param('dt') first")
                 })?,
@@ -882,7 +948,11 @@ impl PyFormula {
             if !self.params.iter().any(|(nm, _)| nm == k) {
                 return Err(value_error(format!(
                     "FormulaPopulation: unknown param '{k}' — known: {}",
-                    self.params.iter().map(|(nm, _)| nm.as_str()).collect::<Vec<_>>().join(", ")
+                    self.params
+                        .iter()
+                        .map(|(nm, _)| nm.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )));
             }
         }
@@ -890,7 +960,11 @@ impl PyFormula {
             if !self.states.iter().any(|(nm, _)| nm == k) {
                 return Err(value_error(format!(
                     "FormulaPopulation: unknown state '{k}' — known: {}",
-                    self.states.iter().map(|(nm, _)| nm.as_str()).collect::<Vec<_>>().join(", ")
+                    self.states
+                        .iter()
+                        .map(|(nm, _)| nm.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )));
             }
         }
@@ -1122,7 +1196,10 @@ impl PyTrace {
         self.dt
     }
     fn __repr__(&self) -> String {
-        format!("Trace(steps={}, dt={}, spikes={})", self.steps, self.dt, self.spikes)
+        format!(
+            "Trace(steps={}, dt={}, spikes={})",
+            self.steps, self.dt, self.spikes
+        )
     }
 }
 

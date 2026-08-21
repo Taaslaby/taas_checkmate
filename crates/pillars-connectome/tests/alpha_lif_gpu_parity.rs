@@ -95,10 +95,7 @@ fn alpha_lif_gpu_parity() {
     );
     eprintln!(
         "[parity] alpha_lif_gpu: spikes={}/{} active={}/{} max|Δv|={max_abs:.2e}",
-        cpu_out.total_spikes,
-        gpu_out.total_spikes,
-        cpu_out.active_neurons,
-        gpu_out.active_neurons,
+        cpu_out.total_spikes, gpu_out.total_spikes, cpu_out.active_neurons, gpu_out.active_neurons,
     );
 }
 
@@ -119,6 +116,9 @@ fn alpha_lif_gpu_runs() {
     )
     .expect("GPU worker");
     let out = gpu.run_seconds(0.05).expect("GPU run");
-    assert!(out.total_spikes > 0, "GPU worker should fire with Poisson input: {out:?}");
+    assert!(
+        out.total_spikes > 0,
+        "GPU worker should fire with Poisson input: {out:?}"
+    );
     assert!(out.wall_seconds > 0.0);
 }

@@ -318,8 +318,7 @@ pub(crate) fn tool_button(
 ) -> egui::Response {
     // Желаемая ширина не больше доступной (рейл может быть уже запрошенной).
     let width = width.min(ui.available_width()).max(1.0);
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     let painter = ui.painter_at(rect);
     // Активный = сигнальный фон + рамка; hover = лёгкая подсветка;
     // нажатие = чуть темнее, чтобы был тактильный отклик.

@@ -1409,15 +1409,19 @@ impl PySpikeGradBridge {
                 })?;
 
         let gb_arr = PyArray1::from_vec(py, gb);
-        let gspikes_arr =
-            PyArray2::from_vec2(py, &gspikes.chunks(sd).map(|c| c.to_vec()).collect::<Vec<_>>())
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e))
-                })?;
+        let gspikes_arr = PyArray2::from_vec2(
+            py,
+            &gspikes.chunks(sd).map(|c| c.to_vec()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
 
         let tuple = PyTuple::new(
             py,
-            &[gw_arr.into_py(py), gb_arr.into_py(py), gspikes_arr.into_py(py)],
+            &[
+                gw_arr.into_py(py),
+                gb_arr.into_py(py),
+                gspikes_arr.into_py(py),
+            ],
         )?
         .unbind();
         Ok(tuple.into())
@@ -1780,14 +1784,17 @@ impl PyTorusGrid {
         for step in 0..n_steps {
             let d = &drives_data[step * n..(step + 1) * n];
             self.inner.record_step(&mut traj, step, d);
-            self.inner.step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
+            self.inner
+                .step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
         }
         let phases = PyArray1::from_vec(py, self.inner.phases.clone());
         let amps = PyArray1::from_vec(py, self.inner.amplitudes.clone());
         let py_traj = PyTorusTrajectory { inner: traj };
-        let tuple =
-            PyTuple::new(py, &[phases.into_py(py), amps.into_py(py), py_traj.into_py(py)])?
-                .unbind();
+        let tuple = PyTuple::new(
+            py,
+            &[phases.into_py(py), amps.into_py(py), py_traj.into_py(py)],
+        )?
+        .unbind();
         Ok(tuple.into())
     }
 
@@ -1883,7 +1890,8 @@ impl PyTorusGrid {
         for step in 0..n_steps {
             let d = &drives_data[step * n..(step + 1) * n];
             self.inner.record_step(&mut traj, step, d);
-            self.inner.step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
+            self.inner
+                .step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
         }
         // output[t] = фазы в момент t+1: traj.phases[(t+1)..] + финальные фазы.
         let mut phase_matrix = vec![0.0f32; n_steps * n];
@@ -1896,7 +1904,10 @@ impl PyTorusGrid {
         }
         let pm = PyArray2::from_vec2(
             py,
-            &phase_matrix.chunks(n).map(|c| c.to_vec()).collect::<Vec<_>>(),
+            &phase_matrix
+                .chunks(n)
+                .map(|c| c.to_vec())
+                .collect::<Vec<_>>(),
         )
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
         let py_traj = PyTorusTrajectory { inner: traj };

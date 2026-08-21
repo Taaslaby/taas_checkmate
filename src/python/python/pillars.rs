@@ -519,28 +519,21 @@ impl PyTransformerPopulation {
     ///     eta_v: STDP learning rate for values, 0 = frozen (default 0.0)
     #[new]
     #[pyo3(signature = (n, dt=0.5, k_scale=0.5, thresh=0.9, eta_k=0.0, eta_v=0.0))]
-    fn new(
-        n: usize,
-        dt: f32,
-        k_scale: f32,
-        thresh: f32,
-        eta_k: f32,
-        eta_v: f32,
-    ) -> Self {
+    fn new(n: usize, dt: f32, k_scale: f32, thresh: f32, eta_k: f32, eta_v: f32) -> Self {
         let mut pop = NeuralPopulation::<TransformerModel>::new(n);
-        pop.fill_param(0, dt);              // DT
-        pop.fill_param(1, 0.95);            // Decay
-        pop.fill_param(2, 1.0);             // Gain
-        pop.fill_param(3, 0.5);             // Inv_Tau_Acc
-        pop.fill_param(4, thresh);          // Thresh
-        pop.fill_param(5, k_scale);         // K_Scale
-        pop.fill_param(6, eta_k);           // Eta_K
-        pop.fill_param(7, eta_v);           // Eta_V
-        pop.fill_param(8, 1.0);             // W_Base
-        pop.fill_param(9, 2.0);             // W_Span
-        pop.fill_param(10, 1.0);            // V_Base
-        pop.fill_param(11, 2.0);            // V_Span
-        // Init w/v to 1.0 (states 9..17 = w0..w7, 17..25 = v0..v7)
+        pop.fill_param(0, dt); // DT
+        pop.fill_param(1, 0.95); // Decay
+        pop.fill_param(2, 1.0); // Gain
+        pop.fill_param(3, 0.5); // Inv_Tau_Acc
+        pop.fill_param(4, thresh); // Thresh
+        pop.fill_param(5, k_scale); // K_Scale
+        pop.fill_param(6, eta_k); // Eta_K
+        pop.fill_param(7, eta_v); // Eta_V
+        pop.fill_param(8, 1.0); // W_Base
+        pop.fill_param(9, 2.0); // W_Span
+        pop.fill_param(10, 1.0); // V_Base
+        pop.fill_param(11, 2.0); // V_Span
+                                 // Init w/v to 1.0 (states 9..17 = w0..w7, 17..25 = v0..v7)
         for i in 0..8 {
             pop.fill_state(9 + i, 1.0);
             pop.fill_state(17 + i, 1.0);
@@ -550,18 +543,54 @@ impl PyTransformerPopulation {
 
     // ─── Params ─────────────────────────────────────────────
 
-    #[setter] fn set_dt(&mut self, v: f32) { self.inner.fill_param(0, v); }
-    #[setter] fn set_decay(&mut self, v: f32) { self.inner.fill_param(1, v); }
-    #[setter] fn set_gain(&mut self, v: f32) { self.inner.fill_param(2, v); }
-    #[setter] fn set_inv_tau_acc(&mut self, v: f32) { self.inner.fill_param(3, v); }
-    #[setter] fn set_thresh(&mut self, v: f32) { self.inner.fill_param(4, v); }
-    #[setter] fn set_k_scale(&mut self, v: f32) { self.inner.fill_param(5, v); }
-    #[setter] fn set_eta_k(&mut self, v: f32) { self.inner.fill_param(6, v); }
-    #[setter] fn set_eta_v(&mut self, v: f32) { self.inner.fill_param(7, v); }
-    #[setter] fn set_w_base(&mut self, v: f32) { self.inner.fill_param(8, v); }
-    #[setter] fn set_w_span(&mut self, v: f32) { self.inner.fill_param(9, v); }
-    #[setter] fn set_v_base(&mut self, v: f32) { self.inner.fill_param(10, v); }
-    #[setter] fn set_v_span(&mut self, v: f32) { self.inner.fill_param(11, v); }
+    #[setter]
+    fn set_dt(&mut self, v: f32) {
+        self.inner.fill_param(0, v);
+    }
+    #[setter]
+    fn set_decay(&mut self, v: f32) {
+        self.inner.fill_param(1, v);
+    }
+    #[setter]
+    fn set_gain(&mut self, v: f32) {
+        self.inner.fill_param(2, v);
+    }
+    #[setter]
+    fn set_inv_tau_acc(&mut self, v: f32) {
+        self.inner.fill_param(3, v);
+    }
+    #[setter]
+    fn set_thresh(&mut self, v: f32) {
+        self.inner.fill_param(4, v);
+    }
+    #[setter]
+    fn set_k_scale(&mut self, v: f32) {
+        self.inner.fill_param(5, v);
+    }
+    #[setter]
+    fn set_eta_k(&mut self, v: f32) {
+        self.inner.fill_param(6, v);
+    }
+    #[setter]
+    fn set_eta_v(&mut self, v: f32) {
+        self.inner.fill_param(7, v);
+    }
+    #[setter]
+    fn set_w_base(&mut self, v: f32) {
+        self.inner.fill_param(8, v);
+    }
+    #[setter]
+    fn set_w_span(&mut self, v: f32) {
+        self.inner.fill_param(9, v);
+    }
+    #[setter]
+    fn set_v_base(&mut self, v: f32) {
+        self.inner.fill_param(10, v);
+    }
+    #[setter]
+    fn set_v_span(&mut self, v: f32) {
+        self.inner.fill_param(11, v);
+    }
 
     // ─── State getters ──────────────────────────────────────
 

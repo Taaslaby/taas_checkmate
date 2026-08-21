@@ -332,8 +332,7 @@ pub(crate) fn run_local_sim(
             nodes.push(t);
         }
     }
-    run_simulation(d, &nodes, drive, model, bias, steps, pulse, 0.5, gh, pk)
-        .map(SimOutcome::Local)
+    run_simulation(d, &nodes, drive, model, bias, steps, pulse, 0.5, gh, pk).map(SimOutcome::Local)
 }
 
 pub(crate) fn local_sim_text(d: &MancData, r: &SimResult) -> String {

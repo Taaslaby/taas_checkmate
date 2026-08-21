@@ -83,7 +83,10 @@ pub struct TrainableSpikeSource {
 impl TrainableSpikeSource {
     /// Проверка конфигурации.
     fn assert_layout(&self) {
-        assert!(self.n_neurons > 0, "TrainableSpikeSource: n_neurons must be > 0");
+        assert!(
+            self.n_neurons > 0,
+            "TrainableSpikeSource: n_neurons must be > 0"
+        );
         assert_eq!(
             self.w.len(),
             self.n_neurons * SLOTS,
@@ -105,7 +108,14 @@ impl TrainableSpikeSource {
     }
 
     /// Новый источник: w=v=1 (как движковый TransformerModel на старте).
-    pub fn new(n_neurons: usize, dt: f32, decay: f32, gain: f32, inv_tau: f32, k_scale: f32) -> Self {
+    pub fn new(
+        n_neurons: usize,
+        dt: f32,
+        decay: f32,
+        gain: f32,
+        inv_tau: f32,
+        k_scale: f32,
+    ) -> Self {
         assert!(n_neurons > 0, "TrainableSpikeSource: n_neurons must be > 0");
         Self {
             w: vec![1.0; n_neurons * SLOTS],
@@ -152,7 +162,10 @@ impl TrainableSpikeSource {
             n_steps * n,
             "TrainableSpikeSource::forward: features must be n_steps × n_neurons"
         );
-        assert!(features.iter().all(|x| x.is_finite()), "features must be finite");
+        assert!(
+            features.iter().all(|x| x.is_finite()),
+            "features must be finite"
+        );
 
         let mut spikes = vec![0.0f32; n_steps * n];
         let mut recs = vec![SpikeStepRec::default(); n_steps * n];
@@ -191,7 +204,13 @@ impl TrainableSpikeSource {
                 acc = if pre > 0.0 { pre } else { 0.0 };
                 spikes[t * n + d] = acc;
 
-                recs[t * n + d] = SpikeStepRec { q, a, mem, pre, clamp };
+                recs[t * n + d] = SpikeStepRec {
+                    q,
+                    a,
+                    mem,
+                    pre,
+                    clamp,
+                };
 
                 for i in (1..SLOTS).rev() {
                     mem[i] = mem[i - 1] * self.decay;
@@ -401,7 +420,10 @@ mod tests {
                 }
             }
         }
-        assert!(nonzero >= 4, "degenerate gradient check: only {nonzero} nonzero");
+        assert!(
+            nonzero >= 4,
+            "degenerate gradient check: only {nonzero} nonzero"
+        );
         assert!(
             max_rel < 0.05,
             "source gradient check FAILED: max rel err {max_rel:.4}"
@@ -431,7 +453,15 @@ mod tests {
             &mut m_v,
             &mut v_v,
         );
-        assert!(src.w.iter().zip(&w_before).any(|(a, b)| (a - b).abs() > 1e-8));
-        assert!(src.v.iter().zip(&v_before).any(|(a, b)| (a - b).abs() > 1e-8));
+        assert!(src
+            .w
+            .iter()
+            .zip(&w_before)
+            .any(|(a, b)| (a - b).abs() > 1e-8));
+        assert!(src
+            .v
+            .iter()
+            .zip(&v_before)
+            .any(|(a, b)| (a - b).abs() > 1e-8));
     }
 }

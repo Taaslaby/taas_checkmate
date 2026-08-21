@@ -215,4 +215,3 @@ pub fn sim_lif_synaptic(
     }
     spike_buffer
 }
-

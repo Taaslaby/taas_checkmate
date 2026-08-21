@@ -28,12 +28,12 @@ fn ring_drive(tg: &TorusGrid, cx: usize, cy: usize, ring_r: usize, val: f32) -> 
     let mut d = tg.drives_vec();
     for y in 0..tg.h {
         for x in 0..tg.w {
-            let dx = (x as isize - cx as isize).abs().min(
-                (tg.w as isize - (x as isize - cx as isize).abs()).abs(),
-            );
-            let dy = (y as isize - cy as isize).abs().min(
-                (tg.h as isize - (y as isize - cy as isize).abs()).abs(),
-            );
+            let dx = (x as isize - cx as isize)
+                .abs()
+                .min((tg.w as isize - (x as isize - cx as isize).abs()).abs());
+            let dy = (y as isize - cy as isize)
+                .abs()
+                .min((tg.h as isize - (y as isize - cy as isize).abs()).abs());
             let dist = ((dx * dx + dy * dy) as f32).sqrt();
             if dist <= ring_r as f32 {
                 d[tg.idx(x, y)] = val * (1.0 - dist / ring_r as f32);
@@ -124,7 +124,10 @@ fn main() {
     let r = tg.order_parameter();
     println!("\n── финал ──");
     println!("   R = {r:.4}");
-    println!("   Фазы: min={:.2} max={:.2}", tg.phases.iter().fold(f32::INFINITY, |a, &p| a.min(p)),
-             tg.phases.iter().fold(f32::NEG_INFINITY, |a, &p| a.max(p)));
+    println!(
+        "   Фазы: min={:.2} max={:.2}",
+        tg.phases.iter().fold(f32::INFINITY, |a, &p| a.min(p)),
+        tg.phases.iter().fold(f32::NEG_INFINITY, |a, &p| a.max(p))
+    );
     println!();
 }

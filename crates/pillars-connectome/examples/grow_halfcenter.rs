@@ -12,10 +12,10 @@
 //! cargo run -p pillars-connectome --example grow_halfcenter --release
 //! ```
 
+use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
 use pillars_grow::{
     Bounds, CellType, ChemoAttraction, DivideOnce, Grid, Secretor, Substance, Vec3, World,
 };
-use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
 
 const DT: f32 = 0.05; // ms
 const TAU_SYN: f32 = 12.0;
@@ -87,10 +87,23 @@ fn build_runner(n: usize, edges: &[(usize, usize, f32)]) -> BrainRunner {
 
     // Same rebound + adaptation profile as tripod_cpg's single half-center.
     let params: [(usize, f32); 17] = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0f32 / 100.0), (9, 1.0f32 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0f32 / 100.0),
+        (9, 1.0f32 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     let mut all = vec![0.0f32; n];
     for (col, val) in params {

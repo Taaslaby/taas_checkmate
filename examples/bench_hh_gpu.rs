@@ -96,8 +96,16 @@ fn main() {
     // что «голый compute» = replay CUDA Graph + host-sync за шаг (не чистый
     // device-time). «Цикл с чтением» дополнительно гоняет 800КБ D2H за шаг.
     println!("🧠 HH × {N} × {STEPS} (dt = {DT} мс), GPU (RTX 4060 Ti)");
-    println!("  graph replay + sync:    {bare_secs:.3} с | {:.1} млн нер-шагов/с | {:.4}x реалтайма", mps(bare_secs), rt(bare_secs));
-    println!("  цикл с чтением спайков: {loop_secs:.3} с | {:.1} млн/с | {:.4}x реалтайма", mps(loop_secs), rt(loop_secs));
+    println!(
+        "  graph replay + sync:    {bare_secs:.3} с | {:.1} млн нер-шагов/с | {:.4}x реалтайма",
+        mps(bare_secs),
+        rt(bare_secs)
+    );
+    println!(
+        "  цикл с чтением спайков: {loop_secs:.3} с | {:.1} млн/с | {:.4}x реалтайма",
+        mps(loop_secs),
+        rt(loop_secs)
+    );
     println!("  спайков: {total}");
 }
 

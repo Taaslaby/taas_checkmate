@@ -171,7 +171,10 @@ fn train_epoch(
         let final_grad = vec![0.0f32; pst_dim];
 
         let (gw, gb, gspikes) = bridge.backward_full(&final_grad, &traj, &spikes, Some(&per_step));
-        assert!(gspikes.iter().all(|x| x.is_finite()), "spike grad non-finite");
+        assert!(
+            gspikes.iter().all(|x| x.is_finite()),
+            "spike grad non-finite"
+        );
 
         for (sum, x) in grad_w.iter_mut().zip(gw) {
             *sum += x;
@@ -182,7 +185,10 @@ fn train_epoch(
 
         if train_source {
             let (dw, dv) = source.backward(&gspikes, STEPS, &recs);
-            assert!(dw.iter().chain(&dv).all(|x| x.is_finite()), "source grad non-finite");
+            assert!(
+                dw.iter().chain(&dv).all(|x| x.is_finite()),
+                "source grad non-finite"
+            );
             for (sum, x) in grad_src_w.iter_mut().zip(dw) {
                 *sum += x;
             }
@@ -197,7 +203,17 @@ fn train_epoch(
             *x = x.clamp(-GRAD_CLIP, GRAD_CLIP);
         }
         bridge.update_adam(
-            &grad_w, &grad_b, ADAM_LR_BRIDGE, 0.9, 0.999, 1e-8, adam_step, m_w, v_w, m_b, v_b,
+            &grad_w,
+            &grad_b,
+            ADAM_LR_BRIDGE,
+            0.9,
+            0.999,
+            1e-8,
+            adam_step,
+            m_w,
+            v_w,
+            m_b,
+            v_b,
         );
     }
 
@@ -241,7 +257,13 @@ fn run_config(cfg: Config) -> (f32, f32, f32) {
     let pst_dim = pst_linear_dim(N_OSC);
     let teacher_bridge = teacher_bridge();
     let teacher_src = TrainableSpikeSource::new_random(
-        SPIKE_DIM, SRC_DT, SRC_DECAY, SRC_GAIN, SRC_INV_TAU, SRC_K_SCALE, 7,
+        SPIKE_DIM,
+        SRC_DT,
+        SRC_DECAY,
+        SRC_GAIN,
+        SRC_INV_TAU,
+        SRC_K_SCALE,
+        7,
     );
 
     let train_set: Vec<Sequence> = (0..TRAIN_SEQUENCES)
@@ -252,15 +274,32 @@ fn run_config(cfg: Config) -> (f32, f32, f32) {
         .collect();
 
     let mut source = TrainableSpikeSource::new(
-        SPIKE_DIM, SRC_DT, SRC_DECAY, SRC_GAIN, SRC_INV_TAU, SRC_K_SCALE,
+        SPIKE_DIM,
+        SRC_DT,
+        SRC_DECAY,
+        SRC_GAIN,
+        SRC_INV_TAU,
+        SRC_K_SCALE,
     );
     let mut bridge = if bridge_teacher_init {
         SpikeGradBridge::from_weights(
-            SPIKE_DIM, N_OSC, BRIDGE_DT, DRIVE_GAIN, ALPHA, FREQ_MIN, FREQ_MAX, W12, W13, W23,
-            &teacher_bridge.w, &teacher_bridge.b,
+            SPIKE_DIM,
+            N_OSC,
+            BRIDGE_DT,
+            DRIVE_GAIN,
+            ALPHA,
+            FREQ_MIN,
+            FREQ_MAX,
+            W12,
+            W13,
+            W23,
+            &teacher_bridge.w,
+            &teacher_bridge.b,
         )
     } else {
-        SpikeGradBridge::new_zero(SPIKE_DIM, N_OSC, BRIDGE_DT, DRIVE_GAIN, ALPHA, FREQ_MIN, FREQ_MAX, W12, W13, W23)
+        SpikeGradBridge::new_zero(
+            SPIKE_DIM, N_OSC, BRIDGE_DT, DRIVE_GAIN, ALPHA, FREQ_MIN, FREQ_MAX, W12, W13, W23,
+        )
     };
 
     let mut m_w = vec![0.0; bridge.w.len()];
@@ -300,7 +339,11 @@ fn run_config(cfg: Config) -> (f32, f32, f32) {
             );
         }
     }
-    (baseline, last_valid, dataset_loss(&source, &bridge, &train_set))
+    (
+        baseline,
+        last_valid,
+        dataset_loss(&source, &bridge, &train_set),
+    )
 }
 
 fn main() {
@@ -319,9 +362,18 @@ fn main() {
     let (b1, v1, t1) = run_config(Config::EndToEnd);
 
     println!("\n╔══════════════════════════════════════════════════════════════╗");
-    println!("║  bridge-only:  val {:.8} → {:.8}  (train {:.8})", b0, v0, t0);
-    println!("║  source-only:  val {:.8} → {:.8}  (train {:.8})", b2, v2, t2);
-    println!("║  end-to-end:   val {:.8} → {:.8}  (train {:.8})", b1, v1, t1);
+    println!(
+        "║  bridge-only:  val {:.8} → {:.8}  (train {:.8})",
+        b0, v0, t0
+    );
+    println!(
+        "║  source-only:  val {:.8} → {:.8}  (train {:.8})",
+        b2, v2, t2
+    );
+    println!(
+        "║  end-to-end:   val {:.8} → {:.8}  (train {:.8})",
+        b1, v1, t1
+    );
     let gain = if v0 > 0.0 {
         100.0 * (v0 - v1) / v0
     } else {

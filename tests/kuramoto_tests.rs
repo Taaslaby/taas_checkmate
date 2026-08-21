@@ -209,7 +209,13 @@ fn test_lazy_sincos_update() {
     let mut phases_prev = vec![0.0f32; n];
     let eps = 0.01;
 
-    kuramoto_measure::lazy_sincos_update(&mut sin_out, &mut cos_out, &phases, &mut phases_prev, eps);
+    kuramoto_measure::lazy_sincos_update(
+        &mut sin_out,
+        &mut cos_out,
+        &phases,
+        &mut phases_prev,
+        eps,
+    );
 
     // Taylor series precision: sin(π/2) ≈ 0.99984, cos(π/2) ≈ ±0.00089
     for i in 0..n {
@@ -236,7 +242,13 @@ fn test_lazy_sincos_skip_small_change() {
     let mut phases_prev = vec![0.0f32; n];
     let eps = 0.01;
 
-    kuramoto_measure::lazy_sincos_update(&mut sin_out, &mut cos_out, &phases, &mut phases_prev, eps);
+    kuramoto_measure::lazy_sincos_update(
+        &mut sin_out,
+        &mut cos_out,
+        &phases,
+        &mut phases_prev,
+        eps,
+    );
 
     // Change is < eps, so sin_out/cos_out should NOT be updated
     for i in 0..n {
@@ -264,7 +276,14 @@ fn test_batch_coherence_sweep() {
     let areas_sin = vec![0.0f32; n_areas * n_elem];
     let areas_cos = vec![1.0f32; n_areas * n_elem]; // all in phase
 
-    kuramoto_measure::batch_coherence_sweep(&mut output, &areas, &areas_sin, &areas_cos, n_areas, n_elem);
+    kuramoto_measure::batch_coherence_sweep(
+        &mut output,
+        &areas,
+        &areas_sin,
+        &areas_cos,
+        n_areas,
+        n_elem,
+    );
 
     // All in phase → R = 1.0
     for &o in &output {

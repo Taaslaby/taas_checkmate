@@ -25,7 +25,9 @@ mod rate;
 
 pub use gco::{sim_gco, sim_gco_record};
 pub use haap::{haap_population, sim_haap_pillars};
-pub use hh::{hh_population_pacemaking, hh_population_standard, sim_hh_pillars, sim_hh_synaptic_pillars};
+pub use hh::{
+    hh_population_pacemaking, hh_population_standard, sim_hh_pillars, sim_hh_synaptic_pillars,
+};
 pub use izhikevich::{
     pad_to, sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic,
     step_izhikevich_dual_pillars, step_izhikevich_pillars,

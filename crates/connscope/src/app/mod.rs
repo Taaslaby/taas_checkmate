@@ -37,9 +37,9 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, vec2};
-use elegance::{BuiltInTheme, Theme};
 use egui_dock::tab_viewer::OnCloseResponse;
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
+use elegance::{BuiltInTheme, Theme};
 
 use crate::app::connectome::ConnectomeMode;
 use crate::app::mode::{Mode, ShellServices, Surface};
@@ -175,7 +175,8 @@ pub(crate) enum DockPreset {
 }
 
 impl DockPreset {
-    pub(crate) const ALL: [DockPreset; 4] = [Self::Workspace, Self::Full, Self::Minimal, Self::Tabs];
+    pub(crate) const ALL: [DockPreset; 4] =
+        [Self::Workspace, Self::Full, Self::Minimal, Self::Tabs];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
@@ -442,7 +443,10 @@ impl ConnApp {
             return;
         }
         let id = egui::Id::new("workspace_dock_state");
-        if let Some(saved) = ui.ctx().data_mut(|d| d.get_persisted::<DockState<Surface>>(id)) {
+        if let Some(saved) = ui
+            .ctx()
+            .data_mut(|d| d.get_persisted::<DockState<Surface>>(id))
+        {
             self.dock = saved;
         }
         // Последний применённый пресет тоже переживает рестарт.
@@ -593,11 +597,8 @@ impl TabViewer for ConnApp {
 /// через меню «Окна»/«Вид» — дефолт не должен быть кашей из девяти вкладок.
 fn default_dock() -> DockState<Surface> {
     let mut dock = DockState::new(vec![Surface::Inspector]);
-    dock.main_surface_mut().split_right(
-        NodeIndex::root(),
-        0.22,
-        vec![Surface::Atlas],
-    );
+    dock.main_surface_mut()
+        .split_right(NodeIndex::root(), 0.22, vec![Surface::Atlas]);
     dock
 }
 
@@ -754,9 +755,16 @@ mod tests {
         assert_eq!(tabs, vec![Surface::Inspector, Surface::Atlas]);
         // Полная раскладка «Все панели» — все поверхности ровно по разу.
         let tabs = sorted_tabs(&full_dock());
-        assert_eq!(tabs.len(), Surface::ALL.len(), "дубль/потеря вкладки: {tabs:?}");
+        assert_eq!(
+            tabs.len(),
+            Surface::ALL.len(),
+            "дубль/потеря вкладки: {tabs:?}"
+        );
         for (i, surface) in Surface::ALL.iter().enumerate() {
-            assert_eq!(tabs[i], *surface, "вкладка {surface:?} не на месте/отсутствует");
+            assert_eq!(
+                tabs[i], *surface,
+                "вкладка {surface:?} не на месте/отсутствует"
+            );
         }
     }
 

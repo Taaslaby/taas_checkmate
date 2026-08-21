@@ -81,11 +81,9 @@ impl NeuromlNetwork {
     /// population `pop` (mM), or an error if the population has no Ca²⁺ `species`.
     fn ca<'py>(&self, py: Python<'py>, pop: usize) -> PyResult<Bound<'py, PyArray1<f32>>> {
         self.check_pop(pop)?;
-        let cable = self
-            .inner
-            .network
-            .cable_ca(pop)
-            .ok_or_else(|| PyValueError::new_err(format!("population {pop} has no Ca2+ species")))?;
+        let cable = self.inner.network.cable_ca(pop).ok_or_else(|| {
+            PyValueError::new_err(format!("population {pop} has no Ca2+ species"))
+        })?;
         let root = self.inner.cable_info(pop).map(|c| c.root).unwrap_or(0);
         let mut out = Vec::with_capacity(cable.n_neurons);
         for i in 0..cable.n_neurons {

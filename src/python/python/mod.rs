@@ -46,8 +46,8 @@ pub mod io;
 pub mod karmac;
 pub mod kuramoto;
 pub mod lif_connectome;
-pub mod neuron;
 pub mod neuroml;
+pub mod neuron;
 pub mod pillars;
 pub mod poisson_stp;
 pub mod rl_agent;
@@ -168,7 +168,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, neurons, neuron::PyGlif3State);
     export_class!(m, neurons, neuron::PyGlif4State);
     export_class!(m, neurons, neuron::PyChordotonalSensor); // 🦗 механорецептор
-    // ─── neuroml ──────────────────────────────────────
+                                                            // ─── neuroml ──────────────────────────────────────
     let neuroml_sub = make_sub(m.py(), m, "neuroml")?;
     let f_load = wrap_pyfunction!(neuroml::py_load_neuroml, &neuroml_sub)?;
     export_fn_facade(&neuroml_sub, &f_load)?;

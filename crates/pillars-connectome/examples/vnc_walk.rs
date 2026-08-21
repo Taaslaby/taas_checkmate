@@ -116,9 +116,7 @@ fn main() {
         } else {
             "нет корреляции"
         };
-        println!(
-            "  {name}: L={l_rate:.1} Hz  R={r_rate:.1} Hz  corr(L,R)={corr:+.3}  → {phase}"
-        );
+        println!("  {name}: L={l_rate:.1} Hz  R={r_rate:.1} Hz  corr(L,R)={corr:+.3}  → {phase}");
     }
     println!(
         "\n[wall] {:.2} с на {} мс мозга = {:.3}x realtime",

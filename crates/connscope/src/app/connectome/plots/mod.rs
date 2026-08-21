@@ -235,9 +235,11 @@ impl ConnectomeMode {
         }
         ui.add_space(tokens::SP_SM);
         ui.label(
-            egui::RichText::new("Откреплённый плот — отдельное окно системы (можно двигать на второй монитор).")
-                .weak()
-                .small(),
+            egui::RichText::new(
+                "Откреплённый плот — отдельное окно системы (можно двигать на второй монитор).",
+            )
+            .weak()
+            .small(),
         );
     }
 
@@ -269,8 +271,8 @@ impl ConnectomeMode {
         // Адаптивная сетка: в узкой (вертикальной) ориентации дока плоты
         // выстраиваются в столбик на всю ширину, в широкой — в ряд по столько
         // колонок, сколько помещается с комфортной шириной карточки.
-        let cols = ((ui.available_width() / MIN_PLOT_COL_WIDTH).floor() as usize)
-            .clamp(1, kinds.len());
+        let cols =
+            ((ui.available_width() / MIN_PLOT_COL_WIDTH).floor() as usize).clamp(1, kinds.len());
         for row in kinds.chunks(cols) {
             if row.len() == 1 {
                 render_plot_card(ui, row[0], data, self.filters.color_mode, r);
@@ -296,7 +298,8 @@ impl ConnectomeMode {
         // Осциллограф «Конструктора» — независим от симуляции коннектома.
         let bst = self.plots.get(PlotKind::BuilderScope);
         if bst.enabled && bst.detached {
-            let viewport_id = egui::ViewportId::from_hash_of(("neoMyelin.plot", PlotKind::BuilderScope as usize));
+            let viewport_id =
+                egui::ViewportId::from_hash_of(("neoMyelin.plot", PlotKind::BuilderScope as usize));
             let builder = egui::ViewportBuilder::default()
                 .with_title("⧉ Осциллограф конструктора")
                 .with_inner_size([640.0, 400.0])

@@ -240,47 +240,57 @@ pub(super) fn card_full_isi(ui: &mut egui::Ui, r: &FullSimResult) {
     let mut log_y = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
     // Вне plot_card — чтобы чекбокс был в карточке, а не внутри плота.
     let card_sub = format!("медиана {median:.1} мс · {n_with} нейронов · {n_spikes} спайков");
-    plot_card(ui, ic::TIMER, "ISI-гистограмма", &card_sub, |ui| {
-        ui.horizontal(|ui| {
-            let mut v = log_y;
-            if ui
-                .checkbox(&mut v, "логарифм Y")
-                .on_hover_text("Переключить ось Y в логарифм — видно хвост распределения")
-                .changed()
-            {
-                log_y = v;
-                ui.ctx().data_mut(|d| d.insert_temp(id, log_y));
-            }
-            ui.label(
-                egui::RichText::new(if log_y { "log" } else { "linear" })
-                    .weak()
-                    .small(),
-            );
-        });
-        let bars: Vec<Bar> = counts
-            .iter()
-            .enumerate()
-            .map(|(i, &c)| {
-                let x = cap * (i as f64 + 0.5) / bins as f64;
-                let y = if log_y {
-                    if c <= 0.0 { 0.0 } else { (c + 1.0).log10() }
-                } else {
-                    c
-                };
-                Bar::new(x, y)
-                    .width(cap / bins as f64 * 0.9)
-                    .fill(Color32::from_rgb(130, 170, 255))
-            })
-            .collect();
-        let y_label = if log_y { "мс (log Y)" } else { "мс" };
-        styled_plot(ui, "full_isi", y_label)
-            .allow_zoom(false)
-            .allow_drag(false)
-            .include_y(0.0)
-            .show(ui, |p| {
-                p.bar_chart(BarChart::new("ISI", bars));
+    plot_card(
+        ui,
+        ic::TIMER,
+        "ISI-гистограмма",
+        &card_sub,
+        |ui| {
+            ui.horizontal(|ui| {
+                let mut v = log_y;
+                if ui
+                    .checkbox(&mut v, "логарифм Y")
+                    .on_hover_text("Переключить ось Y в логарифм — видно хвост распределения")
+                    .changed()
+                {
+                    log_y = v;
+                    ui.ctx().data_mut(|d| d.insert_temp(id, log_y));
+                }
+                ui.label(
+                    egui::RichText::new(if log_y { "log" } else { "linear" })
+                        .weak()
+                        .small(),
+                );
             });
-    });
+            let bars: Vec<Bar> = counts
+                .iter()
+                .enumerate()
+                .map(|(i, &c)| {
+                    let x = cap * (i as f64 + 0.5) / bins as f64;
+                    let y = if log_y {
+                        if c <= 0.0 {
+                            0.0
+                        } else {
+                            (c + 1.0).log10()
+                        }
+                    } else {
+                        c
+                    };
+                    Bar::new(x, y)
+                        .width(cap / bins as f64 * 0.9)
+                        .fill(Color32::from_rgb(130, 170, 255))
+                })
+                .collect();
+            let y_label = if log_y { "мс (log Y)" } else { "мс" };
+            styled_plot(ui, "full_isi", y_label)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .include_y(0.0)
+                .show(ui, |p| {
+                    p.bar_chart(BarChart::new("ISI", bars));
+                });
+        },
+    );
 }
 
 /// Фазовая гистограмма моторных нейронов: фаза каждого спайка мотора
@@ -375,7 +385,11 @@ fn heat_color(v: f32) -> Color32 {
         (18.0 + 40.0 * t, 28.0 + 95.0 * t, 58.0 + 92.0 * t)
     } else {
         let t = (v - 0.5) / 0.5; // teal → warm amber
-        (58.0 + 152.0 * t, 123.0 + 62.0 * t, 150.0 * (1.0 - t) + 45.0 * t)
+        (
+            58.0 + 152.0 * t,
+            123.0 + 62.0 * t,
+            150.0 * (1.0 - t) + 45.0 * t,
+        )
     };
     Color32::from_rgb(r as u8, g as u8, b as u8)
 }

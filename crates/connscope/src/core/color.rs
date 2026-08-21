@@ -79,11 +79,11 @@ pub fn color_for(d: &MancData, i: usize, mode: ColorMode) -> Color32 {
 /// Публичная: легенда и 3D-оверлей рисуют те же цвета.
 pub(crate) fn klass_color(k: u8) -> Color32 {
     match k {
-        1 => Color32::from_rgb(212, 90, 78),   // motor — muted vermillion (был 235,90,90)
-        2 => Color32::from_rgb(86, 160, 200),  // sensory — steel blue (был 80,200,235 — неон)
-        3 => Color32::from_rgb(200, 148, 65),  // ascending — muted amber (был 245,165,70)
+        1 => Color32::from_rgb(212, 90, 78), // motor — muted vermillion (был 235,90,90)
+        2 => Color32::from_rgb(86, 160, 200), // sensory — steel blue (был 80,200,235 — неон)
+        3 => Color32::from_rgb(200, 148, 65), // ascending — muted amber (был 245,165,70)
         4 => Color32::from_rgb(135, 115, 195), // descending — muted lavender (был 155,110,240)
-        5 => Color32::from_rgb(78, 168, 118),  // intrinsic — muted teal (был 110,210,120)
+        5 => Color32::from_rgb(78, 168, 118), // intrinsic — muted teal (был 110,210,120)
         6 => Color32::from_rgb(175, 175, 185), // glia — cool gray (был 205,205,215 — слишком яркий)
         7 => Color32::from_rgb(188, 110, 175), // efferent — muted mauve (был 240,145,235)
         _ => Color32::from_rgb(138, 138, 148), // other — mid gray (был 115,115,125 — темноват на #1C2021)

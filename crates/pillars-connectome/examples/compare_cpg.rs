@@ -103,10 +103,23 @@ fn grow_tripod() -> (usize, Vec<(usize, usize, f32)>) {
 
 fn set_haap_params(runner: &mut BrainRunner, n: usize) {
     let params: [(usize, f32); 17] = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0f32 / 100.0), (9, 1.0f32 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0f32 / 100.0),
+        (9, 1.0f32 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     let mut all = vec![0.0f32; n];
     for (col, val) in params {
@@ -130,8 +143,8 @@ fn build_grown_runner(n: usize, edges: &[(usize, usize, f32)]) -> BrainRunner {
     }
     let nt_types = vec![-1.0f32; n];
     let conn = ConnectomeData::new(row_ptr, ci, vals, nt_types, vec![]);
-    let mut runner = BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN))
-        .expect("grown runner");
+    let mut runner =
+        BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN)).expect("grown runner");
     set_haap_params(&mut runner, n);
     // stance = ids 0,1,2; swing = ids 3,4,5 (grown node order).
     let mut init = vec![0.0f32; n];
@@ -167,8 +180,8 @@ fn build_hand_cpg(w_seg: f32) -> BrainRunner {
 
     let nt_types = vec![-1.0f32; 2 * N_LEGS];
     let conn = ConnectomeData::new(row_ptr, ci, vals, nt_types, vec![]);
-    let mut cpg = BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN))
-        .expect("hand CPG build");
+    let mut cpg =
+        BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN)).expect("hand CPG build");
     set_haap_params(&mut cpg, 2 * N_LEGS);
 
     let mut init = vec![0.0f32; 2 * N_LEGS];
@@ -337,7 +350,11 @@ fn run_embodied(
         phase02,
         all_stance_frac: all_stance as f32 / STEPS as f32,
         all_swing_frac: all_swing as f32 / STEPS as f32,
-        joint_excursion: [q_max[0] - q_min[0], q_max[1] - q_min[1], q_max[2] - q_min[2]],
+        joint_excursion: [
+            q_max[0] - q_min[0],
+            q_max[1] - q_min[1],
+            q_max[2] - q_min[2],
+        ],
     }
 }
 
@@ -371,7 +388,9 @@ fn print_row(r: &CpgResult) {
 }
 
 fn main() {
-    println!("compare_cpg: выращенный (ДНК) vs ручной (tripod_cpg), W_SEG=8, закрытая петля 3000 мс\n");
+    println!(
+        "compare_cpg: выращенный (ДНК) vs ручной (tripod_cpg), W_SEG=8, закрытая петля 3000 мс\n"
+    );
 
     let (n, edges) = grow_tripod();
     let mut grown = build_grown_runner(n, &edges);

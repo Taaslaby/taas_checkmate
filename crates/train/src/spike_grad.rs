@@ -866,10 +866,11 @@ mod tests {
     /// есть Wᵀ·grad_drives — чистая линейная алгебра, без динамики T3.
     #[test]
     fn test_bridge_spike_grad_from_drives_exact() {
-        let mut bridge = SpikeGradBridge::new_zero(3, 2, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let mut bridge =
+            SpikeGradBridge::new_zero(3, 2, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
         let sd = bridge.spike_dim; // 3
         let dd = bridge.drive_dim; // 6
-        // Известные веса
+                                   // Известные веса
         for i in 0..sd {
             for j in 0..dd {
                 bridge.w[i * dd + j] = (i as f32 + 1.0) * 0.1 + (j as f32) * 0.01;
@@ -910,8 +911,8 @@ mod tests {
     /// фиксированный seed (как в spike::tests) и гейт «оба значения значимы».
     #[test]
     fn test_bridge_grad_spikes_finite_diff() {
-        use rand::SeedableRng;
         use rand::rngs::StdRng;
+        use rand::SeedableRng;
         // Кинк-свободная конфигурация: r-clamp гейт делает loss кусочно-
         // негладким у границ r ∈ [0.001, 10]. Мягкий drive_gain + строго
         // положительные спайки держат r в середине диапазона — никаких изломов.
@@ -960,7 +961,10 @@ mod tests {
                 nonzero += 1;
             }
         }
-        assert!(nonzero >= 3, "grad_spikes degenerate: only {nonzero} nonzero");
+        assert!(
+            nonzero >= 3,
+            "grad_spikes degenerate: only {nonzero} nonzero"
+        );
         // Допуск 0.5: forward использует fast_sincos_simd (~1e-4), backward — libm;
         // накопленная trig-ошибка за 4 шага даёт 11-44% (см. backward.rs trig mismatch),
         // подтверждено эмпирически (0.44 на худшем элементе). Точная проверка линейной

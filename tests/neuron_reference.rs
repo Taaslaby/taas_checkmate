@@ -292,8 +292,7 @@ fn verify_vs_neuron() {
             let spikes_ref = compute_spike_times(v_ref, dt).len();
             let v_init = -65.0f32;
             let mut v = vec![v_init];
-            let gate_init =
-                pillars::kernels::hh_channels::steady_state_gates(v_init, &channels);
+            let gate_init = pillars::kernels::hh_channels::steady_state_gates(v_init, &channels);
             let mut gates = gate_init.clone();
             let g_max_per_neuron = vec![120.0, 36.0];
             let i_exts = vec![i_ext];

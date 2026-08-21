@@ -22,8 +22,8 @@
 use eframe::egui::epaint::{CircleShape, TextShape};
 use eframe::egui::{pos2, Color32, FontId, Pos2, Shape, Stroke, Vec2};
 use egui_graphs::{
-    DisplayEdge, DisplayNode, DrawContext, EdgeProps, FruchtermanReingold, FruchtermanReingoldState,
-    Graph, GraphView, LayoutForceDirected, Node, NodeProps,
+    DisplayEdge, DisplayNode, DrawContext, EdgeProps, FruchtermanReingold,
+    FruchtermanReingoldState, Graph, GraphView, LayoutForceDirected, Node, NodeProps,
 };
 use petgraph::stable_graph::{DefaultIx, IndexType, NodeIndex, StableGraph};
 use petgraph::{Directed, EdgeType};
@@ -282,8 +282,7 @@ impl<Ty: EdgeType, Ix: IndexType, D: DisplayNode<EgoNode, EgoEdge, Ty, Ix>>
 }
 
 /// Конкретный граф: узлы = нейроны, рёбра = связи, направленный.
-pub(crate) type EgoGraph =
-    Graph<EgoNode, EgoEdge, Directed, DefaultIx, EgoNodeShape, EgoEdgeShape>;
+pub(crate) type EgoGraph = Graph<EgoNode, EgoEdge, Directed, DefaultIx, EgoNodeShape, EgoEdgeShape>;
 
 /// Конкретное вью: та же конфигурация + силовая раскладка FR.
 pub(crate) type EgoView<'a> = GraphView<

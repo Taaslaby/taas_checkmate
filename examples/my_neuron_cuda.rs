@@ -91,8 +91,9 @@ pub mod my_lif {
             // Reset + подпрыг адаптационного тока на спайке
             let v_final = spike.cond().then(params.v_reset).else_(v_new);
             let u_inc = spike.cond().then(params.b).else_(zero);
-            let du =
-                (params.a * (state.v - params.v_rest) - state.u + u_inc) * params.inv_tau_u * ctx.dt();
+            let du = (params.a * (state.v - params.v_rest) - state.u + u_inc)
+                * params.inv_tau_u
+                * ctx.dt();
             let u_new = state.u + du;
 
             state.v = is_refr.cond().then(state.v).else_(v_final);
@@ -118,8 +119,11 @@ const STEPS_BENCH: usize = 2_000;
 fn main() {
     println!("╔══════════════════════════════════════════════════════");
     println!("║  MyLIF: свой нейрон — один исходник, два бэкенда");
-    println!("║  {} состояний, {} параметров, ядро: `mylif_kernel`",
-        MyLIFModel::N_STATE, MyLIFModel::N_PARAMS);
+    println!(
+        "║  {} состояний, {} параметров, ядро: `mylif_kernel`",
+        MyLIFModel::N_STATE,
+        MyLIFModel::N_PARAMS
+    );
     println!("╚══════════════════════════════════════════════════════");
     println!();
 
@@ -146,7 +150,9 @@ fn build_pop(n: usize) -> NeuralPopulation<MyLIFModel> {
 
 /// Половина нейронов под током 25, половина в тишине.
 fn make_i_in(n: usize) -> Vec<f32> {
-    (0..n).map(|i| if i % 2 == 0 { 25.0 } else { 0.0 }).collect()
+    (0..n)
+        .map(|i| if i % 2 == 0 { 25.0 } else { 0.0 })
+        .collect()
 }
 
 /// SoA-снимок популяции (column-major) — формат, который ждёт CompiledModel.
@@ -207,7 +213,10 @@ fn parity() {
     let ok = cpu_counts == gpu_counts;
     let total: i64 = cpu_counts.iter().sum();
     println!("[1/3] Паритет CPU <-> GPU ({N_PARITY} нейронов x {STEPS_PARITY} шагов)");
-    println!("      спайки совпали по каждому нейрону: {}", if ok { "ДА" } else { "НЕТ" });
+    println!(
+        "      спайки совпали по каждому нейрону: {}",
+        if ok { "ДА" } else { "НЕТ" }
+    );
     println!("      всего спайков: {total}");
     println!("      max |delta state| = {max_diff:.2e} | max diff bits = {max_bits}");
     if !ok {
@@ -252,7 +261,8 @@ fn bench() {
         N_BENCH,
     )
     .expect("NVRTC / CUDA");
-    gpu.upload(&snap_states, &snap_params, &i_in).expect("upload");
+    gpu.upload(&snap_states, &snap_params, &i_in)
+        .expect("upload");
 
     // Реалистичный цикл: спайки читаем на каждом шаге (D2H).
     let mut g_spikes = vec![0i32; N_BENCH];
@@ -299,7 +309,10 @@ fn bench() {
         rt(gpu_core)
     );
     println!();
-    println!("  скорость CPU/GPU (с чтением спайков): {:.1}x", cpu_secs / gpu_loop);
+    println!(
+        "  скорость CPU/GPU (с чтением спайков): {:.1}x",
+        cpu_secs / gpu_loop
+    );
     let spike_diff = cpu_spikes.abs_diff(gpu_spikes);
     println!("  расхождение спайков: {spike_diff} (CPU {cpu_spikes} vs GPU {gpu_spikes})");
 }

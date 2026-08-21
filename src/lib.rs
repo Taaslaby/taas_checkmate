@@ -83,16 +83,13 @@ pub use train::rl;
 
 // Корневые реэкспорты — напрямую из pillars.
 pub use io::{safety_clamp, LinearDecoder, PwmEncoder};
-pub use pillars::kernels::spike_entropy;
 pub use pillars::api::neurons::{
     bsa_encode, bsa_kernel_hamming, compute_lfp, eprop_update, intrinsic_plasticity, phase_encode,
-    population_rate_decode, probe_fr, stdp_homeostatic, stdp_update, step_adex,
-    step_fhn, step_gco, step_hr, step_izhikevich, step_lif, step_lif_at, step_neuromotor,
-    step_saw, step_wc, suggest_config, surrogate_gradient, synaptic_normalization,
-    NeuromotorState,
-    DelayBuffer, DopamineSTDP, EPropAdExMulti, EPropIzhikevich, EPropIzhikevichMulti, EPropLIF,
-    EPropSaw, EPropTunerConfig, FrProbePoint, PoissonGenerator, ShortTermPlasticity, SornNetwork,
-    TtfsEncoder,
+    population_rate_decode, probe_fr, stdp_homeostatic, stdp_update, step_adex, step_fhn, step_gco,
+    step_hr, step_izhikevich, step_lif, step_lif_at, step_neuromotor, step_saw, step_wc,
+    suggest_config, surrogate_gradient, synaptic_normalization, DelayBuffer, DopamineSTDP,
+    EPropAdExMulti, EPropIzhikevich, EPropIzhikevichMulti, EPropLIF, EPropSaw, EPropTunerConfig,
+    FrProbePoint, NeuromotorState, PoissonGenerator, ShortTermPlasticity, SornNetwork, TtfsEncoder,
 };
 pub use pillars::kernels::csr::{
     apply_stdp_ltd, compute_hamiltonian, propagate_spikes, rate_step, step_gco_full,
@@ -102,6 +99,7 @@ pub use pillars::kernels::measure::{
     phase_coherence, winding_matrix,
 };
 pub use pillars::kernels::phase::{kuramoto_step_dense, kuramoto_step_sparse, t3_step_sparse};
+pub use pillars::kernels::spike_entropy;
 pub use train::rl::{test_mdp_episode, ActorCriticAgent};
 
 #[cfg(feature = "t3")]

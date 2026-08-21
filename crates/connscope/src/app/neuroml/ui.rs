@@ -316,9 +316,7 @@ impl NeuromlMode {
                             crate::app::widgets::ActionTone::Neutral,
                             130.0,
                         )
-                        .on_hover_text(
-                            "Открыть дерево компартментов с V(t) по компартментам",
-                        )
+                        .on_hover_text("Открыть дерево компартментов с V(t) по компартментам")
                         .clicked()
                     {
                         action = Some(NeuromlAction::OpenCable);

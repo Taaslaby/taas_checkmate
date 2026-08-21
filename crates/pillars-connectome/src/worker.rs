@@ -149,8 +149,7 @@ impl AlphaLifWorker {
 
     /// Удобный конструктор: загрузить `.taas` с диска и собрать воркер.
     pub fn from_taas(path: &str, params: ShiuParams) -> Result<Self, String> {
-        let f = std::fs::File::open(path)
-            .map_err(|e| format!("cannot open {path}: {e}"))?;
+        let f = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
         let conn = ConnectomeData::load_baked(&mut std::io::BufReader::new(f))
             .map_err(|e| format!("bad .taas: {e}"))?;
         Self::new(conn, params)
@@ -160,8 +159,11 @@ impl AlphaLifWorker {
     /// с весом `poisson_weight` (скачок прямо в v — как `target_var='v'` у Шу).
     pub fn set_sugar_grn(&mut self, indices: &[usize]) {
         self.runner.set_alpha_refrac_ms(indices, 0.0);
-        self.runner
-            .add_poisson_group(indices, self.params.poisson_rate, self.params.poisson_weight);
+        self.runner.add_poisson_group(
+            indices,
+            self.params.poisson_rate,
+            self.params.poisson_weight,
+        );
         self.sugar_grn = indices.to_vec();
     }
 
@@ -263,7 +265,10 @@ mod tests {
         let out = worker.run_steps(100, &ext);
         assert!(out.total_spikes > 0);
         // Neuron 2 должен спайкнуть (цепь 0→1→2 с весом 500 мВ).
-        assert!(out.active_neurons >= 3, "chain 0→1→2 should light up: {out:?}");
+        assert!(
+            out.active_neurons >= 3,
+            "chain 0→1→2 should light up: {out:?}"
+        );
     }
 
     #[test]

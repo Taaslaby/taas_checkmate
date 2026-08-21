@@ -276,4 +276,3 @@ pub fn derive_neuron_model_impl(input: TokenStream) -> TokenStream {
 
     expanded.into()
 }
-

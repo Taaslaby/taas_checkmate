@@ -71,13 +71,14 @@ pub(crate) const TEXT_MONO: f32 = 12.5;
 /// начертанием; этот хелпер возвращает RichText с JetBrains Mono.
 #[allow(dead_code)]
 pub(crate) fn tabular(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).family(egui::FontFamily::Monospace).size(TEXT_MONO)
+    egui::RichText::new(text)
+        .family(egui::FontFamily::Monospace)
+        .size(TEXT_MONO)
 }
 
 // ── controls ─────────────────────────────────────────────────
 /// Высота паинтерной кнопки-действия (`action_button` не берёт высоту из стиля).
 pub(crate) const CONTROL_H: f32 = 30.0;
-
 
 // ── legend (color cheat-sheet in the inspector) ──────────────
 /// Colored swatch square (px).

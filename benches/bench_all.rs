@@ -8,10 +8,10 @@
 #![allow(non_snake_case)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use pillars::kernels;
 use pillars::core::lane::SimdLane;
 use pillars::core::runner::run_neuron;
 use pillars::core::util::{load8, load8_i32, store8};
+use pillars::kernels;
 use pillars::ops::plasticity::stp as pillars_stp;
 use pillars::zoo::neurons::FHNModel;
 use pillars::zoo::Model;

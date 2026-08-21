@@ -161,8 +161,12 @@ pub(crate) fn render_neuron_card(
             ui.label(tokens::eyebrow("Связи (топ-5, по весу)"));
             for c in &card.conns {
                 // Моноширинный w — tabular-nums для быстрого сравнения весов.
-                ui.label(egui::RichText::new(c).family(egui::FontFamily::Monospace).size(tokens::TEXT_MONO))
-                    .on_hover_text(c);
+                ui.label(
+                    egui::RichText::new(c)
+                        .family(egui::FontFamily::Monospace)
+                        .size(tokens::TEXT_MONO),
+                )
+                .on_hover_text(c);
             }
         }
         ui.add_space(tokens::SP_MD);

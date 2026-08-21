@@ -130,7 +130,13 @@ pub(crate) trait Mode {
 
     /// Докируемая поверхность рабочего пространства (см. [`Surface`]).
     /// Рисуется внутри единого дерева `egui_dock`, которым владеет оболочка.
-    fn dock_surface(&mut self, _ui: &mut egui::Ui, _surface: Surface, _services: &mut ShellServices) {}
+    fn dock_surface(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _surface: Surface,
+        _services: &mut ShellServices,
+    ) {
+    }
 
     /// Левая часть статус-бара: hover-инфо или контекстная подсказка режима.
     fn status_left(&self) -> String {
@@ -142,7 +148,13 @@ pub(crate) trait Mode {
 
     /// Плавающие окна и модалки режима (рисуются поверх панелей). Может
     /// попросить оболочку сфокусировать [`Surface`] через [`ShellServices`].
-    fn windows(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame, _services: &mut ShellServices) {}
+    fn windows(
+        &mut self,
+        _ctx: &egui::Context,
+        _frame: &mut eframe::Frame,
+        _services: &mut ShellServices,
+    ) {
+    }
 
     /// Режимная секция меню «Вид». Возвращает [`Surface`], которую режим
     /// просит сфокусировать (оболочка применяет запрос после вызова).

@@ -19,10 +19,10 @@
 
 use rand::Rng;
 
+use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
 use pillars_grow::{
     Bounds, CellType, ChemoAttraction, DivideOnce, Grid, Secretor, Substance, Vec3, World,
 };
-use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
 
 const DT: f32 = 0.05; // ms
 const TAU_SYN: f32 = 12.0;
@@ -98,14 +98,27 @@ fn build_runner(n: usize, edges: &[(usize, usize, f32)]) -> BrainRunner {
     }
     let nt_types = vec![-1.0f32; n];
     let conn = ConnectomeData::new(row_ptr, ci, vals, nt_types, vec![]);
-    let mut runner = BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN))
-        .expect("runner");
+    let mut runner =
+        BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN)).expect("runner");
 
     let params: [(usize, f32); 17] = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0f32 / 100.0), (9, 1.0f32 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0f32 / 100.0),
+        (9, 1.0f32 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     let mut all = vec![0.0f32; n];
     for (col, val) in params {
@@ -178,8 +191,8 @@ fn convolve(s: &[f32], win: &[f32]) -> Vec<f32> {
 /// growth did not produce a mutual pair.
 fn evaluate(p: GrowthParams) -> (f32, f32) {
     let (n, edges) = grow(p);
-    let mutual = edges.iter().any(|e| e.0 == 0 && e.1 == 1)
-        && edges.iter().any(|e| e.0 == 1 && e.1 == 0);
+    let mutual =
+        edges.iter().any(|e| e.0 == 0 && e.1 == 1) && edges.iter().any(|e| e.0 == 1 && e.1 == 0);
     if n < 2 || !mutual {
         return (0.0, 0.0);
     }

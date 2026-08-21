@@ -280,7 +280,7 @@ impl Default for PharmaState {
             library: DrugLibrary::load(),
             drug: 0,
             active: false,
-            log_conc: 0.0, // 1 µM
+            log_conc: 0.0,        // 1 µM
             half_life_steps: 0.0, // постоянная концентрация
         }
     }

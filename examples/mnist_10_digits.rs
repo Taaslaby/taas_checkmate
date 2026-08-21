@@ -37,11 +37,17 @@ fn fetch_gz(name: &str, url: &str) -> Vec<u8> {
         return std::fs::read(&cache).expect("read cache");
     }
     let out = Command::new("bash")
-        .args(["-c", &format!("curl -sL '{url}' | gunzip > '{cache}' && echo OK")])
+        .args([
+            "-c",
+            &format!("curl -sL '{url}' | gunzip > '{cache}' && echo OK"),
+        ])
         .output()
         .expect("curl+gunzip");
-    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("OK"),
-        "download failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("OK"),
+        "download failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     std::fs::read(&cache).expect("read downloaded")
 }
 
@@ -55,7 +61,12 @@ fn load_images(raw: &[u8]) -> Vec<Vec<f32>> {
     let base = 16;
     for i in 0..n {
         let start = base + i * ROWS * COLS;
-        imgs.push(raw[start..start + ROWS * COLS].iter().map(|&b| b as f32 * PIXEL_SCALE).collect());
+        imgs.push(
+            raw[start..start + ROWS * COLS]
+                .iter()
+                .map(|&b| b as f32 * PIXEL_SCALE)
+                .collect(),
+        );
     }
     imgs
 }
@@ -136,12 +147,24 @@ impl Softmax {
     fn train(x: &[Vec<f32>], y: &[usize], epochs: usize, lr: f32) -> Self {
         let (n, d) = (x.len(), x[0].len());
         let k = N_CLASSES;
-        let mean: Vec<f32> = (0..d).map(|j| x.iter().map(|r| r[j]).sum::<f32>() / n as f32).collect();
-        let std: Vec<f32> = (0..d)
-            .map(|j| (x.iter().map(|r| (r[j] - mean[j]).powi(2)).sum::<f32>() / n as f32).sqrt().max(1e-6))
+        let mean: Vec<f32> = (0..d)
+            .map(|j| x.iter().map(|r| r[j]).sum::<f32>() / n as f32)
             .collect();
-        let xn: Vec<Vec<f32>> = x.iter()
-            .map(|r| r.iter().enumerate().map(|(j, &v)| (v - mean[j]) / std[j]).collect())
+        let std: Vec<f32> = (0..d)
+            .map(|j| {
+                (x.iter().map(|r| (r[j] - mean[j]).powi(2)).sum::<f32>() / n as f32)
+                    .sqrt()
+                    .max(1e-6)
+            })
+            .collect();
+        let xn: Vec<Vec<f32>> = x
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .enumerate()
+                    .map(|(j, &v)| (v - mean[j]) / std[j])
+                    .collect()
+            })
             .collect();
         let mut w = vec![vec![0.0f32; d]; k];
         let mut b = vec![0.0f32; k];
@@ -159,24 +182,35 @@ impl Softmax {
                     let p = ex[c] / sum;
                     let grad = (p - if c == yi { 1.0 } else { 0.0 }) / n as f32;
                     gb[c] += grad;
-                    for j in 0..d { gw[c][j] += grad * xi[j]; }
+                    for j in 0..d {
+                        gw[c][j] += grad * xi[j];
+                    }
                 }
             }
             for c in 0..k {
                 b[c] -= lr * gb[c];
-                for j in 0..d { w[c][j] -= lr * gw[c][j]; }
+                for j in 0..d {
+                    w[c][j] -= lr * gw[c][j];
+                }
             }
         }
         Softmax { mean, std, w, b }
     }
 
     fn predict(&self, x: &[f32]) -> usize {
-        let z: Vec<f32> = x.iter().enumerate().map(|(j, &v)| (v - self.mean[j]) / self.std[j]).collect();
+        let z: Vec<f32> = x
+            .iter()
+            .enumerate()
+            .map(|(j, &v)| (v - self.mean[j]) / self.std[j])
+            .collect();
         let mut best = 0usize;
         let mut best_s = f32::NEG_INFINITY;
         for (c, wc) in self.w.iter().enumerate() {
             let s = self.b[c] + (0..z.len()).map(|j| wc[j] * z[j]).sum::<f32>();
-            if s > best_s { best_s = s; best = c; }
+            if s > best_s {
+                best_s = s;
+                best = c;
+            }
         }
         best
     }
@@ -185,7 +219,9 @@ impl Softmax {
 fn print_cm(title: &str, cm: &[[usize; N_CLASSES]; N_CLASSES]) {
     println!("\n{title}");
     print!("    ");
-    for p in 0..N_CLASSES { print!("  {p:>3}"); }
+    for p in 0..N_CLASSES {
+        print!("  {p:>3}");
+    }
     println!("   |  точн.");
     for (a, row) in cm.iter().enumerate() {
         print!("  {a} |");
@@ -206,10 +242,22 @@ fn print_cm(title: &str, cm: &[[usize; N_CLASSES]; N_CLASSES]) {
 fn main() {
     println!("📥 Загружаем MNIST (все 10 цифр)...");
     let base = "https://ossci-datasets.s3.amazonaws.com/mnist";
-    let train_img = load_images(&fetch_gz("train-images.idx3-ubyte", &format!("{base}/train-images-idx3-ubyte.gz")));
-    let train_lbl = load_labels(&fetch_gz("train-labels.idx1-ubyte", &format!("{base}/train-labels-idx1-ubyte.gz")));
-    let test_img  = load_images(&fetch_gz("t10k-images.idx3-ubyte", &format!("{base}/t10k-images-idx3-ubyte.gz")));
-    let test_lbl  = load_labels(&fetch_gz("t10k-labels.idx1-ubyte", &format!("{base}/t10k-labels-idx1-ubyte.gz")));
+    let train_img = load_images(&fetch_gz(
+        "train-images.idx3-ubyte",
+        &format!("{base}/train-images-idx3-ubyte.gz"),
+    ));
+    let train_lbl = load_labels(&fetch_gz(
+        "train-labels.idx1-ubyte",
+        &format!("{base}/train-labels-idx1-ubyte.gz"),
+    ));
+    let test_img = load_images(&fetch_gz(
+        "t10k-images.idx3-ubyte",
+        &format!("{base}/t10k-images-idx3-ubyte.gz"),
+    ));
+    let test_lbl = load_labels(&fetch_gz(
+        "t10k-labels.idx1-ubyte",
+        &format!("{base}/t10k-labels-idx1-ubyte.gz"),
+    ));
     println!("   тренировка: {}", train_img.len());
     println!("   тест:       {}\n", test_img.len());
 
@@ -247,8 +295,13 @@ fn main() {
                 .iter()
                 .map(|&u| ((BAND_W as i64 - (lo as i64 - u as i64).abs()).max(0)) as f64 * 0.5)
                 .sum();
-            let s: f64 = (lo..lo + BAND_W).map(|c| profile[d][c] - global[c]).sum::<f64>() - overlap_pen;
-            if s > best.0 { best = (s, lo); }
+            let s: f64 = (lo..lo + BAND_W)
+                .map(|c| profile[d][c] - global[c])
+                .sum::<f64>()
+                - overlap_pen;
+            if s > best.0 {
+                best = (s, lo);
+            }
         }
         band_of[d] = best.1;
         used.push(best.1);
@@ -256,10 +309,14 @@ fn main() {
     println!("🔍 Полосы классов (data-driven, width={BAND_W}): {band_of:?}\n");
 
     // ─── Тренировка 10 нейронов ─────────────────────────────────
-    let mut learned: Vec<NeuralPopulation<TransformerModel>> =
-        (0..N_CLASSES).map(|d| make_neuron(THRESH, 0.01, d)).collect();
+    let mut learned: Vec<NeuralPopulation<TransformerModel>> = (0..N_CLASSES)
+        .map(|d| make_neuron(THRESH, 0.01, d))
+        .collect();
     let n_train = train_img.len();
-    println!("🎓 Тренируем {} образцов (учитель на свою цифру)...", n_train);
+    println!(
+        "🎓 Тренируем {} образцов (учитель на свою цифру)...",
+        n_train
+    );
     let t0 = std::time::Instant::now();
     for (i, (img, &label)) in train_img.iter().zip(&train_lbl).enumerate() {
         let d = label as usize;
@@ -268,7 +325,12 @@ fn main() {
             let _ = run_digit(&mut learned[c], img, teach, band_of[c]);
         }
         if (i + 1) % 15000 == 0 {
-            println!("   ... {}/{}  ({:.0}с)", i + 1, n_train, t0.elapsed().as_secs());
+            println!(
+                "   ... {}/{}  ({:.0}с)",
+                i + 1,
+                n_train,
+                t0.elapsed().as_secs()
+            );
         }
     }
     println!("   обучено за {:.1}с\n", t0.elapsed().as_secs_f32());
@@ -290,7 +352,9 @@ fn main() {
             sw += v * (c as f32);
             s += v;
         }
-        if s < 0.01 { return 0.0; }
+        if s < 0.01 {
+            return 0.0;
+        }
         let mean = sw / s;
         let mut var = 0.0f32;
         for c in 0..COLS {
@@ -310,7 +374,9 @@ fn main() {
             for d in 0..N_CLASSES {
                 let (_, acc) = run_digit(&mut learned[d], img, 0.0, band_of[d]);
                 a[d] = acc;
-                r[d] = (0..ROWS).map(|row| band_density(img, row, band_of[d])).sum::<f32>();
+                r[d] = (0..ROWS)
+                    .map(|row| band_density(img, row, band_of[d]))
+                    .sum::<f32>();
             }
             let spread: f32 = (0..ROWS).map(|row| row_spread(img, row)).sum();
             let ink: f32 = img.iter().sum();
@@ -335,7 +401,11 @@ fn main() {
     let mut cm_arg = [[0usize; N_CLASSES]; N_CLASSES];
     for (f, &l) in test_acc.iter().zip(&test_y) {
         let mut best = 0usize;
-        for d in 1..N_CLASSES { if f[d] > f[best] { best = d; } }
+        for d in 1..N_CLASSES {
+            if f[d] > f[best] {
+                best = d;
+            }
+        }
         cm_arg[l][best] += 1;
     }
     let acc_arg = diag(&cm_arg) as f64 * 100.0 / n_test as f64;
@@ -378,13 +448,27 @@ fn main() {
 
     // ─── Отчёт ──────────────────────────────────────────────────
     println!("\n╔══════════════════════════════════════════════════════╗");
-    println!("║  1. argmax по нейронам (база):           {:5.1}%    ║", acc_arg);
-    println!("║  2. softmax над сырыми полосами:         {:5.1}%    ║", acc_raw);
-    println!("║  3. softmax над признаками нейронов:     {:5.1}%    ║", acc_n);
-    println!("║  4. softmax над склейкой (нейроны+сырые): {:5.1}%    ║", acc_cat);
+    println!(
+        "║  1. argmax по нейронам (база):           {:5.1}%    ║",
+        acc_arg
+    );
+    println!(
+        "║  2. softmax над сырыми полосами:         {:5.1}%    ║",
+        acc_raw
+    );
+    println!(
+        "║  3. softmax над признаками нейронов:     {:5.1}%    ║",
+        acc_n
+    );
+    println!(
+        "║  4. softmax над склейкой (нейроны+сырые): {:5.1}%    ║",
+        acc_cat
+    );
     println!("╚══════════════════════════════════════════════════════╝");
-    print_cm("🧮 Матрица ошибок: лучшая конфигурация — склейка признаков (STDP + сырые)",
-             &cm_cat);
+    print_cm(
+        "🧮 Матрица ошибок: лучшая конфигурация — склейка признаков (STDP + сырые)",
+        &cm_cat,
+    );
 }
 
 fn diag(cm: &[[usize; N_CLASSES]; N_CLASSES]) -> usize {

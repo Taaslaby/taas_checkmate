@@ -52,4 +52,3 @@ pub fn sim_rate(
     }
     spike_buffer
 }
-

@@ -69,10 +69,23 @@ fn build_cpg() -> BrainRunner {
     // 8=Inv_Tau_U 9=Inv_Tau_H 10=V_Half_U 11=K_U 12=V_Half_H 13=K_H 14=V_Thresh
     // 15=V_Reset 16=Delta_U
     let params = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0 / 100.0), (9, 1.0 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0 / 100.0),
+        (9, 1.0 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     for (col, val) in params {
         cpg.set_haap_param_column(col, &[val, val]);
@@ -105,8 +118,14 @@ fn run_leg(feedback: bool) -> Gait {
     let mut mn = vec![0i32; body.n_muscles];
 
     let mut g = Gait {
-        n0: 0, n1: 0, q_min: f32::INFINITY, q_max: f32::NEG_INFINITY,
-        stance_frac: 0.0, sensor_frac: 0.0, reset_events: 0, crossings: 0,
+        n0: 0,
+        n1: 0,
+        q_min: f32::INFINITY,
+        q_max: f32::NEG_INFINITY,
+        stance_frac: 0.0,
+        sensor_frac: 0.0,
+        reset_events: 0,
+        crossings: 0,
     };
 
     let mut reset_current = 0.0f32;

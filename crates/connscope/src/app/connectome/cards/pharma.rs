@@ -131,7 +131,10 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState, mo
 
         // Совместимость мишени с текущей моделью: канальные мишени требуют
         // HH/HAAP, рецепторные масштабируют синапсы в любой модели.
-        let mname = models::MODELS.get(model).map(|m| m.short_name()).unwrap_or("?");
+        let mname = models::MODELS
+            .get(model)
+            .map(|m| m.short_name())
+            .unwrap_or("?");
         match pharma_target_fit(d.target, model) {
             Ok(()) => {
                 ui.label(

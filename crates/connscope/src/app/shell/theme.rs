@@ -188,8 +188,8 @@ fn visuals(ctx: &egui::Context) {
     v.window_fill = BG_CARD;
     v.extreme_bg_color = BG_INSET; // поля ввода, «утопленные» области
     v.faint_bg_color = BG_CARD; // чередование строк таблиц
-    // Акцент и выделение не задаём здесь: их перекрашивает elegance
-    // (`Theme::install` → `Palette::focus`), а виджеты читают `theme::accent(ui)`.
+                                // Акцент и выделение не задаём здесь: их перекрашивает elegance
+                                // (`Theme::install` → `Palette::focus`), а виджеты читают `theme::accent(ui)`.
 
     // Панели разделяются яркостью (panel_fill vs window_fill); рамка окна
     // — едва заметная (у панелей рамки в egui 0.35 нет вообще).
@@ -231,7 +231,10 @@ fn visuals(ctx: &egui::Context) {
     style.text_styles = [
         (
             TextStyle::Heading,
-            FontId::new(tokens::TEXT_HEADING, egui::FontFamily::Name(HEADING_FAMILY.into())),
+            FontId::new(
+                tokens::TEXT_HEADING,
+                egui::FontFamily::Name(HEADING_FAMILY.into()),
+            ),
         ),
         (
             TextStyle::Body,

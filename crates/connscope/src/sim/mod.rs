@@ -68,8 +68,7 @@ impl PharmaPk {
         if self.half_life_steps <= 0.0 {
             return self.dose.conc_um;
         }
-        self.dose.conc_um
-            * (-(t as f32) * std::f32::consts::LN_2 / self.half_life_steps).exp()
+        self.dose.conc_um * (-(t as f32) * std::f32::consts::LN_2 / self.half_life_steps).exp()
     }
 
     /// Множитель мишени на шаге `t` (1.0 = не действует).
@@ -196,7 +195,12 @@ fn apply_pharma_chunk(
                     if !hh_base.is_empty() {
                         (HH_COL_G_LEAK, false, "g_Leak", hh_base)
                     } else {
-                        (HAAP_COL_G_L, true, "g_l", runner.get_haap_param_column(HAAP_COL_G_L))
+                        (
+                            HAAP_COL_G_L,
+                            true,
+                            "g_l",
+                            runner.get_haap_param_column(HAAP_COL_G_L),
+                        )
                     }
                 }
                 Target::Hcn => (
@@ -791,8 +795,18 @@ mod tests {
     #[test]
     fn pharma_scales_hh_g_na() {
         let d = tiny_data();
-        let r = run_full_sim(&d, 0, 2, 20.0, 50, 1.0, 0.5, 0.3, Some(const_pk(ttx(), 0.01)))
-            .unwrap(); // 2 = HH
+        let r = run_full_sim(
+            &d,
+            0,
+            2,
+            20.0,
+            50,
+            1.0,
+            0.5,
+            0.3,
+            Some(const_pk(ttx(), 0.01)),
+        )
+        .unwrap(); // 2 = HH
         assert!(r.pharma_note.contains("g_Na"), "note: {}", r.pharma_note);
         assert!(r.pharma_note.contains("×0.50"), "note: {}", r.pharma_note);
     }
@@ -801,8 +815,18 @@ mod tests {
     #[test]
     fn pharma_channel_rejected_on_lif() {
         let d = tiny_data();
-        let r = run_full_sim(&d, 0, 0, 20.0, 50, 1.0, 0.5, 0.3, Some(const_pk(ttx(), 0.01)))
-            .unwrap(); // 0 = LIF
+        let r = run_full_sim(
+            &d,
+            0,
+            0,
+            20.0,
+            50,
+            1.0,
+            0.5,
+            0.3,
+            Some(const_pk(ttx(), 0.01)),
+        )
+        .unwrap(); // 0 = LIF
         assert!(r.pharma_note.starts_with("⚠"), "note: {}", r.pharma_note);
         assert!(r.pharma_note.contains("NaV"), "note: {}", r.pharma_note);
     }
@@ -841,15 +865,29 @@ mod tests {
         .unwrap(); // IC50 → ×0.50
         assert!(r.pharma_note.contains("GABA"), "note: {}", r.pharma_note);
         assert!(r.pharma_note.contains("×0.50"), "note: {}", r.pharma_note);
-        assert!(r.pharma_note.contains("1 синапс"), "note: {}", r.pharma_note);
+        assert!(
+            r.pharma_note.contains("1 синапс"),
+            "note: {}",
+            r.pharma_note
+        );
     }
 
     /// Нулевая концентрация = препарат не действует (note пустой).
     #[test]
     fn pharma_inactive_dose_is_noop() {
         let d = tiny_data();
-        let r = run_full_sim(&d, 0, 2, 20.0, 50, 1.0, 0.5, 0.3, Some(const_pk(ttx(), 0.0)))
-            .unwrap();
+        let r = run_full_sim(
+            &d,
+            0,
+            2,
+            20.0,
+            50,
+            1.0,
+            0.5,
+            0.3,
+            Some(const_pk(ttx(), 0.0)),
+        )
+        .unwrap();
         assert!(r.pharma_note.is_empty(), "note: {}", r.pharma_note);
     }
 
@@ -897,7 +935,10 @@ mod tests {
         assert!((g1 - g0 * 0.5).abs() < 1e-3, "база·0.5: {g0} → {g1}");
         apply_pharma_chunk(&mut runner, &d.nt, None, &pk, 10, &mut baseline).unwrap();
         let g2 = runner.get_hh_param_column(1)[0];
-        assert!((g2 - g1).abs() < 1e-4, "повтор не накапливает: {g1} vs {g2}");
+        assert!(
+            (g2 - g1).abs() < 1e-4,
+            "повтор не накапливает: {g1} vs {g2}"
+        );
         // scale = 1.0 (концентрация выклиренсилась) → база восстановилась.
         let pk1 = PharmaPk {
             dose: dose(ttx(), 0.0),

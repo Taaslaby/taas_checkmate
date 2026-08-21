@@ -93,14 +93,27 @@ fn build_cpg(w_seg: f32, sync: bool) -> BrainRunner {
 
     let nt_types = vec![-1.0f32; N_NEURONS];
     let conn = ConnectomeData::new(row_ptr, ci, vals, nt_types, vec![]);
-    let mut cpg = BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN))
-        .expect("hexapod CPG build");
+    let mut cpg =
+        BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN)).expect("hexapod CPG build");
 
     let params = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0 / 100.0), (9, 1.0 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0 / 100.0),
+        (9, 1.0 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     let mut all = vec![0.0f32; N_NEURONS];
     for (col, val) in params {
@@ -185,7 +198,11 @@ fn run_hexapod(w_seg: f32, sync: bool) -> HexapodResult {
     let win: Vec<f32> = (0..400).map(|_| 1.0 / 400.0).collect();
     let smooth: Vec<Vec<f32>> = stance.iter().map(|s| convolve(s, &win)).collect();
     let period_ms = autocorr_period(&smooth[0], DT);
-    let f_hz = if period_ms > 0.0 { 1000.0 / period_ms } else { 0.0 };
+    let f_hz = if period_ms > 0.0 {
+        1000.0 / period_ms
+    } else {
+        0.0
+    };
     let phases: [f32; N_LEGS] = std::array::from_fn(|j| {
         if f_hz > 0.0 {
             goertzel_phase(&smooth[j], f_hz, DT)
@@ -194,8 +211,7 @@ fn run_hexapod(w_seg: f32, sync: bool) -> HexapodResult {
         }
     });
     // Normalize phases relative to leg 0.
-    let phases: [f32; N_LEGS] =
-        std::array::from_fn(|j| (phases[j] - phases[0]).rem_euclid(360.0));
+    let phases: [f32; N_LEGS] = std::array::from_fn(|j| (phases[j] - phases[0]).rem_euclid(360.0));
 
     let mut mean_stance = 0.0;
     for (k, &c) in count_hist.iter().enumerate() {
@@ -278,7 +294,10 @@ fn report(name: &str, r: &HexapodResult) {
             mx = mx.max(p);
         }
         // circular-aware spread near 0° (wrap 359→-1)
-        let ph_wrapped: Vec<f32> = ph.iter().map(|&p| if p > 180.0 { p - 360.0 } else { p }).collect();
+        let ph_wrapped: Vec<f32> = ph
+            .iter()
+            .map(|&p| if p > 180.0 { p - 360.0 } else { p })
+            .collect();
         let (mut mn2, mut mx2) = (ph_wrapped[0], ph_wrapped[0]);
         for &p in &ph_wrapped {
             mn2 = mn2.min(p);

@@ -81,7 +81,13 @@ impl EqPropNet {
     }
 
     /// Релаксация до равновесия. `target=None` → free; иначе nudge к цели.
-    pub fn settle(&self, x: &[f64; 3], target: Option<f64>, beta: f64, t_steps: usize) -> (Vec<f64>, f64) {
+    pub fn settle(
+        &self,
+        x: &[f64; 3],
+        target: Option<f64>,
+        beta: f64,
+        t_steps: usize,
+    ) -> (Vec<f64>, f64) {
         // Gauss–Seidel: сначала y (по предыдущему h), затем h (по новому y).
         let mut h = vec![0.0f64; self.n_hidden];
         let mut y = 0.0f64;
@@ -241,7 +247,10 @@ mod tests {
     #[test]
     fn test_contrast_aligns_with_gradient() {
         let x = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
-        let t: Vec<f64> = [0usize, 1, 1, 0].iter().map(|&v| 2.0 * v as f64 - 1.0).collect();
+        let t: Vec<f64> = [0usize, 1, 1, 0]
+            .iter()
+            .map(|&v| 2.0 * v as f64 - 1.0)
+            .collect();
         let net = EqPropNet::new(8, 1);
         let (dw_bp, _dv_bp) = net.backprop_grad(&x, &t);
 

@@ -65,8 +65,8 @@ use pillars::core::arch::SimdType;
 use pillars::core::lane::SimdLane;
 use pillars::core::NeuralPopulation;
 use pillars::zoo::{
-    AlphaLifModel, AlphaLifModelParamIdx, AlphaLifModelStateIdx, HAAPModel, HAAPModelParamIdx, HHModel,
-    HHModelParamIdx,
+    AlphaLifModel, AlphaLifModelParamIdx, AlphaLifModelStateIdx, HAAPModel, HAAPModelParamIdx,
+    HHModel, HHModelParamIdx,
 };
 
 /// Build the alpha-LIF SIMD population (Shiu fly brain model).
@@ -623,14 +623,7 @@ impl BrainRunner {
                 tau_syn,
                 ..
             } => Some(alpha_lif_population(
-                n,
-                *dt_ms,
-                *tau_ref,
-                *tau_m,
-                *v_rest,
-                *v_thresh,
-                *v_reset,
-                *tau_syn,
+                n, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, *tau_syn,
             )),
             _ => None,
         };
@@ -783,17 +776,8 @@ impl BrainRunner {
                 t_delay,
             } => {
                 let _ = self.run_lif_alpha(
-                    n_steps,
-                    external_I,
-                    *dt_ms,
-                    *tau_ref,
-                    *tau_m,
-                    *v_rest,
-                    *v_thresh,
-                    *v_reset,
-                    *tau_syn,
-                    *t_delay,
-                    true,
+                    n_steps, external_I, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset,
+                    *tau_syn, *t_delay, true,
                 );
             }
             NeuronConfig::Izh {
@@ -894,17 +878,8 @@ impl BrainRunner {
                 tau_syn,
                 t_delay,
             } => self.run_lif_alpha(
-                n_steps,
-                external_I,
-                *dt_ms,
-                *tau_ref,
-                *tau_m,
-                *v_rest,
-                *v_thresh,
-                *v_reset,
-                *tau_syn,
-                *t_delay,
-                false,
+                n_steps, external_I, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset,
+                *tau_syn, *t_delay, false,
             ),
             // Other models: fall back to the raster path and scan it. Only the
             // alpha worker uses run_count today; this keeps the API total.
@@ -1200,9 +1175,9 @@ impl BrainRunner {
         if let NeuronConfig::LifAlpha { t_delay, dt_ms, .. } = &self.config {
             let n = self.n_neurons;
             self.state.v[..n].fill(0.0); // will be synced from pop on first run
-            // Rebuild from config — preserves per-neuron refr_steps overrides
-            // ONLY if the caller re-applies set_alpha_refrac_ms after reset
-            // (same contract as the HH population).
+                                         // Rebuild from config — preserves per-neuron refr_steps overrides
+                                         // ONLY if the caller re-applies set_alpha_refrac_ms after reset
+                                         // (same contract as the HH population).
             let new_pop = self.make_alpha_pop();
             if let Some(pop) = self.alpha_pop.as_mut() {
                 *pop = new_pop;
@@ -1344,20 +1319,21 @@ impl BrainRunner {
     /// scalar params (dt, time_factor, v_rest/thresh/reset, refr_steps,
     /// syn_decay). The delay ring buffer + CSR scatter stay in the runner.
     fn make_alpha_pop(&self) -> NeuralPopulation<AlphaLifModel> {
-        let (dt_ms, tau_ref, tau_m, v_rest, v_thresh, v_reset, tau_syn) =
-            match &self.config {
-                NeuronConfig::LifAlpha {
-                    dt_ms,
-                    tau_ref,
-                    tau_m,
-                    v_rest,
-                    v_thresh,
-                    v_reset,
-                    tau_syn,
-                    ..
-                } => (*dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, *tau_syn),
-                _ => (0.1, 2.2, 20.0, -52.0, -45.0, -52.0, 5.0),
-            };
+        let (dt_ms, tau_ref, tau_m, v_rest, v_thresh, v_reset, tau_syn) = match &self.config {
+            NeuronConfig::LifAlpha {
+                dt_ms,
+                tau_ref,
+                tau_m,
+                v_rest,
+                v_thresh,
+                v_reset,
+                tau_syn,
+                ..
+            } => (
+                *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, *tau_syn,
+            ),
+            _ => (0.1, 2.2, 20.0, -52.0, -45.0, -52.0, 5.0),
+        };
         alpha_lif_population(
             self.n_neurons,
             dt_ms,

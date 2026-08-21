@@ -123,9 +123,9 @@ impl ConnectomeMode {
                 EgoView::fast_forward_until_stable_budgeted_force_run(
                     ui,
                     &mut self.sel.ego_graph,
-                    0.3,   // среднее смещение узла за шаг, ниже — остановка
-                    2000,  // предел числа шагов
-                    200,   // предел времени, мс
+                    0.3,  // среднее смещение узла за шаг, ниже — остановка
+                    2000, // предел числа шагов
+                    200,  // предел времени, мс
                     ego_id.clone(),
                 );
             }
@@ -229,9 +229,7 @@ impl ConnectomeMode {
             egui::PopupAnchor::Position(pointer),
         )
         .show(|ui| {
-            ui.label(
-                egui::RichText::new(format!("#{idx} {type_label}", idx = p.presyn)).strong(),
-            );
+            ui.label(egui::RichText::new(format!("#{idx} {type_label}", idx = p.presyn)).strong());
             ui.label(format!("{} синапсов · вес {:.1}", p.count, p.weight));
             ui.label(egui::RichText::new(dir).weak());
         });

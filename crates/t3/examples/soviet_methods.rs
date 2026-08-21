@@ -60,7 +60,9 @@ fn main() {
     }
 
     print!("   step      |");
-    for s in &check_steps { print!(" {s:>6}"); }
+    for s in &check_steps {
+        print!(" {s:>6}");
+    }
     println!("\n   ──────────────────────────────────────────────────");
 
     // ── Kuramoto (1-й порядок) ──
@@ -115,17 +117,29 @@ fn main() {
     let tg = TorusGrid::new(W, H, 1.0, 1.0, 42);
     let points = tg.bifurcation_scan(0.0, 6.0, 0.5, 120, DT, RADIUS, DRIVE_GAIN, ALPHA, EPS);
 
-    println!("   {:>6} {:>8} {:>12} {:>10} {:>18}", "K", "R", "top_mode", "top_F", "first_wave");
+    println!(
+        "   {:>6} {:>8} {:>12} {:>10} {:>18}",
+        "K", "R", "top_mode", "top_F", "first_wave"
+    );
     println!("   ------ -------- ------------ ---------- ------------------");
 
     let mut prev_mode = (0i32, 0i32);
     for pt in &points {
-        let marker = if pt.top_mode != prev_mode { " ← bifurcation!" } else { "" };
+        let marker = if pt.top_mode != prev_mode {
+            " ← bifurcation!"
+        } else {
+            ""
+        };
         println!(
             "   {:.2}   {:.5}   (k={:>2},{:>2})   {:.5}   (k={:>2},{:>2}) F={:.5}{}",
-            pt.k, pt.r,
-            pt.top_mode.0, pt.top_mode.1, pt.top_power,
-            pt.first_wave.0, pt.first_wave.1, pt.first_wave.2,
+            pt.k,
+            pt.r,
+            pt.top_mode.0,
+            pt.top_mode.1,
+            pt.top_power,
+            pt.first_wave.0,
+            pt.first_wave.1,
+            pt.first_wave.2,
             marker
         );
         prev_mode = pt.top_mode;

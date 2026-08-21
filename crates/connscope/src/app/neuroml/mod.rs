@@ -101,7 +101,12 @@ impl Default for NeuromlMode {
 impl Mode for NeuromlMode {
     /// Модалка «NeuroML → pillars». Вкладки «Редактор» и «Морфология» рисует
     /// оболочка через `editor_dock_view` / `cable_dock_view` (дерево дока).
-    fn windows(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame, services: &mut ShellServices) {
+    fn windows(
+        &mut self,
+        ctx: &egui::Context,
+        frame: &mut eframe::Frame,
+        services: &mut ShellServices,
+    ) {
         self.neuroml_modal(ctx, frame, services);
     }
 }

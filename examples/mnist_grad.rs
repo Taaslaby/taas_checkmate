@@ -38,8 +38,8 @@ const SCORE_CLAMP: f32 = 50.0;
 // Гиперпараметры обучения
 const BATCH: usize = 256;
 const EPOCHS: usize = 120;
-const LR_WV: f32 = 0.02;   // нейроновые w/v (×0.5 на 40 и 80 эпохах)
-const LR_RO: f32 = 0.05;   // readout
+const LR_WV: f32 = 0.02; // нейроновые w/v (×0.5 на 40 и 80 эпохах)
+const LR_RO: f32 = 0.05; // readout
 const TRAIN_LIMIT: usize = 20000; // подвыборка для скорости
 
 const PIXEL_SCALE: f32 = 1.0 / 255.0;
@@ -52,11 +52,17 @@ fn fetch_gz(name: &str, url: &str) -> Vec<u8> {
         return std::fs::read(&cache).expect("read cache");
     }
     let out = Command::new("bash")
-        .args(["-c", &format!("curl -sL '{url}' | gunzip > '{cache}' && echo OK")])
+        .args([
+            "-c",
+            &format!("curl -sL '{url}' | gunzip > '{cache}' && echo OK"),
+        ])
         .output()
         .expect("curl+gunzip");
-    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("OK"),
-        "download failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("OK"),
+        "download failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     std::fs::read(&cache).expect("read downloaded")
 }
 
@@ -70,7 +76,12 @@ fn load_images(raw: &[u8]) -> Vec<Vec<f32>> {
     let base = 16;
     for i in 0..n {
         let start = base + i * ROWS * COLS;
-        imgs.push(raw[start..start + ROWS * COLS].iter().map(|&b| b as f32 * PIXEL_SCALE).collect());
+        imgs.push(
+            raw[start..start + ROWS * COLS]
+                .iter()
+                .map(|&b| b as f32 * PIXEL_SCALE)
+                .collect(),
+        );
     }
     imgs
 }
@@ -95,7 +106,9 @@ fn row_spread(img: &[f32], row: usize) -> f32 {
         sw += v * (c as f32);
         s += v;
     }
-    if s < 0.01 { return 0.0; }
+    if s < 0.01 {
+        return 0.0;
+    }
     let mean = sw / s;
     let mut var = 0.0f32;
     for c in 0..COLS {
@@ -152,7 +165,11 @@ struct Grads {
 
 impl Net {
     /// Forward по изображению: признаки нейронов + записи шагов для backward.
-    fn forward(&self, img: &[f32], bands: &[usize; N_NEURONS]) -> ([f32; N_NEURONS], [[StepRec; ROWS]; N_NEURONS]) {
+    fn forward(
+        &self,
+        img: &[f32],
+        bands: &[usize; N_NEURONS],
+    ) -> ([f32; N_NEURONS], [[StepRec; ROWS]; N_NEURONS]) {
         let mut feats = [0.0f32; N_NEURONS];
         let mut all = [[StepRec::default(); ROWS]; N_NEURONS];
         for d in 0..N_NEURONS {
@@ -177,17 +194,29 @@ impl Net {
                     esum += e[i];
                 }
                 let mut a = [0.0f32; N_SLOTS];
-                for i in 0..N_SLOTS { a[i] = e[i] / esum; }
+                for i in 0..N_SLOTS {
+                    a[i] = e[i] / esum;
+                }
 
                 let mut out = 0.0f32;
-                for (i, &ai) in a.iter().enumerate() { out += ai * self.v[d][i] * mem[i]; }
+                for (i, &ai) in a.iter().enumerate() {
+                    out += ai * self.v[d][i] * mem[i];
+                }
                 let pre = acc + DT * (out - acc * INV_TAU);
                 acc = if pre > 0.0 { pre } else { 0.0 };
                 feats[d] += acc;
 
-                *slot = StepRec { q, a, mem, pre, clamp };
+                *slot = StepRec {
+                    q,
+                    a,
+                    mem,
+                    pre,
+                    clamp,
+                };
 
-                for i in (1..N_SLOTS).rev() { mem[i] = mem[i - 1] * DECAY; }
+                for i in (1..N_SLOTS).rev() {
+                    mem[i] = mem[i - 1] * DECAY;
+                }
                 mem[0] = q * GAIN;
             }
         }
@@ -211,7 +240,9 @@ impl Net {
                     *da_i = dout * self.v[d][i] * r.mem[i];
                 }
                 let mut dot = 0.0f32;
-                for (i, &ai) in r.a.iter().enumerate() { dot += ai * da[i]; }
+                for (i, &ai) in r.a.iter().enumerate() {
+                    dot += ai * da[i];
+                }
                 for (i, &ai) in r.a.iter().enumerate() {
                     let ds = ai * (da[i] - dot);
                     if !r.clamp[i] {
@@ -242,13 +273,20 @@ fn readout_bwd(net: &Net, x: &[f32; FEAT], label: usize) -> (f32, [f32; N_NEURON
     let m = z.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let mut e = [0.0f32; N_CLASSES];
     let mut esum = 0.0f32;
-    for (c, ec) in e.iter_mut().enumerate() { *ec = (z[c] - m).exp(); esum += *ec; }
+    for (c, ec) in e.iter_mut().enumerate() {
+        *ec = (z[c] - m).exp();
+        esum += *ec;
+    }
     let mut p = [0.0f32; N_CLASSES];
-    for (c, pc) in p.iter_mut().enumerate() { *pc = e[c] / esum; }
+    for (c, pc) in p.iter_mut().enumerate() {
+        *pc = e[c] / esum;
+    }
 
     let loss = -p[label].max(1e-7).ln();
     let mut dz = [0.0f32; N_CLASSES];
-    for (c, dzc) in dz.iter_mut().enumerate() { *dzc = p[c] - if c == label { 1.0 } else { 0.0 }; }
+    for (c, dzc) in dz.iter_mut().enumerate() {
+        *dzc = p[c] - if c == label { 1.0 } else { 0.0 };
+    }
 
     let mut df = [0.0f32; FEAT];
     let mut g = Grads::default();
@@ -270,7 +308,10 @@ fn predict(net: &Net, x: &[f32; FEAT]) -> usize {
     let mut best_z = f32::NEG_INFINITY;
     for c in 0..N_CLASSES {
         let z = net.rb[c] + (0..FEAT).map(|j| net.rw[c][j] * x[j]).sum::<f32>();
-        if z > best_z { best_z = z; best = c; }
+        if z > best_z {
+            best_z = z;
+            best = c;
+        }
     }
     best
 }
@@ -279,38 +320,58 @@ fn predict(net: &Net, x: &[f32; FEAT]) -> usize {
 
 fn wv_to_vec(net: &Net) -> Vec<f32> {
     let mut p = Vec::with_capacity(N_NEURONS * N_SLOTS * 2);
-    for d in 0..N_NEURONS { p.extend_from_slice(&net.w[d]); }
-    for d in 0..N_NEURONS { p.extend_from_slice(&net.v[d]); }
+    for d in 0..N_NEURONS {
+        p.extend_from_slice(&net.w[d]);
+    }
+    for d in 0..N_NEURONS {
+        p.extend_from_slice(&net.v[d]);
+    }
     p
 }
 
 fn wv_from_vec(net: &mut Net, p: &[f32]) {
     let mut k = 0;
     for d in 0..N_NEURONS {
-        for i in 0..N_SLOTS { net.w[d][i] = p[k]; k += 1; }
+        for i in 0..N_SLOTS {
+            net.w[d][i] = p[k];
+            k += 1;
+        }
     }
     for d in 0..N_NEURONS {
-        for i in 0..N_SLOTS { net.v[d][i] = p[k]; k += 1; }
+        for i in 0..N_SLOTS {
+            net.v[d][i] = p[k];
+            k += 1;
+        }
     }
 }
 
 fn wv_grads_vec(g: &Grads) -> Vec<f32> {
     let mut p = Vec::with_capacity(N_NEURONS * N_SLOTS * 2);
-    for d in 0..N_NEURONS { p.extend_from_slice(&g.dw[d]); }
-    for d in 0..N_NEURONS { p.extend_from_slice(&g.dv[d]); }
+    for d in 0..N_NEURONS {
+        p.extend_from_slice(&g.dw[d]);
+    }
+    for d in 0..N_NEURONS {
+        p.extend_from_slice(&g.dv[d]);
+    }
     p
 }
 
 fn ro_to_vec(net: &Net) -> Vec<f32> {
     let mut p = Vec::with_capacity(N_CLASSES * (FEAT + 1));
-    for c in 0..N_CLASSES { p.extend_from_slice(&net.rw[c]); p.push(net.rb[c]); }
+    for c in 0..N_CLASSES {
+        p.extend_from_slice(&net.rw[c]);
+        p.push(net.rb[c]);
+    }
     p
 }
 
 fn ro_from_vec(net: &mut Net, p: &[f32]) {
     let mut k = 0;
     for c in 0..N_CLASSES {
-        for j in 0..FEAT { net.rw[c][j] = p[k]; k += 1; }
+        for j in 0..FEAT {
+            net.rw[c][j] = p[k];
+            k += 1;
+        }
         net.rb[c] = p[k];
         k += 1;
     }
@@ -318,7 +379,10 @@ fn ro_from_vec(net: &mut Net, p: &[f32]) {
 
 fn ro_grads_vec(g: &Grads) -> Vec<f32> {
     let mut p = Vec::with_capacity(N_CLASSES * (FEAT + 1));
-    for c in 0..N_CLASSES { p.extend_from_slice(&g.drw[c]); p.push(g.drb[c]); }
+    for c in 0..N_CLASSES {
+        p.extend_from_slice(&g.drw[c]);
+        p.push(g.drb[c]);
+    }
     p
 }
 
@@ -332,7 +396,11 @@ struct Adam {
 
 impl Adam {
     fn new(n: usize) -> Self {
-        Adam { m: vec![0.0; n], v: vec![0.0; n], t: 0 }
+        Adam {
+            m: vec![0.0; n],
+            v: vec![0.0; n],
+            t: 0,
+        }
     }
     fn step(&mut self, p: &mut [f32], g: &[f32], lr: f32) {
         self.t += 1;
@@ -376,7 +444,11 @@ fn grad_check() {
         .map(|k| {
             let row = k / COLS;
             let col = k % COLS;
-            if (12..20).contains(&row) && (8..22).contains(&col) { 0.6 } else { 0.05 }
+            if (12..20).contains(&row) && (8..22).contains(&col) {
+                0.6
+            } else {
+                0.05
+            }
         })
         .collect();
     let bands = [4usize; N_NEURONS];
@@ -402,8 +474,12 @@ fn grad_check() {
         net.w[d][i] = orig;
         let numeric = (lp - lm) / (2.0 * eps);
         let rel = (analytic - numeric).abs() / (analytic.abs() + 1e-4); // abs-пол против деления нуля
-        if analytic.abs() > 1e-4 { max_rel = max_rel.max(rel); } // релятивно — только значимые
-        if analytic.abs() > 1e-6 { nonzero += 1; }
+        if analytic.abs() > 1e-4 {
+            max_rel = max_rel.max(rel);
+        } // релятивно — только значимые
+        if analytic.abs() > 1e-6 {
+            nonzero += 1;
+        }
         println!("   dw[{d}][{i}]: analytic={analytic:.5} numeric={numeric:.5} err={rel:.3}");
     }
     for &(d, i) in &[(0usize, 1usize), (4, 6)] {
@@ -416,12 +492,22 @@ fn grad_check() {
         net.v[d][i] = orig;
         let numeric = (lp - lm) / (2.0 * eps);
         let rel = (analytic - numeric).abs() / (analytic.abs() + 1e-4);
-        if analytic.abs() > 1e-4 { max_rel = max_rel.max(rel); }
-        if analytic.abs() > 1e-6 { nonzero += 1; }
+        if analytic.abs() > 1e-4 {
+            max_rel = max_rel.max(rel);
+        }
+        if analytic.abs() > 1e-6 {
+            nonzero += 1;
+        }
         println!("   dv[{d}][{i}]: analytic={analytic:.5} numeric={numeric:.5} err={rel:.3}");
     }
-    assert!(nonzero >= 4, "gradient check degenerate: only {nonzero}/6 params nonzero");
-    assert!(max_rel < 0.05, "gradient check FAILED: max rel err {max_rel:.4}");
+    assert!(
+        nonzero >= 4,
+        "gradient check degenerate: only {nonzero}/6 params nonzero"
+    );
+    assert!(
+        max_rel < 0.05,
+        "gradient check FAILED: max rel err {max_rel:.4}"
+    );
     println!("   ✅ gradient check PASSED (max rel err {max_rel:.4})\n");
 }
 
@@ -429,12 +515,28 @@ fn main() {
     grad_check();
     println!("📥 Загружаем MNIST...");
     let base = "https://ossci-datasets.s3.amazonaws.com/mnist";
-    let train_img = load_images(&fetch_gz("train-images.idx3-ubyte", &format!("{base}/train-images-idx3-ubyte.gz")));
-    let train_lbl = load_labels(&fetch_gz("train-labels.idx1-ubyte", &format!("{base}/train-labels-idx1-ubyte.gz")));
-    let test_img  = load_images(&fetch_gz("t10k-images.idx3-ubyte", &format!("{base}/t10k-images-idx3-ubyte.gz")));
-    let test_lbl  = load_labels(&fetch_gz("t10k-labels.idx1-ubyte", &format!("{base}/t10k-labels-idx1-ubyte.gz")));
+    let train_img = load_images(&fetch_gz(
+        "train-images.idx3-ubyte",
+        &format!("{base}/train-images-idx3-ubyte.gz"),
+    ));
+    let train_lbl = load_labels(&fetch_gz(
+        "train-labels.idx1-ubyte",
+        &format!("{base}/train-labels-idx1-ubyte.gz"),
+    ));
+    let test_img = load_images(&fetch_gz(
+        "t10k-images.idx3-ubyte",
+        &format!("{base}/t10k-images-idx3-ubyte.gz"),
+    ));
+    let test_lbl = load_labels(&fetch_gz(
+        "t10k-labels.idx1-ubyte",
+        &format!("{base}/t10k-labels-idx1-ubyte.gz"),
+    ));
     let n_train = TRAIN_LIMIT.min(train_img.len());
-    println!("   тренировка: {} (лимит {} для скорости)", train_img.len(), n_train);
+    println!(
+        "   тренировка: {} (лимит {} для скорости)",
+        train_img.len(),
+        n_train
+    );
     println!("   тест:       {}\n", test_img.len());
 
     // ─── Data-driven полосы классов (только train) ──────────────
@@ -469,8 +571,13 @@ fn main() {
                     .iter()
                     .map(|&u| ((BAND_W as i64 - (lo as i64 - u as i64).abs()).max(0)) as f64 * 0.5)
                     .sum();
-                let s: f64 = (lo..lo + BAND_W).map(|c| profile[d][c] - global[c]).sum::<f64>() - overlap_pen;
-                if s > best.0 { best = (s, lo); }
+                let s: f64 = (lo..lo + BAND_W)
+                    .map(|c| profile[d][c] - global[c])
+                    .sum::<f64>()
+                    - overlap_pen;
+                if s > best.0 {
+                    best = (s, lo);
+                }
             }
             band_of[d * 2 + k] = best.1;
             used.push(best.1);
@@ -483,7 +590,10 @@ fn main() {
     let mut adam_ro = Adam::new(N_CLASSES * (FEAT + 1));
 
     // ─── Обучение ───────────────────────────────────────────────
-    println!("⚡ Обучение BPTT: {} образцов × {EPOCHS} эпох, batch={BATCH}", n_train);
+    println!(
+        "⚡ Обучение BPTT: {} образцов × {EPOCHS} эпох, batch={BATCH}",
+        n_train
+    );
     let t0 = std::time::Instant::now();
     let mut rng = StdRng::seed_from_u64(42);
     let mut indices: Vec<usize> = (0..n_train).collect();
@@ -515,16 +625,23 @@ fn main() {
                 }
                 for c in 0..N_CLASSES {
                     g.drb[c] += g_ro.drb[c];
-                    for j in 0..FEAT { g.drw[c][j] += g_ro.drw[c][j]; }
+                    for j in 0..FEAT {
+                        g.drw[c][j] += g_ro.drw[c][j];
+                    }
                 }
             }
             let s = chunk.len() as f32;
             for d in 0..N_NEURONS {
-                for i in 0..N_SLOTS { g.dw[d][i] /= s; g.dv[d][i] /= s; }
+                for i in 0..N_SLOTS {
+                    g.dw[d][i] /= s;
+                    g.dv[d][i] /= s;
+                }
             }
             for c in 0..N_CLASSES {
                 g.drb[c] /= s;
-                for j in 0..FEAT { g.drw[c][j] /= s; }
+                for j in 0..FEAT {
+                    g.drw[c][j] /= s;
+                }
             }
             let mut pw = wv_to_vec(&net);
             let gw = wv_grads_vec(&g);
@@ -536,8 +653,11 @@ fn main() {
             ro_from_vec(&mut net, &pr);
         }
         if epoch % 10 == 0 || epoch == EPOCHS - 1 {
-            println!("   эпоха {epoch:>3}: loss={:.4}  ({:.0}с)",
-                     loss_sum / n_seen as f64, t0.elapsed().as_secs());
+            println!(
+                "   эпоха {epoch:>3}: loss={:.4}  ({:.0}с)",
+                loss_sum / n_seen as f64,
+                t0.elapsed().as_secs()
+            );
         }
     }
     println!("   обучено за {:.1}с\n", t0.elapsed().as_secs_f32());
@@ -552,22 +672,30 @@ fn main() {
         let x = feat_vec(&feats, &global_feats(img));
         let best = predict(&net, &x);
         cm[label as usize][best] += 1;
-        if best == label as usize { acc_count += 1; }
+        if best == label as usize {
+            acc_count += 1;
+        }
     }
 
     let w0: Vec<f32> = net.w[0].to_vec();
     let v0: Vec<f32> = net.v[0].to_vec();
 
     println!("\n╔══════════════════════════════════════════╗");
-    println!("║  🏆 Точность: {:.1}%  ({}/{})      ║",
-             acc_count as f64 * 100.0 / n_test as f64, acc_count, n_test);
+    println!(
+        "║  🏆 Точность: {:.1}%  ({}/{})      ║",
+        acc_count as f64 * 100.0 / n_test as f64,
+        acc_count,
+        n_test
+    );
     println!("║  🔑 w₀: {:.2?}  ║", &w0[..4]);
     println!("║  🔑 v₀: {:.2?}  ║", &v0[..4]);
     println!("╚══════════════════════════════════════════╝");
 
     println!("\n🧮 Матрица ошибок (строки — истина, столбцы — предсказание)");
     print!("    ");
-    for p in 0..N_CLASSES { print!("  {p:>3}"); }
+    for p in 0..N_CLASSES {
+        print!("  {p:>3}");
+    }
     println!("   |  точн.");
     for (a, row) in cm.iter().enumerate() {
         print!("  {a} |");

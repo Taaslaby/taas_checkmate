@@ -233,7 +233,11 @@ impl NeuromlMode {
 
         // Высота области редактора: остаток вкладки минус статус-бар и
         // (если есть) список ошибок — вкладка не «распухает» и не режет.
-        let errors_h = if err_lines.is_empty() { 0.0 } else { ERRORS_MAX_HEIGHT + 8.0 };
+        let errors_h = if err_lines.is_empty() {
+            0.0
+        } else {
+            ERRORS_MAX_HEIGHT + 8.0
+        };
         let avail_h = (ui.available_height() - STATUS_H - errors_h).max(80.0);
         let rows_for_h = (avail_h / row_height).ceil() as usize;
         let desired_rows = n_lines.max(rows_for_h).max(1);
@@ -243,9 +247,7 @@ impl NeuromlMode {
         let mut layouter = {
             let err_lines = err_lines.clone();
             let font = font.clone();
-            move |ui: &egui::Ui,
-                  buf: &dyn egui::widgets::text_edit::TextBuffer,
-                  _wrap: f32| {
+            move |ui: &egui::Ui, buf: &dyn egui::widgets::text_edit::TextBuffer, _wrap: f32| {
                 let job = build_job(
                     buf.as_str(),
                     &err_lines,
@@ -447,9 +449,15 @@ const GUTTER_COLOR: egui::Color32 = egui::Color32::from_gray(0x66);
 fn editor_toolbar(ui: &mut egui::Ui, font_size: f32) -> Option<EditorAction> {
     let mut action = None;
     ui.horizontal_wrapped(|ui| {
-        if action_button(ui, ic::FLOPPY_DISK, "Сохранить", ActionTone::Neutral, W_SAVE)
-            .on_hover_text("Записать текст в файл на диске (Ctrl+S)")
-            .clicked()
+        if action_button(
+            ui,
+            ic::FLOPPY_DISK,
+            "Сохранить",
+            ActionTone::Neutral,
+            W_SAVE,
+        )
+        .on_hover_text("Записать текст в файл на диске (Ctrl+S)")
+        .clicked()
         {
             action = Some(EditorAction::Save);
         }
@@ -598,7 +606,9 @@ fn jump_to(
 ) {
     let mut state = resp.state.clone();
     let target = char_of_line_col(text, line, col);
-    state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(target))));
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::one(CCursor::new(target))));
     state.store(ctx, resp.response.id);
     ctx.memory_mut(|m| m.request_focus(resp.response.id));
 }

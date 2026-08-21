@@ -35,11 +35,7 @@ fn load_hhparams(path: &str, n: usize) -> Vec<Vec<f32>> {
     for _ in 0..7 {
         let mut v = vec![0.0f32; n];
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                data.as_ptr().add(off) as *const f32,
-                v.as_mut_ptr(),
-                n,
-            );
+            std::ptr::copy_nonoverlapping(data.as_ptr().add(off) as *const f32, v.as_mut_ptr(), n);
         }
         off += n * 4;
         cols.push(v);
@@ -49,14 +45,15 @@ fn load_hhparams(path: &str, n: usize) -> Vec<Vec<f32>> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).expect("usage: bake_run <file.taas> <lif|hh> <ms> [physio.hhparams]");
+    let path = args
+        .get(1)
+        .expect("usage: bake_run <file.taas> <lif|hh> <ms> [physio.hhparams]");
     let model = args.get(2).map(|s| s.as_str()).unwrap_or("lif");
     let ms: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100);
     let physio_path = args.get(4).map(|s| s.as_str());
 
     let f = std::fs::File::open(path).expect("cannot open .taas");
-    let mut conn = ConnectomeData::load_baked(&mut std::io::BufReader::new(f))
-        .expect("bad .taas");
+    let mut conn = ConnectomeData::load_baked(&mut std::io::BufReader::new(f)).expect("bad .taas");
     let n = conn.n_neurons;
     println!(
         "== {} | {} нейронов, {} синапсов, receptor_types: {} ==",
@@ -69,11 +66,24 @@ fn main() {
     let nt = conn.nt_types.clone();
 
     let mut runner = match model {
-        "hh" => BrainRunner::new(conn, NeuronConfig::HhSynaptic { dt_ms: 0.05, use_pacemaking: false }),
-        _ => BrainRunner::new(conn, NeuronConfig::LifSynaptic {
-            dt_ms: 0.1, tau_ref: 2.2, tau_m: 20.0,
-            v_rest: -52.0, v_thresh: -45.0, v_reset: -52.0,
-        }),
+        "hh" => BrainRunner::new(
+            conn,
+            NeuronConfig::HhSynaptic {
+                dt_ms: 0.05,
+                use_pacemaking: false,
+            },
+        ),
+        _ => BrainRunner::new(
+            conn,
+            NeuronConfig::LifSynaptic {
+                dt_ms: 0.1,
+                tau_ref: 2.2,
+                tau_m: 20.0,
+                v_rest: -52.0,
+                v_thresh: -45.0,
+                v_reset: -52.0,
+            },
+        ),
     }
     .expect("BrainRunner init");
 
@@ -133,28 +143,48 @@ fn main() {
             if spikes[step * n + i] != 0 {
                 total += 1;
                 let c = nt[i] as usize;
-                if c < 11 { by_class[c] += 1; }
+                if c < 11 {
+                    by_class[c] += 1;
+                }
             }
         }
     }
     for i in 0..n {
         let mut has = false;
         for step in 0..n_steps {
-            if spikes[step * n + i] != 0 { has = true; break; }
+            if spikes[step * n + i] != 0 {
+                has = true;
+                break;
+            }
         }
-        if has { active += 1; }
+        if has {
+            active += 1;
+        }
     }
 
     let ms_sim = n_steps as f64 * dt_ms as f64;
     println!("─── результат ───");
-    println!("симуляция: {:.0} мс мозга ({n_steps} шагов) за {:.2} с", ms_sim, elapsed.as_secs_f64());
+    println!(
+        "симуляция: {:.0} мс мозга ({n_steps} шагов) за {:.2} с",
+        ms_sim,
+        elapsed.as_secs_f64()
+    );
     println!("total spikes: {total}");
-    println!("активных нейронов: {active}/{n} ({:.1}%)", 100.0 * active as f64 / n as f64);
-    let names = ["unk", "optic", "sensory", "central", "motor", "desc", "asc", "endocr", "visProj", "visCent", "sensAsc"];
+    println!(
+        "активных нейронов: {active}/{n} ({:.1}%)",
+        100.0 * active as f64 / n as f64
+    );
+    let names = [
+        "unk", "optic", "sensory", "central", "motor", "desc", "asc", "endocr", "visProj",
+        "visCent", "sensAsc",
+    ];
     for (c, &cnt) in by_class.iter().enumerate() {
         if cnt > 0 {
             println!("  class {}({:>7}): {cnt} спайков", c, names[c]);
         }
     }
-    println!("скорость: {:.1}M нейрон-шагов/с", n as f64 * n_steps as f64 / elapsed.as_secs_f64() / 1e6);
+    println!(
+        "скорость: {:.1}M нейрон-шагов/с",
+        n as f64 * n_steps as f64 / elapsed.as_secs_f64() / 1e6
+    );
 }

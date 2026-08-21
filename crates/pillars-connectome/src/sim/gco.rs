@@ -161,4 +161,3 @@ pub fn sim_gco_record(
 
     (v_traj, u_traj)
 }
-

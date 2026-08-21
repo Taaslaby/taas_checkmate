@@ -66,18 +66,18 @@ impl TorusTrajectory {
 /// Точка на бифуркационной диаграмме (Ишлинский 1957).
 #[derive(Clone, Debug)]
 pub struct BifurcationPoint {
-    pub k: f32,                          // coupling strength
-    pub r: f32,                           // глобальный порядок
-    pub top_mode: (i32, i32),            // доминантная волна (kx, ky)
-    pub top_power: f32,                  // мощность доминантной моды
-    pub first_wave: (i32, i32, f32),     // первая не-R мода: (kx, ky, F)
+    pub k: f32,                      // coupling strength
+    pub r: f32,                      // глобальный порядок
+    pub top_mode: (i32, i32),        // доминантная волна (kx, ky)
+    pub top_power: f32,              // мощность доминантной моды
+    pub first_wave: (i32, i32, f32), // первая не-R мода: (kx, ky, F)
 }
 
 /// 2D-сетка на торе: wrap-around по обоим измерениям.
 #[derive(Clone)]
 pub struct TorusGrid {
-    pub w: usize,     // ширина (x)
-    pub h: usize,     // высота (y)
+    pub w: usize, // ширина (x)
+    pub h: usize, // высота (y)
     pub phases: Vec<f32>,
     pub amplitudes: Vec<f32>,
     pub omegas: Vec<f32>,
@@ -90,8 +90,8 @@ impl TorusGrid {
     /// Создать сетку W×H. Частоты — линейная развёртка [freq_min, freq_max].
     /// Фазы случайные (или нулевые, задать позже). Амплитуды = 0.1.
     pub fn new(w: usize, h: usize, freq_min: f32, freq_max: f32, seed: u64) -> Self {
-        use rand::SeedableRng;
         use rand::rngs::StdRng;
+        use rand::SeedableRng;
         let n = w * h;
         let mut rng = StdRng::seed_from_u64(seed);
         use rand::Rng;
@@ -116,9 +116,9 @@ impl TorusGrid {
     /// forward-прогонов в обучении). Фазы случайные из seed, амплитуды = 1.0,
     /// скорости = 0. Частоты и связь не трогаются.
     pub fn reset(&mut self, seed: u64) {
-        use rand::SeedableRng;
         use rand::rngs::StdRng;
         use rand::Rng;
+        use rand::SeedableRng;
         let n = self.w * self.h;
         let mut rng = StdRng::seed_from_u64(seed);
         for i in 0..n {
@@ -275,8 +275,8 @@ impl TorusGrid {
                 }
 
                 // Ускорение: θ̈ = ω + coupling + drive − γ·θ̇
-                let acc = self.omegas[i] + cpl + drives[i] * drive_gain / (r_i + eps)
-                    - damping * v_i;
+                let acc =
+                    self.omegas[i] + cpl + drives[i] * drive_gain / (r_i + eps) - damping * v_i;
                 // Скорость: θ̇' = θ̇ + θ̈·dt
                 let v_next = v_i + dt * acc;
                 // Фаза: θ' = θ + θ̇'·dt
@@ -329,7 +329,8 @@ impl TorusGrid {
             let r = g.order_parameter();
             let spec = g.wave_spectrum(3);
             let top = spec[0];
-            let non_sync = spec.iter()
+            let non_sync = spec
+                .iter()
                 .find(|(kx, ky, _)| *kx != 0 || *ky != 0)
                 .map(|(kx, ky, f)| (*kx, *ky, *f))
                 .unwrap_or((0, 0, 0.0));
@@ -412,9 +413,9 @@ impl TorusGrid {
             for x in 0..self.w {
                 let p = self.phases[self.idx(x, y)];
                 // wave_phase = −2π·(kx·x/W + ky·y/H)  (комплексно-сопряжённая волна)
-                let wp = -2.0 * std::f64::consts::PI
-                    * (kx as f64 * x as f64 / self.w as f64
-                        + ky as f64 * y as f64 / self.h as f64);
+                let wp = -2.0
+                    * std::f64::consts::PI
+                    * (kx as f64 * x as f64 / self.w as f64 + ky as f64 * y as f64 / self.h as f64);
                 re += (p as f64 + wp).cos();
                 im += (p as f64 + wp).sin();
             }
@@ -438,9 +439,9 @@ impl TorusGrid {
             for x in 0..self.w {
                 let i = self.idx(x, y);
                 let p = self.phases[i] as f64;
-                let wp = -2.0 * std::f64::consts::PI
-                    * (kx as f64 * x as f64 / self.w as f64
-                        + ky as f64 * y as f64 / self.h as f64);
+                let wp = -2.0
+                    * std::f64::consts::PI
+                    * (kx as f64 * x as f64 / self.w as f64 + ky as f64 * y as f64 / self.h as f64);
                 let arg = p + wp;
                 re += arg.cos();
                 im += arg.sin();
@@ -457,9 +458,9 @@ impl TorusGrid {
             for x in 0..self.w {
                 let i = self.idx(x, y);
                 let p = self.phases[i] as f64;
-                let wp = -2.0 * std::f64::consts::PI
-                    * (kx as f64 * x as f64 / self.w as f64
-                        + ky as f64 * y as f64 / self.h as f64);
+                let wp = -2.0
+                    * std::f64::consts::PI
+                    * (kx as f64 * x as f64 / self.w as f64 + ky as f64 * y as f64 / self.h as f64);
                 let arg = p + wp;
                 // ∂F/∂θ = (1/(N·F))·[−Re·sin(arg) + Im·cos(arg)]
                 let d = (-re_f * arg.sin() + im_f * arg.cos()) * inv_nf / f as f64;
@@ -521,11 +522,11 @@ impl TorusGrid {
     /// ```
     pub fn backward_one_step(
         &self,
-        th_pre: &[f32],   // θ ДО шага
-        r_pre: &[f32],     // r ДО шага
+        th_pre: &[f32], // θ ДО шага
+        r_pre: &[f32],  // r ДО шага
         drives: &[f32],
-        dth_in: &[f32],    // градиент из θ ПОСЛЕ шага
-        dr_in: &[f32],     // градиент из r ПОСЛЕ шага
+        dth_in: &[f32], // градиент из θ ПОСЛЕ шага
+        dr_in: &[f32],  // градиент из r ПОСЛЕ шага
         dth_out: &mut [f32],
         dr_out: &mut [f32],
         ddrives_out: &mut [f32],
@@ -564,7 +565,8 @@ impl TorusGrid {
                             let sin_dth = dth.sin();
 
                             // Градиент coupling для (i,j): cos(θj−θi)·(dθ_in[j] − dθ_in[i])·dt·K/nf
-                            let edge_grad = cos_dth * (dth_in[j] - dth_in[i]) * dt * coupling_strength / nf;
+                            let edge_grad =
+                                cos_dth * (dth_in[j] - dth_in[i]) * dt * coupling_strength / nf;
                             dth_out[i] += edge_grad;
                             // NOTE: dth_out[j] тоже получит от зеркальной итерации (j как центр),
                             // поэтому НЕ добавляем сюда — во избежание двойного учёта.
@@ -582,7 +584,11 @@ impl TorusGrid {
             let r = r_pre[i];
             let pre_r = r + dt * ((alpha - r * r) * r + drives[i] * drive_gain);
             // r-clamp gate: как в T3, если r_post вне [0.001, 10], градиент обнуляется
-            let rg = if (0.001..=10.0).contains(&pre_r) { 1.0 } else { 0.0 };
+            let rg = if (0.001..=10.0).contains(&pre_r) {
+                1.0
+            } else {
+                0.0
+            };
             // ∂r'_i/∂r_i
             let dr_dr = 1.0 + dt * (alpha - 3.0 * r * r);
             dr_out[i] = dr_in[i] * dr_dr * rg;
@@ -592,8 +598,7 @@ impl TorusGrid {
             dr_out[i] += dth_in[i] * dt * (-drives[i] * drive_gain / (rpe * rpe));
 
             // dL/d(drive_i): ∂θ'_i/∂(drive_i)=dt·gain/(r+ε), ∂r'_i/∂(drive_i)=dt·gain
-            ddrives_out[i] = dth_in[i] * dt * drive_gain / rpe
-                + dr_in[i] * dt * drive_gain * rg;
+            ddrives_out[i] = dth_in[i] * dt * drive_gain / rpe + dr_in[i] * dt * drive_gain * rg;
         }
 
         dk
@@ -773,7 +778,10 @@ mod tests {
             tg.step(0.05, 5.0, 1, &drives, 10.0, 1.0, 0.1);
         }
         let r1 = tg.order_parameter();
-        assert!(r1 > r0 * 2.0, "local coupling should increase sync: {r0} → {r1}");
+        assert!(
+            r1 > r0 * 2.0,
+            "local coupling should increase sync: {r0} → {r1}"
+        );
     }
 
     #[test]
@@ -854,13 +862,29 @@ mod tests {
     }
 
     /// Аналитический градиент dL/dK через BPTT.
-    fn analytic_dk(grid: &TorusGrid, traj: &TorusTrajectory, k: f32, radius: usize, dt: f32) -> f32 {
+    fn analytic_dk(
+        grid: &TorusGrid,
+        traj: &TorusTrajectory,
+        k: f32,
+        radius: usize,
+        dt: f32,
+    ) -> f32 {
         let n = grid.w * grid.h;
         // dL/dθ_final = 2·θ
         let dth_final: Vec<f32> = grid.phases.iter().map(|&p| 2.0 * p).collect();
         let dr_final = vec![0.0f32; n];
-        let (dk, _, _, _) =
-            grid.bptt(traj, &dth_final, &dr_final, &vec![0.0f32; n], k, radius, dt, 10.0, 1.0, 0.1);
+        let (dk, _, _, _) = grid.bptt(
+            traj,
+            &dth_final,
+            &dr_final,
+            &vec![0.0f32; n],
+            k,
+            radius,
+            dt,
+            10.0,
+            1.0,
+            0.1,
+        );
         dk
     }
 
@@ -883,7 +907,10 @@ mod tests {
         let (traj, grid) = run_forward(&tg, n_steps, k, 1, dt, 10.0, 1.0, 0.1);
 
         let analytic = analytic_dk(&grid, &traj, k, 1, dt);
-        assert!(analytic.abs() > 1e-5, "analytic dK must be nonzero: {analytic}");
+        assert!(
+            analytic.abs() > 1e-5,
+            "analytic dK must be nonzero: {analytic}"
+        );
 
         let eps_fd = 1e-3f32;
         let (_, grid_p) = run_forward(&tg, n_steps, k + eps_fd, 1, dt, 10.0, 1.0, 0.1);
@@ -946,14 +973,16 @@ mod tests {
         // R должен расти с K
         let r0 = points[0].r;
         let r_end = points.last().unwrap().r;
-        assert!(r_end > r0 * 1.5,
-            "R should increase with K: {r0} -> {r_end}");
+        assert!(
+            r_end > r0 * 1.5,
+            "R should increase with K: {r0} -> {r_end}"
+        );
         // Хотя бы одна точка имеет не-R доминантную моду
-        let wave_modes: Vec<_> = points.iter()
-            .filter(|p| p.top_mode != (0, 0))
-            .collect();
-        assert!(!wave_modes.is_empty(),
-            "bifurcation should produce non-R modes at some K");
+        let wave_modes: Vec<_> = points.iter().filter(|p| p.top_mode != (0, 0)).collect();
+        assert!(
+            !wave_modes.is_empty(),
+            "bifurcation should produce non-R modes at some K"
+        );
     }
 
     #[test]
@@ -972,7 +1001,18 @@ mod tests {
         let n = tg.w * tg.h;
         let dth = vec![1.0f32; n];
         let dr = vec![0.1f32; n];
-        let (dk, dth0, dr0, _ddrives) = grid.bptt(&traj, &dth, &dr, &vec![0.0f32; n], 3.0, 1, 0.1, 10.0, 1.0, 0.1);
+        let (dk, dth0, dr0, _ddrives) = grid.bptt(
+            &traj,
+            &dth,
+            &dr,
+            &vec![0.0f32; n],
+            3.0,
+            1,
+            0.1,
+            10.0,
+            1.0,
+            0.1,
+        );
         assert!(dk.is_finite());
         assert!(dth0.iter().all(|x| x.is_finite()));
         assert!(dr0.iter().all(|x| x.is_finite()));
@@ -987,8 +1027,18 @@ mod tests {
         let n = tg.w * tg.h;
         let dth = vec![1.0f32; n];
         let dr = vec![0.0f32; n];
-        let (dk_a, _, _, ddrives_a) =
-            grid.bptt(&traj, &dth, &dr, &vec![0.0f32; n], 3.0, 1, 0.1, 10.0, 1.0, 0.1);
+        let (dk_a, _, _, ddrives_a) = grid.bptt(
+            &traj,
+            &dth,
+            &dr,
+            &vec![0.0f32; n],
+            3.0,
+            1,
+            0.1,
+            10.0,
+            1.0,
+            0.1,
+        );
 
         let mut dth_ps = vec![0.0f32; 5 * n];
         dth_ps[(5 - 1) * n..].copy_from_slice(&dth);

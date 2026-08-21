@@ -80,15 +80,28 @@ fn build_cpg(w_seg: f32) -> BrainRunner {
 
     let nt_types = vec![-1.0f32; N_NEURONS]; // all GABA
     let conn = ConnectomeData::new(row_ptr, ci, vals, nt_types, vec![]);
-    let mut cpg = BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN))
-        .expect("tripod CPG build");
+    let mut cpg =
+        BrainRunner::new(conn, BrainConfig::haap_synaptic(DT, TAU_SYN)).expect("tripod CPG build");
 
     // HAAPModelParamIdx columns (same rebound+adaptation profile as the single leg).
     let params = [
-        (0, DT), (1, 1.0), (2, 0.10), (3, -60.0), (4, 0.4), (5, -80.0),
-        (6, 0.8), (7, -30.0), (8, 1.0 / 100.0), (9, 1.0 / 120.0),
-        (10, -35.0), (11, 5.0), (12, -75.0), (13, 6.0), (14, -40.0),
-        (15, -55.0), (16, 0.02),
+        (0, DT),
+        (1, 1.0),
+        (2, 0.10),
+        (3, -60.0),
+        (4, 0.4),
+        (5, -80.0),
+        (6, 0.8),
+        (7, -30.0),
+        (8, 1.0 / 100.0),
+        (9, 1.0 / 120.0),
+        (10, -35.0),
+        (11, 5.0),
+        (12, -75.0),
+        (13, 6.0),
+        (14, -40.0),
+        (15, -55.0),
+        (16, 0.02),
     ];
     let mut all = vec![0.0f32; N_NEURONS];
     for (col, val) in params {
@@ -182,10 +195,7 @@ fn run_tripod(w_seg: f32) -> TripodResult {
 
     // Smooth stance trains for phase analysis.
     let win: Vec<f32> = (0..400).map(|_| 1.0 / 400.0).collect();
-    let smooth: Vec<Vec<f32>> = stance
-        .iter()
-        .map(|s| convolve(s, &win))
-        .collect();
+    let smooth: Vec<Vec<f32>> = stance.iter().map(|s| convolve(s, &win)).collect();
 
     let period_ms = autocorr_period(&smooth[0], DT);
     let phase01_deg = phase_offset(&smooth[0], &smooth[1], period_ms, DT);
@@ -279,9 +289,14 @@ fn report(name: &str, r: &TripodResult) {
     println!(
         "  {name:<12} stance=[{:>5.1} {:>5.1} {:>5.1}]Hz  phase01={:>5.0}°  phase02={:>5.0}°  \
          all_stance={:.2}  all_swing={:.2}  period={:.0}ms  → {verdict}",
-        r.stance_rates[0], r.stance_rates[1], r.stance_rates[2],
-        r.phase01_deg, r.phase02_deg,
-        r.all_stance_frac, r.all_swing_frac, r.period_ms,
+        r.stance_rates[0],
+        r.stance_rates[1],
+        r.stance_rates[2],
+        r.phase01_deg,
+        r.phase02_deg,
+        r.all_stance_frac,
+        r.all_swing_frac,
+        r.period_ms,
     );
 }
 

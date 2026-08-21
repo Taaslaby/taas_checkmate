@@ -50,12 +50,10 @@ impl ConnectomeMode {
         // смещался.
         let zoom_delta = ui.input(|i| i.zoom_delta());
         if (zoom_delta - 1.0).abs() > 1e-4 {
-            let anchor_world =
-                pointer_world.unwrap_or_else(|| self.screen_to_world(size * 0.5));
+            let anchor_world = pointer_world.unwrap_or_else(|| self.screen_to_world(size * 0.5));
             let anchor_screen = pointer_screen.unwrap_or(size * 0.5);
             self.camera.zoom = (self.camera.zoom * zoom_delta).clamp(0.3, 60.0);
-            self.camera.pan =
-                anchor_screen - anchor_world * (self.camera.zoom * crate::app::BASE);
+            self.camera.pan = anchor_screen - anchor_world * (self.camera.zoom * crate::app::BASE);
             // Ручное управление отменяет плавное центрирование.
             self.camera.pan_target = None;
         }
@@ -734,7 +732,9 @@ impl ConnectomeMode {
 
     /// Ориентационный гизмо (оси X/Y/Z), вращается вместе с камерой.
     fn draw_legend_overlay(&self, painter: &egui::Painter, origin: Pos2, _size: Vec2) {
-        let Some(data) = self.data.as_ref() else { return };
+        let Some(data) = self.data.as_ref() else {
+            return;
+        };
         let (title, _hint, rows) =
             crate::app::connectome::cards::legend::legend_data(Some(data), self.filters.color_mode);
         if rows.is_empty() {

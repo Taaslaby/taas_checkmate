@@ -23,9 +23,7 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use crate::connectome::{
-    self as conn, AlphaLifOutput, AlphaLifWorker, ConnectomeData, ShiuParams,
-};
+use crate::connectome::{self as conn, AlphaLifOutput, AlphaLifWorker, ConnectomeData, ShiuParams};
 
 // ─── ConnectomeData ──────────────────────────────────
 
@@ -127,10 +125,7 @@ impl PyConnectomeData {
     ///   5 = GluCl (fast inh — insects!), 6 = mAChR (slow mod).
     ///
     /// Must be called before constructing a ``BrainRunner(model="hh_synaptic")``.
-    pub fn set_receptor_types(
-        &mut self,
-        receptor_types: Bound<'_, PyArray1<u8>>,
-    ) -> PyResult<()> {
+    pub fn set_receptor_types(&mut self, receptor_types: Bound<'_, PyArray1<u8>>) -> PyResult<()> {
         let ro = receptor_types.readonly();
         let sl = ro.as_slice()?;
         if sl.len() != self.inner.n_synapses {
@@ -565,7 +560,11 @@ impl PyBrainRunner {
     /// Returns the number of neurons written. This enables literature-based
     /// per-class physiology (e.g. distinct g_Na/g_K/g_l/E_Leak per neuron).
     #[pyo3(signature = (col, values))]
-    pub fn set_hh_param_column(&mut self, col: usize, values: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+    pub fn set_hh_param_column(
+        &mut self,
+        col: usize,
+        values: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<usize> {
         let ro = values.readonly();
         let sl = ro.as_slice()?;
         Ok(self.inner.set_hh_param_column(col, sl))
@@ -583,7 +582,11 @@ impl PyBrainRunner {
     /// Returns the number of neurons written. This enables literature-based
     /// per-class physiology (M-current + h-current per neuron type).
     #[pyo3(signature = (col, values))]
-    pub fn set_haap_param_column(&mut self, col: usize, values: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+    pub fn set_haap_param_column(
+        &mut self,
+        col: usize,
+        values: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<usize> {
         let ro = values.readonly();
         let sl = ro.as_slice()?;
         Ok(self.inner.set_haap_param_column(col, sl))

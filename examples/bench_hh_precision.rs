@@ -152,11 +152,8 @@ fn run_ref64(t_ms: f64, i_syn: f64) -> (Vec<f64>, u32) {
     let mut was_below = 1.0f64;
     for _ in 0..n_steps {
         (v, m, h, n, c) = hh_step64(
-            v, m, h, n, c,
-            i_syn,
-            DT as f64, Q10 as f64,
-            120.0, 50.0, 36.0, -77.0, 0.3, -54.3,
-            0.0, 120.0, 1.0,
+            v, m, h, n, c, i_syn, DT as f64, Q10 as f64, 120.0, 50.0, 36.0, -77.0, 0.3, -54.3, 0.0,
+            120.0, 1.0,
         );
         let is_above = if v >= 0.0 { 1.0 } else { 0.0 };
         if is_above > 0.0 && was_below > 0.0 {
@@ -213,7 +210,10 @@ fn analyze(t_ms: f32, label: &str) {
     println!();
     println!("───────── {label} ─────────");
     println!("  V RMSE          = {rmse:.4} mV (включает спайки — доминирует сдвиг фазы)");
-    println!("  спайков f32/f64 = {sp32}/{sp64}  (частота {:.1} Гц)", sp32 as f32 / (t_ms / 1000.0));
+    println!(
+        "  спайков f32/f64 = {sp32}/{sp64}  (частота {:.1} Гц)",
+        sp32 as f32 / (t_ms / 1000.0)
+    );
 
     if !drift.is_empty() {
         let last = drift[drift.len() - 1];
@@ -231,7 +231,11 @@ fn analyze(t_ms: f32, label: &str) {
     } else {
         println!("  спайков нет — субпороговый режим");
     }
-    println!("  V(конец) f32/f64 = {:.2} / {:.2} mV", traj32[n - 1], traj64[n - 1]);
+    println!(
+        "  V(конец) f32/f64 = {:.2} / {:.2} mV",
+        traj32[n - 1],
+        traj64[n - 1]
+    );
 }
 
 fn main() {

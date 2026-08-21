@@ -62,13 +62,23 @@ fn main() {
         let n = W * H;
         let (f, grad_f) = grid.fourier_mode_grad(TARGET_KX, TARGET_KY);
         // dL/dθ = 2·(F − target)·∂F/∂θ
-        let dth_final: Vec<f32> = grad_f.iter()
+        let dth_final: Vec<f32> = grad_f
+            .iter()
             .map(|&df| 2.0 * (f - TARGET_POWER) * df)
             .collect();
         let dr_final = vec![0.0f32; n];
 
         let (dk, _, _, _) = grid.bptt(
-            &traj, &dth_final, &dr_final, &vec![0.0f32; n], k, RADIUS, DT, DRIVE_GAIN, ALPHA, EPS,
+            &traj,
+            &dth_final,
+            &dr_final,
+            &vec![0.0f32; n],
+            k,
+            RADIUS,
+            DT,
+            DRIVE_GAIN,
+            ALPHA,
+            EPS,
         );
 
         // SGD
@@ -85,9 +95,10 @@ fn main() {
             let r_val = g.order_parameter();
             let spec = g.wave_spectrum(3);
             let top = &spec[0];
-            let target_in_top = spec.iter().take(5).any(|(kx, ky, _)| {
-                *kx == TARGET_KX && *ky == TARGET_KY
-            });
+            let target_in_top = spec
+                .iter()
+                .take(5)
+                .any(|(kx, ky, _)| *kx == TARGET_KX && *ky == TARGET_KY);
             let star = if target_in_top { " ← target!" } else { "" };
             println!(
                 "   epoch {epoch:>3}  K={k:.4}  F({TARGET_KX},{TARGET_KY})={f_val:.5}  R={r_val:.5}  top=(k={},{})={:.4}{star}",
@@ -112,7 +123,10 @@ fn main() {
         let gain = f_after / f_before.max(1e-5);
         println!("   ✅ Тор управляем через волновой таргет: мода выросла в {gain:.1}x!");
     } else if f_after > f_before * 1.5 {
-        println!("   ✅ Тор управляем: мода выросла в {:.1}x!", f_after / f_before);
+        println!(
+            "   ✅ Тор управляем: мода выросла в {:.1}x!",
+            f_after / f_before
+        );
     } else {
         println!("   ⚠️  Мода не поднялась — возможно, нужна более богатая топология (T³)");
     }

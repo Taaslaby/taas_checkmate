@@ -1,13 +1,13 @@
 //! 🧠 Hodgkin-Huxley 200K Benchmark  
 //! Запуск: cargo run --example bench_hh_200k --release
 
-use std::time::Instant;
 use pillars::prelude::*;
+use std::time::Instant;
 
 fn main() {
     let n: usize = 200_000;
-    let dt: f32 = 0.01;    // 0.01 ms = 100 kHz (как в bench_hh)
-    let n_steps: usize = 5000;   // 50 биол. мс — несколько спайков на нейрон
+    let dt: f32 = 0.01; // 0.01 ms = 100 kHz (как в bench_hh)
+    let n_steps: usize = 5000; // 50 биол. мс — несколько спайков на нейрон
 
     println!("Создаю популяцию {n} нейронов HH...");
     let mut pop = NeuralPopulation::<HHModel>::new(n);
@@ -15,33 +15,35 @@ fn main() {
     // HHModel::N_PARAMS = 12 (col-major, индекс колонки):
     //   0:dt  1:g_Na  2:E_Na  3:g_K  4:E_K  5:g_Leak  6:E_Leak
     //   7:q10  8:v_thresh  9:inv_cm  10:g_CaT  11:E_CaT
-    pop.fill_param(0, dt);            // dt
-    pop.fill_param(1, 120.0);         // g_Na   (mS/cm² — так в bench_hh.rs)
-    pop.fill_param(2, 50.0);          // E_Na   (mV)
-    pop.fill_param(3, 36.0);          // g_K    (mS/cm²)
-    pop.fill_param(4, -77.0);         // E_K    (mV)
-    pop.fill_param(5, 0.3);           // g_Leak (mS/cm²)
-    pop.fill_param(6, -54.3);         // E_Leak (mV)
+    pop.fill_param(0, dt); // dt
+    pop.fill_param(1, 120.0); // g_Na   (mS/cm² — так в bench_hh.rs)
+    pop.fill_param(2, 50.0); // E_Na   (mV)
+    pop.fill_param(3, 36.0); // g_K    (mS/cm²)
+    pop.fill_param(4, -77.0); // E_K    (mV)
+    pop.fill_param(5, 0.3); // g_Leak (mS/cm²)
+    pop.fill_param(6, -54.3); // E_Leak (mV)
     pop.fill_param(7, q10_from_celsius_s(6.3)); // q10 = 1.0 при 6.3°C
-    pop.fill_param(8, 0.0);           // v_thresh (спайк при V > 0)
-    pop.fill_param(9, 1.0);           // inv_cm  = 1/Cm
-    pop.fill_param(10, 0.0);          // g_CaT   (0 = чистый HH, без пейсмейкера)
-    pop.fill_param(11, -80.0);        // E_CaT
+    pop.fill_param(8, 0.0); // v_thresh (спайк при V > 0)
+    pop.fill_param(9, 1.0); // inv_cm  = 1/Cm
+    pop.fill_param(10, 0.0); // g_CaT   (0 = чистый HH, без пейсмейкера)
+    pop.fill_param(11, -80.0); // E_CaT
 
     // Начальные состояния — steady-state при V = -65 mV
     // m∞≈0.053, h∞≈0.596, n∞≈0.317
     let v0 = -65.0;
     let (m_inf, h_inf, n_inf) = hh_steady_state(v0);
-    pop.fill_state(0, v0);            // v
-    pop.fill_state(1, m_inf);         // m
-    pop.fill_state(2, h_inf);         // h
-    pop.fill_state(3, n_inf);         // n
-    pop.fill_state(4, 0.19);          // c  (CaV-T gate, steady-state при -65 mV)
-    pop.fill_state(5, 1.0);           // was_below (для edge detection)
+    pop.fill_state(0, v0); // v
+    pop.fill_state(1, m_inf); // m
+    pop.fill_state(2, h_inf); // h
+    pop.fill_state(3, n_inf); // n
+    pop.fill_state(4, 0.19); // c  (CaV-T gate, steady-state при -65 mV)
+    pop.fill_state(5, 1.0); // was_below (для edge detection)
 
     // Входной ток: половина с I=0, половина с I=8 µA/cm²
-    let i_amp = 50.0f32;   // µA/cm² — надпороговый ток (как в bench_hh)
-    let i_in: Vec<f32> = (0..n).map(|i| if i < n / 2 { i_amp } else { 0.0 }).collect();
+    let i_amp = 50.0f32; // µA/cm² — надпороговый ток (как в bench_hh)
+    let i_in: Vec<f32> = (0..n)
+        .map(|i| if i < n / 2 { i_amp } else { 0.0 })
+        .collect();
     let mut spikes = vec![0i32; n];
 
     // Разогрев

@@ -211,14 +211,12 @@ pub(crate) fn build_job(
         // Число начал строк ≤ byte (линия 1 — 0..a1).
         line_starts.partition_point(|&s| s <= byte) as u32
     };
-    let line_has_error = |byte: usize| -> bool {
-        sorted_errors.binary_search(&line_of_byte(byte)).is_ok()
-    };
+    let line_has_error =
+        |byte: usize| -> bool { sorted_errors.binary_search(&line_of_byte(byte)).is_ok() };
     // Подсветка строки курсора (1-based; 0 = нет). Фон рисуется в LayoutJob —
     // под глифами, а не поверх, и прокручивается вместе с текстом.
-    let line_has_cursor = |byte: usize| -> bool {
-        cursor_line > 0 && line_of_byte(byte) == cursor_line
-    };
+    let line_has_cursor =
+        |byte: usize| -> bool { cursor_line > 0 && line_of_byte(byte) == cursor_line };
 
     let base = TextFormat {
         font_id: font.clone(),
@@ -349,7 +347,10 @@ mod tests {
         // Имя тега на строке 2 — с фоном ошибки (не прозрачный).
         assert_ne!(section("neuroml").format.background, Color32::TRANSPARENT);
         // Имя тега на строке 3 — без фона.
-        assert_eq!(section("izhikevichCell").format.background, Color32::TRANSPARENT);
+        assert_eq!(
+            section("izhikevichCell").format.background,
+            Color32::TRANSPARENT
+        );
     }
 
     /// Строка курсора получает фоновую подсветку, остальные — прозрачный фон.
@@ -363,7 +364,10 @@ mod tests {
                 .find(|s| &DOC[s.byte_range.start.0..s.byte_range.end.0] == needle)
                 .unwrap_or_else(|| panic!("секция `{needle}` не найдена"))
         };
-        assert_ne!(section("izhikevichCell").format.background, Color32::TRANSPARENT);
+        assert_ne!(
+            section("izhikevichCell").format.background,
+            Color32::TRANSPARENT
+        );
         assert_eq!(section("neuroml").format.background, Color32::TRANSPARENT);
     }
 
@@ -452,7 +456,9 @@ mod tests {
         assert_eq!(names, vec!["disabled"]);
         assert!(!tokens.iter().any(|(_, t)| *t == Tok::AttrValue));
         // Закрывающий `>` всё же распознан пунктуацией.
-        assert!(tokens.iter().any(|(r, t)| *t == Tok::TagPunct && &doc[r.clone()] == ">"));
+        assert!(tokens
+            .iter()
+            .any(|(r, t)| *t == Tok::TagPunct && &doc[r.clone()] == ">"));
     }
 
     /// Незакрытый комментарий тянется до конца файла — без паники и пропусков.

@@ -386,12 +386,9 @@ impl PyGpuConnectomeRefiner {
                     .map_err(|e| PyRuntimeError::new_err(format!("zero_grad: {e}")))?;
 
                 for bw_step in (0..n_steps - 1).rev() {
-                    let dtheta_step =
-                        unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) };
-                    let dtheta_next =
-                        unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) };
-                    let phases_step =
-                        unsafe { d_phases_traj.as_ptr().add(bw_step * n) };
+                    let dtheta_step = unsafe { d_dtheta_traj.as_mut_ptr().add(bw_step * n) };
+                    let dtheta_next = unsafe { d_dtheta_traj.as_ptr().add((bw_step + 1) * n) };
+                    let phases_step = unsafe { d_phases_traj.as_ptr().add(bw_step * n) };
 
                     ctx.bptt_step(
                         d_grad_weights.as_mut_ptr(),
