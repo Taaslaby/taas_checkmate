@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>Na+ channel (Bartlett Mel-modified HH - modified by Poirazi, s inactivation from Migliore 1996) (used in soma and axon)
+
+    REDUCED COPY for pillars validation: the third gate `s` (slow
+    inactivation, `Poirazi_na_taus`/`Poirazi_na_sss`) is omitted because the
+    published model binds `no_inact="1"` on every use, which makes its steady
+    state identically 1 (no inactivation) — the gate contributes exactly 1 to
+    the conductance and its tau is irrelevant. m and h are copied verbatim
+    from the published file.</notes>
+
+    <ionChannel id="na" conductance="1pS" type="ionChannelHH" species="na">
+
+        <gateHHtauInf id="m" instances="2">
+            <timeCourse type="fixedTimeCourse" tau="0.05ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-44mV" scale="3mV"/>
+        </gateHHtauInf>
+
+        <gateHHtauInf id="h" instances="1">
+            <timeCourse type="fixedTimeCourse" tau="1ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-49mV" scale="-3.5mV"/>
+        </gateHHtauInf>
+
+    </ionChannel>
+
+</neuroml>

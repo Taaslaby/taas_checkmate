@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>NeuroML file containing a single ion channel</notes>
+
+    <ionChannel id="na" conductance="1pS" type="ionChannelHH" species="na">
+        
+        <notes>Na+ channel (Bartlett Mel-modified HH - modified by Poirazi, s inactivation from Migliore 1996) (used in soma and axon)</notes>
+
+        <gateHHtauInf id="m" instances="2">
+            <timeCourse type="fixedTimeCourse" tau="0.05ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-44mV" scale="3mV"/>
+        </gateHHtauInf>
+        
+        <gateHHtauInf id="h" instances="1">
+            <timeCourse type="fixedTimeCourse" tau="1ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-49mV" scale="-3.5mV"/>
+        </gateHHtauInf>
+        
+        <gateHHtauInf id="s" instances="1">
+            <q10Settings type="q10Fixed" fixedQ10="1"/>
+            <timeCourse type="Poirazi_na_taus"/>
+            <steadyState type="Poirazi_na_sss" no_inact="1"/>  <!-- 1: no inact, 0: max inact-->
+        </gateHHtauInf>
+        
+    </ionChannel>
+    
+   
+    <ComponentType name="Poirazi_na_taus"
+                   extends="baseVoltageDepTime"
+                   description="Tau parameter to describe na in Poirazi 2003">
+        
+        <Constant name="TIME_SCALE" dimension="time" value="1 ms"/>
+        <Constant name="VOLT_SCALE" dimension="voltage" value="1 mV"/>
+        <Constant name="TEMP_SCALE" dimension="temperature" value="1 K"/>
+        <Constant name="R" dimension="none" value="8.315"/>
+        
+        <Requirement name="rateScale" dimension="none"/> 
+        <Requirement name="temperature" dimension="temperature"/>
+
+        <Dynamics>
+            <DerivedVariable name="V" dimension="none" value="v / VOLT_SCALE"/>
+            <DerivedVariable name="T" dimension="none" value="temperature / TEMP_SCALE"/>
+            
+            <DerivedVariable name="alpha" dimension="none" value="exp((1e-3*12*(V+60)*9.648e4) / (R*T))"/>
+            <DerivedVariable name="beta" dimension="none" value="exp((1e-3*12*0.2*(V+60)*9.648e4) / (R*T))"/>
+            
+            <DerivedVariable name="tmp" value="beta / (3e-4 + 3e-4*(1 + alpha))" dimension="none"/>
+            <ConditionalDerivedVariable name="t" dimension="time" exposure="t" >
+                <Case condition="(tmp / rateScale) .lt. 3" value="3 * rateScale * TIME_SCALE"/>
+                <Case value="tmp * TIME_SCALE"/>                
+            </ConditionalDerivedVariable>
+
+        </Dynamics>
+
+    </ComponentType>
+    
+    <ComponentType name="Poirazi_na_sss"
+                   extends="baseVoltageDepVariable"
+                   description="steadyState parameter to describe na in Poirazi 2003">
+        
+        <Parameter name="no_inact" dimension="none"/>
+        
+        <Constant name="VOLT_SCALE" dimension="voltage" value="1 mV"/>
+
+        <Dynamics>
+            <DerivedVariable name="V" dimension="none" value="v / VOLT_SCALE"/>
+            
+            <DerivedVariable name="tmp" dimension="none" value="exp((V+60)/2)"/>
+ 
+            <DerivedVariable name="x" exposure="x" dimension="none" value="(1 + no_inact*tmp) / (1 + tmp)"/>
+        </Dynamics>
+
+    </ComponentType>
+    
+</neuroml>

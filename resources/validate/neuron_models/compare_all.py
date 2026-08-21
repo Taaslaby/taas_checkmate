@@ -14,12 +14,19 @@ Usage:
     PYTHON=.venv/bin/python3 validate/neuron_models/compare_all.py --neuron  # with NEURON
 """
 
-import os, argparse, time
+import os, argparse, sys, subprocess, shutil, tempfile, time
 import numpy as np
 
 # ── paths ──
+# `ROOT` is the resources/ dir (holds the validate/ tree); `PROJECT_ROOT` is
+# the workspace root that holds the freshly-built `taas_checkmate.pyd`. It is
+# inserted into sys.path so `import taas_checkmate` does NOT silently pick up
+# the stale copy in site-packages.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 NEURON_DIR = os.path.join(ROOT, 'validate', 'neuron_models')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+NEURON_HOME = r"C:\nrn"
 
 # ── NEURON loader ──
 _NEURON_LOADED = False
@@ -152,6 +159,29 @@ def validate_lif(dt=0.05, duration_ms=500, plot=False):
     return result
 
 
+def _compile_haap_mods():
+    """Compile the repo's corrected km.mod + hcn.mod into an ASCII temp dir.
+
+    NEURON's c_str() cannot handle the Cyrillic project path, so the corrected
+    mechanisms are copied to an ASCII temp dir and compiled with mknrndll
+    there. Returns the compiled nrnmech.dll path, or None on failure.
+    """
+    tmp = tempfile.mkdtemp(prefix='haap_mods_')
+    for f in ('km.mod', 'hcn.mod'):
+        shutil.copy(os.path.join(NEURON_DIR, f), os.path.join(tmp, f))
+    mknrndll = os.path.join(NEURON_HOME, 'bin', 'mknrndll.bat')
+    if not os.path.exists(mknrndll):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    try:
+        subprocess.run(['cmd.exe', '/c', mknrndll], cwd=tmp, check=True,
+                       capture_output=True)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    return os.path.join(tmp, 'nrnmech.dll')
+
+
 # ═══════════════════════════════════════════════════════════
 #  2. HAAP — M-current + HCN (VNC neuron)
 # ═══════════════════════════════════════════════════════════
@@ -166,15 +196,23 @@ def validate_haap(dt=0.05, duration_ms=500, plot=False):
         'V_thresh': -40.0, 'V_reset': -55.0, 'delta_u': 0.02,
     }
 
+    # Subthreshold — pillars HAAP is a *spiking* model (V≥Vthresh resets V and
+    # bumps u), while NEURON pas+km+hcn are passive conductances with no spike
+    # mechanism. They only agree below threshold, so use a small current that
+    # never fires (steady-state V ≈ −50 mV).
     I_inj = np.zeros(n_steps)
     pulse = slice(int(50/dt), int(250/dt))
-    I_inj[pulse] = 8.0
+    I_inj[pulse] = 1.5
 
-    # TAAS HAAP via Python
+    # TAAS HAAP via Python — gates at their Boltzmann steady state at V = E_L
+    # (matching NEURON's INITIAL block): u_∞ ≈ 0.0025, h_∞ ≈ 0.159. The old
+    # u=0/h=1 init injected a spurious transient (fully-open HCN at rest).
     n = 8
+    u_rest = 1.0 / (1.0 + np.exp(-(params['E_L'] - params['V_half_u']) / params['k_u']))
+    h_rest = 1.0 / (1.0 + np.exp((params['E_L'] - params['V_half_h']) / params['k_h']))
     v = np.full(n, params['E_L'], dtype=np.float32)
-    u = np.full(n, 0.0, dtype=np.float32)
-    h = np.full(n, 1.0, dtype=np.float32)
+    u = np.full(n, u_rest, dtype=np.float32)
+    h = np.full(n, h_rest, dtype=np.float32)
     spikes = np.zeros(n, dtype=np.int32)
 
     p = np.zeros(n * 17, dtype=np.float32)
@@ -211,11 +249,17 @@ def validate_haap(dt=0.05, duration_ms=500, plot=False):
         print(f"      ⚠ Python HAAP failed: {e}")
         V_taas = np.zeros(n_steps); taas_ok = False
 
-    # NEURON
+    # NEURON: compile + load the repo's corrected km.mod + hcn.mod.
     V_neuron = None
-    if _try_load_neuron():
+    try:
+        dll = _compile_haap_mods()
+        if not dll:
+            raise FileNotFoundError('km.mod/hcn.mod compile failed')
+        old_cwd = os.getcwd()
+        os.chdir(tempfile.gettempdir())  # ASCII cwd for NEURON's c_str()
         try:
             from neuron import h
+            h.nrn_load_dll(dll)
             h.load_file('stdrun.hoc')
             soma = h.Section(name='soma')
             soma.L = 10; soma.diam = 10; soma.cm = params['cm']
@@ -250,9 +294,12 @@ def validate_haap(dt=0.05, duration_ms=500, plot=False):
             h.dt = dt; h.tstop = duration_ms
             h.finitialize(params['E_L'])
             h.continuerun(duration_ms)
-            V_neuron = np.array(v_vec)
-        except Exception as e:
-            print(f"      ⚠ NEURON HAAP failed: {e}")
+            # Drop the t=0 sample so v_vec[1:] aligns with V_taas[i] = t=(i+1)·dt.
+            V_neuron = np.array(v_vec)[1:n_steps + 1]
+        finally:
+            os.chdir(old_cwd)
+    except Exception as e:
+        print(f"      ⚠ NEURON HAAP failed: {e}")
 
     result = {'name': 'HAAP', 'dt': dt, 'n_steps': n_steps, 'duration_ms': duration_ms}
     result['V_taas'] = np.array(V_taas) if taas_ok else None

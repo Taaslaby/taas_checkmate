@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>NeuroML file containing a single ion channel</notes>
+
+    <!-- TODO: in the .mod file this is a dummy calcium current, because "the T-current does not activate calcium-dependent currents, the construction with dummy ion Ca prevents the updating of the, internal calcium concentration" -->
+    <ionChannel id="cat" conductance="1pS" type="ionChannelHH" species="ca">
+        
+        <notes>T-type Ca++ channel</notes>
+        
+        <gateHHrates id="m" instances="2">
+            <forwardRate type="HHExpLinearRate" rate="0.209per_ms" midpoint="-27.01mV" scale="-3.8mV"/>
+            <reverseRate type="HHExpRate" rate="0.94per_ms" midpoint="-63.01mV" scale="-17mV"/>
+        </gateHHrates>
+        
+        <gateHHtauInf id="h" instances="1">
+            <timeCourse type="Poirazi_cat_tauh"/>
+            <steadyState type="Poirazi_cat_ssh"/>
+        </gateHHtauInf>
+        
+        <gateHHInstantaneous id="h2" instances="1">
+            <steadyState type="Poirazi_cat_ssh2"/>
+        </gateHHInstantaneous>
+                            
+    </ionChannel>
+    
+    
+    <ComponentType name="Poirazi_cat_tauh"
+                   extends="baseVoltageDepTime"
+                   description="Tau parameter to describe cat in Poirazi 2003">
+        
+        <Constant name="TIME_SCALE" dimension="time" value="1 ms"/>
+        <Constant name="VOLT_SCALE" dimension="voltage" value="1 mV"/>
+
+        <Dynamics>
+            <DerivedVariable name="V" dimension="none" value="v / VOLT_SCALE"/>
+            
+            <DerivedVariable name="alpha" dimension="none" value="1.6e-4*exp((V+57)/-19)"/>
+            <DerivedVariable name="beta" dimension="none" value="1 / (1 + exp((V-15)/-10))"/>
+
+            <DerivedVariable name="t" dimension="time" value="( 1 / 0.68 * (alpha + beta) ) * TIME_SCALE" exposure="t"/>
+
+        </Dynamics>
+
+    </ComponentType>
+    
+    
+    <ComponentType name="Poirazi_cat_ssh"
+                   extends="baseVoltageDepVariable"
+                   description="steadyState parameter to describe cat in Poirazi 2003">
+        
+        <Constant name="VOLT_SCALE" dimension="voltage" value="1 mV"/>
+
+        <Dynamics>
+            <DerivedVariable name="V" dimension="none" value="v / VOLT_SCALE"/>
+            
+            <DerivedVariable name="alpha" dimension="none" value="1.6e-4*exp((V+57)/-19)"/>
+            <DerivedVariable name="beta" dimension="none" value="1 / (1 + exp((V-15)/-10))"/>
+            
+            <DerivedVariable name="x" exposure="x" dimension="none" value="alpha / (alpha + beta)"/>
+        </Dynamics>
+
+    </ComponentType>
+       
+    
+    <ComponentType name="Poirazi_cat_ssh2"
+                   extends="baseVoltageConcDepVariable"
+                   description="steadyState parameter to describe cal in Poirazi 2003">
+        
+        <Constant name="CONC_SCALE" dimension="concentration" value="1 mM"/>
+
+        <Dynamics>
+            <DerivedVariable name="ca_conc_i" dimension="none" value="caConc / CONC_SCALE"/>
+            <DerivedVariable name="x" dimension="none" value="0.001 / (0.001 + ca_conc_i)" exposure="x"/>
+        </Dynamics>
+
+    </ComponentType>
+    
+</neuroml>

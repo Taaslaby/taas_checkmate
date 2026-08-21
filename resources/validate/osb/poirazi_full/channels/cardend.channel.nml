@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>NeuroML file containing a single ion channel</notes>
+
+    <ionChannel id="cardend" conductance="1pS" type="ionChannelHH" species="ca">  <!-- erev="140mV" -->
+    
+        <notes>R-type Ca++ channel (used in distal dendrites)</notes>
+        
+        <gateHHtauInf id="m" instances="3">
+            <timeCourse type="fixedTimeCourse" tau="50ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-48.5mV" scale="3mV"/>
+        </gateHHtauInf>
+        
+        <gateHHtauInf id="h" instances="1">
+            <timeCourse type="fixedTimeCourse" tau="5ms"/>
+            <steadyState type="HHSigmoidVariable" rate="1" midpoint="-53mV" scale="-1mV"/>
+        </gateHHtauInf>
+    
+    </ionChannel>
+
+</neuroml>

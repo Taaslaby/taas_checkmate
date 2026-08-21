@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>NeuroML file containing a single ion channel</notes>
+
+    <ionChannel id="kca" conductance="1pS" type="ionChannelHH" species="k">
+        
+        <notes>Ca++ dependent K+ channel (from Destexhe 1994)</notes>
+        
+        <gateHHtauInf id="m" instances="3">
+            <q10Settings type="q10ExpTemp" q10Factor="3" experimentalTemp="22 degC"/>
+            <timeCourse type="Poirazi_kca_tau"/>
+            <steadyState type="Poirazi_kca_ss"/>
+        </gateHHtauInf>
+          
+    </ionChannel>
+    
+    
+    <ComponentType name="Poirazi_kca_tau"
+                   extends="baseVoltageConcDepTime"
+                   description="Tau parameter to describe kca in Poirazi 2003">
+        
+        <Constant name="TIME_SCALE" dimension="time" value="1 ms"/>
+        <Constant name="CONC_SCALE" dimension="concentration" value="1 mM"/>
+             
+        <Requirement name="rateScale" dimension="none"/>   
+
+        <Dynamics>
+            <DerivedVariable name="ca_conc_i" dimension="none" value="caConc / CONC_SCALE"/>          
+
+            <DerivedVariable name="tmp" value="1 / (0.03*(1 + ((ca_conc_i/0.025)*(ca_conc_i/0.025))))" dimension="none"/>
+            
+            <ConditionalDerivedVariable name="t" dimension="time" exposure="t" >
+                <Case condition="(tmp / rateScale) .lt. 0.5" value="0.5 * rateScale * TIME_SCALE"/>
+                <Case value="tmp * TIME_SCALE"/>                
+            </ConditionalDerivedVariable>
+
+        </Dynamics>
+
+    </ComponentType>
+    
+    
+    <ComponentType name="Poirazi_kca_ss"
+                   extends="baseVoltageConcDepVariable"
+                   description="steadyState parameter to describe kca Poirazi 2003">
+        
+        <Constant name="CONC_SCALE" dimension="concentration" value="1 mM"/>
+
+        <Dynamics>
+            <DerivedVariable name="ca_conc_i" dimension="none" value="caConc / CONC_SCALE"/>
+            
+            <DerivedVariable name="tmp" dimension="none" value="(ca_conc_i/0.025)*(ca_conc_i/0.025)"/>
+            
+            <DerivedVariable name="x" exposure="x" dimension="none" value="tmp / (1 + tmp)"/>
+        </Dynamics>
+
+    </ComponentType>
+    
+</neuroml>

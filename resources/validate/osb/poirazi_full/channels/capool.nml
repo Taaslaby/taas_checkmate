@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.neuroml.org/schema/neuroml2 https://raw.github.com/NeuroML/NeuroML2/development/Schemas/NeuroML2/NeuroML_v2beta4.xsd" id="NeuroML_ionChannel">
+
+    <notes>NeuroML file containing Ca++ dynamics (from Destexhe 1992, modified by Poirazi)</notes>
+    
+    <PoiraziCaConcentrationModel id="capool" ion="ca" decayConstant="200ms" restingConc="1e-4mM" shellThickness="0.1um"/>
+    
+    
+        <ComponentType name="PoiraziCaConcentrationModel"
+                       extends="concentrationModel"
+                       description="Model of Capool">
+            
+        <Parameter name="restingConc" dimension="concentration"/>
+        <Parameter name="decayConstant" dimension="time"/>
+        <Parameter name="shellThickness" dimension="length"/>
+        
+        <Constant name="Faraday" dimension="charge_per_mole" value="96520C_per_mol"/> <!-- that's in the original code...-->
+        
+        <Requirement name="iCa" dimension="current"/>
+        
+        <Exposure name="concentration" dimension="concentration"/>
+
+        <Text name="ion"/> <!-- TODO: check why this isn't inherited from concentrationModel -->
+
+        <Dynamics>
+
+            <StateVariable name="concentration" exposure="concentration" dimension="concentration"/>
+            <StateVariable name="extConcentration" exposure="extConcentration" dimension="concentration"/>
+            
+            <!--  /18: to account for the sharp Ca++ spike repolarization observed in: Golding et al. 1999 -->
+            <TimeDerivative variable="concentration" value=" iCa / (2 * Faraday * surfaceArea * shellThickness * 18) - ((concentration - restingConc) / decayConstant)*7"/>
+            
+            <OnStart>
+                <StateAssignment variable="concentration" value="restingConc"/>  <!-- should be: initialConcentration-->
+                <StateAssignment variable="extConcentration" value="initialExtConcentration"/>
+            </OnStart>          
+
+            <OnCondition test="concentration .lt. 0">
+                <StateAssignment variable="concentration" value="0"/>
+            </OnCondition>
+            
+        </Dynamics>
+
+    </ComponentType>
+ 
+</neuroml>

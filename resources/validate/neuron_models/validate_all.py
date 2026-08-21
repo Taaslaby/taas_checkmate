@@ -8,11 +8,17 @@ Models: HH, HAAP, LIF, Izhikevich, AdEx, Morris-Lecar, FHN
 Measures: RMSE, relative error %, spike count
 """
 
-import os, time, json, shutil, tempfile
+import os, sys, subprocess, time, json, shutil, tempfile
 import numpy as np
 
 NEURON_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(NEURON_DIR, '..', '..'))
+# Workspace root (three levels up) — holds the freshly-built
+# `taas_checkmate.pyd`; without this, `import taas_checkmate` silently loads
+# the stale copy from site-packages.
+PROJECT_ROOT = os.path.normpath(os.path.join(NEURON_DIR, '..', '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+NEURON_HOME = r"C:\nrn"
 
 # ── NEURON loader (ASCII-safe: /tmp symlink) ──
 _H = None
@@ -173,6 +179,29 @@ def validate_lif(dt=0.05, duration_ms=500):
     }
 
 
+def _compile_haap_mods():
+    """Compile the repo's corrected km.mod + hcn.mod into an ASCII temp dir.
+
+    NEURON's c_str() cannot handle the Cyrillic project path, so the corrected
+    mechanisms are copied to an ASCII temp dir and compiled with mknrndll
+    there. Returns the compiled nrnmech.dll path, or None on failure.
+    """
+    tmp = tempfile.mkdtemp(prefix='haap_mods_')
+    for f in ('km.mod', 'hcn.mod'):
+        shutil.copy(os.path.join(NEURON_DIR, f), os.path.join(tmp, f))
+    mknrndll = os.path.join(NEURON_HOME, 'bin', 'mknrndll.bat')
+    if not os.path.exists(mknrndll):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    try:
+        subprocess.run(['cmd.exe', '/c', mknrndll], cwd=tmp, check=True,
+                       capture_output=True)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    return os.path.join(tmp, 'nrnmech.dll')
+
+
 # ═══════════════════════════════════════════════════════════
 #  3. HAAP — M-current + HCN (VNC neuron)
 # ═══════════════════════════════════════════════════════════
@@ -185,7 +214,11 @@ def validate_haap(dt=0.05, duration_ms=500):
                   gM=0.5, EK=-80.0, Vhalf_u=-35.0, ku=5.0, tau_u=100.0,
                   gh=0.3, Eh=-30.0, Vhalf_h=-75.0, kh=6.0, tau_h=200.0,
                   Vthresh=-40.0, Vreset=-55.0, delta_u=0.02)
-    I_amp = 8.0
+    # Subthreshold — pillars HAAP is a *spiking* model (V≥Vthresh resets V and
+    # bumps u), while NEURON pas+km+hcn are passive conductances with no spike
+    # mechanism. They only agree below threshold, so use a small current that
+    # never fires (steady-state V ≈ −50 mV).
+    I_amp = 1.5
 
     # ── TAAS Rust SIMD HAAP ──
     tcm = _try_taas()
@@ -194,9 +227,14 @@ def validate_haap(dt=0.05, duration_ms=500):
     h_taas_arr = np.zeros(n_steps)
     if tcm:
         n = 8
+        # Gates at their Boltzmann steady state at V = E_L, matching NEURON's
+        # INITIAL block (u_∞ ≈ 0.0025, h_∞ ≈ 0.159). The old u=0/h=1 init
+        # injected a spurious transient (fully-open HCN at rest).
+        u_rest = 1.0 / (1.0 + np.exp(-(params['EL'] - params['Vhalf_u']) / params['ku']))
+        h_rest = 1.0 / (1.0 + np.exp((params['EL'] - params['Vhalf_h']) / params['kh']))
         v = np.full(n, params['EL'], dtype=np.float32)
-        u = np.zeros(n, dtype=np.float32)
-        hh = np.ones(n, dtype=np.float32)
+        u = np.full(n, u_rest, dtype=np.float32)
+        hh = np.full(n, h_rest, dtype=np.float32)
         spikes = np.zeros(n, dtype=np.int32)
         p = _build_haap_params(n, dt, **params)
         I = np.zeros(n, dtype=np.float32)
@@ -207,17 +245,18 @@ def validate_haap(dt=0.05, duration_ms=500):
             u_taas[i] = u[0]
             h_taas_arr[i] = hh[0]
 
-    # NEURON: try tnmt km + hcn mechanisms
+    # NEURON: compile + load the repo's corrected km.mod + hcn.mod.
     V_neuron = None
     try:
-        h = _neuron()
-        tnmt_validate = os.path.join(ROOT, '..', 'tnmt', 'validate')
-        tnmt_so = os.path.join(tnmt_validate, 'x86_64', 'libnrnmech.so')
-        if os.path.exists(tnmt_so):
-            tmp_link2 = '/tmp/tnmt_validate_hcn.so'
-            if not os.path.exists(tmp_link2):
-                os.symlink(os.path.abspath(tnmt_so), tmp_link2)
-            h.nrn_load_dll(tmp_link2)
+        dll = _compile_haap_mods()
+        if not dll:
+            raise FileNotFoundError('km.mod/hcn.mod compile failed')
+        old_cwd = os.getcwd()
+        os.chdir(tempfile.gettempdir())  # ASCII cwd for NEURON's c_str()
+        try:
+            from neuron import h
+            h.nrn_load_dll(dll)
+            h.load_file('stdrun.hoc')
 
             soma = h.Section(name='soma')
             soma.L = 10; soma.diam = 10; soma.cm = params['Cm']
@@ -242,7 +281,10 @@ def validate_haap(dt=0.05, duration_ms=500):
             h.dt = dt; h.tstop = duration_ms
             h.finitialize(params['EL'])
             h.continuerun(duration_ms)
-            V_neuron = np.array(v_vec)[:n_steps]
+            # Drop the t=0 sample so v_vec[1:] aligns with V_taas[i] = t=(i+1)·dt.
+            V_neuron = np.array(v_vec)[1:n_steps + 1]
+        finally:
+            os.chdir(old_cwd)
     except Exception as e:
         print(f"      ⚠ HAAP NEURON: {e}")
 
