@@ -1052,21 +1052,46 @@ impl NeuronBuilder {
             ui.label(format!("⚡ {}", self.total_spikes));
         });
         ui.horizontal_wrapped(|ui| {
-            ui.label("File:");
-            ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
-            if ui.button("💾 Save").clicked() {
-                self.save_graph();
-            }
-            if ui.button("📂 Load").clicked() {
-                self.load_file();
-            }
+            // File — схлопнуто в меню, как в Blender (не 3 кнопки в ряд)
+            egui::ComboBox::from_id_salt("file_ops")
+                .selected_text("▭ File")
+                .show_ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(160.0));
+                    });
+                    if ui.button("💾 Save").clicked() {
+                        self.save_graph();
+                    }
+                    if ui.button("📂 Load").clicked() {
+                        self.load_file();
+                    }
+                    if ui.button("🗑 Clear — очистить граф").clicked() {
+                        self.push_undo();
+                        self.nodes.clear();
+                        self.edges.clear();
+                        self.selected = None;
+                        self.selected_edge = None;
+                        self.running = false;
+                        self.reset_sim();
+                    }
+                });
             ui.separator();
-            ui.label("Ops:");
-            for &kind in palette_kinds() {
-                if ui.button(spec_of(kind).name).clicked() {
-                    self.add_node(kind);
-                }
-            }
+            // Ops — дропдаун + Add node (вместо 16 кнопок в ряд)
+            egui::ComboBox::from_id_salt("ops_add")
+                .selected_text("＋ Add node…")
+                .show_ui(ui, |ui| {
+                    for &kind in palette_kinds() {
+                        let spec = spec_of(kind);
+                        let cat = cat_of(kind);
+                        let col = cat_color(cat);
+                        // цветной квадратик как в палитре нод
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter().rect_filled(r, 2.0, col);
+                        if ui.button(spec.name).clicked() {
+                            self.add_node(kind);
+                        }
+                    }
+                });
             if ui.button("🗑 Clear").clicked() {
                 self.push_undo();
                 self.nodes.clear();
@@ -1324,6 +1349,55 @@ impl NeuronBuilder {
         self.drag = Drag::None;
         self.running = false;
         self.reset_sim();
+        self.auto_layout();
+    }
+
+    /// Простая авто-раскладка — слои по топологии (dagre light).
+    /// x = слой * 220, y = индекс в слое * 80. Без пересечений проводов.
+    fn auto_layout(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let n = self.nodes.len();
+        let mut indeg = vec![0usize; n];
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for e in &self.edges {
+            if e.from < n && e.to < n {
+                adj[e.from].push(e.to);
+                indeg[e.to] += 1;
+            }
+        }
+        // Kahn
+        let mut layer = vec![0usize; n];
+        let mut q: Vec<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
+        let mut order = Vec::new();
+        while let Some(u) = q.pop() {
+            order.push(u);
+            for &v in &adj[u] {
+                layer[v] = layer[v].max(layer[u] + 1);
+                indeg[v] -= 1;
+                if indeg[v] == 0 {
+                    q.push(v);
+                }
+            }
+        }
+        // Группируем по слоям
+        let max_l = layer.iter().copied().max().unwrap_or(0);
+        let mut by_layer: Vec<Vec<usize>> = vec![Vec::new(); max_l + 1];
+        for &idx in &order {
+            by_layer[layer[idx]].push(idx);
+        }
+        // Для узлов вне топо-сортировки (циклы) — в последний слой
+        for i in 0..n {
+            if !order.contains(&i) {
+                by_layer[max_l].push(i);
+            }
+        }
+        for (l, nodes) in by_layer.iter().enumerate() {
+            for (k, &idx) in nodes.iter().enumerate() {
+                self.nodes[idx].pos = pos2(20.0 + l as f32 * 220.0, 40.0 + k as f32 * 90.0);
+            }
+        }
     }
 
     fn set_status(&mut self, s: String) {
