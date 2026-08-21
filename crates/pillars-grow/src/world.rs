@@ -146,6 +146,10 @@ impl World {
             neurites: vec![],
             modules: vec![],
             alive: true,
+            // Slightly jittered Delta breaks the lateral-inhibition symmetry
+            // (who becomes primary first); deterministic per seed.
+            delta: 1.0 + self.rng.gen_range(-0.2..0.2),
+            notch: 0.0,
         });
         id
     }
@@ -273,6 +277,30 @@ impl World {
             .sum()
     }
 
+    /// Indices of alive cells (excluding `cell`) whose soma is within `radius`.
+    /// Used by lateral inhibition and other neighbourhood couplings.
+    pub fn neighbors_within(&self, cell: usize, radius: f64) -> Vec<usize> {
+        let p = self.cells[cell].soma.pos;
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| *i != cell && c.alive && c.soma.pos.dist(p) <= radius)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Subtract `amount` of substance `id` from the nearest grid cell
+    /// (trophic consumption); never goes below zero.
+    pub fn consume_substance_at(&mut self, id: &str, p: Vec3, amount: f64) {
+        let (i, j, k) = self.grid.nearest(p);
+        let idx = self.grid.flat(i, j, k);
+        for s in self.substances.iter_mut() {
+            if s.id == id {
+                s.field[idx] = (s.field[idx] - amount).max(0.0);
+            }
+        }
+    }
+
     /// Direction of the nearest foreign neurite segment within `radius` of `p`
     /// (for fasciculation), plus the contact distance. `None` if nothing is
     /// close. Own cell and dead cells are ignored.
@@ -361,8 +389,11 @@ impl World {
         }
     }
 
-    /// Explicit-Euler diffusion + degradation on each substance grid.
+    /// Explicit-Euler diffusion + degradation on each substance grid. The
+    /// Laplacian is normalized by `cell²` (grid units → world units), so the
+    /// diffusion rate is physical: `dt·D/h²` per step (stable for ≤ 1/6).
     pub fn diffuse_substances(&mut self) {
+        let inv_h2 = 1.0 / (self.grid.cell * self.grid.cell);
         let g = self.grid;
         let dt = self.dt;
         for s in self.substances.iter_mut() {
@@ -371,7 +402,7 @@ impl World {
                 for j in 1..g.ny.saturating_sub(1) {
                     for k in 1..g.nz.saturating_sub(1) {
                         let idx = g.flat(i, j, k);
-                        let lap = g.laplacian(&s.field, i, j, k);
+                        let lap = g.laplacian(&s.field, i, j, k) * inv_h2;
                         let v = s.field[idx] + dt * s.diffusion * lap
                             - dt * s.degradation * s.field[idx];
                         next[idx] = v.max(0.0);
@@ -637,7 +668,7 @@ impl World {
             return;
         }
         let offset = self.random_vec(self.grid.cell * 0.5);
-        let (cell_type, role, soma_pos, soma_radius, soma_mods, neurites, cell_mods) = {
+        let (cell_type, role, soma_pos, soma_radius, soma_mods, neurites, cell_mods, delta, notch) = {
             let c = &self.cells[id];
             (
                 c.cell_type,
@@ -670,6 +701,8 @@ impl World {
                     .filter(|m| m.copy_on_divide())
                     .map(|m| m.boxed_copy())
                     .collect::<Vec<Box<dyn CellModule>>>(),
+                c.delta,
+                c.notch,
             )
         };
         // Halve the parent volume (mitosis).
@@ -699,6 +732,8 @@ impl World {
                 .collect(),
             modules: cell_mods,
             alive: true,
+            delta,
+            notch,
         };
         self.cells.push(daughter);
     }

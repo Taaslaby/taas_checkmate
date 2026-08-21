@@ -574,6 +574,163 @@ impl Module for CellApoptosis {
     }
 }
 
+/// Delta–Notch lateral inhibition — cells in a field pick their own fates
+/// (Collier, Monk, Maini & Lewis, 1996, *Bull. Math. Biol.* 58(6)).
+///
+/// Each cell carries `delta` (a secreted ligand) and `notch` (its receptor
+/// activity). Delta production is repressed by the cell's own Notch, Notch is
+/// activated by the mean Delta of its neighbours:
+///
+/// ```text
+/// dD/dt = v / (1 + b·N^h) − D
+/// dN/dt = ⟨D⟩^h / (α + ⟨D⟩^h) − N
+/// ```
+///
+/// The instability amplifies the initial jitter: the first cell to raise its
+/// Delta drives its neighbours' Notch up, repressing *their* Delta — a
+/// regular, self-organized spacing of primary cells emerges (the classic
+/// proneural pattern). A cell whose Notch stays low becomes primary
+/// (`role = primary_role`).
+pub struct LateralInhibition {
+    /// Neighbourhood radius (mean Delta over cells within this distance).
+    pub radius: f64,
+    /// Delta production rate.
+    pub v: f64,
+    /// Notch repression strength on Delta production.
+    pub b: f64,
+    /// Hill coefficient.
+    pub hill: f64,
+    /// Half-saturation of Notch activation.
+    pub alpha: f64,
+    /// Below this Notch activity the cell becomes primary.
+    pub notch_threshold: f64,
+    /// The fate assigned to primary cells.
+    pub primary_role: i32,
+}
+
+impl LateralInhibition {
+    pub fn new(radius: f64) -> Self {
+        LateralInhibition {
+            radius,
+            v: 10.0,
+            b: 100.0,
+            hill: 2.0,
+            alpha: 0.1,
+            notch_threshold: 0.3,
+            primary_role: 1,
+        }
+    }
+}
+
+impl CellModule for LateralInhibition {
+    fn run(&mut self, world: &mut World, cell: usize) {
+        // The Hill terms are fast; clamp the integration step for stability.
+        let dt = world.dt.min(0.1);
+        let neighbours = world.neighbors_within(cell, self.radius);
+        let mean_d = if neighbours.is_empty() {
+            0.0
+        } else {
+            neighbours
+                .iter()
+                .map(|&n| world.cells[n].delta)
+                .sum::<f64>()
+                / neighbours.len() as f64
+        };
+        let n = world.cells[cell].notch;
+        let d = world.cells[cell].delta;
+        let d_prod = self.v / (1.0 + self.b * n.powf(self.hill));
+        let n_prod = mean_d.powf(self.hill) / (self.alpha + mean_d.powf(self.hill));
+        world.cells[cell].delta = (d + dt * (d_prod - d)).max(0.0);
+        world.cells[cell].notch = (n + dt * (n_prod - n)).max(0.0);
+
+        // Fate readout from the *current* state: low Notch + high Delta =
+        // primary. Bidirectional — during the early transient every cell has
+        // low Notch, so a monotonic assignment would mark them all primary;
+        // only the converged pattern is meaningful.
+        world.cells[cell].role =
+            if world.cells[cell].notch < self.notch_threshold && world.cells[cell].delta > 2.0 {
+                self.primary_role
+            } else {
+                0
+            };
+    }
+
+    fn copy_on_divide(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn CellModule> {
+        Box::new(LateralInhibition {
+            radius: self.radius,
+            v: self.v,
+            b: self.b,
+            hill: self.hill,
+            alpha: self.alpha,
+            notch_threshold: self.notch_threshold,
+            primary_role: self.primary_role,
+        })
+    }
+}
+
+/// Neurotrophic competition (Oppenheim, 1991; Barde, 1989): neurons compete
+/// for a shared, depletable trophic factor secreted by the target. Each cell
+/// consumes the substance; a cell whose per-step uptake stays below
+/// `min_uptake` past the grace period undergoes apoptosis. When the trophic
+/// supply is limited this kills the losers and spares the winners — the
+/// developmental mechanism that prunes ~half of generated neurons.
+pub struct TrophicCompetition {
+    pub substance: String,
+    /// Intake = `consume_rate` · local concentration · dt.
+    pub consume_rate: f64,
+    /// Die if per-step uptake is below this after the grace period.
+    pub min_uptake: f64,
+    /// Simulation time before death checks start.
+    pub grace: f64,
+    age: f64,
+}
+
+impl TrophicCompetition {
+    pub fn new(substance: &str) -> Self {
+        TrophicCompetition {
+            substance: substance.to_string(),
+            consume_rate: 0.02,
+            min_uptake: 1e-4,
+            grace: 20.0,
+            age: 0.0,
+        }
+    }
+}
+
+impl Module for TrophicCompetition {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Soma(cell) = host else {
+            return;
+        };
+        self.age += world.dt;
+        let pos = world.cells[cell].soma.pos;
+        let c = world.concentration(&self.substance, pos);
+        let take = self.consume_rate * c * world.dt;
+        world.consume_substance_at(&self.substance, pos, take);
+        if self.age > self.grace && take < self.min_uptake {
+            world.kill_cell(cell);
+        }
+    }
+
+    fn copy_on_divide(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(TrophicCompetition {
+            substance: self.substance.clone(),
+            consume_rate: self.consume_rate,
+            min_uptake: self.min_uptake,
+            grace: self.grace,
+            age: 0.0,
+        })
+    }
+}
+
 /// Secretes a morphogen into the nearest grid cell each step (a soma module).
 pub struct Secretor {
     pub substance: String,
@@ -902,6 +1059,85 @@ mod tests {
         // Dead cells are excluded from the extracted graph.
         let g = w.to_graph();
         assert!(g.nodes.is_empty());
+    }
+
+    #[test]
+    fn lateral_inhibition_isolated_cell_becomes_primary() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_cell_module(c, Box::new(LateralInhibition::new(15.0)));
+        for _ in 0..200 {
+            w.step();
+        }
+        assert_eq!(
+            w.cells[c].role, 1,
+            "isolated cell has no suppression → primary"
+        );
+    }
+
+    #[test]
+    fn lateral_inhibition_produces_regular_spacing() {
+        let mut w = world();
+        let mut cells = Vec::new();
+        for x in 0..5i32 {
+            for y in 0..5i32 {
+                let c = w.add_cell(
+                    Vec3::new(x as f64 * 12.0, y as f64 * 12.0, 0.0),
+                    CellType::Excitatory,
+                    3.0,
+                );
+                w.add_cell_module(c, Box::new(LateralInhibition::new(15.0)));
+                cells.push(c);
+            }
+        }
+        for _ in 0..300 {
+            w.step();
+        }
+        let primaries: Vec<usize> = cells
+            .iter()
+            .filter(|&&c| w.cells[c].role == 1)
+            .copied()
+            .collect();
+        assert!(
+            (4..=20).contains(&primaries.len()),
+            "expected a self-organized subset of primaries, got {}",
+            primaries.len()
+        );
+        // The signature of lateral inhibition: no two primaries close together
+        // (regular spacing, roughly one per neighbourhood radius).
+        for (i, &a) in primaries.iter().enumerate() {
+            for &b in &primaries[i + 1..] {
+                let d = w.cells[a].soma.pos.dist(w.cells[b].soma.pos);
+                assert!(
+                    d > 13.0,
+                    "primaries {a} and {b} are too close ({d:.1}) — no lateral inhibition"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trophic_competition_kills_starved_cell() {
+        let mut w = world();
+        w.add_substance(Substance::new("ntf", 0.1, 0.001, &w.grid, vec![]));
+        w.add_substance_at("ntf", Vec3::ZERO, 50.0);
+        let near = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let far = w.add_cell(Vec3::new(0.0, 0.0, 60.0), CellType::Inhibitory, 4.0);
+        for c in [near, far] {
+            let mut tc = TrophicCompetition::new("ntf");
+            tc.consume_rate = 0.0002; // keep the source from being drained
+            tc.min_uptake = 1e-4;
+            tc.grace = 5.0;
+            w.add_soma_module(c, Box::new(tc));
+        }
+        for _ in 0..30 {
+            w.step();
+        }
+        assert!(w.cells[near].alive, "well-supplied cell must survive");
+        assert!(
+            !w.cells[far].alive,
+            "starved cell must die (neurotrophic competition)"
+        );
     }
 
     #[test]

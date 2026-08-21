@@ -53,4 +53,9 @@ pub struct Cell {
     /// growing, forms no synapses and is excluded from the extracted graph.
     /// It stays in the list (index stability), it just stops participating.
     pub alive: bool,
+    /// Delta–Notch signalling state (lateral inhibition, Collier et al. 1996).
+    /// [`crate::LateralInhibition`] integrates these ODEs; fate decisions are
+    /// read off `notch`/`delta`. Meaningless without that module.
+    pub delta: f64,
+    pub notch: f64,
 }

@@ -43,7 +43,8 @@ pub use math::Vec3;
 pub use module::{CellModule, Host, Module};
 pub use modules::{
     CellApoptosis, ChemoAttraction, ChemoRepulsion, Differentiate, DivideOnce, Fasciculation,
-    RetractNeurite, Secretor, SimpleCellCycle, SomaMigration,
+    LateralInhibition, RetractNeurite, Secretor, SimpleCellCycle, SomaMigration,
+    TrophicCompetition,
 };
 pub use substance::{ArtificialGradient, Grid, Substance};
 pub use world::{Bounds, GrownEdge, GrownGraph, GrownNode, Synapse, SynapseKind, World};
