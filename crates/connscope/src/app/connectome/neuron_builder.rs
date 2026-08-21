@@ -200,22 +200,23 @@ fn cat_of(kind: OpKind) -> NodeCat {
     }
 }
 
-/// Bright accent — headers, wires, port glows, hover borders.
+/// Проф muted акценты — как в connscope (Houdini/Nuke): s~0.48 v~0.78,
+/// L* выровнена, не неон. На тёмном фоне не «светятся», глаз не устаёт.
 fn cat_color(cat: NodeCat) -> Color32 {
     match cat {
-        NodeCat::System => Color32::from_rgb(155, 89, 182), // violet
-        NodeCat::Source => Color32::from_rgb(46, 204, 113), // green
-        NodeCat::Membrane => Color32::from_rgb(52, 152, 219), // blue
-        NodeCat::Math => Color32::from_rgb(230, 126, 34),   // amber
-        NodeCat::Gate => Color32::from_rgb(26, 188, 156),   // teal
-        NodeCat::Logic => Color32::from_rgb(231, 76, 60),   // red
+        NodeCat::System => Color32::from_rgb(128, 90, 165), // muted violet
+        NodeCat::Source => Color32::from_rgb(68, 155, 110), // muted sage green
+        NodeCat::Membrane => Color32::from_rgb(75, 145, 195), // steel blue
+        NodeCat::Gate => Color32::from_rgb(62, 158, 148),   // muted teal
+        NodeCat::Math => Color32::from_rgb(195, 135, 65),   // muted amber
+        NodeCat::Logic => Color32::from_rgb(195, 88, 78),   // muted vermillion
     }
 }
 
-/// Translucent tint that fills the header strip behind the title.
+/// Приглушённый тинт хедера — 52 alpha вместо 62, чтобы не «гореть».
 fn cat_tint(cat: NodeCat) -> Color32 {
     let c = cat_color(cat);
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 62)
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 52)
 }
 
 /// Small icon badge for the header (helps pattern-match at a glance).
@@ -1239,15 +1240,21 @@ impl NeuronBuilder {
 
     fn draw_minimap(&self, painter: &egui::Painter, canvas_size: Vec2) {
         let mm = self.minimap_rect(canvas_size);
+        // мягкая тень под миникартой + muted бордер под тему
+        painter.rect_filled(
+            mm.expand(3.0),
+            CornerRadius::same(8),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 40),
+        );
         painter.rect_filled(
             mm,
             CornerRadius::same(6),
-            Color32::from_rgba_unmultiplied(14, 14, 25, 215),
+            Color32::from_rgba_unmultiplied(22, 22, 32, 225),
         );
         painter.rect_stroke(
             mm,
             CornerRadius::same(6),
-            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(90, 90, 130, 130)),
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(70, 70, 95, 140)),
             StrokeKind::Inside,
         );
         // caption stays visible even for an empty graph (after Clear)
@@ -1293,15 +1300,18 @@ impl NeuronBuilder {
     // ── Rendering ──────────────────────────────────────────────
 
     fn draw_grid(&self, painter: &egui::Painter, origin: Pos2, size: Vec2) {
-        let color = Color32::from_rgba_unmultiplied(70, 70, 90, 60);
+        // Приглушённая сетка — как в Blender (тонкие пунктирные точки, не линии)
+        let color = Color32::from_rgba_unmultiplied(65, 65, 80, 28);
+        let dot = Color32::from_rgba_unmultiplied(75, 75, 92, 42);
         let w_min = self.screen_to_world(Vec2::ZERO);
         let w_max = self.screen_to_world(size);
+        // линии — очень тонкие и прозрачные
         let mut x = (w_min.x / GRID).floor() * GRID;
         while x <= w_max.x {
             let sx = origin.x + self.to_screen(vec2(x, 0.0)).x;
             painter.line_segment(
                 [pos2(sx, origin.y), pos2(sx, origin.y + size.y)],
-                Stroke::new(1.0_f32, color),
+                Stroke::new(0.7_f32, color),
             );
             x += GRID;
         }
@@ -1310,9 +1320,20 @@ impl NeuronBuilder {
             let sy = origin.y + self.to_screen(vec2(0.0, y)).y;
             painter.line_segment(
                 [pos2(origin.x, sy), pos2(origin.x + size.x, sy)],
-                Stroke::new(1.0_f32, color),
+                Stroke::new(0.7_f32, color),
             );
             y += GRID;
+        }
+        // точки на пересечениях — чуть заметнее, как в Houdini
+        let mut x = (w_min.x / GRID).floor() * GRID;
+        while x <= w_max.x {
+            let mut y = (w_min.y / GRID).floor() * GRID;
+            while y <= w_max.y {
+                let p = origin + self.to_screen(vec2(x, y));
+                painter.circle_filled(p, 1.0 * self.zoom, dot);
+                y += GRID;
+            }
+            x += GRID;
         }
     }
 
@@ -1325,7 +1346,7 @@ impl NeuronBuilder {
     ) {
         self.draw_grid(painter, origin, size);
 
-        // ── wires: cubic bezier, colored by the source node's category ──
+        // ── wires: cubic bezier, muted проф + outer glow (Houdini style) ──
         for (i, e) in self.edges.iter().enumerate() {
             if e.from >= self.nodes.len() || e.to >= self.nodes.len() {
                 continue; // stale edge from an old snapshot — skip, don't panic
@@ -1334,21 +1355,22 @@ impl NeuronBuilder {
             let b = origin + self.to_screen(self.in_pin_pos(e.to, e.to_pin));
             let base = cat_color(cat_of(self.nodes[e.from].kind));
             let (color, width) = if self.selected_edge == Some(i) {
-                (Color32::from_rgb(255, 230, 120), 3.0)
+                (Color32::from_rgb(212, 175, 90), 3.0) // muted gold, не неон 255,230,120
             } else if self.hover_edge == Some(i) {
-                (base.gamma_multiply(1.7), 3.0)
+                (base.gamma_multiply(1.45), 2.8)
             } else {
-                (base.gamma_multiply(1.15), 2.0)
+                (base.gamma_multiply(1.05), 1.9) // чуть тоньше и мягче
             };
-            draw_wire(painter, a, b, color, width);
-            // animated “data pulse” while the sim runs (Blender-style flow)
+            // outer glow — размытый след под проводом
+            let glow = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
+            draw_wire(painter, a, b, glow, width + 4.0 * self.zoom);
+            draw_wire(painter, a, b, color, width * self.zoom);
+            // animated “data pulse” — мягче и меньше
             if self.running {
-                let phase = (self.t * 0.012 + i as f64 * 0.618).fract() as f32;
-                painter.circle_filled(
-                    bezier_eval(a, b, phase),
-                    2.4 * self.zoom,
-                    color.gamma_multiply(1.5),
-                );
+                let phase = (self.t * 0.010 + i as f64 * 0.618).fract() as f32;
+                let pulse = bezier_eval(a, b, phase);
+                painter.circle_filled(pulse, 3.2 * self.zoom, glow);
+                painter.circle_filled(pulse, 1.8 * self.zoom, color.gamma_multiply(1.4));
             }
         }
         // wire being dragged from an output pin
@@ -1375,22 +1397,40 @@ impl NeuronBuilder {
             );
             let rounding = CornerRadius::same((8.0 * self.zoom) as u8);
 
-            // soft drop shadow lifts the node off the grid
+            // мягкая тень в 2 слоя — объём как в Blender (не плоский «штамп»)
+            let shadow_r = CornerRadius::same((10.0 * self.zoom) as u8);
+            painter.rect_filled(
+                rect.translate(vec2(0.0, 6.0 * self.zoom))
+                    .expand(4.0 * self.zoom),
+                shadow_r,
+                Color32::from_rgba_unmultiplied(0, 0, 0, 32),
+            );
             painter.rect_filled(
                 rect.translate(vec2(0.0, 3.0 * self.zoom)),
                 rounding,
-                Color32::from_rgba_unmultiplied(0, 0, 0, 90),
+                Color32::from_rgba_unmultiplied(0, 0, 0, 70),
             );
 
-            // body
+            // body — чуть светлее + subtle inner highlight сверху
             let bg = if self.selected == Some(i) {
-                Color32::from_rgb(46, 46, 74)
+                Color32::from_rgb(42, 42, 66)
             } else {
-                Color32::from_rgb(27, 27, 43)
+                Color32::from_rgb(30, 30, 48)
             };
             painter.rect_filled(rect, rounding, bg);
+            // inner highlight — 1px сверху, 14 alpha
+            painter.rect_filled(
+                Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + 1.5 * self.zoom)),
+                CornerRadius {
+                    nw: rounding.nw,
+                    ne: rounding.ne,
+                    sw: 0,
+                    se: 0,
+                },
+                Color32::from_rgba_unmultiplied(255, 255, 255, 14),
+            );
 
-            // header strip: category tint + solid accent line on top
+            // header strip: category tint + accent line + highlight
             let header_h = HEADER_H * self.zoom;
             let header = Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + header_h));
             painter.rect_filled(
@@ -1404,27 +1444,36 @@ impl NeuronBuilder {
                 cat_tint(cat),
             );
             painter.rect_filled(
-                Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + 2.5 * self.zoom)),
+                Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + 2.0 * self.zoom)),
                 CornerRadius::ZERO,
                 accent,
+            );
+            // header inner highlight
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(rect.min.x, rect.min.y + 2.0 * self.zoom),
+                    pos2(rect.max.x, rect.min.y + 3.2 * self.zoom),
+                ),
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(255, 255, 255, 18),
             );
             painter.text(
                 pos2(rect.min.x + 8.0 * self.zoom, rect.min.y + header_h * 0.5),
                 Align2::LEFT_CENTER,
                 format!("{}  {}", cat_icon(cat), spec.name),
-                FontId::proportional(13.0 * self.zoom),
-                Color32::from_rgb(240, 240, 252),
+                FontId::proportional(12.5 * self.zoom),
+                Color32::from_rgb(235, 235, 245),
             );
 
-            // border: bright yellow = selected, category colour = hovered
+            // border: muted gold = selected, category = hovered, soft gray = idle
             let border = if self.selected == Some(i) {
-                Color32::from_rgb(255, 205, 60)
+                Color32::from_rgb(212, 175, 90) // muted gold, не неон 255,205,60
             } else if self.hover_node == Some(i) {
-                accent
+                accent.gamma_multiply(1.3)
             } else {
-                Color32::from_rgb(92, 92, 130)
+                Color32::from_rgba_unmultiplied(80, 80, 105, 180)
             };
-            let bw = if self.selected == Some(i) { 2.0 } else { 1.0 };
+            let bw = if self.selected == Some(i) { 1.8 } else { 1.0 };
             painter.rect_stroke(
                 rect,
                 rounding,
@@ -1432,43 +1481,80 @@ impl NeuronBuilder {
                 StrokeKind::Inside,
             );
 
-            // pins: hollow ring when free, filled (with dark core) when connected
+            // пины — приглушённые, с outer glow при ховере/коннекте (Houdini style)
             let pr = PIN_R * self.zoom;
             for (pin, label) in spec.ins.iter().enumerate() {
                 let c = origin + self.to_screen(self.in_pin_pos(i, pin));
-                let col = Color32::from_rgb(90, 200, 255);
-                if self.edges.iter().any(|e| e.to == i && e.to_pin == pin) {
+                let col = Color32::from_rgb(110, 175, 215); // muted cyan, был 90,200,255 — неон
+                let connected = self.edges.iter().any(|e| e.to == i && e.to_pin == pin);
+                let pin_w = self.in_pin_pos(i, pin);
+                let hovered = pointer_world
+                    .map(|pw| (pw - pin_w).length() < HIT_R)
+                    .unwrap_or(false);
+                if connected {
+                    // outer glow
+                    painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, Color32::from_rgb(16, 18, 32));
+                    painter.circle_filled(c, pr, Color32::from_rgb(22, 24, 38));
                 } else {
+                    if hovered {
+                        painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
+                    }
                     painter.circle_stroke(
                         c,
                         pr,
-                        Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)),
+                        Stroke::new(
+                            1.4 * self.zoom,
+                            col.gamma_multiply(if hovered { 1.0 } else { 0.55 }),
+                        ),
                     );
-                    painter.circle_filled(c, pr * 0.35, col.gamma_multiply(0.5));
+                    painter.circle_filled(
+                        c,
+                        pr * 0.32,
+                        col.gamma_multiply(if hovered { 0.9 } else { 0.45 }),
+                    );
                 }
                 painter.text(
                     c + vec2(-7.0 * self.zoom, 0.0),
                     Align2::RIGHT_CENTER,
                     *label,
-                    FontId::proportional(11.0 * self.zoom),
-                    Color32::from_rgb(165, 175, 200),
+                    FontId::proportional(10.5 * self.zoom),
+                    if hovered {
+                        Color32::from_rgb(195, 205, 230)
+                    } else {
+                        Color32::from_rgb(155, 165, 185)
+                    },
                 );
             }
             for (pin, label) in spec.outs.iter().enumerate() {
                 let c = origin + self.to_screen(self.out_pin_pos(i, pin));
-                let col = Color32::from_rgb(255, 170, 60);
-                if self.edges.iter().any(|e| e.from == i && e.from_pin == pin) {
+                let col = Color32::from_rgb(210, 145, 70); // muted amber, был 255,170,60
+                let connected = self.edges.iter().any(|e| e.from == i && e.from_pin == pin);
+                let pin_w = self.out_pin_pos(i, pin);
+                let hovered = pointer_world
+                    .map(|pw| (pw - pin_w).length() < HIT_R)
+                    .unwrap_or(false);
+                if connected {
+                    painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, Color32::from_rgb(16, 18, 32));
+                    painter.circle_filled(c, pr, Color32::from_rgb(22, 24, 38));
                 } else {
+                    if hovered {
+                        painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
+                    }
                     painter.circle_stroke(
                         c,
                         pr,
-                        Stroke::new(1.4 * self.zoom, col.gamma_multiply(0.55)),
+                        Stroke::new(
+                            1.4 * self.zoom,
+                            col.gamma_multiply(if hovered { 1.0 } else { 0.55 }),
+                        ),
                     );
-                    painter.circle_filled(c, pr * 0.35, col.gamma_multiply(0.5));
+                    painter.circle_filled(
+                        c,
+                        pr * 0.32,
+                        col.gamma_multiply(if hovered { 0.9 } else { 0.45 }),
+                    );
                 }
                 let out_label = match node.kind {
                     OpKind::State => (*label).to_string(),
@@ -1496,106 +1582,106 @@ impl NeuronBuilder {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("🧠 Neuron Builder").strong().size(16.0));
-                ui.separator();
-                if ui
-                    .button(if self.running { "⏸ Pause" } else { "▶ Run" })
-                    .clicked()
-                {
-                    self.running = !self.running;
-                }
-                if ui.button("↺ Reset").clicked() {
-                    self.reset_sim();
-                }
-                if ui.button("⟳ Fit view").clicked() {
-                    self.pan = vec2(20.0, 20.0);
-                    self.zoom = 1.0;
-                }
-                ui.checkbox(&mut self.show_minimap, "🗺 minimap");
-                ui.checkbox(&mut self.show_plot, "📈 scope");
-                ui.separator();
-                ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=200).text("steps/frame"));
-                ui.add(egui::Slider::new(&mut self.dt, 0.01..=2.0).text("dt ms"));
-                ui.add(egui::Slider::new(&mut self.i_syn, -50.0..=100.0).text("I_syn"));
-                ui.add(egui::Slider::new(&mut self.v_init, -100.0..=50.0).text("v_init"));
-                ui.checkbox(&mut self.snap, "snap");
-            });
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Presets:");
-                if ui.button("LIF").clicked() {
-                    self.dt = 0.5;
-                    self.i_syn = 30.0;
-                    self.v_init = -70.0;
-                    self.init_gates = [0.0; 3];
-                    self.spike_thresh = -54.0;
-                    self.load_graph(default_lif_graph());
-                }
-                if ui.button("Morris-Lecar").clicked() {
-                    self.dt = 0.05;
-                    self.i_syn = 50.0;
-                    self.v_init = -60.0;
-                    // w∞(-60) ≈ 0 — w gate starts at rest.
-                    self.init_gates = [0.0003, 0.0, 0.0];
-                    self.spike_thresh = 0.0;
-                    self.load_graph(ml_graph());
-                }
-                if ui.button("HH-lite").clicked() {
-                    self.dt = 0.05;
-                    self.i_syn = 10.0;
-                    self.v_init = -65.0;
-                    // Resting squid gates at v=-65: m≈0.015, h≈0.70, n≈0.18.
-                    // A cold start (all 0) leaves h inactivated — the model
-                    // can never regenerate a spike.
-                    self.init_gates = [0.0153, 0.697, 0.182];
-                    self.spike_thresh = 0.0;
-                    self.load_graph(hh_lite_graph());
-                }
-                ui.separator();
-                ui.label("Trace:");
-                let trace_names = ["Scope", "s0", "s1", "s2", "s3"];
-                let old_trace = self.trace;
-                egui::ComboBox::from_id_salt("trace")
-                    .selected_text(trace_names[self.trace])
-                    .show_ui(ui, |ui| {
-                        for (i, name) in trace_names.iter().enumerate() {
-                            ui.selectable_value(&mut self.trace, i, *name);
-                        }
-                    });
-                if self.trace != old_trace {
-                    // avoid a false spike from a stale crossing baseline
-                    self.prev_trace = self.regs[self.trace_reg()];
-                }
-                ui.add(egui::Slider::new(&mut self.spike_thresh, -100.0..=50.0).text("spike mV"));
-                ui.add(egui::Slider::new(&mut self.window_ms, 50.0..=4000.0).text("window ms"));
-                ui.separator();
-                ui.label(format!("t = {:.1} ms", self.t));
-                ui.label(format!("⚡ {}", self.total_spikes));
-            });
-            ui.horizontal_wrapped(|ui| {
-                ui.label("File:");
-                ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
-                if ui.button("💾 Save").clicked() {
-                    self.save_graph();
-                }
-                if ui.button("📂 Load").clicked() {
-                    self.load_file();
-                }
-                ui.separator();
-                ui.label("Ops:");
-                for &kind in palette_kinds() {
-                    if ui.button(spec_of(kind).name).clicked() {
-                        self.add_node(kind);
+            ui.separator();
+            if ui
+                .button(if self.running { "⏸ Pause" } else { "▶ Run" })
+                .clicked()
+            {
+                self.running = !self.running;
+            }
+            if ui.button("↺ Reset").clicked() {
+                self.reset_sim();
+            }
+            if ui.button("⟳ Fit view").clicked() {
+                self.pan = vec2(20.0, 20.0);
+                self.zoom = 1.0;
+            }
+            ui.checkbox(&mut self.show_minimap, "🗺 minimap");
+            ui.checkbox(&mut self.show_plot, "📈 scope");
+            ui.separator();
+            ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=200).text("steps/frame"));
+            ui.add(egui::Slider::new(&mut self.dt, 0.01..=2.0).text("dt ms"));
+            ui.add(egui::Slider::new(&mut self.i_syn, -50.0..=100.0).text("I_syn"));
+            ui.add(egui::Slider::new(&mut self.v_init, -100.0..=50.0).text("v_init"));
+            ui.checkbox(&mut self.snap, "snap");
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Presets:");
+            if ui.button("LIF").clicked() {
+                self.dt = 0.5;
+                self.i_syn = 30.0;
+                self.v_init = -70.0;
+                self.init_gates = [0.0; 3];
+                self.spike_thresh = -54.0;
+                self.load_graph(default_lif_graph());
+            }
+            if ui.button("Morris-Lecar").clicked() {
+                self.dt = 0.05;
+                self.i_syn = 50.0;
+                self.v_init = -60.0;
+                // w∞(-60) ≈ 0 — w gate starts at rest.
+                self.init_gates = [0.0003, 0.0, 0.0];
+                self.spike_thresh = 0.0;
+                self.load_graph(ml_graph());
+            }
+            if ui.button("HH-lite").clicked() {
+                self.dt = 0.05;
+                self.i_syn = 10.0;
+                self.v_init = -65.0;
+                // Resting squid gates at v=-65: m≈0.015, h≈0.70, n≈0.18.
+                // A cold start (all 0) leaves h inactivated — the model
+                // can never regenerate a spike.
+                self.init_gates = [0.0153, 0.697, 0.182];
+                self.spike_thresh = 0.0;
+                self.load_graph(hh_lite_graph());
+            }
+            ui.separator();
+            ui.label("Trace:");
+            let trace_names = ["Scope", "s0", "s1", "s2", "s3"];
+            let old_trace = self.trace;
+            egui::ComboBox::from_id_salt("trace")
+                .selected_text(trace_names[self.trace])
+                .show_ui(ui, |ui| {
+                    for (i, name) in trace_names.iter().enumerate() {
+                        ui.selectable_value(&mut self.trace, i, *name);
                     }
+                });
+            if self.trace != old_trace {
+                // avoid a false spike from a stale crossing baseline
+                self.prev_trace = self.regs[self.trace_reg()];
+            }
+            ui.add(egui::Slider::new(&mut self.spike_thresh, -100.0..=50.0).text("spike mV"));
+            ui.add(egui::Slider::new(&mut self.window_ms, 50.0..=4000.0).text("window ms"));
+            ui.separator();
+            ui.label(format!("t = {:.1} ms", self.t));
+            ui.label(format!("⚡ {}", self.total_spikes));
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("File:");
+            ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
+            if ui.button("💾 Save").clicked() {
+                self.save_graph();
+            }
+            if ui.button("📂 Load").clicked() {
+                self.load_file();
+            }
+            ui.separator();
+            ui.label("Ops:");
+            for &kind in palette_kinds() {
+                if ui.button(spec_of(kind).name).clicked() {
+                    self.add_node(kind);
                 }
-                if ui.button("🗑 Clear").clicked() {
-                    self.push_undo();
-                    self.nodes.clear();
-                    self.edges.clear();
-                    self.selected = None;
-                    self.selected_edge = None;
-                    self.running = false;
-                    self.reset_sim();
-                }
-            });
+            }
+            if ui.button("🗑 Clear").clicked() {
+                self.push_undo();
+                self.nodes.clear();
+                self.edges.clear();
+                self.selected = None;
+                self.selected_edge = None;
+                self.running = false;
+                self.reset_sim();
+            }
+        });
         ui.separator();
     }
 
@@ -1615,26 +1701,28 @@ impl NeuronBuilder {
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
         ui.heading("Inspector");
-            if let Some(ei) = self.selected_edge {
-                if let Some(e) = self.edges.get(ei) {
-                    let from = spec_of(self.nodes[e.from].kind).name;
-                    let to = spec_of(self.nodes[e.to].kind).name;
-                    ui.label(format!("Wire: {from}.{} → {to}.{}", e.from_pin, e.to_pin));
-                    if ui.button("🗑 Delete wire").clicked() {
-                        self.delete_edge(ei);
-                    }
-                    ui.separator();
+        if let Some(ei) = self.selected_edge {
+            if let Some(e) = self.edges.get(ei) {
+                let from = spec_of(self.nodes[e.from].kind).name;
+                let to = spec_of(self.nodes[e.to].kind).name;
+                ui.label(format!("Wire: {from}.{} → {to}.{}", e.from_pin, e.to_pin));
+                if ui.button("🗑 Delete wire").clicked() {
+                    self.delete_edge(ei);
                 }
+                ui.separator();
             }
-            match self.selected {
-                Some(i) => self.inspector_node(ui, i),
-                None if self.selected_edge.is_none() => {
-                    ui.weak("Select a node (left-click), a wire, or drag from an orange output pin to a cyan input pin.");
-                }
-                None => {}
+        }
+        match self.selected {
+            Some(i) => self.inspector_node(ui, i),
+            None if self.selected_edge.is_none() => {
+                ui.weak("Select a node (left-click), a wire, or drag from an orange output pin to a cyan input pin.");
             }
-            ui.separator();
-            egui::CollapsingHeader::new("Program (opcodes)").default_open(true).show(ui, |ui| {
+            None => {}
+        }
+        ui.separator();
+        egui::CollapsingHeader::new("Program (opcodes)")
+            .default_open(true)
+            .show(ui, |ui| {
                 let prog = self.build_program();
                 for (k, op) in prog.iter().enumerate() {
                     ui.monospace(format!("{k}: {:?} → {}", op.kind, reg_name(op.out_reg)));
@@ -1739,7 +1827,8 @@ impl NeuronBuilder {
                 );
             }
             pui.hline(
-                HLine::new("thresh", self.spike_thresh as f64).color(Color32::from_rgb(120, 160, 255)),
+                HLine::new("thresh", self.spike_thresh as f64)
+                    .color(Color32::from_rgb(120, 160, 255)),
             );
             for &s in &self.spike_times {
                 if s >= t_min {
@@ -1856,7 +1945,12 @@ impl NeuronBuilder {
             .filter(|&&(x, _)| x >= t_min)
             .map(|&(x, y)| [x, y])
             .collect();
-        let spikes: Vec<f64> = self.spike_times.iter().copied().filter(|&s| s >= t_min).collect();
+        let spikes: Vec<f64> = self
+            .spike_times
+            .iter()
+            .copied()
+            .filter(|&s| s >= t_min)
+            .collect();
         BuilderScopeData {
             pts,
             spikes,
@@ -1977,8 +2071,8 @@ impl NeuronBuilder {
         {
             let avail = ui.available_size();
             let canvas_w = avail.x.max(160.0); // узкая вкладка → не уходить в минус
-            // Резерв под осциллограф снизу: 150px, если он показан.
-            // Клэмп обязателен — маленькая вкладка не должна уходить в минус.
+                                               // Резерв под осциллограф снизу: 150px, если он показан.
+                                               // Клэмп обязателен — маленькая вкладка не должна уходить в минус.
             let plot_reserve = if self.show_plot { 150.0 + 8.0 } else { 0.0 };
             let canvas_h = (avail.y - plot_reserve).max(120.0);
             let (mut resp, painter) =
@@ -2164,10 +2258,10 @@ impl NeuronBuilder {
                     });
             }
 
-        if self.show_plot {
-            ui.separator();
-            self.plot_ui(ui);
-        }
+            if self.show_plot {
+                ui.separator();
+                self.plot_ui(ui);
+            }
         }
     }
 }
@@ -2185,7 +2279,14 @@ mod tests {
     use pillars::api::formula::run_program;
 
     /// (имя, граф, dt, i_syn, v_init, старт ворот s1..s3)
-    type Preset = (&'static str, (Vec<GNode>, Vec<GEdge>), f32, f32, f32, [f32; 3]);
+    type Preset = (
+        &'static str,
+        (Vec<GNode>, Vec<GEdge>),
+        f32,
+        f32,
+        f32,
+        [f32; 3],
+    );
 
     /// Every preset must fit the register file and simulate without NaN.
     ///
