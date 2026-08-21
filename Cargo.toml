@@ -7,7 +7,7 @@ members = [
     "crates/t3",
     "crates/train",
     "crates/taas-format",
-    "crates/connscope",
+    "crates/connscope", "crates/pillars-validate",
 ]
 
 [workspace.package]
