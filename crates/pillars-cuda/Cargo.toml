@@ -12,6 +12,7 @@ name = "pillars_cuda"
 [dependencies]
 pillars = { path = "../pillars" }
 pillars-macros = { path = "../pillars-macros" }
+rand = "0.8"
 
 [dev-dependencies]
 serial_test = "3"

@@ -17,6 +17,21 @@ use crate::ffi::*;
 
 const BLOCK: u32 = 256;
 
+/// Compute archs to try when the device's native PTX ISA can't be compiled
+/// (newest first). Newer NVRTC versions reject archs they have dropped (e.g.
+/// compute_90 on CUDA 13.x), older ones reject archs they don't know yet — a
+/// descending walk finds the newest arch this NVRTC still accepts.
+const FALLBACK_ARCHS: &[(i32, i32)] = &[
+    (9, 0),
+    (8, 9),
+    (8, 6),
+    (8, 0),
+    (7, 5),
+    (7, 0),
+    (6, 1),
+    (6, 0),
+];
+
 /// CUDA source for the fixed (model-independent) spike-compaction kernel:
 /// each active spike (`spikes[i] != 0`) atomically claims a slot in
 /// `compacted` and stores its index. `counter` (device int, zeroed per step)
@@ -66,10 +81,14 @@ pub struct CompiledModel {
     bytes_state: usize,
     bytes_params: usize,
     /// Lazily built on first `step_graph` call (capture-once, replay-after).
-    /// `OnceLock` gives interior mutability so graph capture works through
-    /// `&self` (the kernel reads device memory; no host state is mutated by
-    /// replays).
-    graph: OnceLock<GraphState>,
+    /// `Mutex<Option<>>` protects against concurrent capture races — two
+    /// threads may observe `None` and both attempt capture (CUDA forbids
+    /// concurrent stream captures). The mutex ensures only one thread captures.
+    graph: Mutex<Option<GraphState>>,
+    /// CUmodule handles kept alive for the kernel's lifetime. NVRTC creates
+    /// a module per compilation; `cuModuleUnload` is called in Drop.
+    module: CUmodule,
+    compact_module: CUmodule,
 }
 
 impl CompiledModel {
@@ -89,16 +108,10 @@ impl CompiledModel {
         unsafe {
             let (ctx, major, minor) = *global_ctx().as_ref().map_err(|e| e.clone())?;
             let ctx: CUcontext = ctx.0;
-            // Try the device's native PTX ISA first; fall back to compute_90
-            // if this NVRTC doesn't know the newest architectures.
-            let func = match compile_and_load(d, ctx, source, kernel_name, major, minor) {
-                Ok(f) => f,
-                Err(native_err) => {
-                    compile_and_load(d, ctx, source, kernel_name, 90, 0).map_err(|fb_err| {
-                        format!("{native_err}\nfallback compute_90 failed: {fb_err}")
-                    })?
-                }
-            };
+            // Try the device's native PTX ISA first; walk a descending arch
+            // list if this NVRTC rejects it (CUDA 13.x dropped compute_90,
+            // so a single hardcoded fallback arch is not portable).
+            let func = compile_and_load_any(d, ctx, source, kernel_name, major, minor)?;
 
             let bytes_state = ns * stride * 4;
             let bytes_params = np * stride * 4;
@@ -107,26 +120,20 @@ impl CompiledModel {
                 (ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5]);
 
             // Compile the fixed compaction kernel (same context).
-            let compact_func = match compile_and_load(
+            let compact_func = compile_and_load_any(
                 d,
                 ctx,
                 COMPACT_CUDA_SOURCE,
                 "compact_spikes_kernel",
                 major,
                 minor,
-            ) {
-                Ok(f) => f,
-                Err(native_err) => {
-                    compile_and_load(d, ctx, COMPACT_CUDA_SOURCE, "compact_spikes_kernel", 90, 0)
-                        .map_err(|fb_err| {
-                            format!("{native_err}\nfallback compute_90 failed: {fb_err}")
-                        })?
-                }
-            };
+            )?;
 
             Ok(Self {
-                func,
-                compact_func,
+                func: func.1,
+                module: func.0,
+                compact_func: compact_func.1,
+                compact_module: compact_func.0,
                 d_states,
                 d_params,
                 d_i_in,
@@ -137,7 +144,7 @@ impl CompiledModel {
                 stride,
                 bytes_state,
                 bytes_params,
-                graph: OnceLock::new(),
+                graph: Mutex::new(None),
             })
         }
     }
@@ -253,14 +260,15 @@ impl CompiledModel {
         // concurrent use of the persistent API from multiple threads requires
         // caller-side serialization (captures may otherwise race).
         unsafe {
-            // Capture once, replay after. `OnceLock::get_or_try_init` is
-            // unstable, so do the set-if-empty dance by hand. If capture
-            // fails, the lock stays empty and the next call retries.
-            if self.graph.get().is_none() {
-                let g = capture_graph(d, self, dt)?;
-                let _ = self.graph.set(g);
+            // Capture once, replay after. `Mutex<Option<>>` prevents
+            // concurrent capture races: only one thread enters the
+            // None→Some transition; others see the captured graph
+            // (or wait if capture is in progress).
+            let mut guard = self.graph.lock().map_err(|e| format!("graph lock: {e}"))?;
+            if guard.is_none() {
+                *guard = Some(capture_graph(d, self, dt)?);
             }
-            let graph = self.graph.get().expect("graph set above");
+            let graph = guard.as_ref().expect("graph set above");
             // Update dt in the device args buffer, then replay. The graph was
             // instantiated with a pointer to `d_args`; the kernel reads the
             // scalars from device memory, so a fresh dt takes effect without
@@ -389,7 +397,7 @@ impl CompiledModel {
             check_cu(
                 d,
                 (d.cu_memcpy_dtoh)(
-                    states.as_ptr() as *mut c_void,
+                    states.as_mut_ptr() as *mut c_void,
                     self.d_states,
                     self.bytes_state,
                 ),
@@ -428,12 +436,15 @@ impl Drop for CompiledModel {
                     let _ = (d.cu_mem_free)(self.d_spikes);
                     let _ = (d.cu_mem_free)(self.d_compacted);
                     let _ = (d.cu_mem_free)(self.d_counter);
-                    if let Some(g) = self.graph.get() {
-                        let _ = (d.cu_graph_exec_destroy)(g.exec);
-                        let _ = (d.cu_stream_destroy)(g.stream);
-                        let _ = (d.cu_mem_free)(g.d_args);
+                    if let Ok(mut guard) = self.graph.lock() {
+                        if let Some(g) = guard.take() {
+                            let _ = (d.cu_graph_exec_destroy)(g.exec);
+                            let _ = (d.cu_stream_destroy)(g.stream);
+                            let _ = (d.cu_mem_free)(g.d_args);
+                        }
                     }
-                    // The CUDA context is process-global — never destroyed here.
+                    let _ = (d.cu_module_unload)(self.module);
+                    let _ = (d.cu_module_unload)(self.compact_module);
                 }
             }
         }
@@ -449,16 +460,7 @@ pub fn nvrtc_compile_check(source: &str) -> Result<(), String> {
     // supported too, so the first success is the natural pick.
     // `nvrtc_to_ptx` formats `compute_{major}{minor}`, so pass the digits
     // separately (8, 9 → compute_89), not the arch number.
-    let archs: &[(i32, i32)] = &[
-        (9, 0),
-        (8, 9),
-        (8, 6),
-        (8, 0),
-        (7, 5),
-        (7, 0),
-        (6, 1),
-        (6, 0),
-    ];
+    let archs = FALLBACK_ARCHS;
     let mut last_err = "no arch attempted".to_string();
     for &(major, minor) in archs {
         match nvrtc_to_ptx(source, major, minor) {
@@ -612,14 +614,7 @@ unsafe fn capture_graph(d: &Driver, model: &CompiledModel, _dt: f32) -> Result<G
         return Err(format!("graph end_capture: {e}"));
     }
     let mut exec: CUgraphExec = std::ptr::null_mut();
-    let rc = (d.cu_graph_instantiate)(
-        &mut exec,
-        graph,
-        CU_GRAPH_INSTANTIATE_DEFAULT,
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        0,
-    );
+    let rc = (d.cu_graph_instantiate)(&mut exec, graph, CU_GRAPH_INSTANTIATE_DEFAULT);
     let _ = (d.cu_graph_destroy)(graph); // exec is independent of graph
     if rc != 0 {
         let _ = (d.cu_stream_destroy)(stream);
@@ -675,6 +670,37 @@ fn compute_capability(d: &Driver, dev: CUdevice) -> Result<(i32, i32), String> {
     }
 }
 
+/// Compile and load a kernel, trying the device's native compute arch first
+/// and then [`FALLBACK_ARCHS`]. A single hardcoded fallback (e.g. compute_90)
+/// is not portable: CUDA 13.x NVRTC rejects archs it no longer knows
+/// (`NVRTC_ERROR_INVALID_OPTION`). Errors from every attempted arch are
+/// aggregated so the original (usually most informative) failure isn't lost.
+fn compile_and_load_any(
+    d: &Driver,
+    ctx: CUcontext,
+    source: &str,
+    kernel_name: &str,
+    major: i32,
+    minor: i32,
+) -> Result<(CUmodule, CUfunction), String> {
+    let mut tried = Vec::with_capacity(FALLBACK_ARCHS.len() + 1);
+    tried.push((major, minor));
+    tried.extend_from_slice(FALLBACK_ARCHS);
+    let mut errors = String::new();
+    for &(maj, min) in &tried {
+        match compile_and_load(d, ctx, source, kernel_name, maj, min) {
+            Ok(f) => return Ok(f),
+            Err(e) => {
+                if !errors.is_empty() {
+                    errors.push('\n');
+                }
+                errors.push_str(&format!("compute_{maj}{min}: {e}"));
+            }
+        }
+    }
+    Err(format!("no compute arch compiled:\n{errors}"))
+}
+
 fn compile_and_load(
     d: &Driver,
     _ctx: CUcontext,
@@ -682,7 +708,7 @@ fn compile_and_load(
     kernel_name: &str,
     major: i32,
     minor: i32,
-) -> Result<CUfunction, String> {
+) -> Result<(CUmodule, CUfunction), String> {
     unsafe {
         let ptx = nvrtc_to_ptx(source, major, minor)?;
         let mut module: CUmodule = std::ptr::null_mut();
@@ -710,7 +736,7 @@ fn compile_and_load(
                 first_lines(source, 20)
             ));
         }
-        Ok(func)
+        Ok((module, func))
     }
 }
 
@@ -733,9 +759,15 @@ fn nvrtc_to_ptx(source: &str, major: i32, minor: i32) -> Result<Vec<u8>, String>
         }
 
         let arch = format!("--gpu-architecture=compute_{major}{minor}");
+        // `--fmad=false` disables nvcc's automatic `a*b+c → fmaf` contraction.
+        // The CPU side (`f32x8`) emits separate mul + add (Rust does not fuse
+        // without an explicit `mul_add`), so contracting on the GPU would drift
+        // ~1 ulp from the CPU per step and break bit-parity (models that WANT
+        // FMA call `mul_add` explicitly — that `fmaf` is unaffected here).
         let opt = CString::new(arch).unwrap();
-        let opts = [opt.as_ptr()];
-        let rc = (n.nvrtc_compile_program)(prog, 1, opts.as_ptr());
+        let opt_fmad = CString::new("--fmad=false").unwrap();
+        let opts = [opt.as_ptr(), opt_fmad.as_ptr()];
+        let rc = (n.nvrtc_compile_program)(prog, 2, opts.as_ptr());
         if rc != 0 {
             let log = nvrtc_log(n, prog);
             let _ = (n.nvrtc_destroy_program)(&mut prog);
@@ -832,11 +864,29 @@ pub(crate) fn compile_source_function(
             }
             Ok((module, function))
         };
+        // compute_90 is gone on CUDA 13.x — fall back to sm_89 (covers every
+        // consumer GPU since RTX 20xx) instead of a dead arch.
         compile(major, minor).or_else(|native| {
-            compile(90, 0)
-                .map_err(|fallback| format!("{native}\nfallback compute_90 failed: {fallback}"))
+            compile(8, 9).map_err(|fallback| format!("{native}\nfallback compute_89 failed: {fallback}"))
         })
     }
+}
+
+/// Compile and load a `#[dual_neuron]`-generated kernel (a C++-mangled
+/// `__global__`, NOT an `extern "C"` kernel). This is the mangling-aware
+/// counterpart of [`compile_source_function`] — it walks the compute-arch
+/// fallback list and reads the real entry name out of the PTX. Used by
+/// [`crate::network::CompiledNetwork`] to compile each population's kernel.
+pub(crate) fn compile_dual_kernel(
+    source: &str,
+    kernel_name: &str,
+) -> Result<(CUmodule, CUfunction), String> {
+    let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let d = driver().as_ref().map_err(|e| e.clone())?;
+    set_current_ctx(d)?;
+    let (ctx, major, minor) = *global_ctx().as_ref().map_err(|e| e.clone())?;
+    let ctx: CUcontext = ctx.0;
+    compile_and_load_any(d, ctx, source, kernel_name, major, minor)
 }
 
 pub(crate) fn check_cu(d: &Driver, rc: CUresult) -> Result<(), String> {
@@ -845,6 +895,25 @@ pub(crate) fn check_cu(d: &Driver, rc: CUresult) -> Result<(), String> {
     } else {
         Err(driver_error(d, rc))
     }
+}
+
+/// Resolve a kernel function handle from an already-loaded module by its
+/// **unmangled** name. For `extern "C" __global__` kernels the PTX entry name
+/// is exactly the C name (no C++ mangling), so `cuModuleGetFunction` with the
+/// plain name works. Used by [`crate::alpha_lif`] to extract the auxiliary
+/// scatter / inject / count kernels from one NVRTC module.
+pub(crate) fn module_function(module: CUmodule, kernel_name: &str) -> Result<CUfunction, String> {
+    let d = driver().as_ref().map_err(|e| e.clone())?;
+    let name = CString::new(kernel_name).map_err(|_| "kernel name contains NUL")?;
+    let mut func: CUfunction = std::ptr::null_mut();
+    let rc = unsafe { (d.cu_module_get_function)(&mut func, module, name.as_ptr()) };
+    if rc != 0 {
+        return Err(format!(
+            "kernel `{kernel_name}` not found in module: {}",
+            driver_error(d, rc)
+        ));
+    }
+    Ok(func)
 }
 
 fn first_lines(s: &str, n: usize) -> String {
@@ -878,6 +947,26 @@ fn extract_exact_entry_name(ptx: &[u8], requested: &str) -> Result<String, Strin
     }
 }
 
+/// Decode a C++-mangled PTX entry name: `_Z<len><name><rest>` → `<name>`.
+/// NVRTC compiles `__global__` kernels with C++ linkage, so the PTX entry is
+/// `_Z12mylif_kernelPf…`, not `mylif_kernel`. Unmangled (extern "C") kernels
+/// are returned unchanged.
+fn demangle_cpp_entry(name: &str) -> String {
+    let rest = name.strip_prefix("_Z").unwrap_or(name);
+    let digits = rest.bytes().take_while(|b| b.is_ascii_digit()).count();
+    if digits == 0 {
+        return name.to_string();
+    }
+    match rest[..digits].parse::<usize>() {
+        Ok(len)
+            if len > 0 && rest.len() >= digits + len && rest.is_char_boundary(digits + len) =>
+        {
+            rest[digits..digits + len].to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 fn extract_entry_name(ptx: &[u8], requested: &str) -> Result<String, String> {
     let text = String::from_utf8_lossy(ptx);
     let mut matches = Vec::new();
@@ -886,7 +975,8 @@ fn extract_entry_name(ptx: &[u8], requested: &str) -> Result<String, String> {
             let rest = &line[idx + ".entry ".len()..];
             if let Some(open) = rest.find('(') {
                 let name = rest[..open].trim();
-                if !name.is_empty() && (name == requested || name.ends_with(requested)) {
+                let decoded = demangle_cpp_entry(name);
+                if !name.is_empty() && (name == requested || decoded == requested) {
                     matches.push(name.to_string());
                 }
             }

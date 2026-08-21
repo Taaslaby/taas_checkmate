@@ -255,8 +255,7 @@ pub type CuStreamCreateFn = unsafe extern "C" fn(*mut CUstream, u32) -> CUresult
 pub type CuStreamDestroyFn = unsafe extern "C" fn(CUstream) -> CUresult;
 pub type CuStreamBeginCaptureFn = unsafe extern "C" fn(CUstream, u32) -> CUresult;
 pub type CuStreamEndCaptureFn = unsafe extern "C" fn(CUstream, *mut CUgraph) -> CUresult;
-pub type CuGraphInstantiateFn =
-    unsafe extern "C" fn(*mut CUgraphExec, CUgraph, u64, *mut c_void, *mut c_void, u64) -> CUresult;
+pub type CuGraphInstantiateFn = unsafe extern "C" fn(*mut CUgraphExec, CUgraph, u64) -> CUresult;
 pub type CuGraphLaunchFn = unsafe extern "C" fn(CUgraphExec, CUstream) -> CUresult;
 pub type CuGraphDestroyFn = unsafe extern "C" fn(CUgraph) -> CUresult;
 pub type CuGraphExecDestroyFn = unsafe extern "C" fn(CUgraphExec) -> CUresult;

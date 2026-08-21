@@ -9,10 +9,10 @@
 use pillars::core::population::NeuralPopulation;
 use pillars::zoo::Model;
 use pillars_cuda::{
-    CompiledModel, ADEX_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, FHN_CUDA_SOURCE,
-    GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HR_CUDA_SOURCE,
-    IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE, RATE_CUDA_SOURCE,
-    SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
+    CompiledModel, ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE,
+    BEAM_CUDA_SOURCE, FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE,
+    HR_CUDA_SOURCE, IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE,
+    RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, TRANSFORMER_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };
 
 const N: usize = 64; // multiple of 8 → capacity == n, stride == n
@@ -97,6 +97,32 @@ fn run_parity<M: Model>(
 // ═══════════════════════════════════════════════════════════════════
 //  Spiking models
 // ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn alpha_lif_parity() {
+    // LIF + alpha-synapse (Shiu et al. 2024, fly brain). 3 states, 7 params.
+    // No exp — pure linear/FMA arithmetic, so tolerance is tight.
+    let (spikes, bits) = run_parity::<pillars_cuda::AlphaLifModel>(
+        "alphalif_kernel",
+        ALPHA_LIF_CUDA_SOURCE,
+        &[(0, -52.0), (1, 0.0), (2, 22.0)], // v, g, refr_cnt (not refractory)
+        &[
+            0.1,     // dt
+            0.005,   // time_factor = dt/tau_mem (0.1/20)
+            -52.0,   // v_rest
+            -45.0,   // v_thresh
+            -52.0,   // v_reset
+            22.0,    // refr_steps (tau_ref=2.2ms / dt=0.1ms)
+            0.98,    // syn_decay = 1 - dt/tau_syn (1 - 0.1/5)
+        ],
+        0.1,
+        50.0, // conductance input (delayed) in mV-equivalent
+        500,
+        1e-3,
+    );
+    assert!(spikes > 0, "alpha_lif must spike at g=50, got {spikes}");
+    eprintln!("[parity] alpha_lif: spikes={spikes} max bits={bits}");
+}
 
 #[test]
 fn fhn_parity() {
@@ -210,6 +236,73 @@ fn glif4_parity() {
     );
     assert!(spikes > 0, "glif4 must spike at I=30, got {spikes}");
     eprintln!("[parity] glif4: spikes={spikes} max bits={bits}");
+}
+
+#[test]
+fn beam_parity() {
+    // Recurrent beam: phase ramp + triangle wave + echo self-feedback.
+    let (spikes, bits) = run_parity::<pillars_cuda::BeamModel>(
+        "beam_kernel",
+        BEAM_CUDA_SOURCE,
+        &[(0, 0.0), (1, 0.9), (2, 0.0)], // phase, amp, echo
+        &[
+            0.5, 0.1, 0.05, 0.2, 0.05, 1.5, 0.9, 0.02, 0.5, 0.5, 0.6,
+        ], // dt, f0, k_i, k_echo, inv_tau_echo, w_echo, amp0, inv_tau_amp, k_amp, thresh, drain
+        0.5,
+        1.0,
+        1000,
+        1e-3,
+    );
+    assert!(spikes > 0, "beam must pulse with I=1, got {spikes}");
+    eprintln!("[parity] beam: spikes={spikes} max bits={bits}");
+}
+
+#[test]
+fn transformer_parity() {
+    // Temporal self-attention with learnable QKV weights (STDP-style).
+    let (spikes, bits) = run_parity::<pillars_cuda::TransformerModel>(
+        "transformer_kernel",
+        TRANSFORMER_CUDA_SOURCE,
+        &[
+            (0, 0.0),
+            (1, 0.0),
+            (2, 0.0),
+            (3, 0.0),
+            (4, 0.0),
+            (5, 0.0),
+            (6, 0.0),
+            (7, 0.0),  // mem0..mem7
+            (8, 0.0),  // acc
+            (9, 1.0),
+            (10, 1.0),
+            (11, 1.0),
+            (12, 1.0),
+            (13, 1.0),
+            (14, 1.0),
+            (15, 1.0),
+            (16, 1.0), // w0..w7 (keys)
+            (17, 1.0),
+            (18, 1.0),
+            (19, 1.0),
+            (20, 1.0),
+            (21, 1.0),
+            (22, 1.0),
+            (23, 1.0),
+            (24, 1.0), // v0..v7 (values)
+        ],
+        &[
+            0.5, 0.95, 1.0, 0.5, 0.9, 0.5, // dt,decay,gain,inv_tau_acc,thresh,k_scale
+            0.01, 0.01,                       // eta_k, eta_v
+            1.0, 2.0,                         // w_base, w_span
+            1.0, 2.0,                         // v_base, v_span
+        ],
+        0.5,
+        1.0,
+        500,
+        5e-3,
+    );
+    assert!(spikes > 0, "transformer must spike at I=1, got {spikes}");
+    eprintln!("[parity] transformer: spikes={spikes} max bits={bits}");
 }
 
 #[test]
@@ -356,9 +449,12 @@ fn atlasov_parity() {
 #[test]
 fn zoo_sources_are_self_contained() {
     let sources: &[(&str, &str, &str)] = &[
+        ("alphalif_kernel", "alphalif_step", ALPHA_LIF_CUDA_SOURCE),
         ("fhn_kernel", "fhn_step", FHN_CUDA_SOURCE),
         ("adex_kernel", "adex_step", ADEX_CUDA_SOURCE),
         ("glif3_kernel", "glif3_step", GLIF3_CUDA_SOURCE),
+        ("beam_kernel", "beam_step", BEAM_CUDA_SOURCE),
+        ("transformer_kernel", "transformer_step", TRANSFORMER_CUDA_SOURCE),
         ("glif4_kernel", "glif4_step", GLIF4_CUDA_SOURCE),
         ("lifat_kernel", "lifat_step", LIFAT_CUDA_SOURCE),
         (

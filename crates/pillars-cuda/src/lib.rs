@@ -24,11 +24,15 @@
 //! truth) — every model is `#[dual_neuron]` there and exports its
 //! `*_CUDA_SOURCE`. This crate re-exports them and adds the NVRTC driver.
 
+pub mod alpha_lif;
 pub mod engine;
 pub mod ffi;
 pub mod kernel;
+pub mod network;
 
+pub use alpha_lif::{AlphaLifGpu, AlphaLifOutput, AlphaLifParams};
 pub use kernel::{BufferArg, CudaKernel, LaunchConfig, ScalarArg};
+pub use network::{CompiledNetwork, NetworkPop};
 
 /// AOT GPU microkernels + persistent device context. One `.cu` per
 /// microkernel in `kernels/`, FFI wrappers here. Exposed upstream as `cuda`:
@@ -39,13 +43,15 @@ pub use engine::CompiledModel;
 
 // ── Zoo models transpiled IN pillars (no copy here — single source) ──
 pub use pillars::zoo::neurons::{
-    AdExModel, AtlasovNeuromotorModel, FHNModel, GLIF3Model, GLIF4Model, HAAPModel, HHModel,
-    HRModel, IzhikevichDualModel, IzhikevichModel, LIFAtModel, LIFModel, MorrisLecarModel,
-    RateModel, SAWModel, VSNModel, WCModel,
+    AdExModel, AlphaLifModel, AtlasovNeuromotorModel, BeamModel, FHNModel, GLIF3Model, GLIF4Model,
+    HAAPModel, HHModel, HRModel, Izhikevich2007Model, IzhikevichDualModel, IzhikevichModel,
+    LIFAtModel, LIFModel, MorrisLecarModel,    RateModel, SAWModel, TransformerModel, VSNModel,
+    WCModel,
 };
 pub use pillars::zoo::neurons::{
-    ADEX_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE,
-    GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HH_CUDA_SOURCE, HR_CUDA_SOURCE, IZHIKEVICH_CUDA_SOURCE,
+    ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, BEAM_CUDA_SOURCE,
+    FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HH_CUDA_SOURCE,
+    HR_CUDA_SOURCE, IZHIKEVICH_2007_CUDA_SOURCE, IZHIKEVICH_CUDA_SOURCE,
     IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, LIF_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE,
-    RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
+    RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, TRANSFORMER_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };
