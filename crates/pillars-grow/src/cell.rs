@@ -49,4 +49,8 @@ pub struct Cell {
     pub soma: Soma,
     pub neurites: Vec<Neurite>,
     pub modules: Vec<Box<dyn CellModule>>,
+    /// `false` after apoptosis ([`crate::CellApoptosis`]): the cell stops
+    /// growing, forms no synapses and is excluded from the extracted graph.
+    /// It stays in the list (index stability), it just stops participating.
+    pub alive: bool,
 }

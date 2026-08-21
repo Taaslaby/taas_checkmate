@@ -24,6 +24,15 @@ impl Vec3 {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
 
+    /// Cross product (right-hand rule).
+    pub fn cross(self, o: Vec3) -> Vec3 {
+        Vec3::new(
+            self.y * o.z - self.z * o.y,
+            self.z * o.x - self.x * o.z,
+            self.x * o.y - self.y * o.x,
+        )
+    }
+
     pub fn len(self) -> f64 {
         self.dot(self).sqrt()
     }
@@ -54,6 +63,31 @@ impl Vec3 {
             _ => self.z,
         }
     }
+}
+
+/// Rotate `v` by `angle` radians around a unit `axis` (Rodrigues' formula).
+pub fn rotate_vec(v: Vec3, axis: Vec3, angle: f64) -> Vec3 {
+    let c = angle.cos();
+    let s = angle.sin();
+    let t = 1.0 - c;
+    let (x, y, z) = (axis.x, axis.y, axis.z);
+    let (vx, vy, vz) = (v.x, v.y, v.z);
+    Vec3::new(
+        (t * x * x + c) * vx + (t * x * y - s * z) * vy + (t * x * z + s * y) * vz,
+        (t * x * y + s * z) * vx + (t * y * y + c) * vy + (t * y * z - s * x) * vz,
+        (t * x * z - s * y) * vx + (t * y * z + s * x) * vy + (t * z * z + c) * vz,
+    )
+}
+
+/// Closest distance from point `p` to the segment `a`–`b`.
+pub fn dist_point_segment(p: Vec3, a: Vec3, b: Vec3) -> f64 {
+    let ab = b - a;
+    let len2 = ab.dot(ab);
+    if len2 <= 1e-12 {
+        return p.dist(a);
+    }
+    let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
+    p.dist(a + ab * t)
 }
 
 impl Add for Vec3 {
@@ -118,5 +152,41 @@ mod tests {
         assert_eq!(a.axis(1), 2.0);
         assert_eq!(a.axis(2), 3.0);
         assert_eq!(a.axis(9), 3.0); // fallback = z
+    }
+
+    #[test]
+    fn rotate_vec_quarter_turn() {
+        // (1,0,0) rotated +90° around z → (0,1,0).
+        let r = rotate_vec(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            std::f64::consts::FRAC_PI_2,
+        );
+        assert!(r.x.abs() < 1e-12);
+        assert!((r.y - 1.0).abs() < 1e-12);
+        assert!(r.z.abs() < 1e-12);
+    }
+
+    #[test]
+    fn cross_product_orthogonal() {
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let z = x.cross(y);
+        assert!((z.x).abs() < 1e-12);
+        assert!((z.y).abs() < 1e-12);
+        assert!((z.z - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn dist_point_segment_cases() {
+        let a = Vec3::new(0.0, 0.0, 0.0);
+        let b = Vec3::new(10.0, 0.0, 0.0);
+        // On the line between: 0. At the ends: distance to endpoint.
+        assert!(dist_point_segment(Vec3::new(5.0, 0.0, 0.0), a, b).abs() < 1e-12);
+        assert!((dist_point_segment(Vec3::new(3.0, 4.0, 0.0), a, b) - 4.0).abs() < 1e-12);
+        // Beyond an endpoint → distance to that endpoint.
+        assert!((dist_point_segment(Vec3::new(15.0, 0.0, 0.0), a, b) - 5.0).abs() < 1e-12);
+        // Degenerate segment → distance to the point.
+        assert!((dist_point_segment(Vec3::new(2.0, 0.0, 0.0), a, a) - 2.0).abs() < 1e-12);
     }
 }

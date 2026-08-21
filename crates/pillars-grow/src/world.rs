@@ -145,8 +145,17 @@ impl World {
             },
             neurites: vec![],
             modules: vec![],
+            alive: true,
         });
         id
+    }
+
+    /// Mark a cell dead (apoptosis). It stops growing, forms no synapses and
+    /// is excluded from the extracted graph; its index stays valid.
+    pub fn kill_cell(&mut self, cell: usize) {
+        if let Some(c) = self.cells.get_mut(cell) {
+            c.alive = false;
+        }
     }
 
     pub fn add_cell_module(&mut self, cell: usize, m: Box<dyn CellModule>) {
@@ -257,7 +266,33 @@ impl World {
 
     /// Total neurite count across all cells.
     pub fn total_neurites(&self) -> usize {
-        self.cells.iter().map(|c| c.neurites.len()).sum()
+        self.cells
+            .iter()
+            .filter(|c| c.alive)
+            .map(|c| c.neurites.len())
+            .sum()
+    }
+
+    /// Direction of the nearest foreign neurite segment within `radius` of `p`
+    /// (for fasciculation), plus the contact distance. `None` if nothing is
+    /// close. Own cell and dead cells are ignored.
+    pub fn nearby_neurite_dir(&self, cell: usize, p: Vec3, radius: f64) -> Option<(Vec3, f64)> {
+        let mut best: Option<(Vec3, f64)> = None;
+        for (ci, c) in self.cells.iter().enumerate() {
+            if ci == cell || !c.alive {
+                continue;
+            }
+            for neur in &c.neurites {
+                for w in neur.points.windows(2) {
+                    let d = crate::math::dist_point_segment(p, w[0], w[1]);
+                    if d < radius && best.is_none_or(|(_, bd)| d < bd) {
+                        let dir = (w[1] - w[0]).normalized();
+                        best = Some((dir, d));
+                    }
+                }
+            }
+        }
+        best
     }
 
     /// Bifurcate a neurite: a new neurite starts at the current tip, carrying
@@ -359,13 +394,20 @@ impl World {
     /// immediately loses its contacts. Rule-based synapses ([`World::connect_fates`])
     /// are untouched.
     pub fn form_synapses(&mut self, dist: f64) {
-        // Drop all geometric synapses; keep rule-based ones (they dedupe).
-        self.synapses.retain(|s| !s.geometric);
+        // Drop all geometric synapses and any synapse touching a dead cell;
+        // keep live rule-based ones (they dedupe).
+        self.synapses
+            .retain(|s| !s.geometric && self.cells[s.pre].alive && self.cells[s.post].alive);
         let n = self.cells.len();
         // Gather each cell's axon tips and all contact points once per step.
         let mut tips: Vec<Vec<Vec3>> = Vec::with_capacity(n);
         let mut cell_points: Vec<Vec<Vec3>> = Vec::with_capacity(n);
         for c in &self.cells {
+            if !c.alive {
+                tips.push(vec![]);
+                cell_points.push(vec![]);
+                continue;
+            }
             tips.push(
                 c.neurites
                     .iter()
@@ -433,14 +475,14 @@ impl World {
             .cells
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.role == from_role && c.sub_role == from_sub)
+            .filter(|(_, c)| c.alive && c.role == from_role && c.sub_role == from_sub)
             .map(|(i, _)| i)
             .collect();
         let dst: Vec<usize> = self
             .cells
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.role == to_role && c.sub_role == to_sub)
+            .filter(|(_, c)| c.alive && c.role == to_role && c.sub_role == to_sub)
             .map(|(i, _)| i)
             .collect();
         let mut n = 0;
@@ -472,6 +514,7 @@ impl World {
             nodes: self
                 .cells
                 .iter()
+                .filter(|c| c.alive)
                 .map(|c| GrownNode {
                     id: c.id,
                     cell_type: c.cell_type,
@@ -498,6 +541,9 @@ impl World {
     }
 
     pub fn random_vec(&mut self, scale: f64) -> Vec3 {
+        if scale <= 0.0 {
+            return Vec3::ZERO;
+        }
         Vec3::new(
             self.rng.gen_range(-scale..scale),
             self.rng.gen_range(-scale..scale),
@@ -522,6 +568,9 @@ impl World {
     fn run_cell_modules(&mut self) {
         let n = self.cells.len();
         for ci in 0..n {
+            if !self.cells[ci].alive {
+                continue;
+            }
             let mut mods = std::mem::take(&mut self.cells[ci].modules);
             for mut m in mods.drain(..) {
                 m.run(self, ci);
@@ -533,6 +582,9 @@ impl World {
     fn run_soma_modules(&mut self) {
         let n = self.cells.len();
         for ci in 0..n {
+            if !self.cells[ci].alive {
+                continue;
+            }
             let mut mods = std::mem::take(&mut self.cells[ci].soma.modules);
             for mut m in mods.drain(..) {
                 m.run(self, Host::Soma(ci));
@@ -544,6 +596,9 @@ impl World {
     fn run_neurite_modules(&mut self) {
         let n = self.cells.len();
         for ci in 0..n {
+            if !self.cells[ci].alive {
+                continue;
+            }
             let nneur = self.cells[ci].neurites.len();
             for ni in 0..nneur {
                 let mut mods = std::mem::take(&mut self.cells[ci].neurites[ni].modules);
@@ -558,7 +613,9 @@ impl World {
     fn process_divisions(&mut self) {
         let ids = std::mem::take(&mut self.pending_divisions);
         for id in ids {
-            self.divide_cell(id);
+            if self.cells[id].alive {
+                self.divide_cell(id);
+            }
         }
     }
 
@@ -641,6 +698,7 @@ impl World {
                 })
                 .collect(),
             modules: cell_mods,
+            alive: true,
         };
         self.cells.push(daughter);
     }
@@ -766,6 +824,23 @@ mod tests {
             "rule synapses must survive form_synapses"
         );
         assert!(w.synapses.iter().all(|s| !s.geometric));
+    }
+
+    #[test]
+    fn rule_synapses_to_dead_cell_dropped() {
+        let mut w = world();
+        let a = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let b = w.add_cell(Vec3::new(0.0, 0.0, 50.0), CellType::Inhibitory, 4.0);
+        w.cells[a].role = 1;
+        w.cells[b].role = 2;
+        w.connect_fates(1, 0, 2, 0, 3.0);
+        assert_eq!(w.synapses.len(), 1);
+        w.kill_cell(b);
+        w.form_synapses(8.0);
+        assert!(
+            w.synapses.is_empty(),
+            "synapses to a dead cell must be dropped"
+        );
     }
 
     #[test]

@@ -142,6 +142,9 @@ pub struct ChemoAttraction {
     pub stop_concentration: f64,
     /// Hard cap on neurite length (world units); `None` = unlimited.
     pub max_len_um: Option<f64>,
+    /// Max turn angle per step, degrees (CX3D `NeuriteElongation.turnRate`);
+    /// `None` = unlimited. Limits how sharply a cone can bend.
+    pub turn_rate_deg: Option<f64>,
     direction: Option<Vec3>,
 }
 
@@ -156,6 +159,7 @@ impl ChemoAttraction {
             noise_weight: 0.6,
             stop_concentration: 0.3,
             max_len_um: None,
+            turn_rate_deg: None,
             direction: None,
         }
     }
@@ -188,10 +192,13 @@ impl Module for ChemoAttraction {
             return;
         }
 
-        let old = self.direction.unwrap_or(grad);
+        // Normalize the initial direction: the raw gradient is a tiny vector,
+        // so without this the first step would be noise-dominated and seed a
+        // persistent drift off the gradient axis.
+        let old = self.direction.unwrap_or(grad.normalized());
         let noise = world.random_vec(self.noise_weight);
         let step_dir = old * self.old_dir_weight + grad.normalized() * self.gradient_weight + noise;
-        let step_dir = step_dir.normalized();
+        let step_dir = clamp_turn(old, step_dir.normalized(), self.turn_rate_deg);
 
         world.extend_neurite(cell, idx, step_dir * self.speed);
         self.direction = Some(step_dir);
@@ -221,9 +228,30 @@ impl Module for ChemoAttraction {
             noise_weight: self.noise_weight,
             stop_concentration: self.stop_concentration,
             max_len_um: self.max_len_um,
+            turn_rate_deg: self.turn_rate_deg,
             direction: None,
         })
     }
+}
+
+/// Clamp a candidate step direction to within `max_deg` of the previous
+/// direction (CX3D `NeuriteElongation.turnRate`). `None` = no limit.
+fn clamp_turn(prev: Vec3, dir: Vec3, max_deg: Option<f64>) -> Vec3 {
+    let Some(max) = max_deg else {
+        return dir;
+    };
+    let dot = prev.dot(dir).clamp(-1.0, 1.0);
+    let ang = dot.acos();
+    let limit = max.to_radians();
+    if ang <= limit {
+        return dir;
+    }
+    let axis = prev.cross(dir);
+    if axis.len() <= 1e-12 {
+        return prev;
+    }
+    // Rotate `dir` back toward `prev` by the excess angle.
+    crate::math::rotate_vec(dir, axis.normalized(), -(ang - limit))
 }
 
 /// Growth cone that steers **away** from a morphogen source (CX3D
@@ -244,6 +272,8 @@ pub struct ChemoRepulsion {
     pub min_concentration: f64,
     /// Hard cap on neurite length; `None` = unlimited.
     pub max_len_um: Option<f64>,
+    /// Max turn angle per step, degrees; `None` = unlimited.
+    pub turn_rate_deg: Option<f64>,
     direction: Option<Vec3>,
 }
 
@@ -257,6 +287,7 @@ impl ChemoRepulsion {
             noise_weight: 0.6,
             min_concentration: 0.01,
             max_len_um: None,
+            turn_rate_deg: None,
             direction: None,
         }
     }
@@ -280,12 +311,11 @@ impl Module for ChemoRepulsion {
         if concentration < self.min_concentration {
             grad = Vec3::ZERO;
         }
-
-        let old = self.direction.unwrap_or(grad);
+        let old = self.direction.unwrap_or(grad.normalized());
         let noise = world.random_vec(self.noise_weight);
         // Away from the source: negate the gradient.
         let step_dir = old * self.old_dir_weight - grad.normalized() * self.gradient_weight + noise;
-        let step_dir = step_dir.normalized();
+        let step_dir = clamp_turn(old, step_dir.normalized(), self.turn_rate_deg);
 
         world.extend_neurite(cell, idx, step_dir * self.speed);
         self.direction = Some(step_dir);
@@ -307,6 +337,7 @@ impl Module for ChemoRepulsion {
             noise_weight: self.noise_weight,
             min_concentration: self.min_concentration,
             max_len_um: self.max_len_um,
+            turn_rate_deg: self.turn_rate_deg,
             direction: None,
         })
     }
@@ -416,6 +447,130 @@ impl Module for SomaMigration {
             self.speed,
             self.attract,
         ))
+    }
+}
+
+/// Growth cone that bundles with nearby neurites (CX3D `NeuriteFasciculation`):
+/// when the tip passes close to a foreign neurite segment, it steers along that
+/// segment's direction instead of its own — axons gather into bundles, as in
+/// real tracts. A standalone steering module (use it *instead of* a chemo
+/// module for the bundled phase of growth).
+pub struct Fasciculation {
+    /// Search radius for a nearby foreign segment, world units.
+    pub radius: f64,
+    /// Weight of the bundle direction in the step.
+    pub weight: f64,
+    /// Step length per time step.
+    pub speed: f64,
+    /// Weight of the previous direction (persistence).
+    pub old_dir_weight: f64,
+    /// Weight of the random noise component.
+    pub noise_weight: f64,
+    /// Max turn angle per step, degrees; `None` = unlimited.
+    pub turn_rate_deg: Option<f64>,
+    /// Hard cap on neurite length; `None` = unlimited.
+    pub max_len_um: Option<f64>,
+    direction: Option<Vec3>,
+}
+
+impl Fasciculation {
+    pub fn new(radius: f64) -> Self {
+        Fasciculation {
+            radius,
+            weight: 0.6,
+            speed: 1.0,
+            old_dir_weight: 1.0,
+            noise_weight: 0.1,
+            turn_rate_deg: None,
+            max_len_um: None,
+            direction: None,
+        }
+    }
+}
+
+impl Module for Fasciculation {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Neurite { cell, idx } = host else {
+            return;
+        };
+        if let Some(max) = self.max_len_um {
+            if world.cells[cell].neurites[idx].length_um() >= max {
+                return;
+            }
+        }
+        let tip = world.cells[cell].neurites[idx].tip();
+        // Follow the nearest foreign segment's direction when in reach.
+        let bundle = world
+            .nearby_neurite_dir(cell, tip, self.radius)
+            .map(|(d, _)| d);
+        let old = self.direction.unwrap_or(bundle.unwrap_or(Vec3::ZERO));
+        let noise = world.random_vec(self.noise_weight);
+        let steer = bundle.unwrap_or(old);
+        let step_dir = old * self.old_dir_weight + steer * self.weight + noise;
+        let step_dir = clamp_turn(old, step_dir.normalized(), self.turn_rate_deg);
+
+        world.extend_neurite(cell, idx, step_dir * self.speed);
+        self.direction = Some(step_dir);
+    }
+
+    fn copy_on_branch(&self) -> bool {
+        true
+    }
+    fn copy_on_elongate(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(Fasciculation {
+            radius: self.radius,
+            weight: self.weight,
+            speed: self.speed,
+            old_dir_weight: self.old_dir_weight,
+            noise_weight: self.noise_weight,
+            turn_rate_deg: self.turn_rate_deg,
+            max_len_um: self.max_len_um,
+            direction: None,
+        })
+    }
+}
+
+/// Cell death when the local concentration drops below `threshold`
+/// (CX3D `CellApoptosis`): during development roughly half of generated
+/// neurons die — the cell-level counterpart of neurite pruning. Dead cells are
+/// excluded from synapse formation and the extracted graph.
+pub struct CellApoptosis {
+    pub substance: String,
+    /// Below this concentration the cell dies.
+    pub threshold: f64,
+}
+
+impl CellApoptosis {
+    pub fn new(substance: &str, threshold: f64) -> Self {
+        CellApoptosis {
+            substance: substance.to_string(),
+            threshold,
+        }
+    }
+}
+
+impl Module for CellApoptosis {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Soma(cell) = host else {
+            return;
+        };
+        if world.cells[cell].alive
+            && world.concentration(&self.substance, world.cells[cell].soma.pos) < self.threshold
+        {
+            world.kill_cell(cell);
+        }
+    }
+
+    fn copy_on_divide(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(CellApoptosis::new(&self.substance, self.threshold))
     }
 }
 
@@ -674,6 +829,79 @@ mod tests {
             w.cells[c].soma.pos.z <= 80.0,
             "soma must stay inside bounds"
         );
+    }
+
+    #[test]
+    fn turn_rate_clamps_step_direction() {
+        let prev = Vec3::new(1.0, 0.0, 0.0);
+        let target = Vec3::new(0.0, 1.0, 0.0); // 90° away
+        let stepped = clamp_turn(prev, target, Some(30.0));
+        let ang = prev.dot(stepped).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(
+            (ang - 30.0).abs() < 1e-9,
+            "step must be capped at 30°, got {ang}°"
+        );
+        // Within the limit → unchanged.
+        let ok = Vec3::new(1.0, 0.5, 0.0).normalized(); // ~26.6° from +x
+        assert_eq!(clamp_turn(prev, ok, Some(30.0)), ok);
+        // No limit → unchanged.
+        assert_eq!(clamp_turn(prev, target, None), target);
+    }
+
+    #[test]
+    fn fasciculation_follows_nearby_path() {
+        let mut w = world();
+        // Pioneer axon laid straight along +x.
+        let pioneer = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let pn = w.new_neurite(pioneer, true, 0.5);
+        w.extend_neurite(pioneer, pn, Vec3::new(5.0, 0.0, 0.0));
+        w.extend_neurite(pioneer, pn, Vec3::new(10.0, 0.0, 0.0));
+        // Follower whose tip sits 3 units beside the path (within radius 5).
+        let f = w.add_cell(Vec3::new(0.0, 3.0, 0.0), CellType::Excitatory, 4.0);
+        let n = w.new_neurite(f, true, 0.5);
+        let mut fas = Fasciculation::new(5.0);
+        fas.noise_weight = 0.0;
+        fas.old_dir_weight = 0.0; // pure bundling
+        fas.weight = 1.0;
+        w.add_neurite_module(f, n, Box::new(fas));
+        let start = w.cells[f].neurites[n].tip();
+        w.step();
+        let tip = w.cells[f].neurites[n].tip();
+        let moved = tip - start;
+        assert!(
+            moved.x > 0.0,
+            "fasciculated cone must follow the +x path (moved {moved:?})"
+        );
+        assert!(
+            moved.y.abs() < 1e-9,
+            "pure bundling must keep the step on the path (moved {moved:?})"
+        );
+    }
+
+    #[test]
+    fn fasciculation_ignores_own_cell() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        w.extend_neurite(c, n, Vec3::new(5.0, 0.0, 0.0));
+        // The only nearby segment is our own → no bundling target.
+        assert!(w
+            .nearby_neurite_dir(c, Vec3::new(2.0, 1.0, 0.0), 5.0)
+            .is_none());
+    }
+
+    #[test]
+    fn apoptosis_kills_cells_in_low_concentration() {
+        let mut w = world(); // no substance → concentration 0
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_soma_module(c, Box::new(CellApoptosis::new("ntf", 0.5)));
+        for _ in 0..5 {
+            w.step();
+        }
+        assert!(!w.cells[c].alive, "cell in zero concentration must die");
+        // Dead cells are excluded from the extracted graph.
+        let g = w.to_graph();
+        assert!(g.nodes.is_empty());
     }
 
     #[test]
