@@ -8,7 +8,7 @@ use crate::propagate::{
 use crate::types::SpikeQueue;
 use pillars::core::NeuralPopulation;
 use pillars::kernels::synapse::{DecayFactors, SynapticKinetics};
-use pillars::zoo::{HHModel, HHParamIdx};
+use pillars::zoo::{HHModel, HHModelParamIdx};
 
 // ─── HH simulation via pillars (NeuralPopulation<HHModel>) ──
 
@@ -22,19 +22,19 @@ pub fn hh_population_standard(n: usize, dt: f32) -> NeuralPopulation<HHModel> {
     let mut pop = NeuralPopulation::<HHModel>::new(n);
 
     // Params (SoA columns) — identical to old `standard_config`:
-    pop.fill_param(HHParamIdx::DT.into(), dt);
-    pop.fill_param(HHParamIdx::G_Na.into(), 120.0);
-    pop.fill_param(HHParamIdx::E_Na.into(), 50.0);
-    pop.fill_param(HHParamIdx::G_K.into(), 36.0);
-    pop.fill_param(HHParamIdx::E_K.into(), -77.0);
-    pop.fill_param(HHParamIdx::G_Leak.into(), 0.3);
-    pop.fill_param(HHParamIdx::E_Leak.into(), -65.0);
-    pop.fill_param(HHParamIdx::Q10.into(), 1.0); // 6.3°C → Q10 = 1
-    pop.fill_param(HHParamIdx::V_Thresh.into(), 0.0);
-    pop.fill_param(HHParamIdx::Inv_Cm.into(), 1.0);
+    pop.fill_param(HHModelParamIdx::dt.into(), dt);
+    pop.fill_param(HHModelParamIdx::g_Na.into(), 120.0);
+    pop.fill_param(HHModelParamIdx::E_Na.into(), 50.0);
+    pop.fill_param(HHModelParamIdx::g_K.into(), 36.0);
+    pop.fill_param(HHModelParamIdx::E_K.into(), -77.0);
+    pop.fill_param(HHModelParamIdx::g_Leak.into(), 0.3);
+    pop.fill_param(HHModelParamIdx::E_Leak.into(), -65.0);
+    pop.fill_param(HHModelParamIdx::q10.into(), 1.0); // 6.3°C → Q10 = 1
+    pop.fill_param(HHModelParamIdx::v_thresh.into(), 0.0);
+    pop.fill_param(HHModelParamIdx::inv_cm.into(), 1.0);
     // CaV-T: standard HH has NO Ca²⁺ current (g_CaT = 0)
-    pop.fill_param(HHParamIdx::G_CaT.into(), 0.0);
-    pop.fill_param(HHParamIdx::E_CaT.into(), 120.0);
+    pop.fill_param(HHModelParamIdx::g_CaT.into(), 0.0);
+    pop.fill_param(HHModelParamIdx::E_CaT.into(), 120.0);
 
     // State: v = -65, gates at steady state @ -65 (m=0.0529, h=0.596, n=0.318,
     // c=0.19), was_below = 1.0 → first rising edge through 0 fires (1/AP).
@@ -62,9 +62,9 @@ pub fn hh_population_standard(n: usize, dt: f32) -> NeuralPopulation<HHModel> {
 /// `pacemaking_channels` reference test (`hh_step_scalar` with e_leak=−54.387).
 pub fn hh_population_pacemaking(n: usize, dt: f32) -> NeuralPopulation<HHModel> {
     let mut pop = hh_population_standard(n, dt);
-    pop.fill_param(HHParamIdx::E_Leak.into(), -54.387);
-    pop.fill_param(HHParamIdx::G_CaT.into(), 0.5);
-    pop.fill_param(HHParamIdx::E_CaT.into(), 120.0);
+    pop.fill_param(HHModelParamIdx::E_Leak.into(), -54.387);
+    pop.fill_param(HHModelParamIdx::g_CaT.into(), 0.5);
+    pop.fill_param(HHModelParamIdx::E_CaT.into(), 120.0);
     pop
 }
 
@@ -139,7 +139,7 @@ pub fn sim_hh_synaptic_pillars(
     let mut spike_buffer = vec![0i32; spike_buf_len];
     let mut queue = SpikeQueue::new(n_neurons);
     let mut spikes = vec![0i32; n];
-    let dt = pop.param_slice(HHParamIdx::DT.into())[0];
+    let dt = pop.param_slice(HHModelParamIdx::dt.into())[0];
     let factors = DecayFactors::new(dt);
     let mut i_in = vec![0.0f32; n];
 

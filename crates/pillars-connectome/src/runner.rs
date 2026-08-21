@@ -60,9 +60,47 @@ use pillars::kernels::csr::ValidatedCsrGraph;
 use pillars::kernels::synapse::{DecayFactors, SynapticKinetics};
 use rand::{Rng, SeedableRng};
 
-use crate::sim::{hh_population_pacemaking, hh_population_standard};
+use crate::sim::{haap_population, hh_population_pacemaking, hh_population_standard};
+use pillars::core::arch::SimdType;
+use pillars::core::lane::SimdLane;
 use pillars::core::NeuralPopulation;
-use pillars::zoo::{HHModel, HHParamIdx};
+use pillars::zoo::{
+    AlphaLifModel, AlphaLifModelParamIdx, AlphaLifModelStateIdx, HAAPModel, HAAPModelParamIdx, HHModel,
+    HHModelParamIdx,
+};
+
+/// Build the alpha-LIF SIMD population (Shiu fly brain model).
+///
+/// Maps the config scalars to the 7 per-neuron params of [`AlphaLifModel`]:
+/// `[dt, time_factor, v_rest, v_thresh, v_reset, refr_steps, syn_decay]` and
+/// initialises state `[v=v_rest, g=0, refr_cnt=refr_steps]` (start out of
+/// refractory so the first step accepts input, matching the reference model).
+fn alpha_lif_population(
+    n: usize,
+    dt_ms: f32,
+    tau_ref: f32,
+    tau_m: f32,
+    v_rest: f32,
+    v_thresh: f32,
+    v_reset: f32,
+    tau_syn: f32,
+) -> NeuralPopulation<AlphaLifModel> {
+    let mut pop = NeuralPopulation::<AlphaLifModel>::new(n);
+    let time_factor = dt_ms / tau_m.max(1e-6);
+    let syn_decay = 1.0 - dt_ms / tau_syn.max(1e-6);
+    let refr_steps = (tau_ref / dt_ms).round().max(1.0);
+    pop.fill_param(AlphaLifModelParamIdx::dt.into(), dt_ms);
+    pop.fill_param(AlphaLifModelParamIdx::time_factor.into(), time_factor);
+    pop.fill_param(AlphaLifModelParamIdx::v_rest.into(), v_rest);
+    pop.fill_param(AlphaLifModelParamIdx::v_thresh.into(), v_thresh);
+    pop.fill_param(AlphaLifModelParamIdx::v_reset.into(), v_reset);
+    pop.fill_param(AlphaLifModelParamIdx::refr_steps.into(), refr_steps);
+    pop.fill_param(AlphaLifModelParamIdx::syn_decay.into(), syn_decay);
+    pop.fill_state(AlphaLifModelStateIdx::v.into(), v_rest);
+    pop.fill_state(AlphaLifModelStateIdx::g.into(), 0.0);
+    pop.fill_state(AlphaLifModelStateIdx::refr_cnt.into(), refr_steps);
+    pop
+}
 
 // ═══════════════════════════════════════════════════════════
 //  NeuronConfig — all supported neuron models
@@ -91,6 +129,22 @@ pub enum NeuronConfig {
         v_rest: f32,
         v_thresh: f32,
         v_reset: f32,
+    },
+    /// LIF + alpha-synapse (Shiu et al. 2024 fly brain model).
+    ///
+    /// Each pre-spike *jumps* a per-post-synaptic conductance `g` by the edge
+    /// weight (mV), `g` decays with τ_syn, and the resulting `g` is added
+    /// directly to `v` — the exact model of `Drosophila_brain_model`
+    /// (brian2 default_params / fly-brain-main run_pytorch.py).
+    LifAlpha {
+        dt_ms: f32,
+        tau_ref: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_syn: f32,
+        t_delay: f32,
     },
     /// Izhikevich model (current-based)
     Izh {
@@ -142,6 +196,16 @@ pub enum NeuronConfig {
     Rate { dt_ms: f32, tau: f32 },
     /// Graph-coupled oscillator (ψ-wave dynamics)
     Gco { dt_ms: f32 },
+    /// HAAP (Hyperpolarization-Activated Adaptive Pulse-Bursting) — current-based.
+    /// M-current (`u`) adaptation + h-current (`h`) rebound bound the firing rate
+    /// (unlike HH, which has no adaptation and can run away).
+    Haap { dt_ms: f32 },
+    /// HAAP with a decaying synaptic current (τ_syn). A pre-spike adds `w` to a
+    /// persistent per-neuron synaptic current that decays with τ_syn, instead of
+    /// a single one-step pulse. Required for rebound half-center oscillators:
+    /// an inhibitory GABAergic input must hyperpolarize the target for several
+    /// ms (τ_syn ~ 5–10 ms) so the h-current can de-inactivate and rebound.
+    HaapSynaptic { dt_ms: f32, tau_syn: f32 },
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -174,6 +238,24 @@ impl BrainConfig {
             v_rest: -70.0,
             v_thresh: -58.0,
             v_reset: -70.0,
+        }
+    }
+
+    /// LIF + alpha-synapse — exact Shiu et al. 2024 fly brain model
+    /// (brian2 default_params / fly-brain-main run_pytorch.py MODEL_PARAMS).
+    ///
+    /// v_rest=v_reset=-52mV, v_thresh=-45mV, τ_mem=20ms, τ_ref=2.2ms,
+    /// τ_syn=5ms, axonal delay 1.8ms. Weights in mV (already ×0.275 in .taas).
+    pub fn lif_alpha(dt_ms: f32) -> NeuronConfig {
+        NeuronConfig::LifAlpha {
+            dt_ms,
+            tau_ref: 2.2,
+            tau_m: 20.0,
+            v_rest: -52.0,
+            v_thresh: -45.0,
+            v_reset: -52.0,
+            tau_syn: 5.0,
+            t_delay: 1.8,
         }
     }
 
@@ -251,6 +333,17 @@ impl BrainConfig {
     /// Graph-coupled oscillator.
     pub fn gco(dt_ms: f32) -> NeuronConfig {
         NeuronConfig::Gco { dt_ms }
+    }
+
+    /// HAAP (M-current adaptation + h-current rebound), current-based.
+    pub fn haap(dt_ms: f32) -> NeuronConfig {
+        NeuronConfig::Haap { dt_ms }
+    }
+
+    /// HAAP with a decaying synaptic current (τ_syn). Use for rebound
+    /// half-center / CPG circuits where inhibition must persist across steps.
+    pub fn haap_synaptic(dt_ms: f32, tau_syn: f32) -> NeuronConfig {
+        NeuronConfig::HaapSynaptic { dt_ms, tau_syn }
     }
 }
 
@@ -388,8 +481,14 @@ pub struct BrainRunner {
     pub state: BrainState,
     /// Poisson stimulation groups.
     pub poisson_groups: Vec<PoissonGroup>,
-    // Internal buffers (persistent across calls to avoid reallocation)
+    // Internal buffers (persistent across calls to avoid per-run allocation)
     spike_buffer: Vec<i32>,
+    /// Reusable work buffer (n_neurons f32) for Poisson injection + external I.
+    work_buf: Vec<f32>,
+    /// Reusable external current buffer (n_neurons f32).
+    ext_buf: Vec<f32>,
+    /// Precomputed [0, 1, ..., n_neurons-1] — passed to `brain.inject()`.
+    all_indices: Vec<u32>,
     n_neurons: usize,
     step_counter: usize,
 
@@ -397,8 +496,27 @@ pub struct BrainRunner {
     // (NaV+KV+CaV-T) via NeuralPopulation<HHModel>.
     hh_pop: Option<NeuralPopulation<HHModel>>,
 
+    // HAAP population (pillars SIMD engine) — M-current adaptation + h-current.
+    haap_pop: Option<NeuralPopulation<HAAPModel>>,
+
+    // Persistent decaying synaptic current for HAAP-synaptic (τ_syn). Lives
+    // across `run()` calls so a chain of `run()` calls is one continuous timeline.
+    haap_syn: Vec<f32>,
+
     // Synaptic kinetics (for conductance-based models)
     kinetics: Option<SynapticKinetics>,
+
+    // ═══ Alpha-synapse state (Shiu et al. 2024 fly brain model) ═══
+    // Per-neuron dynamics (v, g, refr) — pillars SIMD population (f32x8).
+    alpha_pop: Option<NeuralPopulation<AlphaLifModel>>,
+    // Ring buffer (steps_delay+1) × n — delayed axonal input (delivered as
+    // ctx.i_syn to the SIMD population; refractory mask applied inside model).
+    alpha_delay: Vec<f32>,
+    // Write position into `alpha_delay` (read at (pos+1) % size).
+    alpha_delay_pos: usize,
+    // Compact list of pre-neurons that fired on the previous step (recurrent
+    // input source). Avoids a full 138K-neuron scan per step in the scatter.
+    alpha_fired: Vec<usize>,
 
     // E-Prop eligibility traces
     eligibility: Vec<f32>,
@@ -445,6 +563,8 @@ impl BrainRunner {
             | NeuronConfig::IzhEprop { .. } => NeuronModel::Izhikevich,
             NeuronConfig::Rate { .. } => NeuronModel::Rate,
             NeuronConfig::Gco { .. } => NeuronModel::Gco,
+            NeuronConfig::LifAlpha { .. } => NeuronModel::LIF,
+            NeuronConfig::Haap { .. } | NeuronConfig::HaapSynaptic { .. } => NeuronModel::Haap,
         };
 
         let state = BrainState::new(n, model);
@@ -476,14 +596,51 @@ impl BrainRunner {
             _ => None,
         };
 
+        // HAAP engine: pillars population (M-current + h-current).
+        let haap_pop = match &config {
+            NeuronConfig::Haap { dt_ms } | NeuronConfig::HaapSynaptic { dt_ms, .. } => {
+                Some(haap_population(n, *dt_ms))
+            }
+            _ => None,
+        };
+
         // Initialize E-Prop eligibility buffer
         let eligibility = match &config {
             NeuronConfig::IzhEprop { .. } => vec![0.0f32; connectome.values.len()],
             _ => Vec::new(),
         };
 
+        // Alpha-synapse: SIMD population (v, g, refr) built from config;
+        // delay ring buffer sized lazily in run_lif_alpha.
+        let alpha_pop = match &config {
+            NeuronConfig::LifAlpha {
+                dt_ms,
+                tau_ref,
+                tau_m,
+                v_rest,
+                v_thresh,
+                v_reset,
+                tau_syn,
+                ..
+            } => Some(alpha_lif_population(
+                n,
+                *dt_ms,
+                *tau_ref,
+                *tau_m,
+                *v_rest,
+                *v_thresh,
+                *v_reset,
+                *tau_syn,
+            )),
+            _ => None,
+        };
+        let alpha_delay = Vec::new();
+        let alpha_delay_pos = 0;
+        let alpha_fired = Vec::new();
+
         let spike_buf_len = n * 64; // initial allocation (grows on demand)
         let rng = rand::rngs::StdRng::from_seed([0u8; 32]);
+        let all_indices: Vec<u32> = (0..n as u32).collect();
 
         Ok(Self {
             config,
@@ -492,11 +649,20 @@ impl BrainRunner {
             state,
             poisson_groups: Vec::new(),
             spike_buffer: vec![0i32; spike_buf_len],
+            work_buf: vec![0.0f32; n],
+            ext_buf: vec![0.0f32; n],
+            all_indices,
             n_neurons: n,
             step_counter: 0,
             hh_pop,
+            haap_pop,
+            haap_syn: vec![0.0f32; n],
             kinetics,
             eligibility,
+            alpha_pop,
+            alpha_delay,
+            alpha_delay_pos,
+            alpha_fired,
             rng,
         })
     }
@@ -580,6 +746,10 @@ impl BrainRunner {
         if self.spike_buffer.len() < needed {
             self.spike_buffer.resize(needed, 0);
         }
+        // `record_spikes` writes only 1s (never clears 0s), and this buffer is
+        // reused across `run()` calls — clear the returned window so repeated
+        // calls don't accumulate stale spikes from earlier chunks.
+        self.spike_buffer[..needed].fill(0);
 
         match &self.config {
             NeuronConfig::Lif {
@@ -602,6 +772,30 @@ impl BrainRunner {
             } => self.run_lif(
                 n_steps, external_I, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, true,
             ),
+            NeuronConfig::LifAlpha {
+                dt_ms,
+                tau_ref,
+                tau_m,
+                v_rest,
+                v_thresh,
+                v_reset,
+                tau_syn,
+                t_delay,
+            } => {
+                let _ = self.run_lif_alpha(
+                    n_steps,
+                    external_I,
+                    *dt_ms,
+                    *tau_ref,
+                    *tau_m,
+                    *v_rest,
+                    *v_thresh,
+                    *v_reset,
+                    *tau_syn,
+                    *t_delay,
+                    true,
+                );
+            }
             NeuronConfig::Izh {
                 dt_ms,
                 tau_ref,
@@ -668,11 +862,66 @@ impl BrainRunner {
             NeuronConfig::HhSynaptic { dt_ms, .. } => {
                 self.run_hh(n_steps, external_I, *dt_ms, true)
             }
+            NeuronConfig::Haap { dt_ms } => self.run_haap(n_steps, external_I, *dt_ms, 0.0),
+            NeuronConfig::HaapSynaptic { dt_ms, tau_syn } => {
+                self.run_haap(n_steps, external_I, *dt_ms, *tau_syn)
+            }
             NeuronConfig::Rate { dt_ms, tau } => self.run_rate(n_steps, external_I, *dt_ms, *tau),
             NeuronConfig::Gco { dt_ms } => self.run_gco(n_steps, external_I, *dt_ms),
         }
 
         &self.spike_buffer[..needed]
+    }
+
+    /// Run without materializing the spike raster — count on the fly.
+    ///
+    /// Returns `(total_spikes, active_set)` over `n_steps`: `active_set` is a
+    /// length-`n_neurons` bitmap of neurons that fired at least once.
+    ///
+    /// This is the hot path for [`crate::AlphaLifWorker`]: the raster path
+    /// (`run`) zeroes `n_steps × n` i32 (~554 MB per 0.1 s chunk) and the
+    /// worker then scans the same buffer — two full passes that metrics don't
+    /// need. Counting here skips both, bit-identically (same neuron math).
+    pub fn run_count(&mut self, n_steps: usize, external_I: &[f32]) -> (usize, Vec<bool>) {
+        match &self.config {
+            NeuronConfig::LifAlpha {
+                dt_ms,
+                tau_ref,
+                tau_m,
+                v_rest,
+                v_thresh,
+                v_reset,
+                tau_syn,
+                t_delay,
+            } => self.run_lif_alpha(
+                n_steps,
+                external_I,
+                *dt_ms,
+                *tau_ref,
+                *tau_m,
+                *v_rest,
+                *v_thresh,
+                *v_reset,
+                *tau_syn,
+                *t_delay,
+                false,
+            ),
+            // Other models: fall back to the raster path and scan it. Only the
+            // alpha worker uses run_count today; this keeps the API total.
+            _ => {
+                let n = self.n_neurons;
+                let buf = self.run(n_steps, external_I);
+                let mut total = 0usize;
+                let mut active = vec![false; n];
+                for (idx, &s) in buf.iter().enumerate() {
+                    if s != 0 {
+                        total += 1;
+                        active[idx % n] = true;
+                    }
+                }
+                (total, active)
+            }
+        }
     }
 
     // ─── Spike trains ──────────────────────────────────
@@ -756,6 +1005,10 @@ impl BrainRunner {
     pub fn get_v(&self) -> &[f32] {
         if let Some(ref pop) = self.hh_pop {
             pop.state_slice(0)
+        } else if let Some(ref pop) = self.haap_pop {
+            pop.state_slice(0)
+        } else if let Some(ref pop) = self.alpha_pop {
+            pop.state_slice(AlphaLifModelStateIdx::v.into())
         } else {
             &self.state.v[..self.n_neurons]
         }
@@ -769,6 +1022,12 @@ impl BrainRunner {
             unsafe {
                 std::ptr::copy_nonoverlapping(v.as_ptr(), pop.state_slice_mut(0).as_mut_ptr(), n);
             }
+        } else if let Some(ref mut pop) = self.haap_pop {
+            unsafe {
+                std::ptr::copy_nonoverlapping(v.as_ptr(), pop.state_slice_mut(0).as_mut_ptr(), n);
+            }
+        } else if let Some(ref mut pop) = self.alpha_pop {
+            pop.state_slice_mut(AlphaLifModelStateIdx::v.into())[..n].copy_from_slice(&v[..n]);
         } else {
             self.state.v[..n].copy_from_slice(&v[..n]);
         }
@@ -783,6 +1042,91 @@ impl BrainRunner {
     pub fn set_u(&mut self, u: &[f32]) {
         let n = u.len().min(self.n_neurons);
         self.state.u[..n].copy_from_slice(&u[..n]);
+    }
+
+    /// Set per-neuron HH parameter column (e.g. `HHModelParamIdx::g_Na`) from a slice.
+    ///
+    /// Enables literature-based per-class physiology: load a distinct
+    /// g_Na / g_K / g_l / E_Leak / cm for each neuron instead of one
+    /// population-wide default. Returns the number of neurons written.
+    ///
+    /// Only valid when the runner was created with an `Hh` / `HhSynaptic` config;
+    /// otherwise it's a no-op returning 0.
+    ///
+    /// ⚠️ `reset()` re-creates the HH population from the config defaults and
+    /// **wipes** any per-neuron params set here — re-apply after every `reset()`.
+    pub fn set_hh_param_column(&mut self, col: usize, values: &[f32]) -> usize {
+        let Some(pop) = self.hh_pop.as_mut() else {
+            return 0;
+        };
+        let n = values.len().min(self.n_neurons);
+        pop.param_slice_mut(col)[..n].copy_from_slice(&values[..n]);
+        n
+    }
+
+    /// Set per-neuron HAAP parameter column (e.g. `HAAPModelParamIdx::g_m`) from a
+    /// slice — enables literature-based per-class physiology (M-current/h-current
+    /// atlas params) instead of one population-wide default. Returns the number
+    /// of neurons written.
+    ///
+    /// Only valid when the runner was created with a `Haap` config; otherwise a
+    /// no-op returning 0. ⚠️ `reset()` re-creates the HAAP population from the
+    /// config defaults and **wipes** any per-neuron params — re-apply after reset.
+    pub fn set_haap_param_column(&mut self, col: usize, values: &[f32]) -> usize {
+        let Some(pop) = self.haap_pop.as_mut() else {
+            return 0;
+        };
+        let n = values.len().min(self.n_neurons);
+        pop.param_slice_mut(col)[..n].copy_from_slice(&values[..n]);
+        n
+    }
+
+    /// Read one per-neuron HH parameter column (e.g. `HHModelParamIdx::g_Na`)
+    /// — pairs with [`Self::set_hh_param_column`] for read-modify-write
+    /// (e.g. pharmacology baselines). Empty for non-HH runners.
+    pub fn get_hh_param_column(&self, col: usize) -> Vec<f32> {
+        match &self.hh_pop {
+            Some(pop) => pop.param_slice(col).to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Read one per-neuron HAAP parameter column (e.g. `HAAPModelParamIdx::g_m`)
+    /// — pairs with [`Self::set_haap_param_column`]. Empty for non-HAAP runners.
+    pub fn get_haap_param_column(&self, col: usize) -> Vec<f32> {
+        match &self.haap_pop {
+            Some(pop) => pop.param_slice(col).to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Scale one per-neuron HH parameter column (e.g. `HHModelParamIdx::g_Na`)
+    /// by `factor` in place — pharmacology (channel blockers/openers) applied
+    /// to a whole population at once. Returns neurons written (0 for non-HH
+    /// runners). ⚠️ Same `reset()` caveat as [`Self::set_hh_param_column`].
+    pub fn scale_hh_param_column(&mut self, col: usize, factor: f32) -> usize {
+        let Some(pop) = self.hh_pop.as_mut() else {
+            return 0;
+        };
+        let n = self.n_neurons;
+        for v in pop.param_slice_mut(col)[..n].iter_mut() {
+            *v *= factor;
+        }
+        n
+    }
+
+    /// Scale one per-neuron HAAP parameter column (e.g. `HAAPModelParamIdx::g_m`)
+    /// by `factor` in place. Returns neurons written (0 for non-HAAP runners).
+    /// ⚠️ Same `reset()` caveat as [`Self::set_haap_param_column`].
+    pub fn scale_haap_param_column(&mut self, col: usize, factor: f32) -> usize {
+        let Some(pop) = self.haap_pop.as_mut() else {
+            return 0;
+        };
+        let n = self.n_neurons;
+        for v in pop.param_slice_mut(col)[..n].iter_mut() {
+            *v *= factor;
+        }
+        n
     }
 
     /// Get the accumulated spike buffer.
@@ -803,7 +1147,9 @@ impl BrainRunner {
     /// Reset simulator state (v, u, I_buf, spikes, kinetics).
     pub fn reset(&mut self) {
         let model = match &self.config {
-            NeuronConfig::Lif { .. } | NeuronConfig::LifSynaptic { .. } => NeuronModel::LIF,
+            NeuronConfig::Lif { .. }
+            | NeuronConfig::LifSynaptic { .. }
+            | NeuronConfig::LifAlpha { .. } => NeuronModel::LIF,
             NeuronConfig::Hh { .. } | NeuronConfig::HhSynaptic { .. } => NeuronModel::Hh,
             NeuronConfig::Izh { .. }
             | NeuronConfig::IzhSynaptic { .. }
@@ -811,6 +1157,7 @@ impl BrainRunner {
             | NeuronConfig::IzhEprop { .. } => NeuronModel::Izhikevich,
             NeuronConfig::Rate { .. } => NeuronModel::Rate,
             NeuronConfig::Gco { .. } => NeuronModel::Gco,
+            NeuronConfig::Haap { .. } | NeuronConfig::HaapSynaptic { .. } => NeuronModel::Haap,
         };
         self.state = BrainState::new(self.n_neurons, model);
         self.state.reset_with_noise(self.n_neurons);
@@ -835,6 +1182,36 @@ impl BrainRunner {
             } else {
                 Some(hh_population_standard(self.n_neurons, dt))
             };
+        }
+
+        // Re-init HAAP engine: pillars population (M-current + h-current).
+        if self.haap_pop.is_some() {
+            let dt = match &self.config {
+                NeuronConfig::Haap { dt_ms } | NeuronConfig::HaapSynaptic { dt_ms, .. } => *dt_ms,
+                _ => 0.05,
+            };
+            self.haap_pop = Some(haap_population(self.n_neurons, dt));
+        }
+        self.haap_syn.fill(0.0);
+
+        // Reset alpha-synapse state (Shiu fly brain model): rebuild the SIMD
+        // population (v→v_rest, g=0, refr at full duration), zero the delay
+        // ring buffer, clear spikes_prev.
+        if let NeuronConfig::LifAlpha { t_delay, dt_ms, .. } = &self.config {
+            let n = self.n_neurons;
+            self.state.v[..n].fill(0.0); // will be synced from pop on first run
+            // Rebuild from config — preserves per-neuron refr_steps overrides
+            // ONLY if the caller re-applies set_alpha_refrac_ms after reset
+            // (same contract as the HH population).
+            let new_pop = self.make_alpha_pop();
+            if let Some(pop) = self.alpha_pop.as_mut() {
+                *pop = new_pop;
+            }
+            let size = (t_delay / dt_ms).round().max(0.0) as usize + 1;
+            self.alpha_delay.resize(size * n, 0.0);
+            self.alpha_delay.fill(0.0);
+            self.alpha_delay_pos = size - 1; // read at (pos+1) % size == 0
+            self.alpha_fired.clear();
         }
     }
 
@@ -868,16 +1245,11 @@ impl BrainRunner {
         v_reset: f32,
         synaptic: bool,
     ) {
-        let n = self.n_neurons;
         let n_neurons = self.connectome.row_ptr.len() - 1;
 
-        // Delegate to the pillars-native orchestrator: `crate::Brain` (instant
-        // current) or `crate::SynapticBrain` (conductance) — the legacy
-        // queue/CSR loop disappears. Receptor types are only used on the
-        // synaptic path.
-
-        let mut poisson_buf = vec![0.0f32; n];
-        let mut ext = vec![0.0f32; n_neurons];
+        // Reuse persistent buffers (was allocated every run() call).
+        let work = &mut self.work_buf;
+        let ext = &mut self.ext_buf;
 
         if synaptic {
             // Conductance path — SynapticBrain owns the kinetics loop.
@@ -901,12 +1273,12 @@ impl BrainRunner {
                 }
             });
             for step in 0..n_steps {
-                poisson_buf.fill(0.0);
-                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                work.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, work, dt_ms);
                 for i in 0..n_neurons {
-                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + work[i];
                 }
-                let s = brain.step(&ext);
+                let s = brain.step(ext);
                 record_spikes(&s, n_neurons, &mut self.spike_buffer, step);
             }
             self.kinetics = Some(brain.kinetics().clone());
@@ -932,14 +1304,14 @@ impl BrainRunner {
                     p.state_slice_mut(1)[i] = self.state.refractory[i];
                 }
             });
-            let idx: Vec<u32> = (0..n_neurons as u32).collect();
+            let idx = &self.all_indices;
             for step in 0..n_steps {
-                poisson_buf.fill(0.0);
-                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                work.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, work, dt_ms);
                 for i in 0..n_neurons {
-                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + work[i];
                 }
-                brain.inject(&idx, &ext);
+                brain.inject(idx, ext);
                 brain.step();
                 record_spikes(brain.spikes(), n_neurons, &mut self.spike_buffer, step);
             }
@@ -952,6 +1324,190 @@ impl BrainRunner {
         }
 
         self.step_counter += n_steps;
+    }
+
+    /// LIF + alpha-synapse — exact Shiu et al. 2024 fly brain model.
+    ///
+    /// Mirrors `fly-brain-main/code/run_pytorch.py` (AlphaLIF) 1:1:
+    /// - pre-spike (with 1.8 ms axonal delay) jumps `g` by the edge weight (mV)
+    /// - `g` decays with τ_syn: `g *= (1 - dt/τ_syn)`
+    /// - Poisson/voltage stimuli are added **directly to `v`**
+    /// - `v += dt/τ_mem · (g − (v − v_rest))`; spike when `v > v_thresh`;
+    ///   `v = v_reset` and `g = 0` on spike
+    /// - refractory: incoming `g` is gated while `refrac_cnt < refrac_steps`
+    ///
+    /// The edge weights in `ConnectomeData::values` are the full recurrent
+    /// input in mV (already × wScale=0.275), matching the baked .taas.
+    /// Build the alpha-LIF SIMD population from config params.
+    ///
+    /// The population owns the per-neuron `v`, `g`, `refr_cnt` state and the
+    /// scalar params (dt, time_factor, v_rest/thresh/reset, refr_steps,
+    /// syn_decay). The delay ring buffer + CSR scatter stay in the runner.
+    fn make_alpha_pop(&self) -> NeuralPopulation<AlphaLifModel> {
+        let (dt_ms, tau_ref, tau_m, v_rest, v_thresh, v_reset, tau_syn) =
+            match &self.config {
+                NeuronConfig::LifAlpha {
+                    dt_ms,
+                    tau_ref,
+                    tau_m,
+                    v_rest,
+                    v_thresh,
+                    v_reset,
+                    tau_syn,
+                    ..
+                } => (*dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, *tau_syn),
+                _ => (0.1, 2.2, 20.0, -52.0, -45.0, -52.0, 5.0),
+            };
+        alpha_lif_population(
+            self.n_neurons,
+            dt_ms,
+            tau_ref,
+            tau_m,
+            v_rest,
+            v_thresh,
+            v_reset,
+            tau_syn,
+        )
+    }
+
+    fn run_lif_alpha(
+        &mut self,
+        n_steps: usize,
+        external_I: &[f32],
+        dt_ms: f32,
+        tau_ref: f32,
+        tau_m: f32,
+        v_rest: f32,
+        v_thresh: f32,
+        v_reset: f32,
+        tau_syn: f32,
+        t_delay: f32,
+        record: bool,
+    ) -> (usize, Vec<bool>) {
+        let n = self.n_neurons;
+        let steps_delay = (t_delay / dt_ms).round().max(0.0) as usize;
+        let size = steps_delay + 1;
+        if self.alpha_delay.len() < size * n {
+            self.alpha_delay = vec![0.0; size * n];
+            self.alpha_delay_pos = size - 1;
+        }
+        let _ = (tau_ref, tau_m, v_rest, v_thresh, v_reset, tau_syn);
+
+        let rp = self.csr_graph.row_ptr();
+        let ci = self.csr_graph.col_indices();
+        let vals = &self.connectome.values;
+
+        let pop = self.alpha_pop.as_mut().expect("alpha_pop must be built");
+        let mut spikes = vec![0i32; n];
+        let mut total_spikes = 0usize;
+        let mut active = vec![false; n];
+
+        for step in 0..n_steps {
+            // 1. Poisson/voltage stimuli → direct v jumps (target_var='v'),
+            //    then external_I on top. Poisson only touches the 21 sugar GRN,
+            //    so injecting straight into v avoids a full `work`-buffer pass.
+            {
+                let v_slice = pop.state_slice_mut(AlphaLifModelStateIdx::v.into());
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, v_slice, dt_ms);
+                if !external_I.is_empty() {
+                    for i in 0..n {
+                        v_slice[i] += external_I.get(i).copied().unwrap_or(0.0);
+                    }
+                }
+            }
+
+            // 2. Feed this step's delayed recurrent input straight from the
+            //    ring slot (no copy) to the SIMD neuron step.
+            let read_pos = self.alpha_delay_pos;
+            // SIMD-шаг (sequential; `step_par` был WIP и удалён — см. git log).
+            pop.step(
+                &self.alpha_delay[read_pos * n..(read_pos + 1) * n],
+                &mut spikes,
+            );
+
+            // 3. Zero the slot, scatter the recurrent input of the *previous*
+            //    step's firing neurons into it, then advance the ring pointer.
+            {
+                let slot = &mut self.alpha_delay[read_pos * n..(read_pos + 1) * n];
+                slot.fill(0.0);
+                for &pre in &self.alpha_fired {
+                    let start = rp[pre] as usize;
+                    let end = rp[pre + 1] as usize;
+                    for k in start..end {
+                        let post = ci[k] as usize;
+                        slot[post] += vals[k];
+                    }
+                }
+            }
+            self.alpha_delay_pos = (read_pos + 1) % size;
+
+            // 4. Build the next step's firing list + record spikes in one pass
+            //    over `spikes` (replaces the old `alpha_spikes_prev` memcpy +
+            //    a separate `record_spikes` scan).
+            self.alpha_fired.clear();
+            let base = step * n;
+            // SIMD-скан: 8 спайков за раз через move_mask. Спайки бывают 0/1
+            // (i32), поэтому reinterpret в f32 и `> 0.0` даёт тот же non-zero
+            // маск (i32 1 → denormal 1.4e-45 > 0). Порядок — строго по
+            // возрастанию i → bit-exact с прежним скалярным циклом.
+            let spike_ptr = spikes.as_ptr();
+            let n8 = n & !7;
+            let mut i = 0usize;
+            while i < n8 {
+                let lane = unsafe { (spike_ptr.add(i) as *const SimdType).read_unaligned() };
+                let mut m = lane.cmp_gt(SimdType::splat(0.0)).move_mask();
+                while m != 0 {
+                    let idx = i + (m.trailing_zeros() as usize);
+                    self.alpha_fired.push(idx);
+                    total_spikes += 1;
+                    active[idx] = true;
+                    if record {
+                        self.spike_buffer[base + idx] = 1;
+                    }
+                    m &= m - 1;
+                }
+                i += 8;
+            }
+            for idx in n8..n {
+                if spikes[idx] != 0 {
+                    self.alpha_fired.push(idx);
+                    total_spikes += 1;
+                    active[idx] = true;
+                    if record {
+                        self.spike_buffer[base + idx] = 1;
+                    }
+                }
+            }
+        }
+
+        // Sync membrane state back to BrainState (get_v/set_v read it).
+        {
+            let v_slice = pop.state_slice(AlphaLifModelStateIdx::v.into());
+            self.state.v[..n].copy_from_slice(v_slice);
+        }
+
+        self.step_counter += n_steps;
+        (total_spikes, active)
+    }
+
+    /// Override the refractory duration (in ms) for specific neurons.
+    ///
+    /// Used e.g. for Poisson-stimulated neurons in the Shiu model, which have
+    /// zero refractory so they can fire on every Poisson event.
+    pub fn set_alpha_refrac_ms(&mut self, indices: &[usize], tau_ref_ms: f32) {
+        let dt = match &self.config {
+            NeuronConfig::LifAlpha { dt_ms, .. } => *dt_ms,
+            _ => 0.1,
+        };
+        let steps = (tau_ref_ms / dt).round().max(0.0);
+        if let Some(pop) = self.alpha_pop.as_mut() {
+            let col = pop.param_slice_mut(AlphaLifModelParamIdx::refr_steps.into());
+            for &i in indices {
+                if i < self.n_neurons {
+                    col[i] = steps;
+                }
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -970,15 +1526,11 @@ impl BrainRunner {
         d: f32,
         synaptic: bool,
     ) {
-        let n = self.n_neurons;
         let n_neurons = self.connectome.row_ptr.len() - 1;
 
-        // Delegate to the pillars-native orchestrator: `crate::Brain` (instant
-        // current) or `crate::SynapticBrain` (conductance). v_thresh = 30
-        // matches the legacy hardcoded value.
-
-        let mut poisson_buf = vec![0.0f32; n];
-        let mut ext = vec![0.0f32; n_neurons];
+        // Reuse persistent buffers (was allocated every run() call).
+        let work = &mut self.work_buf;
+        let ext = &mut self.ext_buf;
 
         if synaptic {
             let mut brain = crate::SynapticBrain::<pillars::zoo::IzhikevichModel>::from_connectome(
@@ -1003,12 +1555,12 @@ impl BrainRunner {
                 }
             });
             for step in 0..n_steps {
-                poisson_buf.fill(0.0);
-                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                work.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, work, dt_ms);
                 for i in 0..n_neurons {
-                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + work[i];
                 }
-                let s = brain.step(&ext);
+                let s = brain.step(ext);
                 record_spikes(&s, n_neurons, &mut self.spike_buffer, step);
             }
             self.kinetics = Some(brain.kinetics().clone());
@@ -1037,14 +1589,14 @@ impl BrainRunner {
                     p.state_slice_mut(2)[i] = self.state.refractory[i];
                 }
             });
-            let idx: Vec<u32> = (0..n_neurons as u32).collect();
+            let idx = &self.all_indices;
             for step in 0..n_steps {
-                poisson_buf.fill(0.0);
-                inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut poisson_buf, dt_ms);
+                work.fill(0.0);
+                inject_poisson_into(&self.poisson_groups, &mut self.rng, work, dt_ms);
                 for i in 0..n_neurons {
-                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + poisson_buf[i];
+                    ext[i] = external_I.get(i).copied().unwrap_or(0.0) + work[i];
                 }
-                brain.inject(&idx, &ext);
+                brain.inject(idx, ext);
                 brain.step();
                 record_spikes(brain.spikes(), n_neurons, &mut self.spike_buffer, step);
             }
@@ -1272,8 +1824,8 @@ impl BrainRunner {
         let pop = self.hh_pop.as_mut().unwrap();
 
         // Recreate params if dt changed (state preserved — better than legacy rebuild)
-        if (pop.param_slice(HHParamIdx::DT.into())[0] - dt_ms).abs() > 1e-6 {
-            pop.fill_param(HHParamIdx::DT.into(), dt_ms);
+        if (pop.param_slice(HHModelParamIdx::dt.into())[0] - dt_ms).abs() > 1e-6 {
+            pop.fill_param(HHModelParamIdx::dt.into(), dt_ms);
         }
 
         let mut spikes = vec![0i32; n];
@@ -1319,6 +1871,67 @@ impl BrainRunner {
     // ═══════════════════════════════════════════════════════
     //  Internal: Rate runner
     // ═══════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════════
+    //  Internal: HAAP runner
+    // ═══════════════════════════════════════════════════════════
+
+    fn run_haap(&mut self, n_steps: usize, external_I: &[f32], dt_ms: f32, tau_syn: f32) {
+        let n = self.n_neurons;
+        let n_neurons = self.connectome.row_ptr.len() - 1;
+        debug_assert_eq!(n, n_neurons, "spike buffer stride invariant");
+
+        let pop = self.haap_pop.as_mut().unwrap();
+
+        // Recreate params if dt changed (state preserved).
+        if (pop.param_slice(HAAPModelParamIdx::dt.into())[0] - dt_ms).abs() > 1e-6 {
+            pop.fill_param(HAAPModelParamIdx::dt.into(), dt_ms);
+        }
+
+        let mut spikes = vec![0i32; n];
+        let i_syn = &mut self.haap_syn; // persistent synaptic current (decays)
+        let mut i_in = vec![0.0f32; n]; // per-step input to the population
+
+        // τ_syn = 0 → instant current (old behaviour, bit-identical).
+        // τ_syn > 0 → decaying GABA/AMPA-like synaptic current.
+        let decay = if tau_syn > 0.0 {
+            (-dt_ms / tau_syn).exp()
+        } else {
+            0.0
+        };
+
+        for step in 0..n_steps {
+            // 1. Combine external_I + decaying synaptic current + Poisson
+            for i in 0..n {
+                i_in[i] = external_I.get(i).copied().unwrap_or(0.0) + i_syn[i];
+            }
+            inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut i_in, dt_ms);
+
+            // 2. pillars HAAP step (current-based — M-current + h-current)
+            pop.step(&i_in, &mut spikes);
+
+            // 3. Push spikes → record
+            push_spikes_to_queue(&spikes, n_neurons, &mut self.state.queue);
+            record_spikes(&spikes, n_neurons, &mut self.spike_buffer, step);
+
+            // 4. Decay (or clear) the synaptic current buffer
+            for s in i_syn.iter_mut() {
+                *s *= decay;
+            }
+
+            // 5. CSR propagate (current-based: I_syn[post] += W·nt_types[pre])
+            csr_propagate_after_hh(
+                &self.connectome,
+                &self.csr_graph,
+                &mut self.state.queue,
+                &mut self.kinetics,
+                &mut *i_syn,
+                false,
+            );
+        }
+
+        self.step_counter += n_steps;
+    }
 
     fn run_rate(&mut self, n_steps: usize, external_I: &[f32], dt_ms: f32, tau: f32) {
         let n = self.n_neurons;

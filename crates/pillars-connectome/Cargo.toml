@@ -9,6 +9,7 @@ description = "Universal connectome brain simulator — pillars-native engine + 
 [dependencies]
 pillars = { path = "../pillars" }
 pillars-cuda = { path = "../pillars-cuda", optional = true }
+pillars-grow = { path = "../pillars-grow" }
 serde = { version = "1", features = ["derive"] }
 rand = "0.8"
 
@@ -17,7 +18,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8"
 
 [features]
-default = []
+default = ["rayon"]
+rayon = ["pillars/rayon"]
 cuda = ["pillars-cuda"]
 
 [[bench]]
@@ -27,3 +29,7 @@ harness = false
 [[bench]]
 name = "bench_hh_parity"
 harness = false
+
+[[example]]
+name = "flywire_sugar_gpu"
+required-features = ["cuda"]

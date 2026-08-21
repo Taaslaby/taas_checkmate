@@ -4,7 +4,7 @@
 //! of any directed graph with signed weights (excitatory/inhibitory).
 //!
 //! Use it to build a connectome from any source (FlyWire, MANC, synthetic, etc.)
-//! and then pass it to [`BrainSimulator`](crate::sim::BrainSimulator) for simulation.
+//! and then pass it to [`BrainRunner`](crate::runner::BrainRunner) for simulation.
 
 use std::io::{self, Read, Write};
 

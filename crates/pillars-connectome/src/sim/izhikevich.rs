@@ -1,6 +1,5 @@
 //! Brain simulator module.
 
-use super::lif::step_izhikevich_dual_pillars;
 use super::BrainState;
 use crate::data::ConnectomeData;
 use crate::propagate::{csr_propagate_from_queue, push_spikes_to_queue, record_spikes};
@@ -8,6 +7,81 @@ use crate::types::{IzhikevichDualParams, IzhikevichParams};
 use pillars::kernels::synapse::SynapticKinetics;
 
 // ─── Izhikevich simulation ─────────────────────────────
+
+/// Izhikevich: делегат `pillars::api::neurons::step_izhikevich` (та же
+/// сигнатура; репак в IzhikevichModel + trace side-output внутри pillars).
+pub fn step_izhikevich_pillars(
+    v: &mut [f32],
+    u: &mut [f32],
+    trace: &mut [f32],
+    a: &[f32],
+    b: &[f32],
+    ii: &mut [f32],
+    dt: f32,
+    trace_decay: f32,
+    spikes: &mut [i32],
+    c: &[f32],
+    d: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
+) {
+    pillars::api::neurons::step_izhikevich(
+        v,
+        u,
+        trace,
+        a,
+        b,
+        ii,
+        dt,
+        trace_decay,
+        spikes,
+        c,
+        d,
+        refractory,
+        tau_ref,
+    );
+}
+
+/// Izhikevich Dual (Sun et al. 2026): делегат
+/// `pillars::api::neurons::step_izhikevich_dual` (канон, волна 12).
+pub fn step_izhikevich_dual_pillars(
+    v: &mut [f32],
+    u: &mut [f32],
+    trace: &mut [f32],
+    a: &[f32],
+    b: &[f32],
+    ii: &mut [f32],
+    dt: f32,
+    trace_decay: f32,
+    spikes: &mut [i32],
+    c: &[f32],
+    d: &[f32],
+    refractory: &mut [f32],
+    tau_ref: f32,
+    m: &mut [f32], // slow state per neuron
+    tau_m: f32,    // slow state time constant (0..1, higher = slower)
+    w_m: f32,      // memory-to-current weight
+) {
+    pillars::api::neurons::step_izhikevich_dual(
+        v,
+        u,
+        trace,
+        a,
+        b,
+        ii,
+        dt,
+        trace_decay,
+        spikes,
+        c,
+        d,
+        refractory,
+        tau_ref,
+        m,
+        tau_m,
+        w_m,
+    );
+}
+
 
 /// Pad a Vec to `n_padded` by replicating the last element.
 pub fn pad_to<T: Copy>(v: &[T], n_padded: usize) -> Vec<T> {

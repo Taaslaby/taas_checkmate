@@ -35,98 +35,35 @@ pub fn step_lif_pillars(
 
     // Legacy 5-col [dt, tau_m, v_rest, v_thresh, v_reset] → separate slices.
     // dt — broadcast from slot 0 (та же конвенция, что в sim_lif configure).
-    let dt = params[0];
-    let mut tau_m = vec![0.0f32; n];
-    let mut v_rest = vec![0.0f32; n];
-    let mut v_thresh = vec![0.0f32; n];
-    let mut v_reset = vec![0.0f32; n];
-    for i in 0..n {
-        tau_m[i] = params[n + i];
-        v_rest[i] = params[2 * n + i];
-        v_thresh[i] = params[3 * n + i];
-        v_reset[i] = params[4 * n + i];
-    }
+    // Репак — по чанкам SIMD-ширины 8 на стеке, без heap-аллокаций; numerics
+    // идентичны (step_lif поэлементный, chunks_exact(8)).
     // Замечание (ревью волны 12): api::step_lif использует `inv_tau_m =
     // if τ>0 {1/τ} else {0}`, легаси клампил `1/τ.max(1e-6)` — расхождение
-    // только при τ_m ≤ 1e-6 (нефизично). Временные Vec — плата за отсутствие
-    // дублирования репака; переходный период до слияния крейтов.
-    pillars::api::neurons::step_lif(
-        v, ii, spikes, dt, &tau_m, &v_rest, &v_thresh, &v_reset, refractory, tau_ref,
-    );
-}
-
-/// Izhikevich: делегат `pillars::api::neurons::step_izhikevich` (та же
-/// сигнатура; репак в IzhikevichModel + trace side-output внутри pillars).
-pub fn step_izhikevich_pillars(
-    v: &mut [f32],
-    u: &mut [f32],
-    trace: &mut [f32],
-    a: &[f32],
-    b: &[f32],
-    ii: &mut [f32],
-    dt: f32,
-    trace_decay: f32,
-    spikes: &mut [i32],
-    c: &[f32],
-    d: &[f32],
-    refractory: &mut [f32],
-    tau_ref: f32,
-) {
-    pillars::api::neurons::step_izhikevich(
-        v,
-        u,
-        trace,
-        a,
-        b,
-        ii,
-        dt,
-        trace_decay,
-        spikes,
-        c,
-        d,
-        refractory,
-        tau_ref,
-    );
-}
-
-/// Izhikevich Dual (Sun et al. 2026): делегат
-/// `pillars::api::neurons::step_izhikevich_dual` (канон, волна 12).
-pub fn step_izhikevich_dual_pillars(
-    v: &mut [f32],
-    u: &mut [f32],
-    trace: &mut [f32],
-    a: &[f32],
-    b: &[f32],
-    ii: &mut [f32],
-    dt: f32,
-    trace_decay: f32,
-    spikes: &mut [i32],
-    c: &[f32],
-    d: &[f32],
-    refractory: &mut [f32],
-    tau_ref: f32,
-    m: &mut [f32], // slow state per neuron
-    tau_m: f32,    // slow state time constant (0..1, higher = slower)
-    w_m: f32,      // memory-to-current weight
-) {
-    pillars::api::neurons::step_izhikevich_dual(
-        v,
-        u,
-        trace,
-        a,
-        b,
-        ii,
-        dt,
-        trace_decay,
-        spikes,
-        c,
-        d,
-        refractory,
-        tau_ref,
-        m,
-        tau_m,
-        w_m,
-    );
+    // только при τ_m ≤ 1e-6 (нефизично).
+    let dt = params[0];
+    let iter = v
+        .chunks_exact_mut(8)
+        .zip(ii.chunks_exact_mut(8))
+        .zip(spikes.chunks_exact_mut(8))
+        .zip(refractory.chunks_exact_mut(8))
+        .enumerate();
+    for (chunk, (((v8, ii8), sp8), refr8)) in iter {
+        let base = chunk * 8;
+        let mut tau_m = [0.0f32; 8];
+        let mut v_rest = [0.0f32; 8];
+        let mut v_thresh = [0.0f32; 8];
+        let mut v_reset = [0.0f32; 8];
+        for j in 0..8 {
+            let i = base + j;
+            tau_m[j] = params[n + i];
+            v_rest[j] = params[2 * n + i];
+            v_thresh[j] = params[3 * n + i];
+            v_reset[j] = params[4 * n + i];
+        }
+        pillars::api::neurons::step_lif(
+            v8, ii8, sp8, dt, &tau_m, &v_rest, &v_thresh, &v_reset, refr8, tau_ref,
+        );
+    }
 }
 
 // ─── LIF simulation ──────────────────────────────────

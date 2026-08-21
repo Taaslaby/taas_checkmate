@@ -11,6 +11,10 @@ pub enum NeuronModel {
     /// `BrainState` fields are inert for this model (state is read from the
     /// population).
     Hh,
+    /// HAAP — Hyperpolarization-Activated Adaptive Pulse-Bursting (M-current
+    /// adaptation + h-current rebound). State lives in
+    /// `NeuralPopulation<HAAPModel>`; `BrainState` fields are inert (like `Hh`).
+    Haap,
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -119,6 +123,7 @@ impl BrainState {
             // HH state lives in the population; BrainState is inert (v=-65
             // kept as a sensible default for readers that peek at `v`).
             NeuronModel::Hh => (-65.0, 0.0),
+            NeuronModel::Haap => (-65.0, 0.0),
         };
 
         let queue_cap = n_neurons.max(4).next_power_of_two();

@@ -8,8 +8,8 @@ pub use crate::types::*;
 
 // ═══════════════════════════════════════════════════════════
 //  Pillars bridge helpers (транш 3b → волна 12) — тонкие делегаты
-//  в канон `pillars::api::neurons`. Единый источник для runner.rs и
-//  unity.rs; тела репака живут ТОЛЬКО в pillars (дубль устранён).
+//  в канон `pillars::api::neurons`. Единый источник для runner.rs;
+//  тела репака живут ТОЛЬКО в pillars (дубль устранён).
 // ═══════════════════════════════════════════════════════════
 
 /// LIF: legacy 5-col params `[dt, tau_m, v_rest, v_thresh, v_reset]` × n →
@@ -17,15 +17,19 @@ pub use crate::types::*;
 mod gco;
 #[cfg(feature = "cuda")]
 pub mod gpu;
+mod haap;
 mod hh;
 mod izhikevich;
 mod lif;
 mod rate;
 
 pub use gco::{sim_gco, sim_gco_record};
+pub use haap::{haap_population, sim_haap_pillars};
 pub use hh::{hh_population_pacemaking, hh_population_standard, sim_hh_pillars, sim_hh_synaptic_pillars};
-pub use izhikevich::{pad_to, sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic};
-pub use lif::{step_izhikevich_dual_pillars, step_izhikevich_pillars};
+pub use izhikevich::{
+    pad_to, sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic,
+    step_izhikevich_dual_pillars, step_izhikevich_pillars,
+};
 pub use lif::{sim_lif, sim_lif_synaptic, step_lif_pillars};
 
 #[cfg(feature = "cuda")]
@@ -428,6 +432,27 @@ mod tests {
         assert!(
             total_spikes > 0,
             "HH (instant) should fire with high drive (I=15), got {} spikes",
+            total_spikes
+        );
+        assert_eq!(spikes.len(), n_steps * n);
+    }
+
+    #[test]
+    fn test_sim_haap_basic() {
+        let conn = make_synaptic_connectome();
+        let n = conn.n_neurons;
+        // dt=0.05 ms — HAAP (M-current + h-current) is stable at this timestep.
+        // 2000 steps = 100 ms.
+        let mut pop = haap_population(n, 0.05);
+        let external_I = vec![15.0f32; n];
+        let n_steps = 2000;
+
+        let spikes = sim_haap_pillars(&conn, &mut pop, &external_I, n_steps, 1.0);
+
+        let total_spikes: i32 = spikes.iter().sum();
+        assert!(
+            total_spikes > 0,
+            "HAAP should fire with high drive (I=15), got {} spikes",
             total_spikes
         );
         assert_eq!(spikes.len(), n_steps * n);

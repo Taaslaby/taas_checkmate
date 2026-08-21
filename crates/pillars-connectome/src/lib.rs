@@ -33,6 +33,7 @@ pub mod runner;
 pub mod sim;
 pub mod synaptic;
 pub mod types;
+pub mod worker;
 
 pub use brain::Brain;
 pub use data::{
@@ -45,13 +46,15 @@ pub use rcm::{
 };
 pub use record::{SpikeRecorder, SpikeRecordings};
 pub use runner::{BrainConfig, BrainRunner, LearningRule, NeuronConfig, PoissonGroup};
+pub use worker::{AlphaLifOutput, AlphaLifWorker, ShiuParams};
 pub use sim::{
     csr_propagate, csr_propagate_conductance_from_queue, csr_propagate_from_queue,
-    hh_population_pacemaking, hh_population_standard, pad_to, push_spikes_to_queue, sim_gco,
-    sim_gco_record, sim_hh_pillars, sim_hh_synaptic_pillars, sim_izhikevich, sim_izhikevich_dual,
-    sim_izhikevich_synaptic, sim_lif, sim_lif_synaptic, sim_rate, step_izhikevich_dual_pillars,
-    step_izhikevich_pillars, step_lif_pillars, BrainState, GcoParams, IzhikevichDualParams,
-    IzhikevichParams, LifParams, NeuronModel, RateParams, SpikeQueue,
+    haap_population, hh_population_pacemaking, hh_population_standard, pad_to,
+    push_spikes_to_queue, sim_gco, sim_gco_record, sim_haap_pillars, sim_hh_pillars,
+    sim_hh_synaptic_pillars, sim_izhikevich, sim_izhikevich_dual, sim_izhikevich_synaptic,
+    sim_lif, sim_lif_synaptic, sim_rate, step_izhikevich_dual_pillars, step_izhikevich_pillars,
+    step_lif_pillars, BrainState, GcoParams, IzhikevichDualParams, IzhikevichParams, LifParams,
+    NeuronModel, RateParams, SpikeQueue,
 };
 pub use synaptic::SynapticBrain;
 
