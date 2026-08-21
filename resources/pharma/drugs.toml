@@ -1,0 +1,136 @@
+# neoMyelin — drug library
+#
+# Each drug maps to a modeled conductance or receptor:
+#   channel targets  → scale a conductance in HH / HAAP (NaV, KV, CaT, Leak, Hcn, M)
+#   receptor targets → scale the sign/strength of synapses by neurotransmitter
+#                      (GabaA → GABA, Nach → ACh, GluCl → Glu)
+#
+# `potency_um` is IC50 for Block/Antagonize and EC50 for Open/Agonize, in µM.
+# Values are literature-representative (order-of-magnitude). They are NOT
+# subtype-exact, because the engine models a generic squid-axon HH / point
+# HAAP, not a specific channel isoform. `reference` is the source to check.
+#
+# Honest caveats are in `note` (e.g. Drosophila RDL is largely
+# bicuculline-insensitive).
+
+[[drugs]]
+name = "TTX"
+target = "NaV"
+effect = "Block"
+potency_um = 0.01        # ~10 nM, TTX-sensitive NaV (range 1–10 nM)
+hill = 1.0
+mechanism = "Voltage-gated Na+ channel pore blocker (neurotoxin site 1)"
+reference = "IUPHAR/BPS NaV1.x ligands; PMC2858367 (TTX history)"
+
+[[drugs]]
+name = "TEA"
+target = "KV"
+effect = "Block"
+potency_um = 1000.0      # ~1 mM, delayed-rectifier Kv (range 0.1–10 mM by subtype)
+hill = 1.0
+mechanism = "Voltage-gated K+ (Kv) channel blocker (external pore, quaternary ammonium)"
+reference = "Classic squid-axon pharmacology (Hille, Ionic Channels)"
+
+[[drugs]]
+name = "4-AP"
+target = "KV"
+effect = "Block"
+potency_um = 100.0       # ~100 µM, A-type Kv (range 20–200 µM)
+hill = 1.0
+mechanism = "Voltage-gated K+ (A-type Kv) channel blocker"
+reference = "J Neurosci 27:10785 (2007); IUPHAR/BPS Kv ligands"
+
+[[drugs]]
+name = "Mibefradil"
+target = "CaT"
+effect = "Block"
+potency_um = 1.0         # ~1 µM, T-type Ca2+ (CaV3)
+hill = 1.0
+mechanism = "T-type (CaV3) Ca2+ channel blocker"
+reference = "IUPHAR/BPS CaV3 ligands"
+
+[[drugs]]
+name = "ZD7288"
+target = "Hcn"
+effect = "Block"
+potency_um = 10.0        # ~10 µM, HCN/Ih (range 1–30 µM)
+hill = 1.0
+mechanism = "Hyperpolarization-activated cyclic-nucleotide (HCN/Ih) channel blocker"
+reference = "Tocris 1000 (ZD7288); IUPHAR/BPS HCN ligands"
+
+[[drugs]]
+name = "XE991"
+target = "M"
+effect = "Block"
+potency_um = 0.6         # ~0.6 µM, KCNQ/Kv7 (M-current)
+hill = 1.0
+mechanism = "KCNQ (Kv7) M-current channel blocker"
+reference = "Tatulian et al. 2001, PMC6762632; IUPHAR/BPS Kv7 ligands"
+
+[[drugs]]
+name = "Retigabine"
+target = "M"
+effect = "Open"
+potency_um = 10.0        # ~10 µM, KCNQ2/3 opener
+hill = 1.0
+emax = 2.0               # saturating ~2–3× enhancement of M-current
+mechanism = "KCNQ (Kv7) M-current opener — stabilizes the open state"
+reference = "Tatulian et al. 2001, PMC6762632; PMC4772374"
+
+[[drugs]]
+name = "Picrotoxin"
+target = "GabaA"
+effect = "Antagonize"
+potency_um = 0.25        # ~0.25 µM on Drosophila RDL homomers
+hill = 1.0
+mechanism = "GABA_A (RDL) Cl- channel non-competitive antagonist"
+reference = "PubMed 15148245 (Drosophila GRD/LCCH3 & RDL)"
+
+[[drugs]]
+name = "Bicuculline"
+target = "GabaA"
+effect = "Antagonize"
+potency_um = 1.0         # ~1 µM, vertebrate GABA_A
+hill = 1.0
+mechanism = "GABA_A competitive antagonist (orthosteric site)"
+reference = "IUPHAR/BPS GABA_A ligands"
+note = "Drosophila RDL is largely bicuculline-insensitive — use picrotoxin for the fly."
+
+[[drugs]]
+name = "Muscimol"
+target = "GabaA"
+effect = "Agonize"
+potency_um = 5.0         # ~5 µM, GABA_A agonist
+hill = 1.0
+emax = 1.0
+mechanism = "GABA_A receptor agonist (mimics GABA)"
+reference = "IUPHAR/BPS GABA_A ligands"
+
+[[drugs]]
+name = "Nicotine"
+target = "Nach"
+effect = "Agonize"
+potency_um = 3.0         # ~3 µM (α4β2 ~1 µM, α7 ~10 µM)
+hill = 1.0
+emax = 1.0
+mechanism = "Nicotinic acetylcholine receptor (nAChR) agonist"
+reference = "eLife 11:e74322 (2022) Drosophila nAChR; IUPHAR/BPS nAChR ligands"
+
+[[drugs]]
+name = "Mecamylamine"
+target = "Nach"
+effect = "Antagonize"
+potency_um = 1.0         # ~1 µM, nAChR antagonist
+hill = 1.0
+mechanism = "Nicotinic acetylcholine receptor (nAChR) antagonist"
+reference = "IUPHAR/BPS nAChR ligands"
+
+[[drugs]]
+name = "Ivermectin"
+target = "GluCl"
+effect = "Agonize"
+potency_um = 0.01        # ~10 nM, very potent GluCl opener
+hill = 1.0
+emax = 1.0
+mechanism = "Glutamate-gated Cl- channel (GluCl) agonist — inhibitory in the fly"
+reference = "JBC (Drosophila GluClα); FlyBase FBgn0024963"

@@ -1,0 +1,17 @@
+<neuroml xmlns="http://www.neuroml.org/schema/neuroml2" id="hh_pulse">
+  <!-- Классический HH-аксон (Hodgkin–Huxley 1952): Na/K/leak через
+       channelDensity, стандартные гейты m³h / n⁴. Студенческий пример. -->
+  <hhCell id="squid" v0="-65mV" C="1uF" leakConductance="0.3uS" leakReversal="-54.3mV">
+    <channelDensity id="na" ionChannel="naChans" condDensity="120 mS_per_cm2" erev="50mV"/>
+    <channelDensity id="k" ionChannel="kChans" condDensity="36 mS_per_cm2" erev="-77mV"/>
+  </hhCell>
+  <!-- Импульс 50 nA на 50 мс → серия спайков. -->
+  <pulseGenerator id="pg" delay="0ms" duration="50ms" amplitude="50"/>
+  <network id="net">
+    <population id="pop" component="squid" size="1"/>
+    <explicitInput target="pop[0]" input="pg"/>
+  </network>
+  <!-- HH требует мелкий шаг (dt=0.01 мс), иначе гейты нестабильны.
+       Единый корень XML: Simulation внутри <neuroml>. -->
+  <Simulation id="sim" length="100ms" step="0.01ms"/>
+</neuroml>
