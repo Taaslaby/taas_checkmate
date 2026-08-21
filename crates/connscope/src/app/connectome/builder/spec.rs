@@ -9,6 +9,26 @@ pub(crate) struct Spec {
     pub outs: &'static [&'static str],
 }
 
+/// Описание пина — для тултипа (понятный UX).
+pub(crate) fn pin_desc(kind: OpKind, pin: usize, is_input: bool) -> &'static str {
+    match (kind, pin, is_input) {
+        (OpKind::Leak, 0, true) => "v — мембранный потенциал, мВ",
+        (OpKind::Leak, 1, true) => "i — синаптический ток, мА",
+        (OpKind::Leak, 2, true) => "inv_tau — 1/τ, мс⁻¹",
+        (OpKind::Leak, 3, true) => "v_rest — потенциал покоя, мВ",
+        (OpKind::FireReset, 0, true) => "v — потенциал",
+        (OpKind::FireReset, 1, true) => "thresh — порог спайка",
+        (OpKind::FireReset, 2, true) => "reset — сброс после спайка",
+        (OpKind::Ohmic, 0, true) => "g — проводимость",
+        (OpKind::Ohmic, 1, true) => "v — потенциал",
+        (OpKind::Ohmic, 2, true) => "e — реверс-потенциал",
+        (OpKind::GateStep, 0, true) => "g — текущее значение гейта",
+        (OpKind::GateStep, 1, true) => "g_inf — стационар",
+        (OpKind::GateStep, 2, true) => "inv_tau — скорость",
+        _ => "",
+    }
+}
+
 /// Шаблон для `kind` — имя и пины.
 pub(crate) fn spec_of(kind: OpKind) -> Spec {
     match kind {

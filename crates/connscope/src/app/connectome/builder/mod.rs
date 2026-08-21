@@ -185,6 +185,8 @@ pub(crate) struct NeuronBuilder {
     // files
     filename: String,
     status: String,
+    /// Показывать ли онбординг (первый запуск).
+    show_onboarding: bool,
 }
 
 
@@ -227,6 +229,7 @@ impl Default for NeuronBuilder {
             trace: 0,
             filename: "neuron_graph.json".to_string(),
             status: "Drag from orange pin → cyan pin · scroll = zoom · minimap: click/drag to navigate · right-click canvas for ops".to_string(),
+            show_onboarding: true,
         };
         app.reset_sim();
         app
@@ -264,6 +267,28 @@ impl NeuronBuilder {
 
     fn build_program(&self) -> Vec<OpNode> {
         graph_to_program(&self.nodes, &self.edges)
+    }
+
+    /// Проверка графа — подсветка ошибок (понятный UX).
+    fn validate(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        let has_scope = self.nodes.iter().any(|n| n.kind == OpKind::Scope);
+        if !has_scope {
+            errs.push("Нет Scope — добавь ноду Scope и подключи к ней сигнал".to_string());
+        }
+        for (i, node) in self.nodes.iter().enumerate() {
+            let spec = spec_of(node.kind);
+            for pin in 0..spec.ins.len() {
+                if self.edge_source(i, pin).is_none() {
+                    // Const/Stimulus/State — входы опциональны? Нет, все входы обязательны кроме State
+                    if !matches!(node.kind, OpKind::State | OpKind::Scope) {
+                        errs.push(format!("{}[{}]: вход '{}' не подключен", spec.name, i, spec.ins[pin]));
+                        break;
+                    }
+                }
+            }
+        }
+        errs
     }
 
     // ── Simulation ─────────────────────────────────────────────
@@ -481,11 +506,15 @@ impl NeuronBuilder {
             } else {
                 reg_name(self.nodes[n].out_reg)
             };
-            Some(format!("{} · {} → {}", spec.name, spec.outs[pin], reg))
+            let desc = crate::app::connectome::builder::spec::pin_desc(self.nodes[n].kind, pin, false);
+            let base = format!("{} · {} → {}", spec.name, spec.outs[pin], reg);
+            Some(if desc.is_empty() { base } else { format!("{base}\n{desc}") })
         } else if let Some((n, pin)) = self.hit_in_pin(p) {
             let spec = spec_of(self.nodes[n].kind);
             let src = self.edge_source(n, pin).unwrap_or_else(|| "—".to_string());
-            Some(format!("{} · {} ← {}", spec.name, spec.ins[pin], src))
+            let desc = crate::app::connectome::builder::spec::pin_desc(self.nodes[n].kind, pin, true);
+            let base = format!("{} · {} ← {}", spec.name, spec.ins[pin], src);
+            Some(if desc.is_empty() { base } else { format!("{base}\n{desc}") })
         } else if let Some(ei) = self.hover_edge {
             if ei < self.edges.len() {
                 let e = &self.edges[ei];
@@ -1459,6 +1488,22 @@ impl NeuronBuilder {
     /// Dock-поверхность: тулбар + канвас/осциллограф + инспектор + статус.
     /// Рисуется внутри вкладки [`Surface::Builder`] единого дерева дока.
     pub(crate) fn dock_view(&mut self, ui: &mut egui::Ui) {
+        // Онбординг — первый запуск, пока граф — дефолтный LIF и t==0
+        if self.show_onboarding && self.t < 1.0 && self.nodes.len() < 15 {
+            egui::Window::new("🧠 Neuron Builder — как собрать нейрон")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Перетащи выход (оранжевый) → вход (голубой) чтобы связать ноды.").strong());
+                    ui.label("• Левая кнопка — выбрать/тащить ноду • Правая — меню • Колесо — зум • Space — пуск/пауза");
+                    ui.label(egui::RichText::new("Пресеты: LIF — быстрый старт, HH-lite — 3 гейта. Scope — куда смотреть осциллограф.").weak().small());
+                    ui.add_space(8.0);
+                    if ui.add_sized([120.0, 28.0], egui::Button::new("Понятно, скрыть")).clicked() {
+                        self.show_onboarding = false;
+                    }
+                });
+        }
         let ctx = ui.ctx().clone();
         // ── Keyboard shortcuts (skip while typing in a text field) ──
         if !ctx.egui_wants_keyboard_input() {
@@ -1504,6 +1549,24 @@ impl NeuronBuilder {
         ctx.request_repaint();
 
         self.toolbar(ui);
+
+        // Валидация — понятный UX: подсвечиваем ошибки графа
+        let errs = self.validate();
+        if !errs.is_empty() {
+            egui::Frame::new()
+                .fill(Color32::from_rgba_unmultiplied(90, 30, 30, 200))
+                .inner_margin(egui::Margin::same(8))
+                .corner_radius(6)
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(format!("{} {}", ic::WARNING_CIRCLE, "Граф не запустится:")).strong().color(Color32::from_rgb(255, 180, 180)));
+                    for e in errs.iter().take(3) {
+                        ui.label(egui::RichText::new(format!("• {e}")).small().color(Color32::from_rgb(255, 200, 180)));
+                    }
+                    if errs.len() > 3 {
+                        ui.label(egui::RichText::new(format!("и ещё {}…", errs.len() - 3)).small().weak());
+                    }
+                });
+        }
 
         // ── статус-строка снизу ──
         egui::Panel::bottom("builder_status")
