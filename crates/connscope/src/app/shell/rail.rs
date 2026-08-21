@@ -84,7 +84,7 @@ impl ConnectomeMode {
                         .on_hover_text("3D-облако точек (как в меню «Вид»)")
                         .clicked()
                     {
-                        self.toggle_3d(ui);
+                        self.toggle_3d(ui.ctx());
                     }
                     if self.camera.view3d {
                         // ── настройки 3D-камеры/облака ──
@@ -102,7 +102,10 @@ impl ConnectomeMode {
                         .find(|m| **m == self.filters.color_mode)
                         .map(|m| m.label())
                         .unwrap_or("?");
-                    let btn = rail_button(ui, ic::PALETTE, false, tokens::ICON_SM)
+                    // Подсветка акцентом, когда окраска не дефолтная (НТ) —
+                    // видно, что «что-то перекрашено», без ховера.
+                    let non_default = self.filters.color_mode != ColorMode::Nt;
+                    let btn = rail_button(ui, ic::PALETTE, non_default, tokens::ICON_SM)
                         .on_hover_text(format!("Окраска: {mode_label}"));
                     egui::Popup::menu(&btn).show(|ui| {
                         ui.set_min_width(220.0);
@@ -134,21 +137,6 @@ impl ConnectomeMode {
                     }
                 });
             });
-    }
-
-    /// Переключение 2D↔3D с кадрированием мозга при входе в 3D.
-    fn toggle_3d(&mut self, ui: &mut egui::Ui) {
-        self.camera.view3d = !self.camera.view3d;
-        if self.camera.view3d {
-            let size = ui.input(|i| {
-                i.raw
-                    .screen_rect
-                    .map_or(egui::vec2(1560.0, 960.0), |r| r.size())
-            });
-            self.enter_3d(size);
-        }
-        self.camera.atlas = None;
-        self.camera.atlas3d = None;
     }
 
     /// Попап «3D»: ракурсы, орто/перс, автовращение, GPU и слайдеры камеры.

@@ -10,6 +10,8 @@
 
 use pillars_connectome::{BrainRunner, NeuronConfig};
 
+use crate::core::pharma::Target;
+
 mod haap;
 mod hh;
 mod izh;
@@ -29,6 +31,11 @@ pub trait NeuronModel: Sync {
     fn tune(&self, _runner: &mut BrainRunner, _n: usize, _gh: f32) {}
     /// Показывать ли в UI слайдер h-тока (`g_h`). По умолчанию — нет.
     fn has_h_current(&self) -> bool {
+        false
+    }
+    /// Есть ли у модели проводимость-мишень препарата (канальные мишени).
+    /// Рецепторные мишени (синапсы) подходят любой модели — сюда не входят.
+    fn has_channel(&self, _target: Target) -> bool {
         false
     }
 }

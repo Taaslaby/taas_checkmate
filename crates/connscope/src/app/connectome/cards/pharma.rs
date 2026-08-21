@@ -12,9 +12,12 @@ use egui_phosphor::regular as ic;
 
 use crate::app::connectome::state::PharmaState;
 use crate::app::tokens;
+use crate::sim::{models, pharma_target_fit};
 
 /// Чистая свободная функция фармакологии: работает только с `PharmaState`.
-pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState) {
+/// `model` — индекс модели в `sim::models::MODELS` (для подсказки совместимости
+/// мишени с проводимостями модели).
+pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState, model: usize) {
     // Owned-строки собираем заранее: внутри карточки мы мутируем `pharma`,
     // а библиотеку нельзя держать взаймы.
     let names: Vec<String> = pharma
@@ -60,6 +63,23 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState) {
                 .value_fmt(|v| format!("{:.2} µM", 10f64.powf(v))),
         );
         pharma.log_conc = logc;
+
+        // Период полувыведения в шагах симуляции: 0 = постоянная концентрация
+        // (классический случай), иначе однокомпартментная PK с клиренсом.
+        let mut half = pharma.half_life_steps;
+        ui.add(
+            ElegSlider::new(&mut half, 0.0..=2000.0)
+                .label("период полувыведения")
+                .decimals(0)
+                .value_fmt(|v| {
+                    if v <= 0.0 {
+                        "постоянно (∞)".into()
+                    } else {
+                        format!("T½ = {v:.0} шагов")
+                    }
+                }),
+        );
+        pharma.half_life_steps = half;
 
         ui.add_space(tokens::SP_XS);
         ui.separator();
@@ -107,6 +127,27 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState) {
                     .small()
                     .color(Color32::from_rgb(225, 180, 90)),
             );
+        }
+
+        // Совместимость мишени с текущей моделью: канальные мишени требуют
+        // HH/HAAP, рецепторные масштабируют синапсы в любой модели.
+        let mname = models::MODELS.get(model).map(|m| m.short_name()).unwrap_or("?");
+        match pharma_target_fit(d.target, model) {
+            Ok(()) => {
+                ui.label(
+                    egui::RichText::new(format!("✓ применится при ▶ (модель {mname})"))
+                        .weak()
+                        .small()
+                        .color(Color32::from_rgb(120, 220, 150)),
+                );
+            }
+            Err(reason) => {
+                ui.label(
+                    egui::RichText::new(format!("⚠ {reason} — модель {mname}"))
+                        .small()
+                        .color(Color32::from_rgb(225, 180, 90)),
+                );
+            }
         }
     });
 }

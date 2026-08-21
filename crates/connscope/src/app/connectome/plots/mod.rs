@@ -21,7 +21,7 @@
 use eframe::egui::{self, Color32};
 
 use egui_phosphor::regular as ic;
-use egui_plot::{CoordinatesFormatter, Corner, Legend, Plot};
+use egui_plot::{CoordinatesFormatter, Corner, Legend, Line, Plot, PlotPoints, VLine};
 use elegance::{Checkbox, Modal};
 
 use crate::app::connectome::ConnectomeMode;
@@ -30,6 +30,7 @@ use crate::core::color::ColorMode;
 use crate::io::data::MancData;
 use crate::sim::SimOutcome;
 
+use super::neuron_builder::BuilderScopeData;
 use super::plotlib::{PlotDesc, PlotKind, CATALOG};
 
 mod full;
@@ -89,6 +90,54 @@ fn plot_card(
     body: impl FnOnce(&mut egui::Ui),
 ) {
     crate::app::widgets::compact_card(ui, icon, title, sub, body);
+}
+
+/// Осциллограф «Конструктора» как плот в общей библиотеке: тот же стиль
+/// карточки и плота, но источник — нодовый нейрон (`BuilderScopeData`),
+/// а не симуляция коннектома.
+fn card_builder_scope(ui: &mut egui::Ui, d: &BuilderScopeData) {
+    let mut ymin = f32::INFINITY;
+    let mut ymax = f32::NEG_INFINITY;
+    for &[_, y] in &d.pts {
+        ymin = ymin.min(y as f32);
+        ymax = ymax.max(y as f32);
+    }
+    if !ymin.is_finite() {
+        ymin = -95.0;
+        ymax = 65.0;
+    }
+    let pad = (ymax - ymin).abs().max(10.0) * 0.15;
+    plot_card(
+        ui,
+        ic::FLOW_ARROW,
+        "Осциллограф конструктора",
+        &format!("V(t) · ⚡ {} спайков", d.total_spikes),
+        |ui| {
+            styled_plot(ui, "builder_scope", "мс")
+                .allow_scroll(false)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .include_x(d.t_min)
+                .include_x(d.t_max)
+                .include_y(ymin - pad)
+                .include_y(ymax + pad)
+                .show(ui, |p| {
+                    if !d.pts.is_empty() {
+                        p.line(
+                            Line::new("V(t)", PlotPoints::from(d.pts.clone()))
+                                .color(Color32::from_rgb(90, 220, 130)),
+                        );
+                    }
+                    p.hline(
+                        egui_plot::HLine::new("thresh", d.spike_thresh)
+                            .color(Color32::from_rgb(120, 160, 255)),
+                    );
+                    for &s in &d.spikes {
+                        p.vline(VLine::new("spike", s).color(Color32::from_rgb(255, 130, 100)));
+                    }
+                });
+        },
+    );
 }
 
 // ── диспетчер библиотеки ─────────────────────────────────────
@@ -153,7 +202,47 @@ impl ConnectomeMode {
         self.show_plots = plots_open;
     }
 
+    /// Осциллограф «Конструктора» в нижней панели (если включён и не откреплён).
+    pub(crate) fn render_builder_scope(&self, ui: &mut egui::Ui) {
+        let bst = self.plots.get(PlotKind::BuilderScope);
+        if bst.enabled && !bst.detached {
+            card_builder_scope(ui, &self.builder.scope_snapshot());
+            ui.add_space(tokens::SP_SM);
+        }
+    }
+
+    /// Библиотека плоттеров прямо во вкладке «Плоттер» (когда результата
+    /// симуляции ещё нет): чекбоксы включения + открепление. Вкладка живая,
+    /// а не пустая заглушка «Нет результата».
+    pub(crate) fn render_plot_library(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(tokens::SP_SM);
+        ui.label(
+            egui::RichText::new("Сюда появятся графики после запуска симуляции (▶ в инспекторе). Включи нужные сейчас:")
+                .weak()
+                .small(),
+        );
+        ui.add_space(tokens::SP_SM);
+        ui.label(egui::RichText::new("Локальный контур (ego)").strong());
+        for desc in CATALOG.iter().filter(|d| d.local) {
+            plot_lib_row(ui, self, desc);
+        }
+        ui.add_space(tokens::SP_SM);
+        ui.separator();
+        ui.label(egui::RichText::new("Полный прогон (научные)").strong());
+        for desc in CATALOG.iter().filter(|d| !d.local) {
+            plot_lib_row(ui, self, desc);
+        }
+        ui.add_space(tokens::SP_SM);
+        ui.label(
+            egui::RichText::new("Откреплённый плот — отдельное окно системы (можно двигать на второй монитор).")
+                .weak()
+                .small(),
+        );
+    }
+
     /// Ряд включённых (не откреплённых) плоттеров — нижняя панель.
+    /// Осциллограф «Конструктора» рисует вызывающий (`dock_tab_plots`),
+    /// здесь — только плоты результата симуляции.
     pub(crate) fn render_sim_plots(&self, ui: &mut egui::Ui, r: &SimOutcome) {
         let Some(data) = self.data.as_ref() else {
             return;
@@ -162,6 +251,9 @@ impl ConnectomeMode {
         let kinds: Vec<PlotKind> = CATALOG
             .iter()
             .filter(|d| {
+                if d.kind == PlotKind::BuilderScope {
+                    return false; // уже нарисован выше
+                }
                 if d.local != local {
                     return false;
                 }
@@ -200,6 +292,25 @@ impl ConnectomeMode {
     /// единый дизайн. Закрытие крестиком ОС (`close_requested`) возвращает плот
     /// в нижнюю панель.
     pub(crate) fn plots_windows(&mut self, ctx: &egui::Context) {
+        // Осциллограф «Конструктора» — независим от симуляции коннектома.
+        let bst = self.plots.get(PlotKind::BuilderScope);
+        if bst.enabled && bst.detached {
+            let viewport_id = egui::ViewportId::from_hash_of(("neoMyelin.plot", PlotKind::BuilderScope as usize));
+            let builder = egui::ViewportBuilder::default()
+                .with_title("⧉ Осциллограф конструктора")
+                .with_inner_size([640.0, 400.0])
+                .with_min_inner_size([360.0, 280.0])
+                .with_taskbar(true);
+            let close = ctx.show_viewport_immediate(viewport_id, builder, |ui, _class| {
+                card_builder_scope(ui, &self.builder.scope_snapshot());
+                ui.ctx().input(|i| i.viewport().close_requested())
+            });
+            if close {
+                let mut s = self.plots.get(PlotKind::BuilderScope);
+                s.detached = false;
+                self.plots.set(PlotKind::BuilderScope, s);
+            }
+        }
         let Some(r) = self.sim.result.as_ref() else {
             return;
         };
@@ -208,6 +319,9 @@ impl ConnectomeMode {
             return;
         };
         for desc in CATALOG.iter() {
+            if desc.kind == PlotKind::BuilderScope {
+                continue; // нарисован выше
+            }
             if desc.local != local {
                 continue;
             }

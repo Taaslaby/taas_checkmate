@@ -77,7 +77,7 @@ impl Target {
     }
 
     /// The neurotransmitter a receptor target acts on (`None` for channels).
-    #[allow(dead_code)] // API surface for the next step (receptor → synapse wiring).
+    /// Used by `sim::apply_pharma` to scale synapses by presynaptic NT.
     pub fn receptor_nt(self) -> Option<Nt> {
         match self {
             Target::GabaA => Some(Nt::Gaba),
@@ -197,7 +197,7 @@ impl DrugLibrary {
     }
 
     /// Look up a drug by name (case-insensitive).
-    #[allow(dead_code)] // API surface for the next step (console lookup / wiring).
+    /// Used by CLI/console flags `--drug <имя>` (`cli::pharma_dose_from_flags`).
     pub fn get(&self, name: &str) -> Option<&Drug> {
         self.drugs
             .iter()

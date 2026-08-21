@@ -10,7 +10,7 @@
 //! top_panel (40 px)
 //! ├── tool_shelf      модульная полка: режимы, будущие инструменты
 //! ├── search_group    поиск по типу/классу/НТ/ноге/body_id
-//! └── action_group    ⟳ Fit (F) · 🌐 3D · ? справка (F1)
+//! └── action_group    ? справка (F1) — 3D/Fit живут в рейле и меню «Вид»
 //! ```
 
 use eframe::egui::{self, Key};
@@ -81,9 +81,9 @@ impl ConnectomeMode {
         super::profiler::record("top_search_group", rect);
     }
 
-    /// Правая группа тулбара: действия камеры и справка. Все кнопки — общий
-    /// [`widgets::icon_button`] (та же сигнальная подсветка, что в рейле),
-    /// активное состояние 3D подсвечивается акцентом, как в левом рейле.
+    /// Правая группа тулбара: только справка. Действия камеры (3D, Fit)
+    /// живут в левом рейле и меню «Вид» — один инструмент в одном месте,
+    /// топ-бар остаётся чистой навигацией (вкладки + поиск), как в Blender.
     fn top_action_group(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
         if crate::app::widgets::icon_button(ui, ic::QUESTION, false, tokens::ICON_SM)
             .on_hover_text("Горячие клавиши [F1]")
@@ -91,28 +91,6 @@ impl ConnectomeMode {
         {
             // Модалку «Горячие клавиши» рисует оболочка — просим её через сервисы.
             *services.show_shortcuts = true;
-        }
-        if crate::app::widgets::icon_button(ui, ic::GLOBE, self.camera.view3d, tokens::ICON_SM)
-            .on_hover_text("3D-облако точек")
-            .clicked()
-        {
-            let size = ui.input(|i| {
-                i.raw
-                    .screen_rect
-                    .map_or(egui::vec2(1560.0, 960.0), |r| r.size())
-            });
-            self.camera.view3d = !self.camera.view3d;
-            if self.camera.view3d {
-                self.enter_3d(size);
-            }
-            self.camera.atlas = None;
-            self.camera.atlas3d = None;
-        }
-        if crate::app::widgets::icon_button(ui, ic::ARROW_CLOCKWISE, false, tokens::ICON_SM)
-            .on_hover_text("Вписать вид [F]")
-            .clicked()
-        {
-            self.reset_camera();
         }
         super::profiler::record("top_actions", ui.min_rect());
     }
@@ -126,15 +104,23 @@ impl ConnectomeMode {
     /// жёстко 38px и в тонком баре не центрировался; чипы ровные.
     fn mode_tabs(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) -> egui::Rect {
         let mut rect = egui::Rect::NOTHING;
+        // Активную вкладку подсвечиваем по фокусу дерева (оболочка передаёт
+        // его в `services.focused`) — раньше оба чипа всегда были `false`.
         let atlas = ui
-            .selectable_label(false, icon_label(ic::COMPASS, "Атлас", tokens::ICON_XS))
+            .selectable_label(
+                services.focused == Some(Surface::Atlas),
+                icon_label(ic::COMPASS, "Атлас", tokens::ICON_XS),
+            )
             .on_hover_text("Сфокусировать вкладку «Атлас»");
         rect = rect.union(atlas.rect);
         if atlas.clicked() {
             services.focus_surface = Some(Surface::Atlas);
         }
         let ego = ui
-            .selectable_label(false, icon_label(ic::NETWORK, "Ego-граф", tokens::ICON_XS))
+            .selectable_label(
+                services.focused == Some(Surface::Ego),
+                icon_label(ic::NETWORK, "Ego-граф", tokens::ICON_XS),
+            )
             .on_hover_text("Сфокусировать вкладку «Ego-граф»");
         rect = rect.union(ego.rect);
         if ego.clicked() {
@@ -142,7 +128,8 @@ impl ConnectomeMode {
             self.ego_undocked = false;
             services.focus_surface = Some(Surface::Ego);
         }
-        // Ego-граф: открепить в окно / вернуть в таб.
+        // Ego-граф: открепить в окно / вернуть в таб. Тот же чип-вид, что у
+        // соседних вкладок (не отдельная кнопка) + подсветка, пока откреплён.
         let (txt, hint) = if self.ego_undocked {
             (
                 icon_label(ic::ARROWS_OUT, "Прикрепить", tokens::ICON_XS),
@@ -154,7 +141,9 @@ impl ConnectomeMode {
                 "Вытащить Ego-граф в перетаскиваемое окно (drag за заголовок)",
             )
         };
-        let undock = ui.button(txt).on_hover_text(hint);
+        let undock = ui
+            .selectable_label(self.ego_undocked, txt)
+            .on_hover_text(hint);
         rect = rect.union(undock.rect);
         if undock.clicked() {
             self.ego_undocked = !self.ego_undocked;

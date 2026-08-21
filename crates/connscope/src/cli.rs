@@ -8,8 +8,8 @@
 //! connscope stats <file>
 //! connscope search <file> <запрос>
 //! connscope ego <file> <idx> [--k 10]
-//! connscope sim <file> --drive <idx> [--model lif|izh|hh|haap] [--steps 200] [--bias 20] [--pulse 0.6] [--gh 0.3]
-//! connscope fullsim <file> --drive <idx> [--model lif] [--steps 200] [--bias 30] [--pulse 0.6]
+//! connscope sim <file> --drive <idx> [--model lif|izh|hh|haap] [--steps 200] [--bias 20] [--pulse 0.6] [--gh 0.3] [--drug имя] [--conc µM] [--half-life шаги]
+//! connscope fullsim <file> --drive <idx> [--model lif] [--steps 200] [--bias 30] [--pulse 0.6] [--drug имя] [--conc µM] [--half-life шаги]
 //! connscope disin <file> <idx> [--top 10]
 //! ```
 
@@ -17,10 +17,12 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::core::nt::Nt;
+use crate::core::pharma::DrugLibrary;
 use crate::io::data::MancData;
 use crate::sim::models;
 use crate::sim::{
-    find_disinhibition, run_full_sim, run_simulation, FullSimResult, SimOutcome, SimResult,
+    find_disinhibition, run_full_sim, run_simulation, FullSimResult, PharmaDose, PharmaPk,
+    SimOutcome, SimResult,
 };
 
 pub fn run() -> i32 {
@@ -87,8 +89,8 @@ fn print_help() {
     println!("  connscope stats <file>");
     println!("  connscope search <file> <запрос>");
     println!("  connscope ego <file> <idx> [--k 10]");
-    println!("  connscope sim <file> --drive <idx> [--model lif|izh|hh|haap] [--steps 200] [--bias 20] [--pulse 0.6] [--gh 0.3]");
-    println!("  connscope fullsim <file> --drive <idx> [--model lif] [--steps 200] [--bias 30] [--pulse 0.6]");
+    println!("  connscope sim <file> --drive <idx> [--model lif|izh|hh|haap] [--steps 200] [--bias 20] [--pulse 0.6] [--gh 0.3] [--drug имя] [--conc µM] [--half-life шаги]");
+    println!("  connscope fullsim <file> --drive <idx> [--model lif] [--steps 200] [--bias 30] [--pulse 0.6] [--drug имя] [--conc µM] [--half-life шаги]");
     println!("  connscope disin <file> <idx> [--top 10]");
     println!("  connscope help");
 }
@@ -116,6 +118,36 @@ pub(crate) fn flag_drive(parts: &[&str]) -> Option<usize> {
 /// неизвестное имя → 0 (LIF).
 pub(crate) fn parse_model(s: &str) -> usize {
     models::index_of_name(s).unwrap_or(0)
+}
+
+/// Кинетика препарата из флагов `--drug <имя> [--conc <µM>] [--half-life <шаги>]`.
+/// `None` — флага `--drug` нет; `Err` — неизвестный препарат (с подсказкой).
+pub(crate) fn pharma_pk_from_flags(parts: &[&str]) -> Result<Option<PharmaPk>, String> {
+    let name = flag_val(parts, "--drug", "");
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let lib = DrugLibrary::load();
+    let Some(drug) = lib.get(name) else {
+        let names: Vec<&str> = lib.drugs.iter().map(|d| d.name.as_str()).collect();
+        return Err(format!(
+            "неизвестный препарат: {name} (в библиотеке: {})",
+            names.join(", ")
+        ));
+    };
+    let conc = flag_val(parts, "--conc", "1.0")
+        .parse()
+        .map_err(|_| "--conc должен быть числом (µM)".to_string())?;
+    let half_life: f32 = flag_val(parts, "--half-life", "0")
+        .parse()
+        .map_err(|_| "--half-life должен быть числом (шагов)".to_string())?;
+    Ok(Some(PharmaPk {
+        dose: PharmaDose {
+            drug: drug.clone(),
+            conc_um: conc,
+        },
+        half_life_steps: half_life.max(0.0),
+    }))
 }
 
 pub(crate) fn class_name(v: i8) -> &'static str {
@@ -285,6 +317,7 @@ pub(crate) fn run_local_sim(
     bias: f32,
     pulse: f32,
     gh: f32,
+    pk: Option<PharmaPk>,
 ) -> Result<SimOutcome, String> {
     if drive >= d.n {
         return Err(format!("драйв #{drive} вне сети ({})", d.n));
@@ -299,7 +332,8 @@ pub(crate) fn run_local_sim(
             nodes.push(t);
         }
     }
-    run_simulation(d, &nodes, drive, model, bias, steps, pulse, 0.5, gh).map(SimOutcome::Local)
+    run_simulation(d, &nodes, drive, model, bias, steps, pulse, 0.5, gh, pk)
+        .map(SimOutcome::Local)
 }
 
 pub(crate) fn local_sim_text(d: &MancData, r: &SimResult) -> String {
@@ -374,10 +408,14 @@ fn cmd_sim(d: &mut MancData, parts: &[&str]) -> Result<String, String> {
     let bias = flag_val(parts, "--bias", "20").parse().unwrap_or(20.0);
     let pulse = flag_val(parts, "--pulse", "0.6").parse().unwrap_or(0.6);
     let gh = flag_val(parts, "--gh", "0.3").parse().unwrap_or(0.3);
+    let pk = pharma_pk_from_flags(parts)?;
     let t0 = Instant::now();
-    match run_local_sim(d, drive, model, steps, bias, pulse, gh)? {
+    match run_local_sim(d, drive, model, steps, bias, pulse, gh, pk)? {
         SimOutcome::Local(r) => {
             let mut s = local_sim_text(d, &r);
+            if !r.pharma_note.is_empty() {
+                s.push_str(&format!("\n{}", r.pharma_note));
+            }
             s.push_str(&format!("\n({:?})", t0.elapsed()));
             Ok(s)
         }
@@ -394,9 +432,56 @@ fn cmd_fullsim(d: &MancData, parts: &[&str]) -> Result<String, String> {
     let bias = flag_val(parts, "--bias", "30").parse().unwrap_or(30.0);
     let pulse = flag_val(parts, "--pulse", "0.6").parse().unwrap_or(0.6);
     let gh = flag_val(parts, "--gh", "0.3").parse().unwrap_or(0.3);
+    let pk = pharma_pk_from_flags(parts)?;
     let t0 = Instant::now();
-    let r = run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh)?;
+    let r = run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh, pk)?;
     let mut s = full_sim_text(d, &r);
+    if !r.pharma_note.is_empty() {
+        s.push_str(&format!("\n{}", r.pharma_note));
+    }
     s.push_str(&format!("\n({:?})", t0.elapsed()));
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pharma_pk_from_flags;
+    use crate::core::pharma::Effect;
+
+    /// `--drug` без `--conc` → 1 µM по умолчанию; без флагов → None.
+    #[test]
+    fn dose_flags_parse() {
+        let none = pharma_pk_from_flags(&["--drive", "5"]).unwrap();
+        assert!(none.is_none(), "без --drug дозы нет");
+
+        let d = pharma_pk_from_flags(&["--drug", "TTX"]).unwrap().unwrap();
+        assert_eq!(d.dose.drug.name, "TTX");
+        assert_eq!(d.dose.drug.effect, Effect::Block);
+        assert_eq!(d.dose.conc_um, 1.0, "по умолчанию 1 µM");
+        assert_eq!(d.half_life_steps, 0.0, "по умолчанию постоянная");
+
+        let d = pharma_pk_from_flags(&["--drug", "ttx", "--conc", "0.01"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.dose.conc_um, 0.01);
+        assert!(
+            (d.dose.drug.scale(d.dose.conc_um) - 0.5).abs() < 1e-3,
+            "IC50 → scale 0.5"
+        );
+
+        let d = pharma_pk_from_flags(&["--drug", "TTX", "--half-life", "150"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.half_life_steps, 150.0);
+        // Через 150 шагов концентрация вдвое меньше — проверка кинетики.
+        assert!((d.conc_at(150) - d.conc_at(0) / 2.0).abs() < 1e-3);
+    }
+
+    /// Регистронезависимый поиск + честная ошибка с подсказкой.
+    #[test]
+    fn dose_flags_unknown_drug_reports_library() {
+        let err = pharma_pk_from_flags(&["--drug", "aspirin"]).unwrap_err();
+        assert!(err.contains("aspirin"), "{err}");
+        assert!(err.contains("TTX"), "подсказка со списком: {err}");
+    }
 }

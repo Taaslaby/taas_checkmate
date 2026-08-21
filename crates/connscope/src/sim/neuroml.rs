@@ -319,7 +319,7 @@ mod tests {
         assert_eq!(ln.network.num_populations(), 2);
         assert_eq!(ln.network.graph().unwrap().num_synapses(), 4);
         let r = run_cpu(&mut ln);
-        assert_eq!(r.steps, (1000.0 / 0.5) as usize);
+        assert_eq!(r.steps, (ln.duration_ms / ln.dt_ms) as usize);
         assert_eq!(r.spike_counts.len(), 2);
         // exc[0] под импульсом I=10 стреляет (~22 Гц), популяция не пуста.
         assert!(r.spike_counts[0] > 0, "exc-популяция должна спайкать");

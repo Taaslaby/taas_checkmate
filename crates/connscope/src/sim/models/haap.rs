@@ -2,6 +2,8 @@
 
 use pillars_connectome::{BrainConfig, BrainRunner, NeuronConfig};
 
+use crate::core::pharma::Target;
+
 use super::NeuronModel;
 
 /// HAAP — M-current (`u`) адаптация + h-current (`h`) rebound: частота не
@@ -23,5 +25,8 @@ impl NeuronModel for Haap {
     }
     fn has_h_current(&self) -> bool {
         true
+    }
+    fn has_channel(&self, target: Target) -> bool {
+        matches!(target, Target::M | Target::Hcn | Target::Leak)
     }
 }

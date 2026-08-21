@@ -392,7 +392,7 @@ impl ConnectomeMode {
         if let Some(sel) = self.sel.selected {
             if sel < data.n {
                 let a = origin + self.to_screen(self.proj_point(sel));
-                for &(t, w, out) in &self.sel.ego {
+                for &(t, w, out, _) in &self.sel.ego {
                     if t >= data.n {
                         continue;
                     }

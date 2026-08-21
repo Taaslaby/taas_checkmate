@@ -14,7 +14,10 @@ use eframe::egui;
 
 use crate::app::connectome::ConnectomeMode;
 use crate::sim::models;
-use crate::sim::{find_disinhibition, run_full_sim_stream, run_simulation, SimOutcome, StreamMsg};
+use crate::sim::{
+    find_disinhibition, run_full_sim_stream, run_simulation, PharmaDose, PharmaPk, SimOutcome,
+    StreamMsg,
+};
 
 impl ConnectomeMode {
     /// Узлы локальной симуляции: драйв + ego-соседи (без дублей, с лимитом).
@@ -22,7 +25,7 @@ impl ConnectomeMode {
         let mut nodes: Vec<usize> = Vec::new();
         if let Some(sel) = self.sel.selected {
             nodes.push(sel);
-            for &(t, _, _) in &self.sel.ego {
+            for &(t, _, _, _) in &self.sel.ego {
                 if nodes.len() >= crate::app::MAX_SIM_NODES {
                     break;
                 }
@@ -32,6 +35,29 @@ impl ConnectomeMode {
             }
         }
         nodes
+    }
+
+    /// Кинетика препарата для текущего прогона: None, пока препарат выключен
+    /// (нулевая концентрация) или не выбран. `pub(crate)` — консоль берёт
+    /// дозу из карточки, если не задан флаг `--drug`.
+    pub(crate) fn pharma_pk(&self) -> Option<PharmaPk> {
+        let p = &self.pharma;
+        let conc_um = p.conc_um();
+        if conc_um <= 0.0 {
+            return None;
+        }
+        let dose = PharmaDose {
+            drug: p.library.drugs.get(p.drug)?.clone(),
+            conc_um,
+        };
+        Some(if p.half_life_steps > 0.0 {
+            PharmaPk {
+                dose,
+                half_life_steps: p.half_life_steps,
+            }
+        } else {
+            PharmaPk::constant(dose)
+        })
     }
 
     /// Запуск симуляции (кнопка ▶ в инспекторе). Драйв = выбранный нейрон.
@@ -54,6 +80,7 @@ impl ConnectomeMode {
             return;
         }
         let nodes = self.sim_nodes();
+        let pk = self.pharma_pk();
         match run_simulation(
             d,
             &nodes,
@@ -64,11 +91,12 @@ impl ConnectomeMode {
             self.sim.pulse,
             0.5,
             self.sim.gh,
+            pk,
         ) {
             Ok(r) => {
                 let total: i32 = r.raster.iter().sum();
                 let active = r.rates.iter().filter(|&&x| x > 0.0).count();
-                self.sim.status = format!(
+                let base = format!(
                     "{}: {} нейронов, {} спайков, активных {}/{}",
                     r.model,
                     r.idx.len(),
@@ -76,6 +104,11 @@ impl ConnectomeMode {
                     active,
                     r.idx.len()
                 );
+                self.sim.status = if r.pharma_note.is_empty() {
+                    base
+                } else {
+                    format!("{base} · {}", r.pharma_note)
+                };
                 self.sim.result = Some(SimOutcome::Local(r));
                 self.plots.enable_kind_if_none(true); // плоты ego-контура
             }
@@ -111,6 +144,7 @@ impl ConnectomeMode {
             self.sim.pulse,
             0.5,
             self.sim.gh,
+            self.pharma_pk(),
         ) {
             Ok(s) => {
                 self.live.steps_done = 0;
@@ -171,7 +205,7 @@ impl ConnectomeMode {
                 Ok(StreamMsg::Done(res)) => {
                     let r = *res;
                     let n = self.data.as_ref().map(|d| d.n()).unwrap_or(0);
-                    self.live.status = format!(
+                    let base = format!(
                         "полный прогон · {}: {} спайков, активных {}/{} · {} мс",
                         r.model,
                         r.total_spikes,
@@ -179,6 +213,11 @@ impl ConnectomeMode {
                         n,
                         r.steps as f32 * r.dt_ms
                     );
+                    self.live.status = if r.pharma_note.is_empty() {
+                        base
+                    } else {
+                        format!("{base} · {}", r.pharma_note)
+                    };
                     self.sim.result = Some(SimOutcome::Full(r));
                     self.plots.enable_kind_if_none(false); // научные плоты
                     finished = true;

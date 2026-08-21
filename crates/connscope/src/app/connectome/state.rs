@@ -176,8 +176,9 @@ impl Default for Filters {
 pub(crate) struct Selection {
     pub hover: Option<usize>,
     pub selected: Option<usize>,
-    /// Сырые рёбра ego: (индекс соседа, вес, направление out=true).
-    pub ego: Vec<(usize, f32, bool)>,
+    /// Сырые рёбра ego: (индекс соседа, вес, направление out=true,
+    /// число агрегированных синапсов).
+    pub ego: Vec<(usize, f32, bool, usize)>,
     /// Интерактивный ego-граф (egui_graphs) для инспектора.
     pub ego_graph: EgoGraph,
     /// Для какого выбора ego-граф уже показан — при смене выбора
@@ -201,9 +202,10 @@ impl Default for Selection {
             ego: Vec::new(),
             ego_graph: egui_graphs::Graph::new(petgraph::stable_graph::StableGraph::default()),
             ego_shown_key: None,
-            // Anatomical coordinates are deterministic and readable by
-            // default. Force layout remains available as an explicit mode.
-            ego_layout_coords: true,
+            // Force layout by default: it spreads the neighbourhood into a
+            // readable star (converged once, then frozen). Anatomical
+            // coordinates stay available for spatial context.
+            ego_layout_coords: false,
             ego_shown_proj: Proj::Xz,
             search: String::new(),
             search_status: String::new(),
@@ -256,6 +258,9 @@ pub(crate) struct PharmaState {
     pub active: bool,
     /// log₁₀ концентрации в µM: −2 (0.01 µM) .. 3 (1000 µM).
     pub log_conc: f32,
+    /// Период полувыведения в шагах симуляции; `0` = концентрация постоянна
+    /// (однокомпартментная PK: C(t) = C0·2^(−t/T½)).
+    pub half_life_steps: f32,
 }
 
 impl PharmaState {
@@ -276,6 +281,7 @@ impl Default for PharmaState {
             drug: 0,
             active: false,
             log_conc: 0.0, // 1 µM
+            half_life_steps: 0.0, // постоянная концентрация
         }
     }
 }

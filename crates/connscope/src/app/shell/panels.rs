@@ -45,12 +45,15 @@ pub(crate) fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, open: &
 }
 
 impl ConnectomeMode {
-    /// Вкладка «Плоттер»: графики последнего результата симуляции.
+    /// Вкладка «Плоттер»: графики последнего результата симуляции + трейс
+    /// «Конструктора» (он живёт всегда). Без результата — живая библиотека
+    /// плоттеров (что можно включить), а не пустая заглушка.
     pub(crate) fn dock_tab_plots(&mut self, ui: &mut egui::Ui) {
+        self.render_builder_scope(ui);
         if let Some(r) = &self.sim.result {
             self.render_sim_plots(ui, r);
         } else {
-            ui.weak("Нет результата: запусти симуляцию (▶ в инспекторе) — графики появятся здесь.");
+            self.render_plot_library(ui);
         }
     }
 

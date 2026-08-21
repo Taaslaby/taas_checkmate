@@ -111,9 +111,6 @@ impl ConnectomeMode {
             // raw list of parallel synapses. Aggregation also keeps the force
             // layout bounded for dense connectomes.
             d.ego_edges_agg(i, 64)
-                .into_iter()
-                .map(|(target, weight, out, _count)| (target, weight, out))
-                .collect()
         } else {
             Vec::new()
         };

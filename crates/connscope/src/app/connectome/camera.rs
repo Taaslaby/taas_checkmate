@@ -8,7 +8,7 @@
 //! * **навигация** — `focus_on` (центрировать камеру на нейроне),
 //!   `minimap_rect` / `minimap_pan` (клик по миникарте = прыжок).
 
-use eframe::egui::{pos2, vec2, Rect, Vec2};
+use eframe::egui::{self, pos2, vec2, Rect, Vec2};
 
 use crate::app::connectome::ConnectomeMode;
 use crate::render::atlas::project3d;
@@ -53,6 +53,24 @@ impl ConnectomeMode {
     pub(crate) fn set_camera(&mut self, yaw: f32, pitch: f32) {
         self.camera.yaw = yaw;
         self.camera.pitch = pitch;
+        self.camera.atlas3d = None;
+    }
+
+    /// Общий переключатель 2D↔3D (топбар, рейл, меню «Вид»): при входе в 3D
+    /// кадрирует мозг по экрану и сбрасывает кеши текстур. Раньше три места
+    /// дублировали эту логику и успели разъехаться (меню кадрировало по
+    /// размеру попапа, а не окна).
+    pub(crate) fn toggle_3d(&mut self, ctx: &egui::Context) {
+        self.camera.view3d = !self.camera.view3d;
+        if self.camera.view3d {
+            let size = ctx.input(|i| {
+                i.raw
+                    .screen_rect
+                    .map_or(egui::vec2(1560.0, 960.0), |r| r.size())
+            });
+            self.enter_3d(size);
+        }
+        self.camera.atlas = None;
         self.camera.atlas3d = None;
     }
 
@@ -184,7 +202,7 @@ impl ConnectomeMode {
         let Some(d) = self.data.as_ref() else { return };
         let Some(sel) = self.sel.selected else { return };
         let mut ids: Vec<usize> = vec![sel];
-        for &(t, _, _) in &self.sel.ego {
+        for &(t, _, _, _) in &self.sel.ego {
             if !ids.contains(&t) {
                 ids.push(t);
             }

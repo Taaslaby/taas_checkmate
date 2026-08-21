@@ -43,14 +43,6 @@ fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str) -> bool {
     .clicked()
 }
 
-fn menu_toggle(ui: &mut egui::Ui, checked: &mut bool, icon: &str, label: &str) -> bool {
-    ui.add_sized(
-        [MENU_ITEM_W, MENU_ITEM_H],
-        egui::Checkbox::new(checked, icon_label(icon, label, tokens::ICON_SM)),
-    )
-    .clicked()
-}
-
 impl ConnApp {
     // ── меню ──────────────────────────────────────────────────
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
@@ -75,6 +67,9 @@ impl ConnApp {
                             }
                             if menu_item(ui, ic::CIRCUITRY, "Открыть NeuroML (.nml)…") {
                                 self.neuroml.show = true;
+                                // Доводим до вкладки редактора: модалка поверх,
+                                // а после её закрытия редактор уже в фокусе.
+                                self.focus_surface(Surface::Editor);
                             }
                             if menu_item(ui, ic::ARROW_CLOCKWISE, "Перезагрузить текущий файл")
                             {
@@ -118,7 +113,16 @@ impl ConnApp {
                         ui.separator();
                         menu_section(ui, "РАСКЛАДКА");
                         for p in DockPreset::ALL {
-                            if menu_item(ui, ic::SQUARES_FOUR, p.label()) {
+                            let sel = self.ui.active_preset == p;
+                            let text = if sel {
+                                egui::RichText::new(format!("●  {}", p.label())).strong()
+                            } else {
+                                egui::RichText::new(format!("○  {}", p.label()))
+                            };
+                            if ui
+                                .add_sized([MENU_ITEM_W, MENU_ITEM_H], egui::Button::new(text))
+                                .clicked()
+                            {
                                 self.apply_preset(p);
                             }
                         }
@@ -180,19 +184,27 @@ impl ConnApp {
                             menu_section(ui, "ПОВЕРХНОСТИ");
                             for s in Surface::ALL {
                                 let focused = self.focused_surface() == Some(s);
-                                let label = format!(
-                                    "{}  {}",
-                                    if focused { "●" } else { "○" },
-                                    s.label()
+                                let open = self.surface_open(s);
+                                // ● = в фокусе, ○ = открыта, – = закрыта.
+                                let marker = if focused {
+                                    "●"
+                                } else if open {
+                                    "○"
+                                } else {
+                                    "–"
+                                };
+                                let mut text = icon_label(
+                                    s.icon(),
+                                    &format!("{marker}  {}", s.label()),
+                                    tokens::ICON_SM,
                                 );
+                                if !open {
+                                    text = text.weak();
+                                }
                                 if ui
                                     .add_sized(
                                         [MENU_ITEM_W, MENU_ITEM_H],
-                                        egui::Button::new(icon_label(
-                                            s.icon(),
-                                            &label,
-                                            tokens::ICON_SM,
-                                        )),
+                                        egui::Button::new(text),
                                     )
                                     .on_hover_text("Сфокусировать/вернуть вкладку")
                                     .clicked()
@@ -489,12 +501,23 @@ impl crate::app::connectome::ConnectomeMode {
         use crate::io::data::Proj;
 
         menu_section(ui, "КАМЕРА");
-        if menu_toggle(ui, &mut self.camera.view3d, ic::GLOBE, "3D-облако точек") {
-            if self.camera.view3d {
-                self.enter_3d(ui.available_size());
+        {
+            let marker = if self.camera.view3d { "●" } else { "○" };
+            if ui
+                .add_sized(
+                    [MENU_ITEM_W, MENU_ITEM_H],
+                    egui::Button::new(icon_label(
+                        ic::GLOBE,
+                        &format!("{marker}  3D-облако точек"),
+                        tokens::ICON_SM,
+                    )),
+                )
+                .clicked()
+            {
+                // Общий переключатель 2D↔3D (кадрирование по экрану) — тот же,
+                // что у кнопок в топбаре и рейле.
+                self.toggle_3d(ui.ctx());
             }
-            self.camera.atlas = None;
-            self.camera.atlas3d = None;
         }
         if menu_item(ui, ic::ARROW_CLOCKWISE, "Вписать вид (F)") {
             self.reset_camera();
@@ -536,12 +559,13 @@ impl crate::app::connectome::ConnectomeMode {
 
 fn theme_dot(t: BuiltInTheme) -> Color32 {
     match t {
-        BuiltInTheme::Slate => Color32::from_rgb(0x38, 0xbd, 0xf8),
-        BuiltInTheme::Charcoal => Color32::from_rgb(0x22, 0xd3, 0xee),
-        BuiltInTheme::Frost => Color32::from_rgb(0x03, 0x74, 0xb0),
-        BuiltInTheme::Paper => Color32::from_rgb(0xf0, 0xb4, 0x29),
+        // Тёмные темы — холодные/нейтральные точки; светлые — светлые.
+        BuiltInTheme::Slate => Color32::from_rgb(0x60, 0xa5, 0xfa),
+        BuiltInTheme::Charcoal => Color32::from_rgb(0x8c, 0x8c, 0x93),
+        BuiltInTheme::Frost => Color32::from_rgb(0x7d, 0xd3, 0xfc),
+        BuiltInTheme::Paper => Color32::from_rgb(0xe7, 0xe5, 0xe4),
         // BuiltInTheme — #[non_exhaustive] в elegance: страхуемся.
-        _ => Color32::from_rgb(0x38, 0xbd, 0xf8),
+        _ => Color32::from_rgb(0x60, 0xa5, 0xfa),
     }
 }
 

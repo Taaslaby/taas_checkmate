@@ -23,6 +23,7 @@ pub(crate) mod canvas;
 pub(crate) mod cards;
 pub(crate) mod ego;
 pub(crate) mod inspector;
+pub(crate) mod neuron_builder;
 pub(crate) mod picking;
 pub(crate) mod plotlib;
 pub(crate) mod plots;
@@ -48,6 +49,9 @@ pub(crate) struct ConnectomeMode {
     pub pharma: PharmaState,
     pub live: LiveState,
     pub disin: DisinState,
+
+    // ── конструктор нейрона (нодовый редактор Formula) ──
+    pub builder: neuron_builder::NeuronBuilder,
 
     // ── библиотека плоттеров (включение / открепление) ──
     pub plots: plotlib::PlotLib,
@@ -82,6 +86,7 @@ impl Default for ConnectomeMode {
             pharma: PharmaState::default(),
             live: LiveState::default(),
             disin: DisinState::default(),
+            builder: neuron_builder::NeuronBuilder::default(),
             plots: plotlib::PlotLib::new(),
             console: Console::new(),
             ego_undocked: false,
@@ -138,6 +143,7 @@ impl Mode for ConnectomeMode {
             Surface::Plots => self.dock_tab_plots(ui),
             Surface::Console => self.console_view(ui),
             Surface::Sim => self.dock_tab_sim(ui),
+            Surface::Builder => self.builder.dock_view(ui),
             // Рисуют оболочка из NeuromlMode; сюда не приходят.
             Surface::Morphology | Surface::Editor => {}
         }

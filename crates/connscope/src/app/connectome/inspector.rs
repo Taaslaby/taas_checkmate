@@ -102,9 +102,10 @@ impl ConnectomeMode {
 
     // ── карточка фармакологии ─────────────────────────────────
     /// Прокси на чистую свободную функцию `cards::render_pharma_card`:
-    /// карточка трогает только `self.pharma`, поэтому не требует весь `ConnApp`.
+    /// карточка трогает только `self.pharma` (модель — для подсказки
+    /// совместимости мишени с проводимостями модели).
     fn card_pharma(&mut self, ui: &mut egui::Ui) {
-        render_pharma_card(ui, &mut self.pharma);
+        render_pharma_card(ui, &mut self.pharma, self.sim.model);
     }
 
     // ── карточка растормаживания ──────────────────────────────

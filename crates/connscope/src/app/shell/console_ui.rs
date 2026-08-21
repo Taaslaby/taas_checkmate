@@ -23,8 +23,8 @@ const CONSOLE_HELP: &str = "\
   search <запрос>             поиск по типу/классу/НТ/ноге/body_id
   ego <idx> [--k N]           ego-граф нейрона
   select <idx> | focus <idx>  выбрать нейрон и навести камеру
-  sim [--drive idx] [--model lif|izh|hh|haap] [--steps N] [--bias F] [--pulse F] [--gh F]
-  fullsim [--drive idx] [...] полный прогон всей сети (+ 3D-трасса при trace on)
+  sim [--drive idx] [--model lif|izh|hh|haap] [--steps N] [--bias F] [--pulse F] [--gh F] [--drug имя] [--conc µM] [--half-life шаги]
+  fullsim [--drive idx] [...] полный прогон всей сети (+ 3D-трасса при trace on) [+ --drug имя] [+ --half-life шаги]
   disin <idx> [--top N]       растормаживание: тормоз→⊣тормоз→⊣нейрон
   model <lif|izh|hh|haap>     модель симуляции по умолчанию
   trace on|off                трасса сигнала в 3D
@@ -240,27 +240,40 @@ impl ConnectomeMode {
             .parse()
             .unwrap_or(0.6);
         let gh = cli::flag_val(parts, "--gh", "0.3").parse().unwrap_or(0.3);
+        // Кинетика препарата: флаги `--drug/--conc/--half-life` из консоли,
+        // иначе — препарат карточки фармы.
+        let pk = match cli::pharma_pk_from_flags(parts) {
+            Ok(p) => p.or_else(|| self.pharma_pk()),
+            Err(e) => {
+                self.console.push_text(&format!("⚠ {e}"));
+                return;
+            }
+        };
         let result = {
             let Some(d) = self.data.as_mut() else {
                 self.console.push_text("нет данных");
                 return;
             };
             if full {
-                run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh).map(SimOutcome::Full)
+                run_full_sim(d, drive, model, bias, steps, pulse, 0.5, gh, pk)
+                    .map(SimOutcome::Full)
             } else {
-                cli::run_local_sim(d, drive, model, steps, bias, pulse, gh)
+                cli::run_local_sim(d, drive, model, steps, bias, pulse, gh, pk)
             }
         };
         match result {
             Ok(SimOutcome::Local(r)) => {
-                let text = self
+                let mut text = self
                     .data
                     .as_ref()
                     .map(|d| cli::local_sim_text(d, &r))
                     .unwrap_or_default();
+                if !r.pharma_note.is_empty() {
+                    text.push_str(&format!("\n{}", r.pharma_note));
+                }
                 let total: i32 = r.raster.iter().sum();
                 let active = r.rates.iter().filter(|&&x| x > 0.0).count();
-                self.sim.status = format!(
+                let mut status = format!(
                     "{}: {} нейронов, {} спайков, активных {}/{}",
                     r.model,
                     r.idx.len(),
@@ -268,18 +281,25 @@ impl ConnectomeMode {
                     active,
                     r.idx.len()
                 );
+                if !r.pharma_note.is_empty() {
+                    status.push_str(&format!(" · {}", r.pharma_note));
+                }
+                self.sim.status = status;
                 self.sim.result = Some(SimOutcome::Local(r));
                 self.camera.atlas3d = None;
                 self.console.push_text(&text);
                 self.plots.enable_kind_if_none(true); // плоты ego-контура
             }
             Ok(SimOutcome::Full(r)) => {
-                let text = self
+                let mut text = self
                     .data
                     .as_ref()
                     .map(|d| cli::full_sim_text(d, &r))
                     .unwrap_or_default();
-                self.sim.status = format!(
+                if !r.pharma_note.is_empty() {
+                    text.push_str(&format!("\n{}", r.pharma_note));
+                }
+                let mut status = format!(
                     "Полный VNC · {}: {} спайков, активных {}/{} · {} мс",
                     r.model,
                     r.total_spikes,
@@ -287,6 +307,10 @@ impl ConnectomeMode {
                     self.data.as_ref().map(|d| d.n()).unwrap_or(0),
                     r.steps as f32 * r.dt_ms
                 );
+                if !r.pharma_note.is_empty() {
+                    status.push_str(&format!(" · {}", r.pharma_note));
+                }
+                self.sim.status = status;
                 self.sim.result = Some(SimOutcome::Full(r));
                 self.camera.atlas3d = None;
                 self.console.push_text(&text);

@@ -52,10 +52,12 @@ pub(crate) enum Surface {
     Morphology,
     /// IDE-редактор NeuroML (подсветка, gutter, валидация, ошибки).
     Editor,
+    /// Нодовый конструктор нейрона (Formula: граф опов → программа → сим).
+    Builder,
 }
 
 impl Surface {
-    pub(crate) const ALL: [Surface; 8] = [
+    pub(crate) const ALL: [Surface; 9] = [
         Surface::Inspector,
         Surface::Atlas,
         Surface::Ego,
@@ -64,6 +66,7 @@ impl Surface {
         Surface::Sim,
         Surface::Morphology,
         Surface::Editor,
+        Surface::Builder,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -76,6 +79,7 @@ impl Surface {
             Self::Sim => "Симуляция",
             Self::Morphology => "Морфология",
             Self::Editor => "Редактор",
+            Self::Builder => "Конструктор",
         }
     }
 
@@ -89,6 +93,7 @@ impl Surface {
             Self::Sim => ic::LIGHTNING,
             Self::Morphology => ic::TREE_STRUCTURE,
             Self::Editor => ic::TEXT_T,
+            Self::Builder => ic::FLOW_ARROW,
         }
     }
 }
@@ -102,6 +107,9 @@ pub(crate) struct ShellServices<'a> {
     /// Режим просит сфокусировать вкладку [`Surface`] в дереве дока; оболочка
     /// применяет запрос после вызова хука.
     pub focus_surface: Option<Surface>,
+    /// Вкладка рабочего пространства в фокусе прямо сейчас (для подсветки
+    /// активного состояния — режим не владеет деревом доков).
+    pub focused: Option<Surface>,
 }
 
 /// Режим приложения: владеет своим состоянием и рисует свои поверхности.

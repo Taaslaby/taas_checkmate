@@ -163,9 +163,12 @@ impl AccentPreset {
 /// Пресеты раскладки рабочего пространства (дерева `egui_dock`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DockPreset {
-    /// Blender-подобная: инспектор слева | центр (атлас/ego/морфология)
-    /// сверху + лента (плоттер/консоль/сим) снизу.
+    /// Дефолт: инспектор слева + атлас в центре — чистый старт, остальное
+    /// открывается по требованию через «Окна»/«Вид».
     Workspace,
+    /// Все поверхности сразу: инспектор | центр (атлас/ego/морфо/редактор/
+    /// конструктор) + нижняя лента (плоттер/консоль/сим) — «всё на столе».
+    Full,
     /// Только атлас — минимальный «чистый» вид.
     Minimal,
     /// Все поверхности вкладками в одном листе.
@@ -173,13 +176,35 @@ pub(crate) enum DockPreset {
 }
 
 impl DockPreset {
-    pub(crate) const ALL: [DockPreset; 3] = [Self::Workspace, Self::Minimal, Self::Tabs];
+    pub(crate) const ALL: [DockPreset; 4] = [Self::Workspace, Self::Full, Self::Minimal, Self::Tabs];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Workspace => "Рабочий стол",
+            Self::Full => "Все панели",
             Self::Minimal => "Только атлас",
             Self::Tabs => "Вкладки",
+        }
+    }
+
+    /// Индекс для персистентности (egui `insert_persisted` требует `serde`,
+    /// а пресет — обычный Copy-энум; храним порядковый номер).
+    fn index(self) -> u8 {
+        match self {
+            Self::Workspace => 0,
+            Self::Full => 1,
+            Self::Minimal => 2,
+            Self::Tabs => 3,
+        }
+    }
+
+    fn from_index(i: u8) -> Option<Self> {
+        match i {
+            0 => Some(Self::Workspace),
+            1 => Some(Self::Full),
+            2 => Some(Self::Minimal),
+            3 => Some(Self::Tabs),
+            _ => None,
         }
     }
 }
@@ -214,6 +239,8 @@ struct UiState {
     pub accent: AccentPreset,
     /// Модалка «Горячие клавиши» открыта.
     pub show_shortcuts: bool,
+    /// Последний применённый пресет раскладки (для галочки в меню «Вид»).
+    pub active_preset: DockPreset,
     /// Сглаженный FPS (EMA по stable_dt) для статус-бара.
     pub fps: f32,
     /// Логотип neoMyelin (загружается один раз при старте, рисуется в «О программе»).
@@ -233,6 +260,7 @@ impl Default for UiState {
             // Сигнатурный «люминофор» — единый акцент по умолчанию.
             accent: AccentPreset::Green,
             show_shortcuts: false,
+            active_preset: DockPreset::Workspace,
             fps: 0.0,
             logo_tex: None,
         }
@@ -335,10 +363,12 @@ impl ConnApp {
         // Сервисы оболочки создаём в скоупе: `show_shortcuts` держит
         // `&mut self.ui.*`, а `self.focus_surface` заимствует весь `self` —
         // поэтому фокус читаем и применяем уже после того, как сервисы ушли.
+        let focused = self.focused_surface();
         let focus = {
             let mut services = ShellServices {
                 show_shortcuts: &mut self.ui.show_shortcuts,
                 focus_surface: None,
+                focused,
             };
             self.mode.top_bar(ui, &mut services);
             services.focus_surface
@@ -351,10 +381,12 @@ impl ConnApp {
         self.hover_bar(ui);
         self.modal_windows(&ctx, frame);
 
+        let focused = self.focused_surface();
         let focus = {
             let mut services = ShellServices {
                 show_shortcuts: &mut self.ui.show_shortcuts,
                 focus_surface: None,
+                focused,
             };
             self.mode.windows(&ctx, frame, &mut services);
             self.neuroml.windows(&ctx, frame, &mut services);
@@ -414,6 +446,13 @@ impl ConnApp {
         if let Some(saved) = ui.ctx().data_mut(|d| d.get_persisted::<DockState<Surface>>(id)) {
             self.dock = saved;
         }
+        // Последний применённый пресет тоже переживает рестарт.
+        let preset_id = egui::Id::new("workspace_active_preset");
+        if let Some(idx) = ui.ctx().data_mut(|d| d.get_persisted::<u8>(preset_id)) {
+            if let Some(p) = DockPreset::from_index(idx) {
+                self.ui.active_preset = p;
+            }
+        }
         self.dock_loaded = true;
     }
 
@@ -421,6 +460,9 @@ impl ConnApp {
         let id = egui::Id::new("workspace_dock_state");
         ui.ctx()
             .data_mut(|d| d.insert_persisted(id, self.dock.clone()));
+        let preset_id = egui::Id::new("workspace_active_preset");
+        ui.ctx()
+            .data_mut(|d| d.insert_persisted(preset_id, self.ui.active_preset.index()));
     }
 
     /// Сфокусировать вкладку рабочего пространства (активировать её в листе).
@@ -443,6 +485,12 @@ impl ConnApp {
         let path = self.dock.focused_leaf()?;
         let leaf = self.dock[path].get_leaf()?;
         leaf.tabs.get(leaf.active.0).copied()
+    }
+
+    /// Открыта ли поверхность в дереве сейчас (для меню «Окна»: отличать
+    /// открытую неактивную вкладку от закрытой).
+    fn surface_open(&self, surface: Surface) -> bool {
+        self.dock.find_tab(&surface).is_some()
     }
 
     /// Цикл вкладок рабочего пространства (`[` назад, `]` вперёд).
@@ -472,9 +520,13 @@ impl ConnApp {
     fn apply_preset(&mut self, preset: DockPreset) {
         self.dock = match preset {
             DockPreset::Workspace => default_dock(),
+            DockPreset::Full => full_dock(),
             DockPreset::Minimal => DockState::new(vec![Surface::Atlas]),
             DockPreset::Tabs => DockState::new(Surface::ALL.to_vec()),
         };
+        // Помним последний пресет: меню «Вид» показывает галочку, а значение
+        // переживает рестарт (см. save_dock_state / load_dock_state).
+        self.ui.active_preset = preset;
     }
 }
 
@@ -492,10 +544,12 @@ impl TabViewer for ConnApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, surface: &mut Self::Tab) {
+        let focused = self.focused_surface();
         let focus_request = {
             let mut services = ShellServices {
                 show_shortcuts: &mut self.ui.show_shortcuts,
                 focus_surface: None,
+                focused,
             };
             match *surface {
                 Surface::Morphology => self.neuroml.cable_dock_view(ui),
@@ -534,14 +588,35 @@ impl TabViewer for ConnApp {
     }
 }
 
-/// Дефолтная «рабочая» раскладка: инспектор слева, центр (атлас/ego/морфология)
-/// + нижняя лента (плоттер/консоль/сим) справа.
+/// Дефолтная «рабочая» раскладка — **голая** (Blender-пресет Layout):
+/// инспектор слева + атлас в центре. Остальные поверхности (ego, морфология,
+/// редактор, конструктор, плоттер/консоль/сим) открываются по требованию
+/// через меню «Окна»/«Вид» — дефолт не должен быть кашей из девяти вкладок.
 fn default_dock() -> DockState<Surface> {
+    let mut dock = DockState::new(vec![Surface::Inspector]);
+    dock.main_surface_mut().split_right(
+        NodeIndex::root(),
+        0.22,
+        vec![Surface::Atlas],
+    );
+    dock
+}
+
+/// Пресет «Все панели» — старая полная раскладка: инспектор слева, центр
+/// (атлас/ego/морфология/редактор/конструктор) + нижняя лента
+/// (плоттер/консоль/сим). Доступен из меню «Вид», дефолт — чистый [`default_dock`].
+fn full_dock() -> DockState<Surface> {
     let mut dock = DockState::new(vec![Surface::Inspector]);
     let [_, center] = dock.main_surface_mut().split_right(
         NodeIndex::root(),
         0.22,
-        vec![Surface::Atlas, Surface::Ego, Surface::Morphology, Surface::Editor],
+        vec![
+            Surface::Atlas,
+            Surface::Ego,
+            Surface::Morphology,
+            Surface::Editor,
+            Surface::Builder,
+        ],
     );
     dock.main_surface_mut().split_below(
         center,
@@ -674,8 +749,12 @@ mod tests {
     }
 
     #[test]
-    fn default_dock_has_each_surface_once() {
+    fn default_dock_is_lean() {
+        // Дефолт «Рабочий стол» — чистый: инспектор + атлас, без дублей.
         let tabs = sorted_tabs(&default_dock());
+        assert_eq!(tabs, vec![Surface::Inspector, Surface::Atlas]);
+        // Полная раскладка «Все панели» — все поверхности ровно по разу.
+        let tabs = sorted_tabs(&full_dock());
         assert_eq!(tabs.len(), Surface::ALL.len(), "дубль/потеря вкладки: {tabs:?}");
         for (i, surface) in Surface::ALL.iter().enumerate() {
             assert_eq!(tabs[i], *surface, "вкладка {surface:?} не на месте/отсутствует");
@@ -692,7 +771,15 @@ mod tests {
         app.apply_preset(DockPreset::Tabs);
         assert_eq!(sorted_tabs(&app.dock).len(), Surface::ALL.len());
 
+        // Дефолт «Рабочий стол» — чистый: инспектор + атлас.
         app.apply_preset(DockPreset::Workspace);
+        assert_eq!(
+            sorted_tabs(&app.dock),
+            vec![Surface::Inspector, Surface::Atlas]
+        );
+
+        // «Все панели» — старая полная раскладка со всеми поверхностями.
+        app.apply_preset(DockPreset::Full);
         assert_eq!(sorted_tabs(&app.dock).len(), Surface::ALL.len());
     }
 
