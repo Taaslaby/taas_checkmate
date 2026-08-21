@@ -213,6 +213,7 @@ fn heatmap_classes(ui: &mut egui::Ui, r: &FullSimResult, n: f64, dt: f64) {
 
 /// ISI-гистограмма: распределение межспайковых интервалов по всей сети.
 /// Ось X в мс (до 99-го процентиля, чтобы хвост выбросов не сплющил шкалу).
+/// Переключатель linear/log для оси Y — хвост в 800k vs 10k иначе не видно.
 pub(super) fn card_full_isi(ui: &mut egui::Ui, r: &FullSimResult) {
     let isis = isis_ms(&r.spike_times, r.dt_ms);
     let n_with = r.spike_times.iter().filter(|tr| tr.len() >= 2).count();
@@ -234,31 +235,52 @@ pub(super) fn card_full_isi(ui: &mut egui::Ui, r: &FullSimResult) {
     let bins = 28usize;
     let counts = hist_linear(&isis, bins, cap as f32);
     let n_spikes: usize = r.spike_times.iter().map(|t| t.len()).sum();
-    let bars: Vec<Bar> = counts
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| {
-            let x = cap * (i as f64 + 0.5) / bins as f64;
-            Bar::new(x, c)
-                .width(cap / bins as f64 * 0.9)
-                .fill(Color32::from_rgb(130, 170, 255))
-        })
-        .collect();
-    plot_card(
-        ui,
-        ic::TIMER,
-        "ISI-гистограмма",
-        &format!("медиана {median:.1} мс · {n_with} нейронов · {n_spikes} спайков"),
-        |ui| {
-            styled_plot(ui, "full_isi", "мс")
-                .allow_zoom(false)
-                .allow_drag(false)
-                .include_y(0.0)
-                .show(ui, |p| {
-                    p.bar_chart(BarChart::new("ISI", bars));
-                });
-        },
-    );
+    // Состояние переключателя — в egui memory (per-viewport, без модели).
+    let id = egui::Id::new("isi_log_y");
+    let mut log_y = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+    // Вне plot_card — чтобы чекбокс был в карточке, а не внутри плота.
+    let card_sub = format!("медиана {median:.1} мс · {n_with} нейронов · {n_spikes} спайков");
+    plot_card(ui, ic::TIMER, "ISI-гистограмма", &card_sub, |ui| {
+        ui.horizontal(|ui| {
+            let mut v = log_y;
+            if ui
+                .checkbox(&mut v, "логарифм Y")
+                .on_hover_text("Переключить ось Y в логарифм — видно хвост распределения")
+                .changed()
+            {
+                log_y = v;
+                ui.ctx().data_mut(|d| d.insert_temp(id, log_y));
+            }
+            ui.label(
+                egui::RichText::new(if log_y { "log" } else { "linear" })
+                    .weak()
+                    .small(),
+            );
+        });
+        let bars: Vec<Bar> = counts
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| {
+                let x = cap * (i as f64 + 0.5) / bins as f64;
+                let y = if log_y {
+                    if c <= 0.0 { 0.0 } else { (c + 1.0).log10() }
+                } else {
+                    c
+                };
+                Bar::new(x, y)
+                    .width(cap / bins as f64 * 0.9)
+                    .fill(Color32::from_rgb(130, 170, 255))
+            })
+            .collect();
+        let y_label = if log_y { "мс (log Y)" } else { "мс" };
+        styled_plot(ui, "full_isi", y_label)
+            .allow_zoom(false)
+            .allow_drag(false)
+            .include_y(0.0)
+            .show(ui, |p| {
+                p.bar_chart(BarChart::new("ISI", bars));
+            });
+    });
 }
 
 /// Фазовая гистограмма моторных нейронов: фаза каждого спайка мотора

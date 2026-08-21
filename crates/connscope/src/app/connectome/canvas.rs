@@ -466,6 +466,9 @@ impl ConnectomeMode {
         if self.camera.view3d {
             self.draw_gizmo(painter, origin);
         }
+        // Легенда-оверлей в вьюпорте: дублирует карточку легенды, но не
+        // требует открывать инспектор. 4 строки, tabular-nums, полупрозрачный фон.
+        self.draw_legend_overlay(painter, origin, size);
         // Keep the data surface clear. Mode, filters and render controls live
         // in the rail rather than covering the connectome.
     }
@@ -730,6 +733,53 @@ impl ConnectomeMode {
     }
 
     /// Ориентационный гизмо (оси X/Y/Z), вращается вместе с камерой.
+    fn draw_legend_overlay(&self, painter: &egui::Painter, origin: Pos2, _size: Vec2) {
+        let Some(data) = self.data.as_ref() else { return };
+        let (title, _hint, rows) =
+            crate::app::connectome::cards::legend::legend_data(Some(data), self.filters.color_mode);
+        if rows.is_empty() {
+            return;
+        }
+        // Компактный оверлей — до 4 строк, чтобы не закрывать мозг.
+        let n = rows.len().min(4);
+        let w = 152.0;
+        let h = 20.0 + n as f32 * 16.0;
+        let r = Rect::from_min_size(origin + vec2(8.0, 8.0), vec2(w, h));
+        painter.rect_filled(r, 6.0, Color32::from_rgba_unmultiplied(28, 32, 33, 220));
+        painter.rect_stroke(
+            r,
+            6.0,
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(49, 55, 56, 180)),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            r.min + vec2(8.0, 6.0),
+            Align2::LEFT_TOP,
+            title,
+            FontId::proportional(10.0),
+            Color32::from_rgb(230, 230, 230),
+        );
+        for (i, (name, col, _cnt)) in rows.iter().take(n).enumerate() {
+            let y = r.min.y + 20.0 + i as f32 * 16.0;
+            let sw = Rect::from_min_size(pos2(r.min.x + 8.0, y), vec2(10.0, 10.0));
+            painter.rect_filled(sw, 2.0, *col);
+            // truncate long names to ~14 chars
+            let label = if name.chars().count() > 14 {
+                let t: String = name.chars().take(14).collect();
+                format!("{t}…")
+            } else {
+                name.clone()
+            };
+            painter.text(
+                pos2(sw.max.x + 6.0, y + 5.0),
+                Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(10.0),
+                Color32::from_rgb(190, 190, 210),
+            );
+        }
+    }
+
     fn draw_gizmo(&self, painter: &egui::Painter, origin: Pos2) {
         let center = origin + vec2(46.0, 46.0);
         let r = 30.0;

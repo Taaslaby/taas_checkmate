@@ -66,9 +66,18 @@ pub(crate) const TEXT_SMALL: f32 = 12.0;
 /// Данные: консоль, индексы, числа.
 pub(crate) const TEXT_MONO: f32 = 12.5;
 
+/// Числа в столбцах/сравнениях — tabular-nums (равная ширина цифр).
+/// В egui нет CSS font-variant-numeric, поэтому числа рендерим моноширинным
+/// начертанием; этот хелпер возвращает RichText с JetBrains Mono.
+#[allow(dead_code)]
+pub(crate) fn tabular(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).family(egui::FontFamily::Monospace).size(TEXT_MONO)
+}
+
 // ── controls ─────────────────────────────────────────────────
 /// Высота паинтерной кнопки-действия (`action_button` не берёт высоту из стиля).
 pub(crate) const CONTROL_H: f32 = 30.0;
+
 
 // ── legend (color cheat-sheet in the inspector) ──────────────
 /// Colored swatch square (px).
@@ -86,16 +95,13 @@ pub(crate) const TOOL_COMBO_W: f32 = 110.0;
 /// Standard width of a toolbar slider. Sliders sit on ONE line with the other
 /// controls — so they get no stacked label (a label would make the row crooked).
 pub(crate) const TOOL_SLIDER_W: f32 = 120.0;
-/// Height of the toolbar slider, matched to `elegance::Slider`'s fixed row
-/// height (thumb Ø14 vs label 13+2=15). `elegance::Slider` wraps itself in a
-/// top-down layout that expands to the full row height and top-pins its 15 px
-/// track; passing this exact height through `add_sized` lets the parent row
-/// vertically-center the slider like every other control.
-pub(crate) const TOOL_SLIDER_H: f32 = 15.0;
+/// Height of the toolbar slider — 24px для touch (guideline 44px, но слайдер
+/// узкий трек; 24px даёт нормальный хит-таргет без раздувания тулбара).
+pub(crate) const TOOL_SLIDER_H: f32 = 24.0;
 /// Width of the toolbar search field.
 pub(crate) const TOOL_SEARCH_W: f32 = 200.0;
-/// Height of the single-line top toolbar.
-pub(crate) const TOP_BAR_H: f32 = 40.0;
+/// Height of the single-line top toolbar — 44px для touch-target 43px.
+pub(crate) const TOP_BAR_H: f32 = 44.0;
 /// Horizontal gap between top-toolbar controls.
 pub(crate) const TOP_GAP_X: f32 = SP_SM;
 /// Vertical gap inside a single toolbar row.

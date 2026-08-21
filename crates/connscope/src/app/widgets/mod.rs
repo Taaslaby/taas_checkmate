@@ -65,31 +65,48 @@ pub(crate) fn compact_card(
 /// Список полей «ключ: значение» одним неразрывным текстом на строку.
 /// Ключ — `strong_text_color` (самый яркий цвет темы), значение — обычный
 /// текст: ключи не могут слиться с фоном ни на одной теме. У каждой строки
-/// есть тултип-пояснение.
+/// есть тултип-пояснение. Длинные значения обрезаются с `…` (truncate) —
+/// полный текст в тултипе + клик копирует.
 pub(crate) fn key_value_fields(ui: &mut egui::Ui, fields: &[(&str, String, &str)]) {
     let key_col = ui.visuals().strong_text_color();
     let val_col = ui.visuals().text_color();
     for (k, v, tip) in fields {
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            &format!("{k}:"),
-            0.0,
-            egui::TextFormat {
-                font_id: egui::TextStyle::Body.resolve(ui.style()),
-                color: key_col,
-                ..Default::default()
-            },
-        );
-        job.append(
-            &format!("  {v}"),
-            0.0,
-            egui::TextFormat {
-                font_id: egui::TextStyle::Body.resolve(ui.style()),
-                color: val_col,
-                ..Default::default()
-            },
-        );
-        ui.label(job).on_hover_text(*tip);
+        // Контейнер с min-w-0 — позволяет truncate внутри flex.
+        ui.horizontal(|ui| {
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &format!("{k}:"),
+                0.0,
+                egui::TextFormat {
+                    font_id: egui::TextStyle::Body.resolve(ui.style()),
+                    color: key_col,
+                    ..Default::default()
+                },
+            );
+            // Значение — в truncate-контейнере: при переполнении покажет …
+            // В egui Label автоматически делает break-words; ограничиваем шириной.
+            let full = v.clone();
+            // Обрезаем визуально до ~28 символов, полный — в тултипе.
+            let display = if full.chars().count() > 28 {
+                let truncated: String = full.chars().take(28).collect();
+                format!("  {truncated}…")
+            } else {
+                format!("  {v}")
+            };
+            job.append(
+                &display,
+                0.0,
+                egui::TextFormat {
+                    font_id: egui::TextStyle::Body.resolve(ui.style()),
+                    color: val_col,
+                    ..Default::default()
+                },
+            );
+            let resp = ui.label(job).on_hover_text(format!("{tip}\n{full}"));
+            if resp.clicked() {
+                ui.ctx().copy_text(full);
+            }
+        });
     }
 }
 
@@ -168,6 +185,9 @@ fn shade(c: Color32, t: f32) -> Color32 {
 /// Единая кнопка-действие: иконка + текст, тон по [`ActionTone`], фиксированная
 /// высота, ширина задаётся. Рисуется нашим паинтером — один стиль везде
 /// (инспектор, модалки, NeuroML), не зависит от палитры elegance.
+///
+/// Доступность: фокус-кольцо при `has_focus()`, активация Space/Enter через
+/// `Sense::click()`.
 pub(crate) fn action_button(
     ui: &mut egui::Ui,
     icon: &str,
@@ -189,6 +209,8 @@ pub(crate) fn action_button(
     let painter = ui.painter_at(rect);
     let pressed = response.is_pointer_button_down_on();
     let hovered = response.hovered() && !pressed;
+    // focus-visible кольцо — рисуем поверх заливки, под текст
+    let focused = response.has_focus();
     let (fill, stroke, fg) = match tone {
         // Единственное заметное действие в карточке. Акцент резервируется
         // только для явного запуска/подтверждения, чтобы не превращать
@@ -246,6 +268,14 @@ pub(crate) fn action_button(
             egui::StrokeKind::Inside,
         );
     }
+    if focused {
+        painter.rect_stroke(
+            rect.expand(1.5),
+            egui::CornerRadius::same(tokens::RADIUS_MD as u8),
+            egui::Stroke::new(2.0, theme::accent(ui)),
+            egui::StrokeKind::Outside,
+        );
+    }
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -274,6 +304,10 @@ pub(crate) fn full_width_action(
 /// инструментов: ширина не больше доступной, высота — ровно заданная.
 /// Используется в левом рейле (`rail.rs`), верхнем баре и модалках —
 /// единый вид всех «инструментных» кнопок приложения.
+///
+/// Доступность: `Sense::click()` делает кнопку фокусируемой — Space/Enter
+/// срабатывают через `response.clicked()`. Фокус рисуется явным кольцом
+/// (`has_focus()`), т.к. кастомный паинтер обходит стандартный `Button`.
 pub(crate) fn tool_button(
     ui: &mut egui::Ui,
     icon: &str,
@@ -284,7 +318,8 @@ pub(crate) fn tool_button(
 ) -> egui::Response {
     // Желаемая ширина не больше доступной (рейл может быть уже запрошенной).
     let width = width.min(ui.available_width()).max(1.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     let painter = ui.painter_at(rect);
     // Активный = сигнальный фон + рамка; hover = лёгкая подсветка;
     // нажатие = чуть темнее, чтобы был тактильный отклик.
@@ -318,6 +353,15 @@ pub(crate) fn tool_button(
             theme::accent(ui),
         );
     }
+    // Focus-visible кольцо — 2px акцента снаружи, не перекрывает контент.
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(1.5),
+            egui::CornerRadius::same(tokens::RADIUS_TB as u8),
+            egui::Stroke::new(2.0, theme::accent(ui)),
+            egui::StrokeKind::Outside,
+        );
+    }
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -328,8 +372,9 @@ pub(crate) fn tool_button(
     response
 }
 
-/// Полярный отступ вокруг глифа в [`icon_button`]: 15px иконка → кнопка 27px.
-const ICON_BTN_PAD: f32 = 6.0;
+/// Полярный отступ вокруг глифа в [`icon_button`]: 15px иконка → кнопка 43px
+/// (было 27px, поднято до touch-target ~44px по гайдлайну).
+const ICON_BTN_PAD: f32 = 14.0;
 
 /// Компактная квадратная иконка-кнопка для строк тулбаров и модалок: та же
 /// сигнальная подсветка active/hover, что у [`tool_button`], но фиксированный

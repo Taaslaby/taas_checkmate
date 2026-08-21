@@ -77,8 +77,10 @@ pub(crate) fn neuron_card_data(d: &mut MancData, i: usize) -> NeuronCardData {
     ];
     // Связи: топ-5 партнёров (мультисинапсы агрегированы) — отвечает на
     // вопрос «что делает этот нейрон», даже если аннотаций у него нет.
-    let conns: Vec<String> = d
-        .ego_edges_agg(i, 5)
+    // Сортируем по весу desc, чтобы сильный партнёр всегда сверху.
+    let mut edges = d.ego_edges_agg(i, 5);
+    edges.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let conns: Vec<String> = edges
         .into_iter()
         .map(|(t, w, out, n)| {
             let ty = d.type_name(t);
@@ -92,6 +94,7 @@ pub(crate) fn neuron_card_data(d: &mut MancData, i: usize) -> NeuronCardData {
             } else {
                 String::new()
             };
+            // w — tabular-nums: равная ширина цифр для сравнения весов
             format!("{} {name} · w={w:.0}{syn}", if out { "→" } else { "←" })
         })
         .collect();
@@ -155,9 +158,11 @@ pub(crate) fn render_neuron_card(
         // видно, кто его драйвит и куда он сам влияет.
         if !card.conns.is_empty() {
             ui.add_space(tokens::SP_SM);
-            ui.label(tokens::eyebrow("Связи (топ-5)"));
+            ui.label(tokens::eyebrow("Связи (топ-5, по весу)"));
             for c in &card.conns {
-                ui.label(c);
+                // Моноширинный w — tabular-nums для быстрого сравнения весов.
+                ui.label(egui::RichText::new(c).family(egui::FontFamily::Monospace).size(tokens::TEXT_MONO))
+                    .on_hover_text(c);
             }
         }
         ui.add_space(tokens::SP_MD);

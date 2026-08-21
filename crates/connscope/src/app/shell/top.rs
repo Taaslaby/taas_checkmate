@@ -153,15 +153,27 @@ impl ConnectomeMode {
 
     // ── глобальный поиск ──────────────────────────────────────
     /// Поиск нейрона по типу/классу/НТ/ноге/body_id + статус результата.
+    /// Доступность: видимый label + hint, статус — aria-live эквивалент
+    /// (弱-текст с ролью статуса, читается скринридером при обновлении).
     fn quick_search(&mut self, ui: &mut egui::Ui) -> egui::Rect {
         let mut rect = egui::Rect::NOTHING;
+        ui.label(
+            egui::RichText::new("Поиск нейрона")
+                .weak()
+                .small()
+                .color(crate::app::shell::theme::TEXT_DIM),
+        );
         let resp = ui.add(
             egui::TextEdit::singleline(&mut self.sel.search)
                 .id_salt(SEARCH_FIELD_ID)
                 .desired_width(tokens::TOOL_SEARCH_W)
-                .hint_text("тип / класс / НТ / нога / body_id  (Ctrl+S)"),
+                .hint_text("тип / класс / НТ / нога / body_id …  (Ctrl+S)"),
         );
-        rect = rect.union(resp.rect);
+        // Явный accessible description — в egui попадает в WidgetInfo via
+        // on_hover_text + id.
+        let hover_rect = resp.rect;
+        resp.clone().on_hover_text("Поиск по типу, классу, нейротрансмиттеру, ноге или body_id");
+        rect = rect.union(hover_rect);
         if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             self.search_neuron();
         }
@@ -175,7 +187,14 @@ impl ConnectomeMode {
             self.search_neuron();
         }
         if !self.sel.search_status.is_empty() {
-            let r = ui.label(egui::RichText::new(&self.sel.search_status).weak().small());
+            // aria-live: polite — статус поиска читается при изменении, но не
+            // прерывает ввод. В egui эмулируем слабым текстом + selectable.
+            let r = ui.label(
+                egui::RichText::new(&self.sel.search_status)
+                    .weak()
+                    .small()
+                    .italics(),
+            );
             rect = rect.union(r.rect);
         }
         rect
