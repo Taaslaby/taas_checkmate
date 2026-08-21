@@ -132,6 +132,7 @@ enum Drag {
 }
 
 /// Context menu target.
+#[derive(Clone)]
 enum CtxMenu {
     /// Right-click on empty canvas: add op at this world position.
     Canvas { screen: Pos2, world: Vec2 },
@@ -1697,14 +1698,16 @@ impl NeuronBuilder {
             match self.drag {
                 Drag::Node { idx } => {
                     if resp.dragged() {
-                        let mut new_pos = self.nodes[idx].pos + resp.drag_delta() / self.zoom;
-                        if self.snap {
-                            new_pos.x = (new_pos.x / GRID).round() * GRID;
-                            new_pos.y = (new_pos.y / GRID).round() * GRID;
-                        }
+                        // Плавно, без снапа во время тяги — снап только на отпускании
+                        let new_pos = self.nodes[idx].pos + resp.drag_delta() / self.zoom;
                         self.nodes[idx].pos = new_pos;
                     }
                     if resp.drag_stopped() {
+                        if self.snap {
+                            let p = &mut self.nodes[idx].pos;
+                            p.x = (p.x / GRID).round() * GRID;
+                            p.y = (p.y / GRID).round() * GRID;
+                        }
                         self.drag = Drag::None;
                     }
                 }
@@ -1740,7 +1743,7 @@ impl NeuronBuilder {
             self.draw_canvas(&painter, origin, size, pointer_world);
 
             // ── context menu ──
-            if let Some(menu) = self.ctx_menu.take() {
+            if let Some(menu) = self.ctx_menu.clone() {
                 let (screen, action) = match menu {
                     CtxMenu::Canvas { screen, world } => (screen, CtxMenuAction::Canvas { world }),
                     CtxMenu::Node { screen, idx } => (screen, CtxMenuAction::Node { idx }),
@@ -1758,6 +1761,7 @@ impl NeuronBuilder {
                                     for &kind in palette_kinds() {
                                         if ui.button(spec_of(kind).name).clicked() {
                                             self.add_node_at(kind, world);
+                                            self.ctx_menu = None;
                                         }
                                     }
                                 }
@@ -1765,20 +1769,26 @@ impl NeuronBuilder {
                                     ui.label("Node:");
                                     if ui.button("📄 Duplicate").clicked() {
                                         self.duplicate_node(idx);
+                                        self.ctx_menu = None;
                                     }
                                     if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
                                         self.delete_node(idx);
+                                        self.ctx_menu = None;
                                     }
                                 }
                                 CtxMenuAction::Wire { idx } => {
                                     ui.label("Wire:");
                                     if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
                                         self.delete_edge(idx);
+                                        self.ctx_menu = None;
                                     }
                                 }
                             }
                         });
                     });
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.ctx_menu = None;
             }
 
             if self.show_plot {
