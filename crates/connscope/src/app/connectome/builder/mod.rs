@@ -84,6 +84,9 @@ use eframe::egui::{
 use egui_plot::{HLine, Legend, Line, Plot, PlotPoints, VLine};
 use pillars::api::formula::{self, OpKind, OpNode, I_SYN, N_REGS, S0, S1, S2, S3, TEMP0};
 
+use egui_phosphor::regular as ic;
+use crate::app::tokens;
+
 // ─── Layout constants ───────────────────────────────────────────
 
 mod category;
@@ -979,7 +982,7 @@ impl NeuronBuilder {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("🧠 Neuron Builder").strong().size(16.0));
+            ui.label(egui::RichText::new(format!("{} Neuron Builder", ic::BRAIN)).strong().size(16.0));
             ui.separator();
             if ui
                 .button(if self.running { "⏸ Pause" } else { "▶ Run" })
@@ -1052,15 +1055,15 @@ impl NeuronBuilder {
             ui.add(egui::Slider::new(&mut self.window_ms, 50.0..=4000.0).text("window ms"));
             ui.separator();
             ui.label(format!("t = {:.1} ms", self.t));
-            ui.label(format!("⚡ {}", self.total_spikes));
+            ui.label(format!("{} {}", ic::LIGHTNING, self.total_spikes));
         });
         ui.horizontal_wrapped(|ui| {
             ui.label("File:");
             ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
-            if ui.button("💾 Save").clicked() {
+            if ui.button(tokens::icon_label(ic::FLOPPY_DISK, "Save", tokens::ICON_SM)).clicked() {
                 self.save_graph();
             }
-            if ui.button("📂 Load").clicked() {
+            if ui.button(tokens::icon_label(ic::FOLDER_OPEN, "Load", tokens::ICON_SM)).clicked() {
                 self.load_file();
             }
             ui.separator();
@@ -1080,7 +1083,7 @@ impl NeuronBuilder {
                         }
                     }
                 });
-            if ui.button("🗑 Clear").clicked() {
+            if ui.button(tokens::icon_label(ic::TRASH, "Clear", tokens::ICON_SM)).clicked() {
                 self.push_undo();
                 self.nodes.clear();
                 self.edges.clear();
@@ -1114,7 +1117,7 @@ impl NeuronBuilder {
                 let from = spec_of(self.nodes[e.from].kind).name;
                 let to = spec_of(self.nodes[e.to].kind).name;
                 ui.label(format!("Wire: {from}.{} → {to}.{}", e.from_pin, e.to_pin));
-                if ui.button("🗑 Delete wire").clicked() {
+                if ui.button(tokens::icon_label(ic::TRASH, "Delete wire", tokens::ICON_SM)).clicked() {
                     self.delete_edge(ei);
                 }
                 ui.separator();
@@ -1183,7 +1186,7 @@ impl NeuronBuilder {
             if ui.button("📄 Duplicate").clicked() {
                 self.duplicate_node(i);
             }
-            if ui.button("🗑 Delete node").clicked() {
+            if ui.button(tokens::icon_label(ic::TRASH, "Delete node", tokens::ICON_SM)).clicked() {
                 self.delete_node(i);
             }
         });
@@ -1276,7 +1279,7 @@ impl NeuronBuilder {
         };
         match serde_json::to_string_pretty(&file) {
             Ok(json) => match std::fs::write(&self.filename, json) {
-                Ok(_) => self.set_status(format!("💾 saved → {}", self.filename)),
+                Ok(_) => self.set_status(format!("{} saved → {}", ic::FLOPPY_DISK, self.filename)),
                 Err(e) => self.set_status(format!("save failed: {e}")),
             },
             Err(e) => self.set_status(format!("serialize failed: {e}")),
@@ -1320,7 +1323,7 @@ impl NeuronBuilder {
                     self.drag = Drag::None;
                     self.running = false;
                     self.reset_sim();
-                    self.set_status(format!("📂 loaded ← {}", self.filename));
+                    self.set_status(format!("{} loaded ← {}", ic::FOLDER_OPEN, self.filename));
                 }
                 Err(e) => self.set_status(format!("parse failed: {e}")),
             },
@@ -1700,13 +1703,13 @@ impl NeuronBuilder {
                                     if ui.button("📄 Duplicate").clicked() {
                                         self.duplicate_node(idx);
                                     }
-                                    if ui.button("🗑 Delete").clicked() {
+                                    if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
                                         self.delete_node(idx);
                                     }
                                 }
                                 CtxMenuAction::Wire { idx } => {
                                     ui.label("Wire:");
-                                    if ui.button("🗑 Delete").clicked() {
+                                    if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
                                         self.delete_edge(idx);
                                     }
                                 }

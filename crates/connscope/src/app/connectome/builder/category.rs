@@ -44,12 +44,13 @@ pub(crate) fn cat_tint(cat: NodeCat) -> Color32 {
 }
 
 pub(crate) fn cat_icon(cat: NodeCat) -> &'static str {
+    // Phosphor — чёткие, монохром, один вес, как в остальном connscope
     match cat {
-        NodeCat::System => "🧩",
-        NodeCat::Source => "📥",
-        NodeCat::Membrane => "🧫",
-        NodeCat::Math => "🧮",
-        NodeCat::Gate => "🚪",
-        NodeCat::Logic => "🔀",
+        NodeCat::System => egui_phosphor::regular::PUZZLE_PIECE,
+        NodeCat::Source => egui_phosphor::regular::DOWNLOAD_SIMPLE,
+        NodeCat::Membrane => egui_phosphor::regular::WAVE_SINE,
+        NodeCat::Math => egui_phosphor::regular::CALCULATOR,
+        NodeCat::Gate => egui_phosphor::regular::DOOR,
+        NodeCat::Logic => egui_phosphor::regular::SHUFFLE,
     }
 }

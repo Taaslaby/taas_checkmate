@@ -248,7 +248,7 @@ impl ConnectomeMode {
         let mut tex_mag = 0.0f32;
         if self.camera.view3d {
             if self.camera.use_gpu3d {
-                // ⚡ Шейдерный рендер (wgpu): гауссовы сплэты, отсортированные
+                // Шейдерный рендер (wgpu): гауссовы сплэты, отсортированные
                 // по глубине far→near — ближние перекрывают дальние, без каши.
                 let rect = painter.clip_rect();
                 // Scratch-буфер сортировки живёт в камере между кадрами —

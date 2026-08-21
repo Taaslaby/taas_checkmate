@@ -112,7 +112,7 @@ fn card_builder_scope(ui: &mut egui::Ui, d: &BuilderScopeData) {
         ui,
         ic::FLOW_ARROW,
         "Осциллограф конструктора",
-        &format!("V(t) · ⚡ {} спайков", d.total_spikes),
+        &format!("V(t) · {} {} спайков", ic::LIGHTNING, d.total_spikes),
         |ui| {
             styled_plot(ui, "builder_scope", "мс")
                 .allow_scroll(false)
