@@ -30,6 +30,11 @@ impl Neurite {
     pub fn tip(&self) -> Vec3 {
         *self.points.last().expect("neurite has at least one point")
     }
+
+    /// Total path length (sum of segment lengths), world units.
+    pub fn length_um(&self) -> f64 {
+        self.points.windows(2).map(|w| w[0].dist(w[1])).sum()
+    }
 }
 
 /// A cell: soma + neurites + cell-level modules.

@@ -140,6 +140,8 @@ pub struct ChemoAttraction {
     pub noise_weight: f64,
     /// Concentration above which the growth cone stops.
     pub stop_concentration: f64,
+    /// Hard cap on neurite length (world units); `None` = unlimited.
+    pub max_len_um: Option<f64>,
     direction: Option<Vec3>,
 }
 
@@ -153,6 +155,7 @@ impl ChemoAttraction {
             gradient_weight: 0.2,
             noise_weight: 0.6,
             stop_concentration: 0.3,
+            max_len_um: None,
             direction: None,
         }
     }
@@ -168,13 +171,21 @@ impl Module for ChemoAttraction {
         let Host::Neurite { cell, idx } = host else {
             return;
         };
+        // Max-length cap: the neurite stops elongating (CX3D `MaxLength`).
+        if let Some(max) = self.max_len_um {
+            if world.cells[cell].neurites[idx].length_um() >= max {
+                return;
+            }
+        }
         let tip = world.cells[cell].neurites[idx].tip();
         let concentration = world.concentration(&self.substance, tip);
-        let mut grad = world.gradient(&self.substance, tip);
+        let grad = world.gradient(&self.substance, tip);
 
-        // Stop steering once inside the source (CX3D behaviour).
+        // Arrived: once inside the source the growth cone stops entirely
+        // (CX3D behaviour) — otherwise persistence would carry it past the
+        // target and it would keep cruising through the far side.
         if concentration > self.stop_concentration {
-            grad = Vec3::ZERO;
+            return;
         }
 
         let old = self.direction.unwrap_or(grad);
@@ -209,8 +220,202 @@ impl Module for ChemoAttraction {
             gradient_weight: self.gradient_weight,
             noise_weight: self.noise_weight,
             stop_concentration: self.stop_concentration,
+            max_len_um: self.max_len_um,
             direction: None,
         })
+    }
+}
+
+/// Growth cone that steers **away** from a morphogen source (CX3D
+/// `NeuriteChemoRepulsion`): guidance by avoidance, e.g. crossing a midline
+/// flanked by repulsive cues. Mirror of [`ChemoAttraction`] — the gradient is
+/// flipped and the stop condition is inverted (no steering far from the cue).
+pub struct ChemoRepulsion {
+    pub substance: String,
+    /// Step length per time step.
+    pub speed: f64,
+    /// Weight of the previous direction (persistence).
+    pub old_dir_weight: f64,
+    /// Weight of the (negated) concentration gradient.
+    pub gradient_weight: f64,
+    /// Weight of the random noise component.
+    pub noise_weight: f64,
+    /// Below this concentration the cue is too weak to steer (straight ahead).
+    pub min_concentration: f64,
+    /// Hard cap on neurite length; `None` = unlimited.
+    pub max_len_um: Option<f64>,
+    direction: Option<Vec3>,
+}
+
+impl ChemoRepulsion {
+    pub fn new(substance: &str) -> Self {
+        ChemoRepulsion {
+            substance: substance.to_string(),
+            speed: 1.0,
+            old_dir_weight: 1.0,
+            gradient_weight: 0.2,
+            noise_weight: 0.6,
+            min_concentration: 0.01,
+            max_len_um: None,
+            direction: None,
+        }
+    }
+}
+
+impl Module for ChemoRepulsion {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Neurite { cell, idx } = host else {
+            return;
+        };
+        if let Some(max) = self.max_len_um {
+            if world.cells[cell].neurites[idx].length_um() >= max {
+                return;
+            }
+        }
+        let tip = world.cells[cell].neurites[idx].tip();
+        let concentration = world.concentration(&self.substance, tip);
+        let mut grad = world.gradient(&self.substance, tip);
+
+        // Far from the cue the signal is too weak to steer.
+        if concentration < self.min_concentration {
+            grad = Vec3::ZERO;
+        }
+
+        let old = self.direction.unwrap_or(grad);
+        let noise = world.random_vec(self.noise_weight);
+        // Away from the source: negate the gradient.
+        let step_dir = old * self.old_dir_weight - grad.normalized() * self.gradient_weight + noise;
+        let step_dir = step_dir.normalized();
+
+        world.extend_neurite(cell, idx, step_dir * self.speed);
+        self.direction = Some(step_dir);
+    }
+
+    fn copy_on_branch(&self) -> bool {
+        true
+    }
+    fn copy_on_elongate(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(ChemoRepulsion {
+            substance: self.substance.clone(),
+            speed: self.speed,
+            old_dir_weight: self.old_dir_weight,
+            gradient_weight: self.gradient_weight,
+            noise_weight: self.noise_weight,
+            min_concentration: self.min_concentration,
+            max_len_um: self.max_len_um,
+            direction: None,
+        })
+    }
+}
+
+/// Retract the growth cone when the local concentration drops below
+/// `threshold` — the neurite "fails to find its target" and pulls back
+/// (CX3D `RetractNeurite`). Once fully retracted to the soma the neurite is
+/// pruned (removed), and its geometric synapses disappear on the next step.
+///
+/// This is the pruning half of the classic growth→pruning story: exuberant
+/// growth is followed by elimination of connections that missed their target.
+pub struct RetractNeurite {
+    pub substance: String,
+    /// Below this concentration the neurite retracts.
+    pub threshold: f64,
+    /// Retraction speed, length units per step.
+    pub rate: f64,
+}
+
+impl RetractNeurite {
+    pub fn new(substance: &str, threshold: f64, rate: f64) -> Self {
+        RetractNeurite {
+            substance: substance.to_string(),
+            threshold,
+            rate,
+        }
+    }
+}
+
+impl Module for RetractNeurite {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Neurite { cell, idx } = host else {
+            return;
+        };
+        let tip = world.cells[cell].neurites[idx].tip();
+        if world.concentration(&self.substance, tip) < self.threshold {
+            world.retract_neurite(cell, idx, self.rate);
+        }
+    }
+
+    fn copy_on_divide(&self) -> bool {
+        true
+    }
+    fn copy_on_branch(&self) -> bool {
+        true
+    }
+    fn copy_on_elongate(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(RetractNeurite::new(
+            &self.substance,
+            self.threshold,
+            self.rate,
+        ))
+    }
+}
+
+/// Migrate the soma along a morphogen gradient (CX3D `Migration`): cells
+/// "walk" toward (`attract`) or away from (`repel`) a source, building
+/// layered structures. Movement is clamped to the simulation volume.
+pub struct SomaMigration {
+    pub substance: String,
+    /// Migration speed, world units per step.
+    pub speed: f64,
+    /// `true` = toward higher concentration, `false` = away.
+    pub attract: bool,
+}
+
+impl SomaMigration {
+    pub fn new(substance: &str, speed: f64, attract: bool) -> Self {
+        SomaMigration {
+            substance: substance.to_string(),
+            speed,
+            attract,
+        }
+    }
+}
+
+impl Module for SomaMigration {
+    fn run(&mut self, world: &mut World, host: Host) {
+        let Host::Soma(cell) = host else {
+            return;
+        };
+        let grad = world.gradient(&self.substance, world.cells[cell].soma.pos);
+        // No movement in a flat field (avoid drift on numerical noise).
+        if grad.len() <= 1e-12 {
+            return;
+        }
+        let dir = if self.attract {
+            grad.normalized()
+        } else {
+            Vec3::ZERO - grad.normalized()
+        };
+        world.move_soma(cell, dir * self.speed);
+    }
+
+    fn copy_on_divide(&self) -> bool {
+        true
+    }
+
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(SomaMigration::new(
+            &self.substance,
+            self.speed,
+            self.attract,
+        ))
     }
 }
 
@@ -250,7 +455,7 @@ impl Module for Secretor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Bounds, CellType, Grid, Substance};
+    use crate::{ArtificialGradient, Bounds, CellType, Grid, Substance};
 
     fn world() -> World {
         let grid = Grid::new(32, 32, 32, 5.0, Vec3::new(-80.0, -80.0, -80.0));
@@ -259,6 +464,24 @@ mod tests {
             max: Vec3::new(80.0, 80.0, 80.0),
         };
         World::new(grid, 1.0, bounds, 0)
+    }
+
+    /// A world with a Gaussian gradient rising toward +z (mean 80, sigma 40).
+    fn gradient_world() -> World {
+        let mut w = world();
+        w.add_substance(Substance::new(
+            "A",
+            0.1,
+            0.001,
+            &w.grid,
+            vec![ArtificialGradient::Gaussian {
+                axis: 2,
+                max: 1.0,
+                mean: 80.0,
+                sigma: 40.0,
+            }],
+        ));
+        w
     }
 
     #[test]
@@ -357,5 +580,119 @@ mod tests {
         let chemo = ChemoAttraction::new("x");
         assert!(chemo.copy_on_branch());
         assert!(chemo.copy_on_elongate());
+    }
+
+    #[test]
+    fn chemo_repulsion_grows_away_from_source() {
+        let mut w = gradient_world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        let mut rep = ChemoRepulsion::new("A");
+        rep.noise_weight = 0.05; // gradient dominates
+        w.add_neurite_module(c, n, Box::new(rep));
+        let start = w.cells[c].neurites[n].tip();
+        for _ in 0..100 {
+            w.step();
+        }
+        let tip = w.cells[c].neurites[n].tip();
+        assert!(
+            tip.z < start.z,
+            "repulsion must steer away from +z source (start {start:?}, end {tip:?})"
+        );
+    }
+
+    #[test]
+    fn retract_neurite_prunes_fully_retracted() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        for _ in 0..5 {
+            w.extend_neurite(c, n, Vec3::new(1.0, 0.0, 0.0));
+        }
+        assert_eq!(w.cells[c].neurites[n].points.len(), 6);
+        // No substance "x" → concentration 0 < threshold → retract every step.
+        w.add_neurite_module(c, n, Box::new(RetractNeurite::new("x", 1.0, 100.0)));
+        for _ in 0..20 {
+            w.step();
+        }
+        assert!(
+            w.cells[c].neurites.is_empty(),
+            "a fully retracted neurite must be pruned"
+        );
+    }
+
+    #[test]
+    fn retract_neurite_ignores_high_concentration() {
+        let mut w = gradient_world();
+        let c = w.add_cell(Vec3::new(0.0, 0.0, 75.0), CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        for _ in 0..3 {
+            w.extend_neurite(c, n, Vec3::new(1.0, 0.0, 0.0));
+        }
+        let before = w.cells[c].neurites[n].points.len();
+        // Near the source concentration is high (≫ threshold) → no retraction.
+        w.add_neurite_module(c, n, Box::new(RetractNeurite::new("A", 0.3, 100.0)));
+        for _ in 0..10 {
+            w.step();
+        }
+        assert_eq!(w.cells[c].neurites[n].points.len(), before);
+    }
+
+    #[test]
+    fn soma_migrates_toward_and_away_from_source() {
+        let mut w = gradient_world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_soma_module(c, Box::new(SomaMigration::new("A", 2.0, true)));
+        for _ in 0..10 {
+            w.step();
+        }
+        assert!(
+            w.cells[c].soma.pos.z > 0.0,
+            "soma must migrate toward +z source"
+        );
+
+        let d = w.add_cell(Vec3::new(0.0, 0.0, 20.0), CellType::Inhibitory, 4.0);
+        w.add_soma_module(d, Box::new(SomaMigration::new("A", 2.0, false)));
+        for _ in 0..10 {
+            w.step();
+        }
+        assert!(
+            w.cells[d].soma.pos.z < 20.0,
+            "repelled soma must migrate away from +z source"
+        );
+    }
+
+    #[test]
+    fn migration_clamps_to_bounds() {
+        let mut w = gradient_world();
+        let c = w.add_cell(Vec3::new(0.0, 0.0, 79.0), CellType::Excitatory, 4.0);
+        w.add_soma_module(c, Box::new(SomaMigration::new("A", 10.0, true)));
+        for _ in 0..20 {
+            w.step();
+        }
+        assert!(
+            w.cells[c].soma.pos.z <= 80.0,
+            "soma must stay inside bounds"
+        );
+    }
+
+    #[test]
+    fn chemo_stops_at_max_length() {
+        let mut w = gradient_world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        let mut chemo = ChemoAttraction::new("A");
+        chemo.noise_weight = 0.05;
+        chemo.speed = 1.0;
+        chemo.max_len_um = Some(5.0);
+        w.add_neurite_module(c, n, Box::new(chemo));
+        for _ in 0..100 {
+            w.step();
+        }
+        let len = w.cells[c].neurites[n].length_um();
+        assert!(
+            (4.0..=6.0).contains(&len),
+            "neurite must stop near max_len (len={len})"
+        );
     }
 }

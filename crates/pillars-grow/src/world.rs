@@ -7,8 +7,9 @@
 //!   2. run cell modules   (division)
 //!   3. process divisions
 //!   4. run soma modules   (secretion, migration)
-//!   5. run neurite modules (growth cones)
-//!   6. form synapses
+//!   5. run neurite modules (growth cones, retraction)
+//!   6. prune fully retracted neurites
+//!   7. form synapses (geometry recomputed from live tips)
 //! ```
 
 use std::collections::HashSet;
@@ -42,6 +43,11 @@ pub struct Synapse {
     pub kind: SynapseKind,
     /// Synaptic strength, derived from the growth geometry (see `form_synapses`).
     pub weight: f64,
+    /// True if formed by contact geometry ([`World::form_synapses`]); such
+    /// synapses are recomputed every step, so a retracted/pruned neurite
+    /// automatically drops its synapses. Rule-based synapses
+    /// ([`World::connect_fates`]) are `false` and persist.
+    pub geometric: bool,
 }
 
 /// A grown neuron (cell) in the extracted graph.
@@ -95,6 +101,7 @@ pub struct World {
     pub synapse_strength: f64,
     rng: StdRng,
     pending_divisions: Vec<usize>,
+    pending_prunes: Vec<(usize, usize)>,
 }
 
 impl World {
@@ -113,6 +120,7 @@ impl World {
             synapse_strength: 20.0,
             rng: StdRng::seed_from_u64(seed),
             pending_divisions: vec![],
+            pending_prunes: vec![],
         }
     }
 
@@ -184,10 +192,67 @@ impl World {
         }
     }
 
-    /// Advance the growth-cone tip of a neurite by `step`.
+    /// Advance the growth-cone tip of a neurite by `step`, clamped to the
+    /// simulation volume (CX3D `ECM` behaviour: neurites stay inside).
     pub fn extend_neurite(&mut self, cell: usize, idx: usize, step: Vec3) {
-        let tip = self.cells[cell].neurites[idx].tip();
-        self.cells[cell].neurites[idx].points.push(tip + step);
+        let tip = self.cells[cell].neurites[idx].tip() + step;
+        let b = self.bounds;
+        let clamped = Vec3::new(
+            tip.x.clamp(b.min.x, b.max.x),
+            tip.y.clamp(b.min.y, b.max.y),
+            tip.z.clamp(b.min.z, b.max.z),
+        );
+        self.cells[cell].neurites[idx].points.push(clamped);
+    }
+
+    /// Retract the growth-cone tip by `amount` length units: the tip walks
+    /// back along the polyline, dropping exhausted segments. Once the tip is
+    /// back at the soma (single point), the neurite is scheduled for pruning
+    /// (removed after the module loop — CX3D `RetractNeurite`: a fully
+    /// retracted neurite disappears).
+    pub fn retract_neurite(&mut self, cell: usize, idx: usize, amount: f64) {
+        let pts = &mut self.cells[cell].neurites[idx].points;
+        if pts.len() <= 1 {
+            self.request_prune(cell, idx);
+            return;
+        }
+        let mut remaining = amount;
+        while remaining > 0.0 && pts.len() > 1 {
+            let a = pts[pts.len() - 2];
+            let b = pts[pts.len() - 1];
+            let seg = a.dist(b);
+            if seg <= remaining + 1e-12 {
+                pts.pop();
+                remaining -= seg;
+            } else {
+                // Partial: the tip stops inside the last segment.
+                let t = (seg - remaining) / seg;
+                *pts.last_mut().unwrap() = a + (b - a) * t;
+                remaining = 0.0;
+            }
+        }
+        if pts.len() <= 1 {
+            self.request_prune(cell, idx);
+        }
+    }
+
+    /// Schedule a neurite for removal at the end of the step (so in-flight
+    /// module iterations never see a shifted neurite list).
+    pub fn request_prune(&mut self, cell: usize, idx: usize) {
+        if !self.pending_prunes.contains(&(cell, idx)) {
+            self.pending_prunes.push((cell, idx));
+        }
+    }
+
+    /// Move the soma by `delta`, clamped to the simulation volume.
+    pub fn move_soma(&mut self, cell: usize, delta: Vec3) {
+        let p = self.cells[cell].soma.pos + delta;
+        let b = self.bounds;
+        self.cells[cell].soma.pos = Vec3::new(
+            p.x.clamp(b.min.x, b.max.x),
+            p.y.clamp(b.min.y, b.max.y),
+            p.z.clamp(b.min.z, b.max.z),
+        );
     }
 
     /// Total neurite count across all cells.
@@ -287,7 +352,15 @@ impl World {
     /// Form a synapse whenever an axon tip is within `dist` of another cell
     /// (soma or any neurite point). Target points are gathered once per step
     /// and synapses are deduplicated per (pre, post) pair.
+    ///
+    /// Geometric synapses are **recomputed from scratch every step**: they are
+    /// dropped first, then re-formed from the current axon tips. This makes
+    /// retraction/pruning actually rewire the network — a pruned neurite
+    /// immediately loses its contacts. Rule-based synapses ([`World::connect_fates`])
+    /// are untouched.
     pub fn form_synapses(&mut self, dist: f64) {
+        // Drop all geometric synapses; keep rule-based ones (they dedupe).
+        self.synapses.retain(|s| !s.geometric);
         let n = self.cells.len();
         // Gather each cell's axon tips and all contact points once per step.
         let mut tips: Vec<Vec<Vec3>> = Vec::with_capacity(n);
@@ -337,6 +410,7 @@ impl World {
                         post: b_id,
                         kind,
                         weight,
+                        geometric: true,
                     });
                 }
             }
@@ -381,6 +455,7 @@ impl World {
                     post: b,
                     kind,
                     weight,
+                    geometric: false,
                 });
                 n += 1;
             }
@@ -438,6 +513,7 @@ impl World {
         self.process_divisions();
         self.run_soma_modules();
         self.run_neurite_modules();
+        self.process_prunes();
         let d = self.synapse_dist;
         self.form_synapses(d);
         self.time += self.dt;
@@ -483,6 +559,17 @@ impl World {
         let ids = std::mem::take(&mut self.pending_divisions);
         for id in ids {
             self.divide_cell(id);
+        }
+    }
+
+    /// Apply pending neurite prunes (after the module loop, so in-flight
+    /// module iteration never sees a shifted neurite list).
+    fn process_prunes(&mut self) {
+        let prunes = std::mem::take(&mut self.pending_prunes);
+        for (ci, ni) in prunes {
+            if ni < self.cells[ci].neurites.len() {
+                self.cells[ci].neurites.remove(ni);
+            }
         }
     }
 
@@ -636,6 +723,63 @@ mod tests {
         assert!(
             after > before,
             "secretion should raise field: {before} -> {after}"
+        );
+    }
+
+    #[test]
+    fn geometric_synapse_dropped_when_tip_retracts() {
+        let mut w = world();
+        let a = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_cell(Vec3::new(0.0, 0.0, 10.0), CellType::Inhibitory, 4.0);
+        let n = w.new_neurite(a, true, 0.5);
+        // Extend the axon toward B until its tip is within synapse_dist (8).
+        w.extend_neurite(a, n, Vec3::new(0.0, 0.0, 3.0)); // tip at z=3 → dist 7 < 8
+        w.form_synapses(8.0);
+        assert_eq!(w.synapses.len(), 1);
+        assert!(w.synapses[0].geometric);
+        // Retract the tip back to the soma → contact gone → synapse recomputed away.
+        w.retract_neurite(a, n, 100.0);
+        w.form_synapses(8.0);
+        assert!(
+            w.synapses.is_empty(),
+            "a retracted contact must drop its geometric synapse"
+        );
+    }
+
+    #[test]
+    fn rule_synapses_survive_geometry_recompute() {
+        let mut w = world();
+        let a1 = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let a2 = w.add_cell(Vec3::new(0.0, 0.0, 5.0), CellType::Excitatory, 4.0);
+        let b1 = w.add_cell(Vec3::new(0.0, 0.0, 50.0), CellType::Inhibitory, 4.0);
+        w.cells[a1].role = 1;
+        w.cells[a2].role = 1;
+        w.cells[b1].role = 2;
+        let made = w.connect_fates(1, 0, 2, 0, 3.0);
+        assert_eq!(made, 2);
+        // Cells are far apart, so geometry forms nothing — and must not eat
+        // the rule-based wiring either.
+        w.form_synapses(8.0);
+        assert_eq!(
+            w.synapses.len(),
+            2,
+            "rule synapses must survive form_synapses"
+        );
+        assert!(w.synapses.iter().all(|s| !s.geometric));
+    }
+
+    #[test]
+    fn extend_neurite_clamps_to_bounds() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::new(0.0, 0.0, 79.0), CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, true, 0.5);
+        for _ in 0..10 {
+            w.extend_neurite(c, n, Vec3::new(0.0, 0.0, 10.0));
+        }
+        let tip = w.cells[c].neurites[n].tip();
+        assert!(
+            tip.z <= 80.0,
+            "neurite tip must stay inside bounds ({tip:?})"
         );
     }
 }

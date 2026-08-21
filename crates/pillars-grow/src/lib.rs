@@ -41,6 +41,9 @@ pub use dna::{extract_gene, parse_fasta, parse_gene_coords, read_maybe_gzip, rev
 pub use genome::{parse_dna_map, DnaGene, FlyGenome};
 pub use math::Vec3;
 pub use module::{CellModule, Host, Module};
-pub use modules::{ChemoAttraction, Differentiate, DivideOnce, Secretor, SimpleCellCycle};
+pub use modules::{
+    ChemoAttraction, ChemoRepulsion, Differentiate, DivideOnce, RetractNeurite, Secretor,
+    SimpleCellCycle, SomaMigration,
+};
 pub use substance::{ArtificialGradient, Grid, Substance};
 pub use world::{Bounds, GrownEdge, GrownGraph, GrownNode, Synapse, SynapseKind, World};
