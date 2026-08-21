@@ -98,7 +98,11 @@ use geometry::{GRID, HEADER_H, HIT_R, NODE_W, PIN_H, PIN_R, SCOPE_POINTS, bezier
 use kind::{ALL_KINDS, kind_at, kind_index, palette_kinds, reg_name};
 mod graph;
 mod presets;
+mod compile;
+mod io;
 pub(crate) use graph::{Edge, GEdge, GNode, Node};
+use compile::{graph_to_program, input_reg_of};
+use io::{FileEdge, FileGraph, FileNode};
 use presets::{default_lif_graph, hh_lite_graph, ml_graph};
 
 
@@ -224,74 +228,6 @@ impl Default for NeuronBuilder {
         app.reset_sim();
         app
     }
-}
-
-// ─── Serialization ──────────────────────────────────────────────
-#[derive(serde::Serialize, serde::Deserialize)]
-struct FileGraph {
-    version: u32,
-    nodes: Vec<FileNode>,
-    edges: Vec<FileEdge>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct FileNode {
-    kind: u8,
-    x: f32,
-    y: f32,
-    out_reg: usize,
-    c: f32,
-    c2: f32,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct FileEdge {
-    from: usize,
-    from_pin: usize,
-    to: usize,
-    to_pin: usize,
-}
-
-/// Source register feeding `node.pin` (State nodes → s0..s3).
-///
-/// Bounds-guarded: stale edges (from an old binary, a hand-edited JSON, or
-/// an undo snapshot) are skipped instead of panicking.
-fn input_reg_of(nodes: &[GNode], edges: &[GEdge], node: usize, pin: usize) -> usize {
-    for e in edges {
-        if e.to == node && e.to_pin == pin && e.from < nodes.len() {
-            return if nodes[e.from].kind == OpKind::State {
-                S0 + e.from_pin
-            } else {
-                nodes[e.from].out_reg
-            };
-        }
-    }
-    S0 // disconnected pin falls back to the membrane state
-}
-
-/// Resolve a node graph into a flat op program (shader order).
-///
-/// State/Scope nodes are graph-only and never emitted; every other node
-/// becomes one [`OpNode`]. Register indices are clamped to `N_REGS` so a
-/// stale graph degrades gracefully instead of panicking in the interpreter.
-fn graph_to_program(nodes: &[GNode], edges: &[GEdge]) -> Vec<OpNode> {
-    let mut prog = Vec::with_capacity(nodes.len());
-    for (i, node) in nodes.iter().enumerate() {
-        if matches!(node.kind, OpKind::State | OpKind::Scope) {
-            continue;
-        }
-        let n_in = spec_of(node.kind).ins.len();
-        let mut in_regs = [S0; 4];
-        for (pin, reg) in in_regs[..n_in].iter_mut().enumerate() {
-            *reg = input_reg_of(nodes, edges, i, pin);
-        }
-        let mut op = OpNode::new(node.kind, node.out_reg.min(N_REGS - 1));
-        op.in_regs = in_regs;
-        op.c = node.c;
-        op.c2 = node.c2;
-        prog.push(op);
-    }
-    prog
 }
 
 impl NeuronBuilder {
