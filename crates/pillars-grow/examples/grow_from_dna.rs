@@ -138,7 +138,11 @@ fn main() {
             "  {} → {} → {}",
             g.gene,
             g.neurotransmitter,
-            if g.sign < 0 { "тормозной (−)" } else { "возбуждающий (+)" }
+            if g.sign < 0 {
+                "тормозной (−)"
+            } else {
+                "возбуждающий (+)"
+            }
         );
     }
 
@@ -203,8 +207,18 @@ fn main() {
         );
     }
 
-    let w01 = g.edges.iter().find(|e| e.pre == 0 && e.post == 1).map(|e| e.weight).unwrap_or(0.0);
-    let w10 = g.edges.iter().find(|e| e.pre == 1 && e.post == 0).map(|e| e.weight).unwrap_or(0.0);
+    let w01 = g
+        .edges
+        .iter()
+        .find(|e| e.pre == 0 && e.post == 1)
+        .map(|e| e.weight)
+        .unwrap_or(0.0);
+    let w10 = g
+        .edges
+        .iter()
+        .find(|e| e.pre == 1 && e.post == 0)
+        .map(|e| e.weight)
+        .unwrap_or(0.0);
     let both_inhibitory = g.edges.iter().all(|e| e.kind == SynapseKind::Inhibitory);
     let mutual = w01 > 0.0 && w10 > 0.0;
     println!(
@@ -271,7 +285,6 @@ fn main() {
     println!("  → {verdict}");
     println!(
         "\nитог: ДНК ({}) → рост → 2×{}(GABA) → взаимное торможение → антифаза",
-        path,
-        genome.nt_gene
+        path, genome.nt_gene
     );
 }

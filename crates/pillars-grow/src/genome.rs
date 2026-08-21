@@ -81,10 +81,7 @@ impl FlyGenome {
     }
 
     /// Attach the raw DNA sequences (gene → A/C/G/T) loaded from FASTA/GFF.
-    pub fn with_sequences(
-        mut self,
-        seqs: &std::collections::HashMap<String, String>,
-    ) -> Self {
+    pub fn with_sequences(mut self, seqs: &std::collections::HashMap<String, String>) -> Self {
         self.nt_gene_seq = seqs.get(&self.nt_gene).cloned();
         self.morphogen_gene_seq = seqs.get(&self.morphogen_gene).cloned();
         self.guidance_gene_seq = seqs.get(&self.guidance_gene).cloned();
@@ -93,13 +90,13 @@ impl FlyGenome {
 
     /// Resolve the cell type from the DNA map (gene → sign).
     pub fn cell_type(&self, map: &[DnaGene]) -> Option<CellType> {
-        map.iter()
-            .find(|g| g.gene == self.nt_gene)
-            .map(|g| if g.sign < 0 {
+        map.iter().find(|g| g.gene == self.nt_gene).map(|g| {
+            if g.sign < 0 {
                 CellType::Inhibitory
             } else {
                 CellType::Excitatory
-            })
+            }
+        })
     }
 
     /// Human-readable name of the neurotransmitter this genome's cells make.

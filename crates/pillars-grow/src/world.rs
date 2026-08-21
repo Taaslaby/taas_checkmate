@@ -272,8 +272,7 @@ impl World {
                     for k in 1..g.nz.saturating_sub(1) {
                         let idx = g.flat(i, j, k);
                         let lap = g.laplacian(&s.field, i, j, k);
-                        let v = s.field[idx]
-                            + dt * s.diffusion * lap
+                        let v = s.field[idx] + dt * s.diffusion * lap
                             - dt * s.degradation * s.field[idx];
                         next[idx] = v.max(0.0);
                     }
@@ -598,7 +597,11 @@ mod tests {
                 break;
             }
         }
-        assert!(w.cells.len() > 1, "expected division, got {} cells", w.cells.len());
+        assert!(
+            w.cells.len() > 1,
+            "expected division, got {} cells",
+            w.cells.len()
+        );
     }
 
     #[test]
@@ -630,6 +633,9 @@ mod tests {
             w.step();
         }
         let after = w.concentration("A", Vec3::ZERO);
-        assert!(after > before, "secretion should raise field: {before} -> {after}");
+        assert!(
+            after > before,
+            "secretion should raise field: {before} -> {after}"
+        );
     }
 }

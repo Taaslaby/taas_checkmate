@@ -163,12 +163,19 @@ fn main() {
     }
 
     // Structural check: mutual inhibitory pair (the half-center motif).
-    let w01 = g.edges.iter().find(|e| e.pre == 0 && e.post == 1).map(|e| e.weight).unwrap_or(0.0);
-    let w10 = g.edges.iter().find(|e| e.pre == 1 && e.post == 0).map(|e| e.weight).unwrap_or(0.0);
-    let both_inhibitory = g
+    let w01 = g
         .edges
         .iter()
-        .all(|e| e.kind == SynapseKind::Inhibitory);
+        .find(|e| e.pre == 0 && e.post == 1)
+        .map(|e| e.weight)
+        .unwrap_or(0.0);
+    let w10 = g
+        .edges
+        .iter()
+        .find(|e| e.pre == 1 && e.post == 0)
+        .map(|e| e.weight)
+        .unwrap_or(0.0);
+    let both_inhibitory = g.edges.iter().all(|e| e.kind == SynapseKind::Inhibitory);
     let mutual = w01 > 0.0 && w10 > 0.0;
     println!(
         "half-center motif: mutual={mutual}  both_inhibitory={both_inhibitory}  w01={w01:.3}  w10={w10:.3}"
@@ -206,11 +213,17 @@ fn main() {
     };
     println!(
         "  spikes0: {:?}",
-        t0.iter().take(20).map(|t| format!("{t:.0}")).collect::<Vec<_>>()
+        t0.iter()
+            .take(20)
+            .map(|t| format!("{t:.0}"))
+            .collect::<Vec<_>>()
     );
     println!(
         "  spikes1: {:?}",
-        t1.iter().take(20).map(|t| format!("{t:.0}")).collect::<Vec<_>>()
+        t1.iter()
+            .take(20)
+            .map(|t| format!("{t:.0}"))
+            .collect::<Vec<_>>()
     );
     let phase = phase_offset(&train0, &train1, dt);
     let period = autocorr_period(&train0, dt);

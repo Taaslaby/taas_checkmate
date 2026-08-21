@@ -44,7 +44,11 @@ fn main() {
         "fra", "comm", "robo", // axon guidance
     ];
     let coords = parse_gene_coords(&gff, &wanted);
-    println!("GFF: найдено {}/{} целевых генов\n", coords.len(), wanted.len());
+    println!(
+        "GFF: найдено {}/{} целевых генов\n",
+        coords.len(),
+        wanted.len()
+    );
 
     let mut extracted: HashMap<String, String> = HashMap::new();
     for sym in &wanted {
@@ -71,7 +75,11 @@ fn main() {
     // Build the half-center genome carrying real DNA sequences.
     let genome = FlyGenome::half_center().with_sequences(&extracted);
     println!("\n=== FlyGenome (с реальной ДНК) ===");
-    println!("  nt_gene      = {} ({} bp)", genome.nt_gene, seq_len(&genome.nt_gene_seq));
+    println!(
+        "  nt_gene      = {} ({} bp)",
+        genome.nt_gene,
+        seq_len(&genome.nt_gene_seq)
+    );
     println!(
         "  morphogen    = {} ({} bp)",
         genome.morphogen_gene,

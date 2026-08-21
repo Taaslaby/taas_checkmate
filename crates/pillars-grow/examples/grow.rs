@@ -55,7 +55,11 @@ fn main() {
     // Growth phase: every cell extends an axon that chases the gradient.
     for ci in 0..world.cells.len() {
         let idx = world.new_neurite(ci, true, 0.5);
-        world.add_neurite_module(ci, idx, Box::new(ChemoAttraction::new("A").branching(0.002)));
+        world.add_neurite_module(
+            ci,
+            idx,
+            Box::new(ChemoAttraction::new("A").branching(0.002)),
+        );
     }
 
     println!("=== growth phase ===");

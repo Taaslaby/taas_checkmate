@@ -37,7 +37,7 @@ pub fn parse_fasta(text: &str) -> HashMap<String, String> {
             let acc = rest.split_whitespace().next().unwrap_or("").to_string();
             cur = Some(acc);
         } else if cur.is_some() {
-            buf.push_str(line.trim());
+            buf.push_str(&line.trim().to_uppercase());
         }
     }
     if let Some(acc) = cur {
@@ -117,5 +117,100 @@ pub fn extract_gene(
         revcomp(&s)
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_fasta_handles_multi_record_and_whitespace() {
+        let text = ">chr2L extra description\nacgtACGT\nNNnn\n>chr3\nTTTT\n>chr4\n";
+        let seqs = parse_fasta(text);
+        assert_eq!(seqs.len(), 3);
+        // Accession is the first token; bases are uppercased, whitespace stripped.
+        assert_eq!(seqs["chr2L"], "ACGTACGTNNNN");
+        assert_eq!(seqs["chr3"], "TTTT");
+        assert!(seqs.contains_key("chr4"));
+        assert_eq!(seqs["chr4"], "");
+    }
+
+    #[test]
+    fn parse_fasta_empty_input() {
+        assert!(parse_fasta("").is_empty());
+        assert!(parse_fasta(">only_header\n").len() == 1);
+    }
+
+    #[test]
+    fn revcomp_complements_and_reverses() {
+        assert_eq!(revcomp("ATGC"), "GCAT");
+        assert_eq!(revcomp("ATGC"), revcomp("ATGC")); // palindromic-ish check
+        assert_eq!(revcomp("AATT"), "AATT");
+        assert_eq!(revcomp("acgt"), "ACGT");
+        // Unknown bases map to N.
+        assert_eq!(revcomp("AXG"), "CNT");
+    }
+
+    #[test]
+    fn parse_gene_coords_prefers_gene_attr_and_dedups() {
+        let gff = [
+            "##gff-version 3",
+            "2R\tFlyBase\tgene\t1000\t2000\t.\t+\t.\tID=FBgn1;gene=eve;Name=even-skipped",
+            // Second eve line — must be ignored (first wins).
+            "2R\tFlyBase\tgene\t9000\t9500\t.\t-\t.\tID=FBgn9;gene=eve;Name=other",
+            "2R\tFlyBase\tgene\t3000\t4000\t.\t-\t.\tID=FBgn2;Name=ftz",
+            "2R\tFlyBase\texon\t500\t600\t.\t+\t.\tgene=not-a-gene",
+            "2R\tFlyBase\tgene\t5000\t6000\t.\t-\t.\tID=FBgn3;gene=hb",
+        ]
+        .join("\n");
+        let coords = parse_gene_coords(&gff, &["eve", "ftz", "hb"]);
+        assert_eq!(coords.len(), 3);
+        // gene= beats Name=; first occurrence of `eve` wins (the + strand one).
+        assert_eq!(coords["eve"], ("2R".to_string(), 1000, 2000, '+'));
+        // Name= fallback for `ftz`.
+        assert_eq!(coords["ftz"], ("2R".to_string(), 3000, 4000, '-'));
+        assert_eq!(coords["hb"], ("2R".to_string(), 5000, 6000, '-'));
+        // Unwanted symbol never appears.
+        assert!(parse_gene_coords(&gff, &["none"]).is_empty());
+    }
+
+    #[test]
+    fn extract_gene_slices_and_revcomps() {
+        let mut seqs = HashMap::new();
+        seqs.insert("2R".to_string(), "AACCGGTTAACCGGTT".to_string());
+
+        // 1-based inclusive coordinates: positions 3..=6 → "CCGG".
+        let fwd = ("2R".to_string(), 3usize, 6usize, '+');
+        assert_eq!(extract_gene(&seqs, &fwd), "CCGG");
+
+        // Minus strand: revcomp of "CCGG" is "CCGG"; use an asymmetric window.
+        let minus = ("2R".to_string(), 5usize, 8usize, '-');
+        // Window 5..=8 of "AACCGGTTAACCGGTT": chars 5,6,7,8 = "GGTT".
+        assert_eq!(revcomp("GGTT"), "AACC");
+        assert_eq!(extract_gene(&seqs, &minus), "AACC");
+
+        // Unknown chromosome → empty.
+        let missing = ("3R".to_string(), 1usize, 4usize, '+');
+        assert_eq!(extract_gene(&seqs, &missing), "");
+    }
+
+    #[test]
+    fn read_maybe_gzip_transparently_decompresses() {
+        let dir = std::env::temp_dir();
+        let plain = dir.join(format!("pillars_grow_plain_{}.txt", std::process::id()));
+        let gz = dir.join(format!("pillars_grow_gz_{}.gz", std::process::id()));
+        std::fs::write(&plain, "hello\n").unwrap();
+
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut enc, b"hello gz").unwrap();
+        let bytes = enc.finish().unwrap();
+        std::fs::write(&gz, bytes).unwrap();
+
+        assert_eq!(read_maybe_gzip(plain.to_str().unwrap()).unwrap(), "hello\n");
+        assert_eq!(read_maybe_gzip(gz.to_str().unwrap()).unwrap(), "hello gz");
+
+        let _ = std::fs::remove_file(&plain);
+        let _ = std::fs::remove_file(&gz);
     }
 }

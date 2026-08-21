@@ -246,3 +246,116 @@ impl Module for Secretor {
         Box::new(Secretor::new(&self.substance, self.amount))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Bounds, CellType, Grid, Substance};
+
+    fn world() -> World {
+        let grid = Grid::new(32, 32, 32, 5.0, Vec3::new(-80.0, -80.0, -80.0));
+        let bounds = Bounds {
+            min: Vec3::new(-80.0, -80.0, -80.0),
+            max: Vec3::new(80.0, 80.0, 80.0),
+        };
+        World::new(grid, 1.0, bounds, 0)
+    }
+
+    #[test]
+    fn divide_once_stops_after_one_division() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_cell_module(c, Box::new(DivideOnce::new(300.0, 12.0)));
+        for _ in 0..30 {
+            w.step();
+        }
+        assert_eq!(
+            w.cells.len(),
+            2,
+            "DivideOnce must split exactly once (progenitor + one daughter)"
+        );
+    }
+
+    #[test]
+    fn divide_once_daughter_is_module_free() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_cell_module(c, Box::new(DivideOnce::new(300.0, 12.0)));
+        for _ in 0..30 {
+            w.step();
+        }
+        // `copy_on_divide` is false → the daughter carries no division module.
+        assert!(
+            w.cells[1].modules.is_empty(),
+            "DivideOnce must not copy itself into the daughter"
+        );
+    }
+
+    #[test]
+    fn simple_cell_cycle_copies_into_daughters() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.add_cell_module(c, Box::new(SimpleCellCycle::new(300.0, 12.0)));
+        for _ in 0..30 {
+            w.step();
+            if w.cells.len() >= 4 {
+                break;
+            }
+        }
+        assert!(
+            w.cells.len() >= 4,
+            "SimpleCellCycle daughters must keep dividing, got {} cells",
+            w.cells.len()
+        );
+    }
+
+    #[test]
+    fn differentiate_reads_morphogen_concentration() {
+        let mut w = world();
+        w.add_substance(Substance::new("morph", 0.1, 0.001, &w.grid, vec![]));
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        // 10 units at the exact grid node under the cell → trilinear is exact.
+        w.add_substance_at("morph", Vec3::ZERO, 10.0);
+        Differentiate::new("morph", 3.0).run(&mut w, c);
+        assert_eq!(w.cells[c].role, 3, "role = floor(10 / 3)");
+        // Zero concentration → role 0.
+        let far = w.add_cell(Vec3::new(-60.0, -60.0, -60.0), CellType::Inhibitory, 4.0);
+        Differentiate::new("morph", 3.0).run(&mut w, far);
+        assert_eq!(w.cells[far].role, 0);
+    }
+
+    #[test]
+    fn secretor_ignores_neurite_host() {
+        let mut w = world();
+        w.add_substance(Substance::new("morph", 0.1, 0.001, &w.grid, vec![]));
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        let n = w.new_neurite(c, false, 0.5);
+        let before = w.concentration("morph", Vec3::ZERO);
+        // A soma-only module hosted on a neurite must no-op.
+        Secretor::new("morph", 5.0).run(&mut w, Host::Neurite { cell: c, idx: n });
+        assert_eq!(w.concentration("morph", Vec3::ZERO), before);
+    }
+
+    #[test]
+    fn chemo_ignores_soma_host() {
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 4.0);
+        w.new_neurite(c, true, 0.5);
+        w.add_soma_module(c, Box::new(ChemoAttraction::new("x")));
+        for _ in 0..10 {
+            w.step();
+        }
+        // The neurite module never fires (host is Soma) → no elongation points.
+        assert_eq!(w.cells[c].neurites[0].points.len(), 1);
+    }
+
+    #[test]
+    fn copy_flags_follow_division_contract() {
+        assert!(SimpleCellCycle::new(1.0, 2.0).copy_on_divide());
+        assert!(!DivideOnce::new(1.0, 2.0).copy_on_divide());
+        assert!(Secretor::new("x", 1.0).copy_on_divide());
+        let chemo = ChemoAttraction::new("x");
+        assert!(chemo.copy_on_branch());
+        assert!(chemo.copy_on_elongate());
+    }
+}

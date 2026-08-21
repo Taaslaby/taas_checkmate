@@ -177,3 +177,103 @@ impl Substance {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grid() -> Grid {
+        Grid::new(8, 9, 10, 1.0, Vec3::ZERO)
+    }
+
+    #[test]
+    fn volume_and_flat_indexing() {
+        let g = grid();
+        assert_eq!(g.volume(), 8 * 9 * 10);
+        assert_eq!(g.flat(0, 0, 0), 0);
+        assert_eq!(g.flat(0, 0, 1), 1);
+        assert_eq!(g.flat(0, 1, 0), 10);
+        assert_eq!(g.flat(1, 0, 0), 9 * 10);
+        // Max index fits inside the field.
+        assert!(g.flat(7, 8, 9) < g.volume());
+    }
+
+    #[test]
+    fn trilinear_reads_grid_points() {
+        let g = grid();
+        let mut field = vec![0.0; g.volume()];
+        field[g.flat(2, 3, 4)] = 7.0;
+        // At a grid node the interpolation returns that node's value.
+        let p = Vec3::new(2.0, 3.0, 4.0);
+        assert_eq!(g.trilinear(&field, p), 7.0);
+        // Midway between the node and zero neighbours halves it.
+        let mid = Vec3::new(2.5, 3.0, 4.0);
+        assert!((g.trilinear(&field, mid) - 3.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn trilinear_clamps_outside() {
+        let g = grid();
+        let mut field = vec![0.0; g.volume()];
+        field[g.flat(7, 8, 9)] = 5.0;
+        // Past the last interior node the sample clamps to the boundary value.
+        let outside = Vec3::new(100.0, 100.0, 100.0);
+        assert_eq!(g.trilinear(&field, outside), 5.0);
+        let negative = Vec3::new(-100.0, 0.0, 0.0);
+        assert_eq!(g.trilinear(&field, negative), 0.0);
+    }
+
+    #[test]
+    fn laplacian_6_neighbour() {
+        let g = Grid::new(4, 4, 4, 1.0, Vec3::ZERO);
+        let mut field = vec![0.0; g.volume()];
+        // A uniform field has zero Laplacian.
+        field.iter_mut().for_each(|v| *v = 2.0);
+        assert_eq!(g.laplacian(&field, 2, 2, 2), 0.0);
+        // A peak at the centre gives a negative Laplacian (curvature down).
+        let mut field = vec![0.0; g.volume()];
+        field[g.flat(2, 2, 2)] = 6.0;
+        let lap = g.laplacian(&field, 2, 2, 2);
+        // 3D: sum(neighbours) - 6*centre = 0 - 36.
+        assert_eq!(lap, -36.0);
+    }
+
+    #[test]
+    fn nearest_clamps_to_grid() {
+        let g = grid();
+        assert_eq!(g.nearest(Vec3::new(2.4, 3.4, 4.4)), (2, 3, 4));
+        assert_eq!(g.nearest(Vec3::new(-5.0, 0.0, 0.0)), (0, 0, 0));
+        assert_eq!(g.nearest(Vec3::new(1e6, 1e6, 1e6)), (7, 8, 9));
+    }
+
+    #[test]
+    fn gaussian_gradient_peaks_at_mean() {
+        let g = ArtificialGradient::Gaussian {
+            axis: 2,
+            max: 2.0,
+            mean: 0.0,
+            sigma: 1.0,
+        };
+        assert_eq!(g.value(Vec3::new(0.0, 0.0, 0.0)), 2.0);
+        assert!((g.value(Vec3::new(0.0, 0.0, 1.0)) - 2.0 * (-0.5f64).exp()).abs() < 1e-12);
+        // Far away it decays to zero.
+        assert!(g.value(Vec3::new(0.0, 0.0, 50.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn linear_gradient_between_peaks() {
+        let g = ArtificialGradient::Linear {
+            axis: 1,
+            max: 10.0,
+            peak: 2.0,
+            zero: 0.0,
+        };
+        assert_eq!(g.value(Vec3::new(0.0, 0.5, 0.0)), 2.5);
+        assert_eq!(g.value(Vec3::new(0.0, 1.0, 0.0)), 5.0);
+        assert_eq!(g.value(Vec3::new(0.0, 0.0, 0.0)), 0.0);
+        // The ramp is (lo, hi) exclusive — zero at and past the peak.
+        assert_eq!(g.value(Vec3::new(0.0, 2.0, 0.0)), 0.0);
+        assert_eq!(g.value(Vec3::new(0.0, 3.0, 0.0)), 0.0);
+        assert_eq!(g.value(Vec3::new(0.0, -1.0, 0.0)), 0.0);
+    }
+}

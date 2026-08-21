@@ -76,3 +76,47 @@ impl Mul<f64> for Vec3 {
         self.scale(s)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dot_len_dist() {
+        let a = Vec3::new(1.0, 2.0, 2.0);
+        let b = Vec3::new(4.0, 0.0, 0.0);
+        assert_eq!(a.dot(b), 4.0);
+        assert!((a.len() - 3.0).abs() < 1e-12);
+        assert!((a.dist(Vec3::ZERO) - 3.0).abs() < 1e-12);
+        assert!((a.dist(b) - 17.0f64.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn normalized_unit_and_zero() {
+        let u = Vec3::new(3.0, 0.0, 4.0).normalized();
+        assert!((u.len() - 1.0).abs() < 1e-12);
+        assert!((u.x - 0.6).abs() < 1e-12);
+        assert!((u.z - 0.8).abs() < 1e-12);
+        // Near-zero vectors normalize to ZERO instead of NaNs.
+        assert_eq!(Vec3::ZERO.normalized(), Vec3::ZERO);
+        assert_eq!(Vec3::new(1e-14, 0.0, 0.0).normalized(), Vec3::ZERO);
+    }
+
+    #[test]
+    fn scale_and_ops() {
+        let a = Vec3::new(1.0, 2.0, 3.0);
+        assert_eq!(a.scale(2.0), Vec3::new(2.0, 4.0, 6.0));
+        assert_eq!(a * 2.0, Vec3::new(2.0, 4.0, 6.0));
+        assert_eq!(a + a, Vec3::new(2.0, 4.0, 6.0));
+        assert_eq!(a - a, Vec3::ZERO);
+    }
+
+    #[test]
+    fn axis_accessors() {
+        let a = Vec3::new(1.0, 2.0, 3.0);
+        assert_eq!(a.axis(0), 1.0);
+        assert_eq!(a.axis(1), 2.0);
+        assert_eq!(a.axis(2), 3.0);
+        assert_eq!(a.axis(9), 3.0); // fallback = z
+    }
+}
