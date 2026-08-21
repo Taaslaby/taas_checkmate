@@ -89,12 +89,12 @@ fn len_err(name: &str, n: usize, got: usize) -> pyo3::PyErr {
 
 /// SIMD-кернелы pillars требуют длину популяции, кратную 8 (LANES).
 /// Вместо паники в assert — понятная PyValueError.
-fn check_lanes(n: usize, fname: &str) -> PyResult<()> {
-    if !n.is_multiple_of(8) {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "{fname}: population size {n} must be a multiple of 8 (SIMD lanes); pad with zeros or use a multiple of 8"
-        )));
-    }
+/// Legacy check — the SIMD runner internally handles non-multiple-of-8 n
+/// via scalar tail (n8 = n & !7 then tail loop). NeuralPopulation also
+/// auto-pads. Kept as a no-op for backward compat; callers that used it
+/// continue to compile without changes.
+#[inline(always)]
+fn check_lanes(_n: usize, _fname: &str) -> PyResult<()> {
     Ok(())
 }
 

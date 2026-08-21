@@ -38,7 +38,7 @@ pub mod connectome;
 pub mod connectome_brain;
 pub mod cpe;
 pub mod eprop;
-pub mod hetero_brain;
+pub mod formula;
 pub mod hh;
 #[cfg(feature = "cuda")]
 pub mod hh_gpu;
@@ -47,6 +47,7 @@ pub mod karmac;
 pub mod kuramoto;
 pub mod lif_connectome;
 pub mod neuron;
+pub mod neuroml;
 pub mod pillars;
 pub mod poisson_stp;
 pub mod rl_agent;
@@ -166,6 +167,15 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, neurons, neuron::PySomatoDendriticNeuron);
     export_class!(m, neurons, neuron::PyGlif3State);
     export_class!(m, neurons, neuron::PyGlif4State);
+    export_class!(m, neurons, neuron::PyChordotonalSensor); // 🦗 механорецептор
+    // ─── neuroml ──────────────────────────────────────
+    let neuroml_sub = make_sub(m.py(), m, "neuroml")?;
+    let f_load = wrap_pyfunction!(neuroml::py_load_neuroml, &neuroml_sub)?;
+    export_fn_facade(&neuroml_sub, &f_load)?;
+    let f_load_file = wrap_pyfunction!(neuroml::py_load_neuroml_file, &neuroml_sub)?;
+    export_fn_facade(&neuroml_sub, &f_load_file)?;
+    neuroml_sub.add_class::<neuroml::NeuromlNetwork>()?;
+
     // ─── karmac ────────────────────────────────────────
     let karmac_sub = make_sub(m.py(), m, "karmac")?;
     export_class!(m, karmac_sub, karmac::PyCarmackBsp);
@@ -234,6 +244,8 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class!(m, t3, t3::PyHologramEncoder);
     export_class!(m, t3, t3::PyNormalizedSpiker);
     export_class!(m, t3, t3::PySpikeGradBridge);
+    export_class!(m, t3, t3::PyTorusGrid);
+    export_class!(m, t3, t3::PyTorusTrajectory);
     add_fn!(t3, t3::py_pst_features);
     add_fn!(t3, t3::py_pst_linear_features);
     add_fn!(t3, t3::py_pst_linear_dim);
@@ -315,8 +327,9 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── connectome_brain ─────────────────────────────────
     let connectome_brain = make_sub(m.py(), m, "connectome_brain")?;
     export_class!(m, connectome_brain, connectome_brain::PyConnectomeData);
-    export_class!(m, connectome_brain, connectome_brain::PyBrainSimulator);
     export_class!(m, connectome_brain, connectome_brain::PyBrainRunner);
+    export_class!(m, connectome_brain, connectome_brain::PyAlphaLifWorker);
+    export_class!(m, connectome_brain, connectome_brain::PyAlphaLifOutput);
     export_class!(m, connectome_brain, connectome_brain::PySpikeRecorder);
 
     // ─── format ────────────────────────────────────────
@@ -343,6 +356,18 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ─── iit ─────────────────────────────────────────────
     // let iit = make_sub(m.py(), m, "iit")?;
     // export_class!(m, iit, iit::PyIITConsciousness);
+
+    // ─── formula — реалтайм-сборка своего нейрона из ops ──
+    let formula = make_sub(m.py(), m, "formula")?;
+    export_class!(m, formula, formula::PyNeuronBuilder);
+    export_class!(m, formula, formula::PyFormula);
+    export_class!(m, formula, formula::PyFormulaPopulation);
+    export_class!(m, formula, formula::PyTrace);
+    export_class!(m, formula, formula::PyOpKind);
+    export_class!(m, formula, formula::PyOpNode);
+    export_class!(m, formula, formula::PyReg);
+    // функции lif / run_program регистрируются в formula::register —
+    // #[pyfunction(name = …)] недоступен извне модуля (приватный mod)
 
     // ─── hh ─────────────────────────────────────────────
     let hh = make_sub(m.py(), m, "hh")?;
@@ -457,8 +482,18 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     export_class_facade!(pillars, neuron::PyGlif4State);
     export_class_facade!(pillars, neuron::PySomatoDendriticNeuron);
     export_class_facade!(pillars, neuron::PyAstrocyteState);
+    export_class_facade!(pillars, neuron::PyChordotonalSensor);
     export_class_facade!(pillars, trainer::PyEPropTrainer);
     export_class_facade!(pillars, rl_agent::PyActorCriticAgent);
+    // formula — фасад pillars (единый вход для нового кода)
+    export_class_facade!(pillars, formula::PyNeuronBuilder);
+    export_class_facade!(pillars, formula::PyFormula);
+    export_class_facade!(pillars, formula::PyFormulaPopulation);
+    export_class_facade!(pillars, formula::PyTrace);
+    export_class_facade!(pillars, formula::PyOpKind);
+    export_class_facade!(pillars, formula::PyOpNode);
+    export_class_facade!(pillars, formula::PyReg);
+    formula::register(&formula, Some(&pillars), Some(m))?;
 
     // ─── hologram ─────────────────────────────────────────
     let hologram = make_sub(m.py(), m, "hologram")?;

@@ -2,7 +2,8 @@
 //!
 //! Exposes:
 //! - `taas_checkmate.connectome_brain.ConnectomeData` — build from CSR arrays
-//! - `taas_checkmate.connectome_brain.BrainSimulator` — LIF/Izhikevich/Rate/Psi
+//! - `taas_checkmate.connectome_brain.BrainRunner` — universal runner (LIF, Izh,
+//!   IzhDual, HH, HAAP, Rate, GCO, GPU paths)
 //! - `taas_checkmate.connectome_brain.SpikeRecorder` — spike counting for named groups
 //!
 //! Usage:
@@ -10,36 +11,28 @@
 //! import taas_checkmate as tcm
 //!
 //! conn = tcm.ConnectomeData(rp, ci, vals, nt_types, [("dn", dn_ids), ("mn", mn_ids)])
-//! sim = tcm.BrainSimulator(conn.n_neurons, "lif")
-//! spike_buf = sim.step_batch(conn, n_steps=50, external_I=...)
+//! runner = tcm.BrainRunner(conn, "lif", dt_ms=0.5)
+//! spike_buf = runner.run(n_steps=50, external_I=...)
 //! rates = tcm.SpikeRecorder(conn.n_neurons).record_group(
 //!     spike_buf, 50, 0.5, conn.group("mn"), max_rate=100.0)
-//!
-//! # Conductance-based (requires receptor_types):
-//! conn.build_receptor_types()
-//! spike_buf = sim.step_batch_synaptic(conn, n_steps=50, external_I=...)
 //! ```
 
 #![allow(non_snake_case)]
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::connectome::{
-    self as conn, hh_population_pacemaking, hh_population_standard, sim_hh_pillars,
-    sim_hh_synaptic_pillars, ConnectomeData, GcoParams, IzhikevichParams, LifParams, NeuronModel,
-    RateParams, SynapticKinetics,
+    self as conn, AlphaLifOutput, AlphaLifWorker, ConnectomeData, ShiuParams,
 };
-use crate::pillars::zoo::HHModel;
-use crate::pillars::zoo::HHParamIdx;
-use crate::pillars::NeuralPopulation;
 
 // ─── ConnectomeData ──────────────────────────────────
 
 /// Universal connectome: CSR matrix + NT types + named neuron groups.
 ///
 /// Can be built from any source (FlyWire, MANC, synthetic, etc.)
-/// and then passed to ``BrainSimulator.step_batch()``.
+/// and then passed to ``BrainRunner.run()``.
 #[pyclass(name = "ConnectomeData", module = "taas_checkmate.connectome_brain")]
 pub struct PyConnectomeData {
     pub inner: ConnectomeData,
@@ -127,6 +120,30 @@ impl PyConnectomeData {
         self.inner.build_receptor_types();
     }
 
+    /// Set per-synapse receptor_types directly (e.g. loaded from a baked .taas).
+    ///
+    /// ``receptor_types`` must be ``[n_synapses]`` uint8 with data.rs codes:
+    ///   0 = AMPA (exc fallback), 2 = GABA_A (fast inh), 4 = nAChR (fast exc),
+    ///   5 = GluCl (fast inh — insects!), 6 = mAChR (slow mod).
+    ///
+    /// Must be called before constructing a ``BrainRunner(model="hh_synaptic")``.
+    pub fn set_receptor_types(
+        &mut self,
+        receptor_types: Bound<'_, PyArray1<u8>>,
+    ) -> PyResult<()> {
+        let ro = receptor_types.readonly();
+        let sl = ro.as_slice()?;
+        if sl.len() != self.inner.n_synapses {
+            return Err(PyValueError::new_err(format!(
+                "set_receptor_types: expected {} entries (n_synapses), got {}",
+                self.inner.n_synapses,
+                sl.len()
+            )));
+        }
+        self.inner.receptor_types = sl.to_vec();
+        Ok(())
+    }
+
     /// Build per-synapse receptor_types with Drosophila-appropriate FlyWire NT mapping.
     ///
     /// ``nt_map`` must be ``[n_neurons]`` float32 array with FlyWire NT codes:
@@ -161,778 +178,13 @@ impl PyConnectomeData {
     }
 }
 
-// ─── BrainSimulator ──────────────────────────────────
-
-/// Universal brain simulator for any CSR connectome.
-///
-/// Supports models: ``"lif"``, ``"izhikevich"``, ``"rate"``, ``"psi"``, ``"hh"``.
-///
-/// > **Deprecated** — the pillars-native path replaces this for the models it
-/// > covers (LIF, Izhikevich, Rate, and conductance-based synapses). Prefer:
-/// > ```python
-/// > from taas_checkmate import pillars
-/// > brain = pillars.ConnectomeBrain(row_ptr, col_idx, weights, delays)   # instant
-/// > brain = pillars.SynapticConnectomeBrain(row_ptr, col_idx, weights,
-/// >                                        delays, receptor_types, dt)   # conductance
-/// > ```
-/// > `BrainSimulator` remains for the models without a pillars equivalent yet
-/// > (``"gco"``, dual-Izhikevich, GPU paths).
-///
-/// Usage (legacy):
-/// ```python
-/// sim = tcm.BrainSimulator(conn.n_neurons, "lif")
-/// spike_buf = sim.step_batch(conn, n_steps=50, dt_ms=0.5, external_I=...)
-/// ```
-#[pyclass(name = "BrainSimulator", module = "taas_checkmate.connectome_brain")]
-pub struct PyBrainSimulator {
-    state: conn::BrainState,
-    model: conn::NeuronModel,
-    n_neurons: usize,
-    kinetics: Option<SynapticKinetics>,
-    hh_pop: Option<(f32, NeuralPopulation<HHModel>)>, // (dt, pop) — lazily created for "hh" model
-    hh_use_pacemaking: bool,                          // if true, use 3-channel HH (NaV+KV+CaT)
-    hh_i_in: Vec<f32>,                                // last external input (Ii getter snapshot)
-}
-
-/// Ensure HH population exists for the given dt. Recreates if dt changed.
-///
-/// Free function over disjoint fields so callers can borrow `self.kinetics`
-/// (or other fields) simultaneously with the returned population.
-fn ensure_hh_pop(
-    hh_pop: &mut Option<(f32, NeuralPopulation<HHModel>)>,
-    hh_use_pacemaking: bool,
-    n_neurons: usize,
-    dt: f32,
-) -> &mut NeuralPopulation<HHModel> {
-    match hh_pop {
-        Some((stored_dt, _)) if *stored_dt == dt => {}
-        _ => {
-            let pop = if hh_use_pacemaking {
-                hh_population_pacemaking(n_neurons, dt)
-            } else {
-                hh_population_standard(n_neurons, dt)
-            };
-            *hh_pop = Some((dt, pop));
-        }
-    }
-    &mut hh_pop.as_mut().unwrap().1
-}
-
-#[pymethods]
-impl PyBrainSimulator {
-    #[new]
-    #[pyo3(signature = (n_neurons, model="lif".to_string(), pacemaking=false))]
-    pub fn new(n_neurons: usize, model: String, pacemaking: bool) -> PyResult<Self> {
-        let (nm, hh_use_pacemaking, hh_config) = match model.as_str() {
-            "lif" => (NeuronModel::LIF, false, None),
-            "izhikevich" => (NeuronModel::Izhikevich, false, None),
-            "rate" => (NeuronModel::Rate, false, None),
-            "psi" => (NeuronModel::LIF, false, None), // Psi removed
-            "hh" => {
-                if pacemaking {
-                    let pop = hh_population_pacemaking(n_neurons, 0.5);
-                    (NeuronModel::LIF, true, Some((0.0, pop)))
-                } else {
-                    let pop = hh_population_standard(n_neurons, 0.5);
-                    (NeuronModel::LIF, false, Some((0.0, pop)))
-                }
-            }
-            other => {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Unknown model '{other}'. Use: lif, izhikevich, rate, psi, hh"
-                )))
-            }
-        };
-        let state = conn::BrainState::new(n_neurons, nm);
-        Ok(Self {
-            state,
-            model: nm,
-            n_neurons,
-            kinetics: None,
-            hh_pop: hh_config,
-            hh_use_pacemaking,
-            hh_i_in: vec![0.0; n_neurons],
-        })
-    }
-
-    /// Getter for n_neurons.
-    #[getter]
-    pub fn n_neurons(&self) -> usize {
-        self.n_neurons
-    }
-
-    /// Run a batch of simulation steps on the connectome.
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph with NT types.
-    ///     n_steps: number of simulation steps.
-    ///     dt_ms: timestep in milliseconds (default 0.5).
-    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
-    ///
-    /// Returns:
-    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, scale=1.0))]
-    pub fn step_batch<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &PyConnectomeData,
-        n_steps: usize,
-        dt_ms: f32,
-        external_I: Option<Bound<'_, PyArray1<f32>>>,
-        scale: f32,
-    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let conn_data = &connectome.inner;
-        let n = self.n_neurons;
-        let ext_I: Vec<f32> = match external_I {
-            Some(arr) => {
-                let ro = arr.readonly();
-                let sl = ro.as_slice()?;
-                let mut v = vec![0.0f32; n];
-                let copy_n = sl.len().min(n);
-                v[..copy_n].copy_from_slice(&sl[..copy_n]);
-                v
-            }
-            None => vec![0.0f32; n],
-        };
-
-        let spike_buf = if self.hh_pop.is_some() {
-            self.hh_i_in[..n].copy_from_slice(&ext_I[..n]);
-            let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
-            sim_hh_pillars(conn_data, pop, &ext_I, n_steps, scale)
-        } else {
-            match self.model {
-                NeuronModel::LIF => {
-                    let tau_m = vec![20.0f32; n];
-                    let v_rest = vec![-70.0f32; n];
-                    let v_thresh = vec![-58.0f32; n];
-                    let v_reset = vec![-70.0f32; n];
-                    let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                    conn::sim_lif(conn_data, &mut self.state, &params, &ext_I, n_steps, scale)
-                }
-                NeuronModel::Izhikevich => {
-                    let params = IzhikevichParams {
-                        a: vec![0.02f32; n],
-                        b: vec![0.2f32; n],
-                        c: vec![-65.0f32; n],
-                        d: vec![8.0f32; n],
-                        dt_ms,
-                        tau_ref: 2.0,
-                    };
-                    conn::sim_izhikevich(conn_data, &mut self.state, &params, &ext_I, n_steps)
-                }
-                NeuronModel::Rate => {
-                    let params = RateParams { tau: 10.0, dt_ms };
-                    conn::sim_rate(conn_data, &mut self.state, &params, &ext_I, n_steps)
-                }
-                NeuronModel::Gco => {
-                    let params = GcoParams { dt_ms };
-                    conn::sim_gco(conn_data, &mut self.state, &params, &ext_I, n_steps)
-                }
-                NeuronModel::Hh => {
-                    let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
-                    sim_hh_pillars(conn_data, pop, &ext_I, n_steps, scale)
-                }
-            }
-        };
-
-        Ok(spike_buf.into_pyarray(py))
-    }
-
-    /// Run a batch of conductance-based LIF steps.
-    ///
-    /// Requires ``connectome.build_receptor_types()`` to have been called first.
-    /// Conductance-based synapses give realistic PSC decay (AMPA τ≈2ms, GABA_A τ≈10ms).
-    /// Synaptic kinetics persist across calls — conductances carry over between batches.
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph with NT + receptor types.
-    ///     n_steps: number of simulation steps.
-    ///     dt_ms: timestep in milliseconds (default 0.5).
-    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
-    ///     scale: synaptic weight multiplier (default 1e10 for FAFB baked weights).
-    ///
-    /// Returns:
-    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, scale=1e10))]
-    pub fn step_batch_synaptic<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &PyConnectomeData,
-        n_steps: usize,
-        dt_ms: f32,
-        external_I: Option<Bound<'_, PyArray1<f32>>>,
-        scale: f32,
-    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        if connectome.inner.receptor_types.is_empty() {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "receptor_types empty — call connectome.build_receptor_types() first",
-            ));
-        }
-
-        let conn_data = &connectome.inner;
-        let n = self.n_neurons;
-
-        let ext_I: Vec<f32> = match external_I {
-            Some(arr) => {
-                let ro = arr.readonly();
-                let sl = ro.as_slice()?;
-                let mut v = vec![0.0f32; n];
-                let copy_n = sl.len().min(n);
-                v[..copy_n].copy_from_slice(&sl[..copy_n]);
-                v
-            }
-            None => vec![0.0f32; n],
-        };
-
-        // Initialize kinetics on first call
-        if self.kinetics.is_none() {
-            self.kinetics = Some(SynapticKinetics::new(n));
-        }
-
-        let spike_buf = if self.hh_pop.is_some() {
-            self.hh_i_in[..n].copy_from_slice(&ext_I[..n]);
-            let pop = ensure_hh_pop(&mut self.hh_pop, self.hh_use_pacemaking, n, dt_ms);
-            let kinetics = self.kinetics.as_mut().unwrap();
-            sim_hh_synaptic_pillars(conn_data, pop, &ext_I, n_steps, kinetics, scale)
-        } else {
-            let kinetics = self.kinetics.as_mut().unwrap();
-            match self.model {
-                NeuronModel::LIF => {
-                    let tau_m = vec![20.0f32; n];
-                    let v_rest = vec![-70.0f32; n];
-                    let v_thresh = vec![-58.0f32; n];
-                    let v_reset = vec![-70.0f32; n];
-                    let params = LifParams::new(&tau_m, &v_rest, &v_thresh, &v_reset, dt_ms, 2.0);
-                    conn::sim_lif_synaptic(
-                        conn_data,
-                        &mut self.state,
-                        &params,
-                        &ext_I,
-                        n_steps,
-                        kinetics,
-                        scale,
-                    )
-                }
-                NeuronModel::Izhikevich => {
-                    let params = IzhikevichParams {
-                        a: vec![0.02f32; n],
-                        b: vec![0.2f32; n],
-                        c: vec![-65.0f32; n],
-                        d: vec![8.0f32; n],
-                        dt_ms,
-                        tau_ref: 2.0,
-                    };
-                    conn::sim_izhikevich_synaptic(
-                        conn_data,
-                        &mut self.state,
-                        &params,
-                        &ext_I,
-                        n_steps,
-                        kinetics,
-                        scale,
-                    )
-                }
-                _ => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Synaptic mode not supported for model {:?}",
-                        self.model
-                    )))
-                }
-            }
-        };
-
-        Ok(spike_buf.into_pyarray(py))
-    }
-
-    /// Run Izhikevich Dual Memory simulation with slow state pathway.
-    ///
-    /// The slow state accumulates recent spiking activity per neuron:
-    /// ```text
-    /// m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t-1]
-    /// I += w_m · m[t-1]
-    /// ```
-    ///
-    /// Also applies Hebbian plasticity on CSR weights (in-place):
-    /// ``dW = η · m_pre · m_post − α · W · dt``
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph (weights are modified by Hebbian plasticity).
-    ///     n_steps: number of simulation steps.
-    ///     dt_ms: timestep in milliseconds (default 0.5).
-    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
-    ///     tau_m: slow memory time constant (0..1, higher = slower decay, default 0.999).
-    ///     w_m: memory-to-current weight (how much slow state modulates I, default 5.0).
-    ///     hebb_lr: Hebbian learning rate (default 0.001).
-    ///     hebb_decay: Hebbian weight decay (default 0.0001).
-    ///
-    /// Returns:
-    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[pyo3(signature = (connectome, n_steps, dt_ms=0.5, external_I=None, tau_m=0.999, w_m=5.0, hebb_lr=0.001, hebb_decay=0.0001))]
-    pub fn step_batch_dual<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &mut PyConnectomeData,
-        n_steps: usize,
-        dt_ms: f32,
-        external_I: Option<Bound<'_, PyArray1<f32>>>,
-        tau_m: f32,
-        w_m: f32,
-        hebb_lr: f32,
-        hebb_decay: f32,
-    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let conn_data = &mut connectome.inner;
-        let n = self.n_neurons;
-
-        let ext_I: Vec<f32> = match external_I {
-            Some(arr) => {
-                let ro = arr.readonly();
-                let sl = ro.as_slice()?;
-                let mut v = vec![0.0f32; n];
-                let copy_n = sl.len().min(n);
-                v[..copy_n].copy_from_slice(&sl[..copy_n]);
-                v
-            }
-            None => vec![0.0f32; n],
-        };
-
-        let params = conn::IzhikevichDualParams {
-            a: vec![0.02f32; n],
-            b: vec![0.2f32; n],
-            c: vec![-65.0f32; n],
-            d: vec![8.0f32; n],
-            dt_ms,
-            tau_ref: 2.0,
-            tau_m,
-            w_m,
-        };
-
-        let spike_buf = conn::sim_izhikevich_dual(
-            conn_data,
-            &mut self.state,
-            &params,
-            &ext_I,
-            n_steps,
-            hebb_lr,
-            hebb_decay,
-        );
-
-        Ok(spike_buf.into_pyarray(py))
-    }
-
-    /// Reset synaptic conductances to zero (keeps membrane potentials intact).
-    pub fn reset_kinetics(&mut self) {
-        if let Some(k) = &mut self.kinetics {
-            k.reset();
-        }
-    }
-
-    /// Reset brain state with small noise. Also resets synaptic conductances.
-    pub fn reset(&mut self) {
-        if let Some((dt, _)) = &self.hh_pop {
-            let pop = if self.hh_use_pacemaking {
-                hh_population_pacemaking(self.n_neurons, *dt)
-            } else {
-                hh_population_standard(self.n_neurons, *dt)
-            };
-            self.hh_pop = Some((*dt, pop));
-        }
-        self.state = conn::BrainState::new(self.n_neurons, self.model);
-        self.state.reset_with_noise(self.n_neurons);
-        if let Some(k) = &mut self.kinetics {
-            k.reset();
-        }
-    }
-
-    /// Set membrane potentials (v) from numpy array.
-    /// Copies values into the internal state buffer, respecting padding.
-    pub fn set_v(&mut self, v_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = v_arr.readonly();
-        let sl = ro.as_slice()?;
-        if let Some((_, pop)) = &mut self.hh_pop {
-            let n = sl.len().min(pop.len());
-            let p = pop.state_slice_mut(0);
-            for i in 0..n {
-                p[i] = sl[i];
-            }
-        } else {
-            let n = sl.len().min(self.state.v.len());
-            self.state.v[..n].copy_from_slice(&sl[..n]);
-        }
-        Ok(())
-    }
-
-    /// Set recovery variables (u) from numpy array.
-    /// Necessary for Izhikevich GPU state sync (v is set via set_v, u via this).
-    pub fn set_u(&mut self, u_arr: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = u_arr.readonly();
-        let sl = ro.as_slice()?;
-        let n = sl.len().min(self.state.u.len());
-        self.state.u[..n].copy_from_slice(&sl[..n]);
-        Ok(())
-    }
-
-    /// Current membrane potentials (v) — read-only snapshot.
-    pub fn v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if let Some((_, pop)) = &self.hh_pop {
-            pop.state_slice(0)[..self.n_neurons]
-                .to_vec()
-                .into_pyarray(py)
-        } else {
-            self.state.v[..self.n_neurons].to_vec().into_pyarray(py)
-        }
-    }
-
-    /// Current recovery variables (u) — read-only snapshot.
-    pub fn u<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        self.state.u[..self.n_neurons].to_vec().into_pyarray(py)
-    }
-
-    /// Set HH ion channel parameters (for "hh" model only).
-    ///
-    /// Args:
-    ///     g_max_arr: per-channel max conductances ``[n_channels]`` e.g. [120.0, 36.0] for NaV, KV.
-    ///     E_rev_arr: per-channel reversal potentials ``[n_channels]`` e.g. [50.0, -77.0] for Na, K.
-    ///     g_leak: per-neuron leak conductance ``[n_neurons]`` (scalar accepted, broadcast).
-    ///     E_leak: per-neuron leak reversal ``[n_neurons]`` (scalar accepted, broadcast).
-    ///
-    /// Must be called after constructing BrainSimulator(model="hh").
-    /// Takes effect on the next ``step_batch()`` call.
-    /// Pass ``dt_ms=`` to lock the HH timestep — prevents ``ensure_hh_config``
-    /// from recreating the config with default parameters.
-    #[pyo3(signature = (g_max_arr, E_rev_arr, g_leak, E_leak, dt_ms=None))]
-    pub fn set_hh_params(
-        &mut self,
-        g_max_arr: Bound<'_, PyArray1<f32>>,
-        E_rev_arr: Bound<'_, PyArray1<f32>>,
-        g_leak: Bound<'_, PyArray1<f32>>,
-        E_leak: Bound<'_, PyArray1<f32>>,
-        dt_ms: Option<f32>,
-    ) -> PyResult<()> {
-        let hh_pop = match &mut self.hh_pop {
-            Some((dt, pop)) => {
-                // Lock the dt if provided — prevents ensure_hh_pop from recreating
-                if let Some(dt_val) = dt_ms {
-                    *dt = dt_val;
-                }
-                pop
-            }
-            None => {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    "BrainSimulator not in HH mode — construct with model='hh'".to_string(),
-                ))
-            }
-        };
-        let n = self.n_neurons;
-        let n_channels = if self.hh_use_pacemaking { 3 } else { 2 };
-        let chans: &[HHParamIdx] = if self.hh_use_pacemaking {
-            &[HHParamIdx::G_Na, HHParamIdx::G_K, HHParamIdx::G_CaT]
-        } else {
-            &[HHParamIdx::G_Na, HHParamIdx::G_K]
-        };
-
-        // g_max_arr: [n_channels] (broadcast) or [n_channels * n_neurons] (per-neuron)
-        {
-            let ro = g_max_arr.readonly();
-            let sl = ro.as_slice()?;
-            if sl.len() == n_channels {
-                // Broadcast scalar per-channel g_max to all neurons
-                for (ch_i, &val) in sl.iter().enumerate() {
-                    hh_pop.fill_param(chans[ch_i].into(), val);
-                }
-            } else if sl.len() == n_channels * n {
-                // Per-neuron g_max (column-major: [ch0_n0..ch0_nN, ch1_n0..ch1_nN, ...])
-                for (ch_i, ch) in chans.iter().enumerate() {
-                    let p = hh_pop.param_slice_mut((*ch).into());
-                    for ni in 0..n {
-                        p[ni] = sl[ch_i * n + ni];
-                    }
-                }
-            } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "g_max_arr length {}: expected n_channels={} (broadcast) or n_channels*n={}",
-                    sl.len(),
-                    n_channels,
-                    n_channels * n
-                )));
-            }
-        }
-
-        // E_rev_arr: must match n_channels
-        {
-            let ro = E_rev_arr.readonly();
-            let sl = ro.as_slice()?;
-            if sl.len() != n_channels {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "E_rev_arr length {} != n_channels {}",
-                    sl.len(),
-                    n_channels
-                )));
-            }
-            let rev_chans: &[HHParamIdx] = if self.hh_use_pacemaking {
-                &[HHParamIdx::E_Na, HHParamIdx::E_K, HHParamIdx::E_CaT]
-            } else {
-                &[HHParamIdx::E_Na, HHParamIdx::E_K]
-            };
-            for (ch_i, &val) in sl.iter().enumerate() {
-                hh_pop.fill_param(rev_chans[ch_i].into(), val);
-            }
-        }
-
-        // g_leak: per-neuron, length must match n_neurons
-        {
-            let ro = g_leak.readonly();
-            let sl = ro.as_slice()?;
-            let m = sl.len().min(n);
-            let p = hh_pop.param_slice_mut(HHParamIdx::G_Leak.into());
-            for i in 0..m {
-                p[i] = sl[i];
-            }
-        }
-
-        // E_leak: per-neuron, length must match n_neurons
-        {
-            let ro = E_leak.readonly();
-            let sl = ro.as_slice()?;
-            let m = sl.len().min(n);
-            let p = hh_pop.param_slice_mut(HHParamIdx::E_Leak.into());
-            for i in 0..m {
-                p[i] = sl[i];
-            }
-        }
-
-        // Update edge-detection flag to match new v → avoid spike glitch after param change
-        {
-            let v: Vec<f32> = hh_pop.state_slice(0)[..n].to_vec();
-            let thresh: Vec<f32> = hh_pop.param_slice(HHParamIdx::V_Thresh.into())[..n].to_vec();
-            let p = hh_pop.state_slice_mut(5); // was_below
-            for i in 0..n {
-                p[i] = if v[i] < thresh[i] { 1.0 } else { 0.0 };
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Get membrane capacitances — read-only snapshot.
-    /// For HH: returns C_m = 1/inv_cm (per-neuron, derived from pillars param).
-    /// For LIF/Izhikevich: returns state's internal C_m (default 1.0).
-    pub fn C_m<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if let Some((_, pop)) = &self.hh_pop {
-            let inv = pop.param_slice(HHParamIdx::Inv_Cm.into());
-            inv[..self.n_neurons]
-                .iter()
-                .map(|&v| 1.0 / v)
-                .collect::<Vec<f32>>()
-                .into_pyarray(py)
-        } else {
-            // Non-HH: C_m is not stored per-neuron, return defaults
-            vec![1.0; self.n_neurons].into_pyarray(py)
-        }
-    }
-
-    /// Set membrane capacitances (per-neuron).
-    /// For HH: stores inv_cm = 1/C_m per-neuron. Affects dv/dt = (I - I_ion) / C_m.
-    /// For non-HH: no effect (LIF/Izhikevich use params, not per-neuron C_m).
-    pub fn set_C_m(&mut self, values: Bound<'_, PyArray1<f32>>) -> PyResult<()> {
-        let ro = values.readonly();
-        let sl = ro.as_slice()?;
-        if let Some((_, pop)) = &mut self.hh_pop {
-            let n = sl.len().min(self.n_neurons);
-            let p = pop.param_slice_mut(HHParamIdx::Inv_Cm.into());
-            for i in 0..n {
-                p[i] = 1.0 / sl[i];
-            }
-        }
-        // Non-HH: silently ignored (LIF/Izhikevich have fixed params, not per-neuron C_m)
-        Ok(())
-    }
-
-    /// Current input currents (Ii) — read-only snapshot.
-    /// For HH: returns last external input buffer (pillars keeps no persistent Ii).
-    /// For others: returns state.I_buf (accumulated synaptic + external).
-    pub fn Ii<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
-        if self.hh_pop.is_some() {
-            self.hh_i_in[..self.n_neurons].to_vec().into_pyarray(py)
-        } else {
-            self.state.I_buf[..self.n_neurons].to_vec().into_pyarray(py)
-        }
-    }
-
-    /// Run GCO (Graph-Coupled Oscillator) with time-varying external input, record (v, u) trajectory.
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph with NT types.
-    ///     external_I: ``numpy.ndarray`` shape ``(n_changes, n_neurons)`` — external input per change.
-    ///     steps_per_input: GCO steps per external input.
-    ///     dt_ms: timestep in milliseconds.
-    ///     tau: phase time scale for GCO.
-    ///     record_every: record state every N steps (default 0 = record at end of each input block).
-    ///
-    /// Returns:
-    ///     ``(v_traj, u_traj)`` — each ``(n_records * n_neurons,)`` flat float32 array.
-    ///     Reshape with ``.reshape(-1, n_neurons)`` in Python.
-    #[pyo3(signature = (connectome, external_I, steps_per_input, dt_ms=0.5, tau=1.0, record_every=0))]
-    pub fn gco_record<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &PyConnectomeData,
-        external_I: Bound<'_, PyArray2<f32>>,
-        steps_per_input: usize,
-        dt_ms: f32,
-        #[allow(unused_variables)] tau: f32,
-        record_every: usize,
-    ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
-        let n_neurons = self.n_neurons;
-        let n_changes = external_I.len()?;
-        if n_changes == 0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "external_I must have at least one row".to_string(),
-            ));
-        }
-        let ro = external_I.readonly();
-        let ext_I_sl = ro.as_slice()?;
-        if ext_I_sl.len() != n_changes * n_neurons {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "external_I shape ({n_changes},?) expected n_neurons={n_neurons}, got {} elements",
-                ext_I_sl.len()
-            )));
-        }
-        let params = conn::GcoParams { dt_ms };
-        let (v_traj, u_traj) = conn::sim_gco_record(
-            &connectome.inner,
-            &mut self.state,
-            &params,
-            ext_I_sl,
-            n_changes,
-            steps_per_input,
-            record_every,
-        );
-
-        let v_arr = PyArray1::from_vec(py, v_traj);
-        let u_arr = PyArray1::from_vec(py, u_traj);
-        Ok((v_arr, u_arr))
-    }
-
-    /// Run a batch of LIF steps on GPU (CUDA).
-    ///
-    /// Requires `--features cuda` build. Falls back to error if GPU unavailable.
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph with NT types.
-    ///     n_steps: number of simulation steps.
-    ///     dt_ms: timestep in milliseconds.
-    ///     external_I: external input current ``[n_neurons]``.
-    ///     tau_m: membrane time constant ``[n_neurons]``.
-    ///     v_rest: resting potential ``[n_neurons]``.
-    ///     v_thresh: threshold potential ``[n_neurons]``.
-    ///     v_reset: reset potential ``[n_neurons]``.
-    ///
-    /// Returns:
-    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[cfg(feature = "cuda")]
-    #[pyo3(signature = (connectome, n_steps, dt_ms, external_I, tau_m, v_rest, v_thresh, v_reset))]
-    pub fn step_batch_gpu<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &PyConnectomeData,
-        n_steps: usize,
-        dt_ms: f32,
-        external_I: Bound<'_, PyArray1<f32>>,
-        tau_m: Bound<'_, PyArray1<f32>>,
-        v_rest: Bound<'_, PyArray1<f32>>,
-        v_thresh: Bound<'_, PyArray1<f32>>,
-        v_reset: Bound<'_, PyArray1<f32>>,
-    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let conn_data = &connectome.inner;
-        let ext_I = external_I.readonly();
-        let ext_I_sl = ext_I.as_slice()?;
-        let tau_m_ro = tau_m.readonly();
-        let tau_m_sl = tau_m_ro.as_slice()?;
-        let v_rest_ro = v_rest.readonly();
-        let v_rest_sl = v_rest_ro.as_slice()?;
-        let v_thresh_ro = v_thresh.readonly();
-        let v_thresh_sl = v_thresh_ro.as_slice()?;
-        let v_reset_ro = v_reset.readonly();
-        let v_reset_sl = v_reset_ro.as_slice()?;
-
-        let spike_buf = conn::sim_lif_gpu(
-            conn_data,
-            &mut self.state,
-            dt_ms,
-            ext_I_sl,
-            n_steps,
-            tau_m_sl,
-            v_rest_sl,
-            v_thresh_sl,
-            v_reset_sl,
-        );
-        Ok(spike_buf.into_pyarray(py))
-    }
-
-    /// Run a batch of Izhikevich steps on GPU (CUDA).
-    ///
-    /// Requires `--features cuda` build.
-    ///
-    /// Args:
-    ///     connectome: ``ConnectomeData`` — CSR graph with NT types.
-    ///     n_steps: number of simulation steps.
-    ///     dt_ms: timestep in milliseconds.
-    ///     external_I: external input current ``[n_neurons]``.
-    ///     a: Izhikevich recovery rate ``[n_neurons]``.
-    ///     b: Izhikevich sensitivity ``[n_neurons]``.
-    ///     c: Izhikevich after-spike reset ``[n_neurons]``.
-    ///     d: Izhikevich after-spike recovery ``[n_neurons]``.
-    ///
-    /// Returns:
-    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
-    #[cfg(feature = "cuda")]
-    #[pyo3(signature = (connectome, n_steps, dt_ms, external_I, a, b, c, d))]
-    pub fn step_batch_gpu_izhikevich<'py>(
-        &mut self,
-        py: Python<'py>,
-        connectome: &PyConnectomeData,
-        n_steps: usize,
-        dt_ms: f32,
-        external_I: Bound<'_, PyArray1<f32>>,
-        a: Bound<'_, PyArray1<f32>>,
-        b: Bound<'_, PyArray1<f32>>,
-        c: Bound<'_, PyArray1<f32>>,
-        d: Bound<'_, PyArray1<f32>>,
-    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let conn_data = &connectome.inner;
-        let ext_I = external_I.readonly();
-        let ext_I_sl = ext_I.as_slice()?;
-        let a_ro = a.readonly();
-        let a_sl = a_ro.as_slice()?;
-        let b_ro = b.readonly();
-        let b_sl = b_ro.as_slice()?;
-        let c_ro = c.readonly();
-        let c_sl = c_ro.as_slice()?;
-        let d_ro = d.readonly();
-        let d_sl = d_ro.as_slice()?;
-
-        let spike_buf = conn::sim_izhikevich_gpu(
-            conn_data,
-            &mut self.state,
-            dt_ms,
-            ext_I_sl,
-            n_steps,
-            a_sl,
-            b_sl,
-            c_sl,
-            d_sl,
-        );
-        Ok(spike_buf.into_pyarray(py))
-    }
-}
-
 // ─── BrainRunner ──────────────────────────────────
 
 /// Universal brain runner — ONE Rust call replaces the slow Python loop.
 ///
 /// Supports all neuron models: ``"lif"``, ``"lif_synaptic"``, ``"izh"``,
 /// ``"izh_synaptic"``, ``"izh_dual"``, ``"izh_eprop"``, ``"hh"``,
-/// ``"hh_synaptic"``, ``"rate"``, ``"gco"``.
+/// ``"hh_synaptic"``, ``"haap"``, ``"rate"``, ``"gco"``.
 ///
 /// Usage:
 /// ```python
@@ -950,7 +202,7 @@ pub struct PyBrainRunner {
 #[pymethods]
 impl PyBrainRunner {
     #[new]
-    #[pyo3(signature = (connectome, model="lif".to_string(), dt_ms=0.5, tau_ref=2.0, tau_m=20.0, v_rest=-70.0, v_thresh=-58.0, v_reset=-70.0, pacemaking=false))]
+    #[pyo3(signature = (connectome, model="lif".to_string(), dt_ms=0.5, tau_ref=2.0, tau_m=20.0, v_rest=-70.0, v_thresh=-58.0, v_reset=-70.0, pacemaking=false, tau_syn=5.0, t_delay=1.8))]
     #[allow(unused_variables)] // tau_ref/v_rest/v_thresh/v_reset reserved for future configs
     pub fn new(
         connectome: &PyConnectomeData,
@@ -962,10 +214,22 @@ impl PyBrainRunner {
         v_thresh: f32,
         v_reset: f32,
         pacemaking: bool,
+        tau_syn: f32,
+        t_delay: f32,
     ) -> PyResult<Self> {
         let config = match model.as_str() {
             "lif" => conn::BrainConfig::lif(dt_ms),
             "lif_synaptic" => conn::BrainConfig::lif_synaptic(dt_ms),
+            "lif_alpha" => conn::NeuronConfig::LifAlpha {
+                dt_ms,
+                tau_ref,
+                tau_m,
+                v_rest,
+                v_thresh,
+                v_reset,
+                tau_syn,
+                t_delay,
+            },
             "izh" | "izhikevich" => conn::BrainConfig::izh(dt_ms),
             "izh_synaptic" => conn::BrainConfig::izh(dt_ms), // + receptor_types
             "izh_dual" => conn::BrainConfig::izh_dual(dt_ms),
@@ -978,11 +242,13 @@ impl PyBrainRunner {
                 }
             }
             "hh_synaptic" => conn::BrainConfig::hh_synaptic(dt_ms),
+            "haap" => conn::BrainConfig::haap(dt_ms),
+            "haap_synaptic" => conn::BrainConfig::haap_synaptic(dt_ms, tau_syn),
             "rate" => conn::BrainConfig::rate(dt_ms, tau_m),
             "gco" => conn::BrainConfig::gco(dt_ms),
             other => {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Unknown model '{other}'. Use: lif, lif_synaptic, izh, izh_synaptic, izh_dual, izh_eprop, hh, hh_synaptic, rate, gco"
+                    "Unknown model '{other}'. Use: lif, lif_synaptic, lif_alpha, izh, izh_synaptic, izh_dual, izh_eprop, hh, hh_synaptic, haap, haap_synaptic, rate, gco"
                 )))
             }
         };
@@ -1007,6 +273,18 @@ impl PyBrainRunner {
     /// Clear all Poisson groups.
     pub fn clear_poisson_groups(&mut self) {
         self.inner.clear_poisson_groups();
+    }
+
+    /// Override the refractory duration (ms) for specific neurons (alpha model).
+    ///
+    /// In the Shiu fly brain model, Poisson-stimulated ("exc") neurons have
+    /// zero refractory so they can fire on every Poisson event.
+    ///
+    /// Args:
+    ///     indices: neuron indices to override.
+    ///     tau_ref_ms: new refractory duration in ms (0 = no refractory).
+    pub fn set_alpha_refrac_ms(&mut self, indices: Vec<usize>, tau_ref_ms: f32) {
+        self.inner.set_alpha_refrac_ms(&indices, tau_ref_ms);
     }
 
     /// Run `n_steps` simulation steps.
@@ -1039,6 +317,276 @@ impl PyBrainRunner {
 
         let spike_buf = self.inner.run(n_steps, &ext_I).to_vec();
         Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Run Izhikevich Dual Memory simulation with slow state pathway.
+    ///
+    /// The slow state accumulates recent spiking activity per neuron:
+    /// ```text
+    /// m[t] = τ_m · m[t-1] + (1-τ_m) · spike[t-1]
+    /// I += w_m · m[t-1]
+    /// ```
+    ///
+    /// Also applies Hebbian plasticity on CSR weights (in-place):
+    /// ``dW = η · m_pre · m_post − α · W · dt``
+    ///
+    /// Args:
+    ///     n_steps: number of simulation steps.
+    ///     dt_ms: timestep in milliseconds (default 0.5).
+    ///     external_I: external input current ``[n_neurons]`` (optional, zeros if None).
+    ///     tau_m: slow memory time constant (0..1, higher = slower decay, default 0.999).
+    ///     w_m: memory-to-current weight (how much slow state modulates I, default 5.0).
+    ///     hebb_lr: Hebbian learning rate (default 0.001).
+    ///     hebb_decay: Hebbian weight decay (default 0.0001).
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    ///
+    /// Note: modifies the connectome weights in-place (Hebbian plasticity).
+    /// Topology (row_ptr / col_indices) is unchanged, so no CSR refresh needed.
+    #[pyo3(signature = (n_steps, dt_ms=0.5, external_I=None, tau_m=0.999, w_m=5.0, hebb_lr=0.001, hebb_decay=0.0001))]
+    pub fn step_batch_dual<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_steps: usize,
+        dt_ms: f32,
+        external_I: Option<Bound<'_, PyArray1<f32>>>,
+        tau_m: f32,
+        w_m: f32,
+        hebb_lr: f32,
+        hebb_decay: f32,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let n = self.inner.n_neurons();
+        let ext_I: Vec<f32> = match external_I {
+            Some(arr) => {
+                let ro = arr.readonly();
+                let sl = ro.as_slice()?;
+                let mut v = vec![0.0f32; n];
+                let copy_n = sl.len().min(n);
+                v[..copy_n].copy_from_slice(&sl[..copy_n]);
+                v
+            }
+            None => vec![0.0f32; n],
+        };
+
+        let params = conn::IzhikevichDualParams {
+            a: vec![0.02f32; n],
+            b: vec![0.2f32; n],
+            c: vec![-65.0f32; n],
+            d: vec![8.0f32; n],
+            dt_ms,
+            tau_ref: 2.0,
+            tau_m,
+            w_m,
+        };
+
+        let inner = &mut self.inner;
+        let spike_buf = conn::sim_izhikevich_dual(
+            &mut inner.connectome,
+            &mut inner.state,
+            &params,
+            &ext_I,
+            n_steps,
+            hebb_lr,
+            hebb_decay,
+        );
+        Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Run GCO (Graph-Coupled Oscillator) with time-varying external input, record (v, u) trajectory.
+    ///
+    /// Args:
+    ///     external_I: ``numpy.ndarray`` shape ``(n_changes, n_neurons)`` — external input per change.
+    ///     steps_per_input: GCO steps per external input.
+    ///     dt_ms: timestep in milliseconds.
+    ///     tau: phase time scale for GCO.
+    ///     record_every: record state every N steps (default 0 = record at end of each input block).
+    ///
+    /// Returns:
+    ///     ``(v_traj, u_traj)`` — each ``(n_records * n_neurons,)`` flat float32 array.
+    ///     Reshape with ``.reshape(-1, n_neurons)`` in Python.
+    #[pyo3(signature = (external_I, steps_per_input, dt_ms=0.5, tau=1.0, record_every=0))]
+    pub fn gco_record<'py>(
+        &mut self,
+        py: Python<'py>,
+        external_I: Bound<'_, PyArray2<f32>>,
+        steps_per_input: usize,
+        dt_ms: f32,
+        #[allow(unused_variables)] tau: f32,
+        record_every: usize,
+    ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
+        let n_neurons = self.inner.n_neurons();
+        let n_changes = external_I.len()?;
+        if n_changes == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "external_I must have at least one row".to_string(),
+            ));
+        }
+        let ro = external_I.readonly();
+        let ext_I_sl = ro.as_slice()?;
+        if ext_I_sl.len() != n_changes * n_neurons {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "external_I shape ({n_changes},?) expected n_neurons={n_neurons}, got {} elements",
+                ext_I_sl.len()
+            )));
+        }
+        let params = conn::GcoParams { dt_ms };
+        let inner = &mut self.inner;
+        let (v_traj, u_traj) = conn::sim_gco_record(
+            &inner.connectome,
+            &mut inner.state,
+            &params,
+            ext_I_sl,
+            n_changes,
+            steps_per_input,
+            record_every,
+        );
+
+        let v_arr = PyArray1::from_vec(py, v_traj);
+        let u_arr = PyArray1::from_vec(py, u_traj);
+        Ok((v_arr, u_arr))
+    }
+
+    /// Run a batch of LIF steps on GPU (CUDA).
+    ///
+    /// Requires `--features cuda` build. Falls back to error if GPU unavailable.
+    ///
+    /// Args:
+    ///     n_steps: number of simulation steps.
+    ///     dt_ms: timestep in milliseconds.
+    ///     external_I: external input current ``[n_neurons]``.
+    ///     tau_m: membrane time constant ``[n_neurons]``.
+    ///     v_rest: resting potential ``[n_neurons]``.
+    ///     v_thresh: threshold potential ``[n_neurons]``.
+    ///     v_reset: reset potential ``[n_neurons]``.
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    #[cfg(feature = "cuda")]
+    #[pyo3(signature = (n_steps, dt_ms, external_I, tau_m, v_rest, v_thresh, v_reset))]
+    pub fn step_batch_gpu<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_steps: usize,
+        dt_ms: f32,
+        external_I: Bound<'_, PyArray1<f32>>,
+        tau_m: Bound<'_, PyArray1<f32>>,
+        v_rest: Bound<'_, PyArray1<f32>>,
+        v_thresh: Bound<'_, PyArray1<f32>>,
+        v_reset: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let ext_I = external_I.readonly();
+        let ext_I_sl = ext_I.as_slice()?;
+        let tau_m_ro = tau_m.readonly();
+        let tau_m_sl = tau_m_ro.as_slice()?;
+        let v_rest_ro = v_rest.readonly();
+        let v_rest_sl = v_rest_ro.as_slice()?;
+        let v_thresh_ro = v_thresh.readonly();
+        let v_thresh_sl = v_thresh_ro.as_slice()?;
+        let v_reset_ro = v_reset.readonly();
+        let v_reset_sl = v_reset_ro.as_slice()?;
+
+        let inner = &mut self.inner;
+        let spike_buf = conn::sim_lif_gpu(
+            &inner.connectome,
+            &mut inner.state,
+            dt_ms,
+            ext_I_sl,
+            n_steps,
+            tau_m_sl,
+            v_rest_sl,
+            v_thresh_sl,
+            v_reset_sl,
+        );
+        Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Run a batch of Izhikevich steps on GPU (CUDA).
+    ///
+    /// Requires `--features cuda` build.
+    ///
+    /// Args:
+    ///     n_steps: number of simulation steps.
+    ///     dt_ms: timestep in milliseconds.
+    ///     external_I: external input current ``[n_neurons]``.
+    ///     a: Izhikevich recovery rate ``[n_neurons]``.
+    ///     b: Izhikevich sensitivity ``[n_neurons]``.
+    ///     c: Izhikevich after-spike reset ``[n_neurons]``.
+    ///     d: Izhikevich after-spike recovery ``[n_neurons]``.
+    ///
+    /// Returns:
+    ///     ``numpy.ndarray`` of shape ``(n_steps, n_neurons)`` — spike buffer (0/1).
+    #[cfg(feature = "cuda")]
+    #[pyo3(signature = (n_steps, dt_ms, external_I, a, b, c, d))]
+    pub fn step_batch_gpu_izhikevich<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_steps: usize,
+        dt_ms: f32,
+        external_I: Bound<'_, PyArray1<f32>>,
+        a: Bound<'_, PyArray1<f32>>,
+        b: Bound<'_, PyArray1<f32>>,
+        c: Bound<'_, PyArray1<f32>>,
+        d: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<Bound<'py, PyArray1<i32>>> {
+        let ext_I = external_I.readonly();
+        let ext_I_sl = ext_I.as_slice()?;
+        let a_ro = a.readonly();
+        let a_sl = a_ro.as_slice()?;
+        let b_ro = b.readonly();
+        let b_sl = b_ro.as_slice()?;
+        let c_ro = c.readonly();
+        let c_sl = c_ro.as_slice()?;
+        let d_ro = d.readonly();
+        let d_sl = d_ro.as_slice()?;
+
+        let inner = &mut self.inner;
+        let spike_buf = conn::sim_izhikevich_gpu(
+            &inner.connectome,
+            &mut inner.state,
+            dt_ms,
+            ext_I_sl,
+            n_steps,
+            a_sl,
+            b_sl,
+            c_sl,
+            d_sl,
+        );
+        Ok(spike_buf.into_pyarray(py))
+    }
+
+    /// Set a per-neuron HH parameter column (only for HH / HH_synaptic models).
+    ///
+    /// Args:
+    ///     col: parameter column index (HHModelParamIdx: 1=g_Na, 2=E_Na, 3=G_K,
+    ///          4=E_K, 5=G_Leak, 6=E_Leak, 9=Inv_Cm, ...).
+    ///     values: per-neuron array ``[n_neurons]``.
+    ///
+    /// Returns the number of neurons written. This enables literature-based
+    /// per-class physiology (e.g. distinct g_Na/g_K/g_l/E_Leak per neuron).
+    #[pyo3(signature = (col, values))]
+    pub fn set_hh_param_column(&mut self, col: usize, values: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+        let ro = values.readonly();
+        let sl = ro.as_slice()?;
+        Ok(self.inner.set_hh_param_column(col, sl))
+    }
+
+    /// Set a per-neuron HAAP parameter column (only for the "haap" model).
+    ///
+    /// Args:
+    ///     col: parameter column index (HAAPModelParamIdx: 0=dt, 1=Inv_Cm, 2=G_L,
+    ///          3=E_L, 4=G_M, 5=E_K, 6=G_H, 7=E_H, 8=Inv_Tau_U, 9=Inv_Tau_H,
+    ///          10=V_Half_U, 11=K_U, 12=V_Half_H, 13=K_H, 14=V_Thresh,
+    ///          15=V_Reset, 16=Delta_U).
+    ///     values: per-neuron array ``[n_neurons]``.
+    ///
+    /// Returns the number of neurons written. This enables literature-based
+    /// per-class physiology (M-current + h-current per neuron type).
+    #[pyo3(signature = (col, values))]
+    pub fn set_haap_param_column(&mut self, col: usize, values: Bound<'_, PyArray1<f32>>) -> PyResult<usize> {
+        let ro = values.readonly();
+        let sl = ro.as_slice()?;
+        Ok(self.inner.set_haap_param_column(col, sl))
     }
 
     /// Build spike trains from the spike buffer.
@@ -1107,6 +655,152 @@ impl PyBrainRunner {
     /// Apply E-Prop weight update.
     pub fn apply_eprop_update(&mut self, learning_signals: Vec<f32>, lr: f32) {
         self.inner.apply_eprop_update(&learning_signals, lr);
+    }
+}
+
+// ─── AlphaLifWorker (Shiu fly brain model) ─────────
+
+/// Результат прогона [`PyAlphaLifWorker`] — метрики одного вызова.
+#[pyclass(name = "AlphaLifOutput", module = "taas_checkmate.connectome_brain")]
+pub struct PyAlphaLifOutput {
+    pub inner: AlphaLifOutput,
+}
+
+#[pymethods]
+impl PyAlphaLifOutput {
+    /// Общее число спайков за прогон.
+    #[getter]
+    pub fn total_spikes(&self) -> usize {
+        self.inner.total_spikes
+    }
+
+    /// Сколько нейронов спайкнуло хотя бы раз.
+    #[getter]
+    pub fn active_neurons(&self) -> usize {
+        self.inner.active_neurons
+    }
+
+    /// Время симуляции мозга (мс).
+    #[getter]
+    pub fn brain_ms(&self) -> f32 {
+        self.inner.brain_ms
+    }
+
+    /// Реальное время (с), потраченное на прогон.
+    #[getter]
+    pub fn wall_seconds(&self) -> f64 {
+        self.inner.wall_seconds
+    }
+
+    /// Во сколько раз быстрее реального времени (1.0 = реальное время).
+    #[getter]
+    pub fn realtime_ratio(&self) -> f64 {
+        self.inner.realtime_ratio()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AlphaLifOutput(spikes={}, active={}, brain_ms={:.1}, wall={:.3}s, ratio={:.3}x)",
+            self.inner.total_spikes,
+            self.inner.active_neurons,
+            self.inner.brain_ms,
+            self.inner.wall_seconds,
+            self.inner.realtime_ratio()
+        )
+    }
+}
+
+/// Воркер: alpha-LIF модель Шу (Shiu et al. 2024, fly brain) на коннектоме.
+///
+/// Высокоуровневая обёртка над `BrainRunner(model="lif_alpha")`: сахарные GRN
+/// стимулируются Poisson-входом, метрики считаются на лету чанками (без
+/// гигантского spike-буфера).
+///
+/// ```python
+/// from taas_checkmate import connectome_brain as cb
+///
+/// conn = cb.ConnectomeData(rp, ci, vals, nt_types)  # CSR, как обычно
+/// worker = cb.AlphaLifWorker(conn)                  # ShiuParams::flywire()
+/// worker.set_sugar_grn(sugar_idx)                  # 21 сахарный GRN, 200 Hz
+/// out = worker.run_seconds(1.0)
+/// print(out)  # spikes=17285 active=385 ...
+/// ```
+#[pyclass(name = "AlphaLifWorker", module = "taas_checkmate.connectome_brain")]
+pub struct PyAlphaLifWorker {
+    inner: AlphaLifWorker,
+}
+
+#[pymethods]
+impl PyAlphaLifWorker {
+    /// Создать воркер из коннектома с параметрами модели Шу (по умолчанию
+    /// `ShiuParams::flywire()`: dt=0.1ms, v_rest=−52, v_th=−45, τ_mem=20ms,
+    /// τ_ref=2.2ms, τ_syn=5ms, t_delay=1.8ms, Poisson 200Hz×68.75мВ).
+    #[new]
+    pub fn new(connectome: &PyConnectomeData) -> PyResult<Self> {
+        let inner = AlphaLifWorker::new(connectome.inner.clone(), ShiuParams::flywire())
+            .map_err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>)?;
+        Ok(Self { inner })
+    }
+
+    /// Задать стимулируемые GRN: рефрактерность 0 + Poisson-вход 200 Гц.
+    pub fn set_sugar_grn(&mut self, indices: Vec<usize>) {
+        self.inner.set_sugar_grn(&indices);
+    }
+
+    /// Прогнать `seconds` секунд мозга, вернуть метрики.
+    ///
+    /// Состояние сохраняется между вызовами — можно продолжать симуляцию
+    /// (режим «always-on»).
+    pub fn run_seconds(&mut self, seconds: f32) -> PyAlphaLifOutput {
+        PyAlphaLifOutput {
+            inner: self.inner.run_seconds(seconds),
+        }
+    }
+
+    /// Прогнать `steps` шагов с опциональным внешним током, вернуть метрики.
+    #[pyo3(signature = (steps, external_i=None))]
+    pub fn run_steps(
+        &mut self,
+        steps: usize,
+        external_i: Option<Bound<'_, PyArray1<f32>>>,
+    ) -> PyResult<PyAlphaLifOutput> {
+        let n = self.inner.n_neurons();
+        let ext: Vec<f32> = match external_i {
+            Some(arr) => {
+                let ro = arr.readonly();
+                let sl = ro.as_slice()?;
+                let mut v = vec![0.0f32; n];
+                let copy_n = sl.len().min(n);
+                v[..copy_n].copy_from_slice(&sl[..copy_n]);
+                v
+            }
+            None => Vec::new(),
+        };
+        Ok(PyAlphaLifOutput {
+            inner: self.inner.run_steps(steps, &ext),
+        })
+    }
+
+    /// Мгновенные мембранные потенциалы (для отладки/визуализации).
+    pub fn get_v<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        self.inner.v().to_vec().into_pyarray(py)
+    }
+
+    /// Число нейронов в коннектоме.
+    #[getter]
+    pub fn n_neurons(&self) -> usize {
+        self.inner.n_neurons()
+    }
+
+    /// Число стимулируемых GRN (0, если set_sugar_grn не вызывался).
+    #[getter]
+    pub fn n_sugar_grn(&self) -> usize {
+        self.inner.n_sugar_grn()
+    }
+
+    /// Сбросить состояние (v→v_rest, g=0) — новая симуляция.
+    pub fn reset(&mut self) {
+        self.inner.reset();
     }
 }
 

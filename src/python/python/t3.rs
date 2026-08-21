@@ -1352,6 +1352,115 @@ impl PySpikeGradBridge {
         Ok(tuple.into())
     }
 
+    /// Full backward: BPTT через T3 → градиенты моста И градиент входных спайков.
+    ///
+    /// В отличие от `backward()`, дополнительно возвращает `grad_spikes`
+    /// `[T × spike_dim]` — dL/d(spikes), чтобы продолжить BPTT вверх
+    /// (в спайковый источник / нейронный слой через torch.autograd).
+    ///
+    /// Args:
+    ///     grad_pst: np.ndarray (pst_dim,) — dLoss/dPST на финальном шаге
+    ///     traj: T2SpikeGradTrajectory — из forward()
+    ///     spikes: np.ndarray (T, spike_dim) — как вход forward
+    ///     per_step_grad_pst: optional np.ndarray (T, pst_dim) — градиент по PST каждого шага
+    ///
+    /// Returns:
+    ///     (grad_w: (spike_dim, drive_dim), grad_b: (drive_dim,), grad_spikes: (T, spike_dim))
+    #[pyo3(name = "backward_full", signature = (grad_pst, traj, spikes, per_step_grad_pst=None))]
+    fn py_backward_full(
+        &self,
+        grad_pst: Bound<'_, PyArray1<f32>>,
+        traj: &PyT2SpikeGradTrajectory,
+        spikes: Bound<'_, PyArray2<f32>>,
+        per_step_grad_pst: Option<Bound<'_, PyArray2<f32>>>,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let gp = grad_pst.readonly().to_vec().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("grad_pst: {:?}", e))
+        })?;
+        let spikes_ro = spikes.readonly();
+        let sp = spikes_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("spikes: {:?}", e))
+        })?;
+
+        let per_step = per_step_grad_pst
+            .map(|arr| {
+                let ro = arr.readonly();
+                ro.as_slice().map(|s| s.to_vec()).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "per_step_grad_pst: {:?}",
+                        e
+                    ))
+                })
+            })
+            .transpose()?;
+
+        let (gw, gb, gspikes) = self
+            .inner
+            .backward_full(&gp, &traj.inner, sp, per_step.as_deref());
+
+        let sd = self.inner.spike_dim;
+        let dd = self.inner.drive_dim;
+
+        let gw_arr =
+            PyArray2::from_vec2(py, &gw.chunks(dd).map(|c| c.to_vec()).collect::<Vec<_>>())
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e))
+                })?;
+
+        let gb_arr = PyArray1::from_vec(py, gb);
+        let gspikes_arr =
+            PyArray2::from_vec2(py, &gspikes.chunks(sd).map(|c| c.to_vec()).collect::<Vec<_>>())
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e))
+                })?;
+
+        let tuple = PyTuple::new(
+            py,
+            &[gw_arr.into_py(py), gb_arr.into_py(py), gspikes_arr.into_py(py)],
+        )?
+        .unbind();
+        Ok(tuple.into())
+    }
+
+    /// Установить веса и смещение моста in-place (без аллокаций — для torch.autograd).
+    ///
+    /// `weights`: (spike_dim, drive_dim), `bias`: (drive_dim,) — row-major,
+    /// как nn.Linear в PyTorch.
+    #[pyo3(name = "set_weights")]
+    fn py_set_weights(
+        &mut self,
+        weights: Bound<'_, PyArray2<f32>>,
+        bias: Bound<'_, PyArray1<f32>>,
+    ) -> PyResult<()> {
+        let w_ro = weights.readonly();
+        let w = w_ro.as_slice().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("weights: {:?}", e))
+        })?;
+        let b_ro = bias.readonly();
+        let b = b_ro.to_vec().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("bias: {:?}", e))
+        })?;
+        let sd = self.inner.spike_dim;
+        let dd = self.inner.drive_dim;
+        if w.len() != sd * dd {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "weights: ожидается ({sd} × {dd}) = {} элементов, получено {}",
+                sd * dd,
+                w.len()
+            )));
+        }
+        if b.len() != dd {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "bias: ожидается {dd} элементов, получено {}",
+                b.len()
+            )));
+        }
+        self.inner.w.copy_from_slice(w);
+        self.inner.b.copy_from_slice(&b);
+        Ok(())
+    }
+
     /// Update bridge weights with gradient descent.
     #[pyo3(name = "update")]
     fn py_update(
@@ -1575,6 +1684,293 @@ impl PyAttentionCoupling {
         format!(
             "AttentionCoupling(n={}, gamma={})",
             self.inner.n, self.inner.gamma
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TorusGrid — осцилляторы на 2D-торе (обучаемая связь K)
+// ═══════════════════════════════════════════════════════════
+
+/// Траектория тора (для BPTT).
+#[pyclass(name = "TorusTrajectory", module = "taas_checkmate.t3")]
+pub struct PyTorusTrajectory {
+    inner: crate::t3::torus::TorusTrajectory,
+}
+
+#[pymethods]
+impl PyTorusTrajectory {
+    fn n_steps(&self) -> usize {
+        self.inner.n_steps
+    }
+    fn n_osc(&self) -> usize {
+        self.inner.n_osc
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "TorusTrajectory(n_steps={}, n_osc={})",
+            self.inner.n_steps, self.inner.n_osc
+        )
+    }
+}
+
+/// Осцилляторы на 2D-торе (wrap-around) с локальной Kuramoto-связью.
+///
+/// Использование:
+///     grid = TorusGrid(8, 8, 0.5, 3.0, seed=0)
+///     phases, amps, traj = grid.run(drives, n_steps, K, radius, dt, ...)
+///     dK, ddrives = grid.backward(grad_phases, grad_amps, traj, K, ...)
+#[pyclass(name = "TorusGrid", module = "taas_checkmate.t3")]
+pub struct PyTorusGrid {
+    pub inner: crate::t3::torus::TorusGrid,
+}
+
+#[pymethods]
+impl PyTorusGrid {
+    #[new]
+    fn new(w: usize, h: usize, freq_min: f32, freq_max: f32, seed: u64) -> Self {
+        Self {
+            inner: crate::t3::torus::TorusGrid::new(w, h, freq_min, freq_max, seed),
+        }
+    }
+
+    fn width(&self) -> usize {
+        self.inner.w
+    }
+    fn height(&self) -> usize {
+        self.inner.h
+    }
+    fn n_osc(&self) -> usize {
+        self.inner.w * self.inner.h
+    }
+
+    /// Прогнать `n_steps` шагов тора, возвращает
+    /// (final_phases, final_amplitudes, trajectory).
+    ///
+    /// `drives`: np.ndarray (n_steps, w*h) — драйв на каждый осциллятор на шаг.
+    /// Перед прогоном состояние сбрасывается (reset_seed).
+    #[pyo3(signature = (drives, n_steps, coupling_strength, radius, dt, drive_gain, alpha, eps, reset_seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn run(
+        &mut self,
+        drives: Bound<'_, PyArray2<f32>>,
+        n_steps: usize,
+        coupling_strength: f32,
+        radius: usize,
+        dt: f32,
+        drive_gain: f32,
+        alpha: f32,
+        eps: f32,
+        reset_seed: u64,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let n = self.inner.w * self.inner.h;
+        let drives_data = drives.readonly().as_slice()?.to_vec();
+        if drives_data.len() != n_steps * n {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "drives: ожидается (n_steps={}, n={}) = {} элементов, получено {}",
+                n_steps,
+                n,
+                n_steps * n,
+                drives_data.len()
+            )));
+        }
+        self.inner.reset(reset_seed);
+        let mut traj = crate::t3::torus::TorusTrajectory::new(n_steps, n);
+        for step in 0..n_steps {
+            let d = &drives_data[step * n..(step + 1) * n];
+            self.inner.record_step(&mut traj, step, d);
+            self.inner.step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
+        }
+        let phases = PyArray1::from_vec(py, self.inner.phases.clone());
+        let amps = PyArray1::from_vec(py, self.inner.amplitudes.clone());
+        let py_traj = PyTorusTrajectory { inner: traj };
+        let tuple =
+            PyTuple::new(py, &[phases.into_py(py), amps.into_py(py), py_traj.into_py(py)])?
+                .unbind();
+        Ok(tuple.into())
+    }
+
+    /// BPTT через динамику тора: dL/dθ_final, dL/dr_final → (dK, ddrives).
+    ///
+    /// `grad_phases`/`grad_amps`: (w*h,) — градиент по финальному состоянию.
+    /// Возвращает dK (скаляр, в np-массиве из 1 элемента) и
+    /// ddrives: (n_steps, w*h) — градиент по драйвам каждого шага.
+    #[pyo3(signature = (grad_phases, grad_amps, traj, coupling_strength, radius, dt, drive_gain, alpha, eps))]
+    #[allow(clippy::too_many_arguments)]
+    fn backward(
+        &self,
+        grad_phases: Bound<'_, PyArray1<f32>>,
+        grad_amps: Bound<'_, PyArray1<f32>>,
+        traj: &PyTorusTrajectory,
+        coupling_strength: f32,
+        radius: usize,
+        dt: f32,
+        drive_gain: f32,
+        alpha: f32,
+        eps: f32,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let n = self.inner.w * self.inner.h;
+        let gp = grad_phases.readonly().to_vec()?;
+        let ga = grad_amps.readonly().to_vec()?;
+        if gp.len() != n || ga.len() != n {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "grad_phases/grad_amps: ожидается {n} элементов, получено {} / {}",
+                gp.len(),
+                ga.len()
+            )));
+        }
+        // dθ0/dr0 (градиент по НАЧАЛЬНОМУ состоянию) отбрасываем — стартовое
+        // состояние фиксировано (reset(seed)) и не обучается.
+        // ddrives_final = 0: слой читает только финальные θ/r, поэтому нет
+        // per-step фичей, дающих прямой градиент в драйвы финального шага.
+        let (dk, _dth0, _dr0, ddrives) = self.inner.bptt(
+            &traj.inner,
+            &gp,
+            &ga,
+            &vec![0.0f32; n],
+            coupling_strength,
+            radius,
+            dt,
+            drive_gain,
+            alpha,
+            eps,
+        );
+        let dk_arr = PyArray1::from_vec(py, vec![dk]);
+        let ddrives_arr = PyArray2::from_vec2(
+            py,
+            &ddrives.chunks(n).map(|c| c.to_vec()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+        let tuple = PyTuple::new(py, &[dk_arr.into_py(py), ddrives_arr.into_py(py)])?.unbind();
+        Ok(tuple.into())
+    }
+
+    /// Прогнать `n_steps` шагов и вернуть per-step фазовую матрицу
+    /// (для per-timestep readout, напр. char-LM).
+    ///
+    /// output[t] = фазы в момент t+1 (после драйва t). Возвращает
+    /// (phase_matrix (n_steps, w*h), trajectory).
+    #[pyo3(signature = (drives, n_steps, coupling_strength, radius, dt, drive_gain, alpha, eps, reset_seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_sequence(
+        &mut self,
+        drives: Bound<'_, PyArray2<f32>>,
+        n_steps: usize,
+        coupling_strength: f32,
+        radius: usize,
+        dt: f32,
+        drive_gain: f32,
+        alpha: f32,
+        eps: f32,
+        reset_seed: u64,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let n = self.inner.w * self.inner.h;
+        let drives_data = drives.readonly().as_slice()?.to_vec();
+        if drives_data.len() != n_steps * n {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "drives: ожидается (n_steps={}, n={}) = {} элементов, получено {}",
+                n_steps,
+                n,
+                n_steps * n,
+                drives_data.len()
+            )));
+        }
+        self.inner.reset(reset_seed);
+        let mut traj = crate::t3::torus::TorusTrajectory::new(n_steps, n);
+        for step in 0..n_steps {
+            let d = &drives_data[step * n..(step + 1) * n];
+            self.inner.record_step(&mut traj, step, d);
+            self.inner.step(dt, coupling_strength, radius, d, drive_gain, alpha, eps);
+        }
+        // output[t] = фазы в момент t+1: traj.phases[(t+1)..] + финальные фазы.
+        let mut phase_matrix = vec![0.0f32; n_steps * n];
+        for t in 0..n_steps.saturating_sub(1) {
+            let src = (t + 1) * n;
+            phase_matrix[t * n..(t + 1) * n].copy_from_slice(&traj.phases[src..src + n]);
+        }
+        if n_steps > 0 {
+            phase_matrix[(n_steps - 1) * n..].copy_from_slice(&self.inner.phases);
+        }
+        let pm = PyArray2::from_vec2(
+            py,
+            &phase_matrix.chunks(n).map(|c| c.to_vec()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+        let py_traj = PyTorusTrajectory { inner: traj };
+        let tuple = PyTuple::new(py, &[pm.into_py(py), py_traj.into_py(py)])?.unbind();
+        Ok(tuple.into())
+    }
+
+    /// BPTT с per-step градиентом по фазам (для per-timestep readout).
+    ///
+    /// `grad_phases`: (n_steps, w*h) — dL/d(output[t]) = dL/d(фазы в момент t+1).
+    /// Возвращает (dK (np-массив из 1), ddrives (n_steps, w*h)).
+    #[pyo3(signature = (grad_phases, traj, coupling_strength, radius, dt, drive_gain, alpha, eps))]
+    #[allow(clippy::too_many_arguments)]
+    fn backward_sequence(
+        &self,
+        grad_phases: Bound<'_, PyArray2<f32>>,
+        traj: &PyTorusTrajectory,
+        coupling_strength: f32,
+        radius: usize,
+        dt: f32,
+        drive_gain: f32,
+        alpha: f32,
+        eps: f32,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let n = self.inner.w * self.inner.h;
+        let n_steps = traj.inner.n_steps;
+        let gp = grad_phases.readonly().as_slice()?.to_vec();
+        if gp.len() != n_steps * n {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "grad_phases: ожидается (n_steps={}, n={}) = {} элементов, получено {}",
+                n_steps,
+                n,
+                n_steps * n,
+                gp.len()
+            )));
+        }
+        let zeros_n = vec![0.0f32; n];
+        let zeros_all = vec![0.0f32; n_steps * n];
+        // dth_final/dr_final = 0 (только per-step readout); амплитудный градиент = 0.
+        let (dk, _dth0, _dr0, ddrives) = self.inner.bptt_per_step(
+            &traj.inner,
+            &zeros_n,
+            &zeros_n,
+            &gp,
+            &zeros_all,
+            coupling_strength,
+            radius,
+            dt,
+            drive_gain,
+            alpha,
+            eps,
+        );
+        let dk_arr = PyArray1::from_vec(py, vec![dk]);
+        let ddrives_arr = PyArray2::from_vec2(
+            py,
+            &ddrives.chunks(n).map(|c| c.to_vec()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{:?}", e)))?;
+        let tuple = PyTuple::new(py, &[dk_arr.into_py(py), ddrives_arr.into_py(py)])?.unbind();
+        Ok(tuple.into())
+    }
+
+    /// Глобальный параметр порядка R (синхронизация) текущего состояния.
+    fn order_parameter(&self) -> f32 {
+        self.inner.order_parameter()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TorusGrid(w={}, h={}, n={})",
+            self.inner.w,
+            self.inner.h,
+            self.inner.w * self.inner.h
         )
     }
 }

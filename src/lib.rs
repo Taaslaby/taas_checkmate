@@ -40,7 +40,6 @@
 //! | karmac     | Cognitive architecture (GNW, LOD, Basal) |
 //! | cuda       | GPU acceleration (implies t3 + connectome) |
 //! | python     | PyO3 bindings (implies t3 + connectome + train + karmac) |
-//! | unity      | C ABI for Unity (implies connectome) |
 
 // ═══════════════════════════════════════════════════════
 //  🏛️ Pillars — the engine (primary API)
@@ -79,9 +78,6 @@ pub mod python;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
-
-#[cfg(feature = "unity")]
-pub mod unity;
 
 pub use train::rl;
 
