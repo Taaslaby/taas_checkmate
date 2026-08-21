@@ -527,6 +527,23 @@ impl GateKinetics {
         }
     }
 
+    /// Steady-state gate value `x_∞ = α(v)/(α(v)+β(v))` at potential `v`.
+    ///
+    /// Numerical floor `1e-12` on `α + β` with neutral fallback `0.5` — the
+    /// canonical rule used by [`steady_state_gates`](self::steady_state_gates),
+    /// `ConductancePopulation` resting init and Markov resting states. Single
+    /// source of truth so engine, api and population layers can never drift.
+    #[inline(always)]
+    pub fn steady_state_at(&self, v: f32) -> f32 {
+        let (a, b) = self.alpha_beta(v);
+        let sum = a + b;
+        if sum > 1e-12 {
+            a / sum
+        } else {
+            0.5
+        }
+    }
+
     /// SIMD α/β. Для `TauInf` — умножение на `1/tau` (легаси-SIMD).
     #[inline(always)]
     pub fn alpha_beta_simd(&self, v: f32x8) -> (f32x8, f32x8) {
@@ -743,9 +760,7 @@ pub fn steady_state_gates(v: f32, channels: &[ChannelSpec]) -> Vec<f32> {
     let mut gates = Vec::new();
     for ch in channels {
         for gate in &ch.gates {
-            let (a, b) = gate.kinetics.alpha_beta(v);
-            let sum = a + b;
-            gates.push(if sum > 1e-12 { a / sum } else { 0.5 });
+            gates.push(gate.kinetics.steady_state_at(v));
         }
     }
     gates
