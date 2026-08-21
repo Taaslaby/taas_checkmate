@@ -60,17 +60,15 @@ pub(crate) mod widgets;
 /// «Вид → Акцент».
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AccentPreset {
-    /// Синий — родной акцент elegance (палитру не трогаем).
-    Blue,
-    /// Фиолетовый.
+    /// Фиолетовый — проф, как в Houdini.
     Violet,
-    /// Золотой.
+    /// Золотой — тёплый акцент.
     Gold,
-    /// Зелёный.
+    /// Зелёный — сигнатурный люминофор neoMyelin.
     Green,
-    /// Розовый.
+    /// Розовый — для выделения.
     Rose,
-    /// Бирюзовый.
+    /// Бирюзовый — холодный.
     Cyan,
 }
 
@@ -79,7 +77,6 @@ impl AccentPreset {
     /// а глифы вроде 🔵/🩵 не входят в шрифты egui и рисуются квадратами.
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::Blue => "Синий",
             Self::Violet => "Фиолетовый",
             Self::Gold => "Золотой",
             Self::Green => "Зелёный",
@@ -88,9 +85,8 @@ impl AccentPreset {
         }
     }
 
-    pub(crate) const fn all() -> [AccentPreset; 6] {
+    pub(crate) const fn all() -> [AccentPreset; 5] {
         [
-            Self::Blue,
             Self::Violet,
             Self::Gold,
             Self::Green,
@@ -109,11 +105,6 @@ impl AccentPreset {
             egui::Color32::from_rgb(r, g, b)
         }
         match self {
-            Self::Blue => (
-                rgb(0x3b, 0x82, 0xf6),
-                rgb(0x25, 0x63, 0xeb),
-                rgb(0x1d, 0x4e, 0xd8),
-            ),
             Self::Violet => (
                 rgb(0x8f, 0x7b, 0xfa),
                 rgb(0x7a, 0x5c, 0xf5),

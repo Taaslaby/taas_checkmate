@@ -22,19 +22,19 @@ use crate::app::tokens;
 use eframe::egui;
 
 // ── палитра ───────────────────────────────────────────────────
-/// Базовая поверхность оболочки. Лёгкий зелёно-серый подтон отделяет
-/// инструмент от обычного «чёрного терминала», не окрашивая данные.
-pub(crate) const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(0x15, 0x17, 0x18);
-/// Поднятая поверхность карточек, доков и окон.
-pub(crate) const BG_CARD: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x20, 0x21);
-/// Поля ввода и «утопленные» области.
-pub(crate) const BG_INSET: egui::Color32 = egui::Color32::from_rgb(0x0E, 0x10, 0x11);
-/// Тихая рамка-разделитель. Чуть холоднее поверхности для читаемой сетки.
-pub(crate) const STROKE_SOFT: egui::Color32 = egui::Color32::from_rgb(0x31, 0x37, 0x38);
-/// Основной текст.
-pub(crate) const TEXT: egui::Color32 = egui::Color32::from_rgb(0xE6, 0xE6, 0xE6);
-/// Второстепенный текст (подписи, единицы измерения).
-pub(crate) const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
+/// Базовая поверхность оболочки — проф тёмный нейтральный (R=G=B, Houdini/Nuke),
+/// без цветного подтона. Панели делятся яркостью, не рамками.
+pub(crate) const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(0x18, 0x1A, 0x1C);
+/// Поднятая поверхность карточек, доков и окон — на ступень светлее панели.
+pub(crate) const BG_CARD: egui::Color32 = egui::Color32::from_rgb(0x22, 0x24, 0x26);
+/// Поля ввода и «утопленные» области — чуть темнее панели.
+pub(crate) const BG_INSET: egui::Color32 = egui::Color32::from_rgb(0x12, 0x14, 0x15);
+/// Тихая рамка-разделитель — нейтральная, без синевы.
+pub(crate) const STROKE_SOFT: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x32, 0x34);
+/// Основной текст — тёплый белый, не чисто белый (меньше засветки).
+pub(crate) const TEXT: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xE8, 0xEA);
+/// Второстепенный текст — средне-серый, WCAG AA на BG_PANEL.
+pub(crate) const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(0x9A, 0x9E, 0xA2);
 /// Приглушённый красный — единственное цветное исключение: ошибки и «стоп».
 /// Один источник danger-красного для всего приложения (`ActionTone::Danger`).
 pub(crate) const DANGER: egui::Color32 = egui::Color32::from_rgb(0xA8, 0x44, 0x44);
@@ -223,12 +223,12 @@ fn visuals(ctx: &egui::Context) {
     v.popup_shadow = soft_shadow;
     v.window_shadow = soft_shadow;
 
-    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
-    style.visuals = v;
+    let mut style_dark = (*ctx.style_of(egui::Theme::Dark)).clone();
+    style_dark.visuals = v;
 
     // Типографическая шкала — из tokens::TEXT_* (единый источник размеров).
     use egui::{FontId, TextStyle};
-    style.text_styles = [
+    style_dark.text_styles = [
         (
             TextStyle::Heading,
             FontId::new(
@@ -256,10 +256,28 @@ fn visuals(ctx: &egui::Context) {
     .into();
 
     // Спacing-шкала ядра egui — в терминах нашего кита (4px-сетки).
-    style.spacing.item_spacing = tokens::ITEM_SPACING;
-    style.spacing.button_padding = egui::vec2(tokens::SP_MD + 1.0, tokens::SP_SM - 1.0);
-    style.spacing.menu_margin = egui::Margin::same(tokens::SP_SM as i8);
-    style.spacing.window_margin = egui::Margin::same(tokens::SP_LG as i8);
+    style_dark.spacing.item_spacing = tokens::ITEM_SPACING;
+    style_dark.spacing.button_padding = egui::vec2(tokens::SP_MD + 1.0, tokens::SP_SM - 1.0);
+    style_dark.spacing.menu_margin = egui::Margin::same(tokens::SP_SM as i8);
+    style_dark.spacing.window_margin = egui::Margin::same(tokens::SP_LG as i8);
 
-    ctx.set_style_of(egui::Theme::Dark, style);
+    ctx.set_style_of(egui::Theme::Dark, style_dark.clone());
+
+    // Светлая тема — без чёрных полос: светлые панели, тёмный текст, те же акценты
+    let mut v_light = Visuals::light();
+    v_light.panel_fill = Color32::from_rgb(0xF0, 0xF2, 0xF5);
+    v_light.window_fill = Color32::WHITE;
+    v_light.extreme_bg_color = Color32::from_rgb(0xE8, 0xEA, 0xED);
+    v_light.faint_bg_color = Color32::WHITE;
+    v_light.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0xD0, 0xD4, 0xD8));
+    v_light.widgets.inactive.bg_fill = Color32::from_rgb(0xE8, 0xEA, 0xED);
+    v_light.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0x1A, 0x1D, 0x1F));
+    v_light.widgets.hovered.bg_fill = Color32::from_rgb(0xDE, 0xE2, 0xE6);
+    v_light.widgets.active.bg_fill = Color32::from_rgb(0xD0, 0xD4, 0xD8);
+    v_light.widgets.noninteractive.bg_fill = Color32::from_rgb(0xF0, 0xF2, 0xF5);
+    let mut style_light = (*ctx.style_of(egui::Theme::Light)).clone();
+    style_light.visuals = v_light;
+    style_light.text_styles = style_dark.text_styles.clone();
+    style_light.spacing = style_dark.spacing;
+    ctx.set_style_of(egui::Theme::Light, style_light);
 }
