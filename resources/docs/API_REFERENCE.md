@@ -456,7 +456,7 @@ sb = SynapticConnectomeBrain(row_ptr, col_idx, weights, delays, receptor_types, 
 sb.step(i_in, spikes_out)  # conductance path
 ```
 
-Легаси-классы (`ConnectomeData`, `BrainSimulator`, `BrainRunner`, `SpikeRecorder`) —
+Легаси-классы (`ConnectomeData`, `BrainRunner`, `SpikeRecorder`) —
 в `taas_checkmate.connectome` через корневой alias.
 
 ---

@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pillars · Движок нейронов в реальном времени</title>
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f6f6f6;
+    --card:#ffffff;
+    --ink:#111111;
+    --ink-2:#3f3f3f;
+    --ink-3:#8a8a8a;
+    --line:#e4e4e4;
+    --line-2:#cfcfcf;
+    --code-bg:#101010;
+    --code-ink:#e6e6e6;
+    --radius:14px;
+    --radius-s:8px;
+    --shadow:0 1px 2px rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.18);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Inter","Helvetica Neue",Arial,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,"Cascadia Code",monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font);
+    font-size:16px;
+    line-height:1.68;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  ::selection{background:#111;color:#fff}
+
+  /* ── header ─────────────────────────────── */
+  header.top{
+    position:sticky;top:0;z-index:40;
+    background:rgba(255,255,255,.9);
+    backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line);
+  }
+  .top-inner{
+    max-width:1180px;margin:0 auto;padding:0 24px;
+    height:60px;display:flex;align-items:center;gap:14px;
+  }
+  .brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+  .brand svg{flex:none}
+  .brand .b-name{font-weight:700;font-size:15px;letter-spacing:.01em}
+  .brand .b-sub{color:var(--ink-3);font-size:12.5px;font-family:var(--mono)}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--ink-3)}
+  .top-right .pill{
+    font-family:var(--mono);border:1px solid var(--line-2);border-radius:999px;
+    padding:3px 10px;color:var(--ink-2);white-space:nowrap;
+  }
+  .top-right select{
+    display:none;font:inherit;font-size:13px;color:var(--ink);
+    background:var(--card);border:1px solid var(--line-2);border-radius:var(--radius-s);
+    padding:6px 10px;max-width:220px;
+  }
+  @media (max-width:820px){
+    .top-right .pill{display:none}
+    .top-right select{display:block}
+  }
+
+  /* ── layout ─────────────────────────────── */
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:230px minmax(0,1fr);gap:52px}
+  @media (max-width:820px){ .wrap{grid-template-columns:1fr;gap:0} }
+
+  nav.toc{
+    position:sticky;top:88px;align-self:start;max-height:calc(100vh - 120px);
+    overflow:auto;padding:8px 14px 8px 0;
+  }
+  @media (max-width:820px){ nav.toc{display:none} }
+  nav.toc .toc-label{
+    font-size:11px;text-transform:uppercase;letter-spacing:.12em;
+    color:var(--ink-3);margin:0 0 10px 12px;
+  }
+  nav.toc a{
+    display:flex;gap:9px;align-items:baseline;
+    color:var(--ink-2);text-decoration:none;font-size:13.5px;
+    padding:5px 12px;border-radius:8px;border-left:2px solid transparent;
+    transition:color .15s,background .15s,border-color .15s;
+  }
+  nav.toc a .num{
+    font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+    min-width:16px;text-align:right;
+  }
+  nav.toc a:hover{color:var(--ink);background:var(--bg-soft)}
+  nav.toc a.active{color:#000;background:#ececec;border-left-color:#000}
+  nav.toc a.active .num{color:#000}
+
+  main{min-width:0;padding-bottom:120px}
+
+  /* ── hero ───────────────────────────────── */
+  .hero{padding:64px 0 34px}
+  .hero .kicker{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:12px;color:#000;
+    background:#fff;border:1px solid #111;
+    padding:4px 12px;border-radius:999px;margin-bottom:20px;
+  }
+  .hero h1{
+    font-size:clamp(30px,4.6vw,46px);line-height:1.12;margin:0 0 16px;
+    font-weight:760;letter-spacing:-.022em;
+  }
+  .hero h1 .grad{color:var(--ink)}
+  .hero p.lead{
+    font-size:17.5px;color:var(--ink-2);max-width:640px;margin:0 0 26px;
+  }
+  .hero .stats{display:flex;flex-wrap:wrap;gap:10px}
+  .hero .stats .s{
+    border:1px solid var(--line);background:var(--card);border-radius:var(--radius-s);
+    padding:8px 14px;font-size:13px;color:var(--ink-2);
+  }
+  .hero .stats .s b{color:var(--ink);font-family:var(--mono);font-weight:600}
+
+  /* ── sections ───────────────────────────── */
+  section.block{padding:40px 0 8px;scroll-margin-top:88px}
+  section.block h2{
+    font-size:26px;font-weight:720;letter-spacing:-.015em;margin:0 0 6px;
+    display:flex;align-items:baseline;gap:12px;
+  }
+  section.block h2 .no{
+    font-family:var(--mono);font-size:14px;color:#000;
+    border:1px solid #c9c9c9;background:transparent;
+    padding:2px 9px;border-radius:8px;flex:none;
+  }
+  section.block .sub{color:var(--ink-3);font-size:14.5px;margin:0 0 22px}
+  section.block h3{
+    font-size:17.5px;font-weight:650;margin:30px 0 10px;letter-spacing:-.01em;
+  }
+  section.block p{margin:12px 0;color:var(--ink-2)}
+  section.block p b,section.block li b{color:var(--ink)}
+  section.block ul,section.block ol{margin:12px 0;padding-left:22px;color:var(--ink-2)}
+  section.block li{margin:6px 0}
+  code.inline{
+    font-family:var(--mono);font-size:.86em;background:var(--bg-soft);
+    border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:#1d1d1d;
+  }
+  a{color:#000;text-decoration:none;border-bottom:1px solid #c2c2c2;transition:border-color .15s}
+  a:hover{border-bottom-color:#000}
+
+  /* callouts */
+  .callout{
+    border:1px solid var(--line);border-left:3px solid #000;
+    background:transparent;border-radius:var(--radius-s);
+    padding:12px 16px;margin:18px 0;font-size:14.5px;color:var(--ink-2);
+  }
+  .callout .t{font-weight:650;color:var(--ink);display:block;margin-bottom:2px}
+
+  /* code */
+  pre.code-wrap{
+    position:relative;margin:18px 0;border-radius:var(--radius);
+    background:var(--code-bg);box-shadow:var(--shadow);
+  }
+  pre.code-wrap::before{
+    content:attr(data-label);position:absolute;top:11px;right:52px;
+    font-family:var(--mono);font-size:10.5px;color:#4d4d4d;letter-spacing:.06em;
+  }
+  pre.code-wrap code{
+    display:block;padding:18px 20px;overflow-x:auto;
+    font-family:var(--mono);font-size:13.5px;line-height:1.62;color:var(--code-ink);
+    tab-size:4;
+  }
+  pre.code-wrap.plain code{color:#aaaaaa}
+  .copy{
+    position:absolute;top:8px;right:8px;z-index:2;
+    border:1px solid #2a2a2a;background:#1a1a1a;color:#aaaaaa;
+    border-radius:7px;font-family:var(--mono);font-size:11px;
+    padding:4px 10px;cursor:pointer;opacity:.75;transition:opacity .15s,color .15s,border-color .15s;
+  }
+  .copy:hover{opacity:1;color:#fff;border-color:#4d4d4d}
+  .copy.done{color:#fff;border-color:#4a4a4a}
+  .tk{color:#fff;font-weight:700}            /* ключевые слова — жирным */
+  .tc{color:#7a7a7a;font-style:italic}        /* комментарии — серым курсивом */
+
+  /* tables */
+  .table-wrap{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--card)}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--bg-soft);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+  tr:last-child td{border-bottom:none}
+  td code.inline{white-space:nowrap}
+  tr:hover td{background:#fafafa}
+
+  /* layer cards */
+  .layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
+  .layer{
+    border:1px solid var(--line);border-radius:var(--radius-s);background:var(--card);
+    padding:14px 16px;position:relative;overflow:hidden;
+  }
+  .layer .l-name{font-family:var(--mono);font-weight:650;font-size:13px;color:#000;margin-bottom:4px}
+  .layer .l-desc{font-size:12.8px;color:var(--ink-2);line-height:1.5}
+  .layer::after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+    background:#000;
+  }
+
+  /* demo */
+  .demo-card{
+    border:1px solid var(--line);border-radius:var(--radius);background:var(--card);
+    box-shadow:var(--shadow);padding:18px;margin:20px 0;
+  }
+  .demo-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .demo-head .d-title{font-weight:650;font-size:14.5px}
+  .demo-head .d-meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+  .demo-head .d-rate{margin-left:auto;font-family:var(--mono);font-size:12px;color:#000}
+  .demo-canvas-wrap{
+    border-radius:10px;overflow:hidden;background:#0c0c0c;
+    border:1px solid #1c1c1c;position:relative;
+  }
+  canvas#raster{display:block;width:100%;height:270px}
+  canvas#trace{display:block;width:100%;height:220px}
+  .demo-console{
+    background:#0c0c0c;border:1px solid #1c1c1c;border-radius:10px;
+    padding:12px 14px;margin-top:12px;
+    font-family:var(--mono);font-size:12px;line-height:1.55;
+    color:#9d9d9d;white-space:pre;overflow:auto;min-height:118px;
+  }
+  .demo-console .ok{color:#e6e6e6}
+  .demo-controls{display:flex;gap:8px;margin-top:12px}
+  .dbtn{
+    font:inherit;font-size:13px;font-weight:600;color:var(--ink);
+    background:var(--bg-soft);border:1px solid var(--line-2);border-radius:var(--radius-s);
+    padding:7px 16px;cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+  }
+  .dbtn:hover{background:#f5f5f5;border-color:#000;color:#000}
+  .dbtn.primary{background:#111;border-color:#111;color:#fff}
+  .dbtn.primary:hover{background:#000;color:#fff}
+
+  /* footer */
+  footer{
+    border-top:1px solid var(--line);margin-top:70px;padding:34px 24px 46px;
+    color:var(--ink-3);font-size:13.5px;text-align:center;
+  }
+  footer code.inline{font-size:12px}
+
+  /* toast */
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:#171717;color:#e7e7e7;font-family:var(--mono);font-size:12.5px;
+    padding:9px 18px;border-radius:999px;opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s;z-index:100;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* reveal */
+  .js section.block{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+  .js section.block.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .js section.block{opacity:1;transform:none;transition:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="#top" aria-label="Наверх">
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <circle cx="16" cy="16" r="15" stroke="#111" stroke-width="1.6"/>
+        <circle cx="16" cy="16" r="4.2" fill="#111"/>
+        <path d="M16 11.8V4.5M16 20.2V27.5M11.8 16H4.5M20.2 16H27.5" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="16" cy="4.5" r="1.8" fill="#444"/><circle cx="16" cy="27.5" r="1.8" fill="#444"/>
+        <circle cx="4.5" cy="16" r="1.8" fill="#444"/><circle cx="27.5" cy="16" r="1.8" fill="#444"/>
+      </svg>
+      <span class="b-name">pillars · документация</span>
+      <span class="b-sub">taas-checkmate</span>
+    </a>
+    <div class="top-right">
+      <span class="pill">Rust 1.78+</span>
+      <span class="pill">SIMD f32x8</span>
+      <span class="pill">AVX2 / NEON / scalar</span>
+      <select id="nav-select" aria-label="Разделы">
+        <option value="#engine">01 · Движок реального времени</option>
+        <option value="#dsl">02 · Свой нейрон на DSL</option>
+        <option value="#compute">03 · ComputeNeuron</option>
+        <option value="#ops">04 · Био-кирпичи (ops)</option>
+        <option value="#macro">05 · Что генерирует макрос</option>
+        <option value="#run">06 · NeuralPopulation</option>
+        <option value="#fast">07 · Быстрый путь: run_neuron</option>
+        <option value="#paradigms">08 · Три парадигмы</option>
+        <option value="#zoo">09 · Зоопарк моделей</option>
+        <option value="#live">10 · Живой пример</option>
+        <option value="#conv">11 · Конвенции</option>
+        <option value="#recipe">12 · Полный рецепт</option>
+        <option value="#py">13 · formula-API (Python)</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<div class="wrap" id="top">
+  <nav class="toc" id="toc" aria-label="Содержание">
+    <p class="toc-label">Содержание</p>
+    <a href="#engine"><span class="num">01</span>Движок</a>
+    <a href="#dsl"><span class="num">02</span>Свой нейрон на DSL</a>
+    <a href="#compute"><span class="num">03</span>ComputeNeuron</a>
+    <a href="#ops"><span class="num">04</span>Био-кирпичи ops</a>
+    <a href="#macro"><span class="num">05</span>Что генерирует макрос</a>
+    <a href="#run"><span class="num">06</span>NeuralPopulation</a>
+    <a href="#fast"><span class="num">07</span>run_neuron</a>
+    <a href="#paradigms"><span class="num">08</span>Три парадигмы</a>
+    <a href="#zoo"><span class="num">09</span>Зоопарк моделей</a>
+    <a href="#live"><span class="num">10</span>Живой пример</a>
+    <a href="#conv"><span class="num">11</span>Конвенции</a>
+    <a href="#recipe"><span class="num">12</span>Полный рецепт</a>
+    <a href="#py"><span class="num">13</span>formula-API (Python)</a>
+  </nav>
+
+  <main>
+
+    <div class="hero">
+      <span class="kicker">◆ zero-cost SIMD · спайковые сети · реальное время</span>
+      <h1>Движок нейронов<br>в реальном времени — <span class="grad">создай свой</span></h1>
+      <p class="lead">
+        <b>pillars</b> — ядро taas-checkmate: каждый нейрон пишется <b>один раз</b> на типизированном
+        DSL и автоматически компилируется и в <b>8-канальный SIMD</b> (AVX2/NEON), и в скалярный код —
+        без JIT, без интерпретаторов, без дублирования. Эта страница — шпаргалка по движку и руководство
+        по созданию собственных моделей нейронов, синапсов и глии.
+      </p>
+      <div class="stats">
+        <div class="s"><b>25+</b> моделей в зоопарке</div>
+        <div class="s"><b>1M</b> нейронов / сек (Izhikevich, 8K)</div>
+        <div class="s"><b>390+</b> тестов</div>
+        <div class="s"><b>1</b> исходник → SIMD + scalar</div>
+      </div>
+    </div>
+
+    <!-- ════════════ 01 · ENGINE ════════════ -->
+    <section class="block" id="engine">
+      <h2><span class="no">01</span>Движок реального времени</h2>
+      <p class="sub">Как устроен pillars: пять слоёв и один конвейер компиляции</p>
+
+      <p>
+        Движок разделён на пять слоёв со строгой односторонней зависимостью
+        <code class="inline">api → zoo → ops → core</code>; батч-микроядра
+        <code class="inline">kernels</code> живут рядом с <code class="inline">ops</code> и никогда
+        не кормят <code class="inline">zoo</code>. Каждый слой — одна ответственность, код не
+        пересекает больше одной границы за раз.
+      </p>
+
+      <div class="layers">
+        <div class="layer"><div class="l-name">api/</div><div class="l-desc">Оркестратор: NeuralPopulation, Network, графы. Safe Rust, без сырых указателей.</div></div>
+        <div class="layer"><div class="l-name">zoo/</div><div class="l-desc">25+ готовых моделей. Строятся из ops + core, никогда не зовут kernels.</div></div>
+        <div class="layer"><div class="l-name">ops/</div><div class="l-desc">Био-кирпичики: ohmic, gate, spike, пластичность — чистые функции над S.</div></div>
+        <div class="layer"><div class="l-name">kernels/</div><div class="l-desc">Батч-микроядра: плоские срезы на вход, SIMD-цикл + скалярный хвост.</div></div>
+        <div class="layer"><div class="l-name">core/</div><div class="l-desc">SIMD-движок: трейт SimdLane → f32x8 | f32. Здесь generic становится инструкцией.</div></div>
+      </div>
+
+      <h3>Мономорфизация вместо интерпретации</h3>
+      <p>
+        Модель пишется один раз — в терминах трейта <code class="inline">SimdLane</code> (generic
+        над <code class="inline">S</code>). При компиляции Rust подставляет и
+        <code class="inline">f32x8</code> (8 нейронов за такт), и <code class="inline">f32</code>
+        (скаляр, любой CPU). Весь SIMD-код порождается на этапе компиляции.
+      </p>
+      <pre class="code-wrap plain"><code>ваша модель:   let spike = v.cmp_ge(v_thresh);
+                    ↓
+        SimdLane trait (generic over S: SimdLane)
+                    ↓
+   ┌───────────────────┼───────────────────┐
+   │  S = f32x8        │  S = f32          │
+   │  _mm256_cmp_ps    │  ucomiss + setae  │
+   │  (AVX2 / NEON)    │  (скаляр)         │
+   └───────────────────┴───────────────────┘</code></pre>
+
+      <h3>Один шаг популяции</h3>
+      <ul>
+        <li>Память — <b>Struct-of-Arrays</b> с выравниванием до 8: колонки <code class="inline">v, u, refr…</code> по <code class="inline">capacity = n.div_ceil(8)*8</code>.</li>
+        <li><code class="inline">n ≤ 8</code> — скалярный путь; <code class="inline">n &gt; 8</code> — SIMD-чанки по 8 + скалярный «хвост» (паритет хвоста покрыт тестами побитово).</li>
+        <li>Входной ток клампится до <code class="inline">±100</code> (<code class="inline">I_SYN_CLAMP_RANGE</code>): защита от переполнения экспонент, нефизичных частот и NaN.</li>
+        <li>Опциональные шины <code class="inline">i_pre / i_post</code> — для STDP и пластичности.</li>
+      </ul>
+    </section>
+
+    <!-- ════════════ 02 · DSL ════════════ -->
+    <section class="block" id="dsl">
+      <h2><span class="no">02</span>Свой нейрон на DSL</h2>
+      <p class="sub">Минимальная модель — 20 строк, полный SIMD-пайплайн — бесплатно</p>
+
+      <p>
+        Единственный способ написать модель — структура с атрибутами
+        <code class="inline">#[state]</code> и <code class="inline">#[param]</code> +
+        реализация трейта <code class="inline">ComputeNeuron</code>. Макрос
+        <code class="inline">#[derive(NeuronModel)]</code> генерирует весь мост к движку.
+      </p>
+
+      <pre class="code-wrap" data-label="crates/pillars/src/zoo/neurons/"><code class="rust">use pillars::prelude::*;
+use pillars::NeuronModel;   // derive-макрос реэкспортируется корневым крейтом
+use pillars::core::compute::{ComputeNeuron, StepContext};
+use pillars::core::lane::SimdLane;
+
+#[derive(NeuronModel)]
+pub struct MyLIF {
+    #[state] pub v: f32,        // мембранный потенциал, мВ
+    #[state] pub refr: f32,     // таймер рефрактерности, мс
+
+    #[param] pub dt: f32,       // шаг интегрирования, мс
+    #[param] pub inv_tau_m: f32, // 1/τ — движок не любит делений
+    #[param] pub v_rest: f32,
+    #[param] pub v_thresh: f32,
+    #[param] pub v_reset: f32,
+    #[param] pub tau_ref: f32,
+}
+
+impl ComputeNeuron for MyLIF {
+    type State&lt;S: SimdLane&gt; = MyLIFState&lt;S&gt;;
+    type Params&lt;S: SimdLane&gt; = MyLIFParams&lt;S&gt;;
+
+    #[inline(always)]
+    fn step&lt;S: SimdLane&gt;(
+        state: &amp;mut MyLIFState&lt;S&gt;,
+        params: &amp;MyLIFParams&lt;S&gt;,
+        ctx: &amp;mut StepContext&lt;S&gt;,
+    ) {
+        let zero = S::zero();
+        let is_refr = state.refr.cmp_gt(zero);
+
+        // Forward Euler: без делений, чистая FMA-арифметика
+        let dv = (params.v_rest - state.v + ctx.i_syn) * params.inv_tau_m * ctx.dt();
+        let v_new = state.v + dv;
+
+        // Спайк только вне рефрактерности (нет back-to-back)
+        let spike = is_refr.cond().then(zero)
+                           .else_(v_new.cmp_ge(params.v_thresh));
+        ctx.emit_spike(spike);              // ← спайк уходит в шину
+
+        let v_final = spike.cond().then(params.v_reset).else_(v_new);
+        state.v = is_refr.cond().then(state.v).else_(v_final);
+
+        let refr_dec = state.refr - ctx.dt();
+        state.refr = spike.cond().then(params.tau_ref).else_(refr_dec).max(zero);
+    }
+}</code></pre>
+
+      <div class="callout">
+        <span class="t">Правила DSL</span>
+        Поле обязано быть <code class="inline">#[state]</code> или <code class="inline">#[param]</code>
+        — ничего другого быть не может. Нужно минимум по одному полю каждого типа. Для моделей,
+        которые не стреляют спайками (синапсы, глия, мышцы), вешайте
+        <code class="inline">#[no_spike]</code> на структуру — раннер пропустит запись спайк-маски.
+      </div>
+
+      <h3>Что это даёт</h3>
+      <ul>
+        <li><b>Типизированный доступ</b>: только <code class="inline">state.v</code>,
+            <code class="inline">params.v_thresh</code> — никаких магических номеров колонок.</li>
+        <li><b>Zero-cost</b>: мост — одна инлайновая функция «именованные поля ⇄ SoA-память», без
+            рантайм-диспетчеризации.</li>
+        <li><b>Один исходник</b> — компилируется в AVX2, NEON и скаляр одновременно.</li>
+        <li><b>Генерация</b>: <code class="inline">MyLIFState&lt;S&gt;</code>,
+            <code class="inline">MyLIFParams&lt;S&gt;</code>, энумы индексов и реализация
+            <code class="inline">Model</code> — см. раздел 05.</li>
+      </ul>
+    </section>
+
+    <!-- ════════════ 03 · COMPUTENEURON ════════════ -->
+    <section class="block" id="compute">
+      <h2><span class="no">03</span>ComputeNeuron — сердце шага</h2>
+      <p class="sub">Типизированный трейт, StepContext и идиома «cond → then → else»</p>
+
+      <p>Всё, что нужно знать о контракте шага:</p>
+      <pre class="code-wrap" data-label="crates/pillars/src/core/compute.rs"><code class="rust">pub trait ComputeNeuron: crate::zoo::Model {
+    type State&lt;S: SimdLane&gt;;    // генерирует макрос
+    type Params&lt;S: SimdLane&gt;;   // генерирует макрос
+
+    fn step&lt;S: SimdLane&gt;(
+        state: &amp;mut Self::State&lt;S&gt;,
+        params: &amp;Self::Params&lt;S&gt;,
+        ctx: &amp;mut StepContext&lt;S&gt;,
+    );
+}
+
+// StepContext — что видит модель на каждом шаге:
+pub struct StepContext&lt;S: SimdLane&gt; {
+    pub i_syn: S,      // постсинаптический ток (сумма по входам)
+    pub i_pre: S,      // пресинаптическая шина (для STDP)
+    pub i_post: S,     // постсинаптическая шина (для STDP)
+    pub dt: f32,       // шаг в мс (скаляр, broadcast через .dt())
+    spike_mask: S,     // сюда пишет emit_spike()
+}</code></pre>
+
+      <h3>Идиомы, которые вы будете использовать</h3>
+      <ul>
+        <li><code class="inline">cond.cond().then(a).else_(b)</code> — «маска»: если cond истинно, берём a, иначе b. Без ветвлений.</li>
+        <li><code class="inline">ctx.emit_spike(mask)</code> — единственный способ сообщить о спайке.</li>
+        <li><code class="inline">S::zero() / S::one() / S::splat(v)</code> — константы и broadcast.</li>
+        <li>Сравнения: <code class="inline">cmp_ge / cmp_gt / cmp_lt / cmp_le</code>, <code class="inline">max / min / clamp01</code>, <code class="inline">exp / ln / sin / cos</code>.</li>
+      </ul>
+
+      <p>
+        Пример с воротными кинетиками и омическими токами — так выглядит «живой» нейрон
+        (HAAP, упрощённо):
+      </p>
+      <pre class="code-wrap" data-label="crates/pillars/src/zoo/neurons/haap.rs"><code class="rust">fn step&lt;S: SimdLane&gt;(
+    state: &amp;mut HAAPState&lt;S&gt;,
+    params: &amp;HAAPParams&lt;S&gt;,
+    ctx: &amp;mut StepContext&lt;S&gt;,
+) {
+    use pillars::ops::*;   // био-кирпичи — чистые функции
+
+    let i_leak = params.g_l * (state.v - params.e_l);            // I = g·(V − E)
+    let i_m    = params.g_m * state.u * (state.v - params.e_k);  // M-ток
+    let i_h    = params.g_h * state.h * (state.v - params.e_h);  // h-ток
+
+    let dv = (ctx.i_syn - (i_leak + i_m + i_h)) * params.inv_cm;
+    let v_new = state.v + dv * ctx.dt();
+
+    // u_∞ = 1 / (1 + exp(−k·(V − V_half))) — сигмоида, аргумент клампится ±50
+    let u_arg = (-params.k_u * (v_new - params.v_half_u))
+        .max(S::splat(-50.0)).min(S::splat(50.0));
+    let u_inf = S::one() / (S::one() + u_arg.exp());
+    let u_new = (state.u + ctx.dt() * (u_inf - state.u) * params.inv_tau_u).clamp01();
+
+    let spike = v_new.cmp_ge(params.v_thresh);
+    ctx.emit_spike(spike);
+
+    state.v = spike.cond().then(params.v_reset).else_(v_new);
+    state.u = spike.cond().then(u_new + params.delta_u).else_(u_new).clamp01();
+}</code></pre>
+    </section>
+
+    <!-- ════════════ 04 · OPS ════════════ -->
+    <section class="block" id="ops">
+      <h2><span class="no">04</span>Био-кирпичи: модуль ops</h2>
+      <p class="sub">Переиспользуемые примитивы — чистые функции над S, без памяти и состояния</p>
+
+      <p>
+        Каждый оп — это <code class="inline">fn op&lt;S: SimdLane&gt;(…S…) → S</code>.
+        Один код работает и в SIMD, и в скаляре. Модель собирается из них как из LEGO.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Модуль</th><th>Примеры</th><th>Смысл</th></tr></thead>
+          <tbody>
+            <tr><td><code class="inline">membrane</code></td><td><code class="inline">leak_integrate</code>, <code class="inline">membrane_depolarize</code></td><td>утечка мембраны, интеграция тока</td></tr>
+            <tr><td><code class="inline">ohmic</code></td><td><code class="inline">ohmic_current</code></td><td>закон Ома: I = g·(V − E_rev)</td></tr>
+            <tr><td><code class="inline">spike</code></td><td><code class="inline">fire_reset</code>, <code class="inline">edge_spike</code>, <code class="inline">spike_bump</code>, <code class="inline">spike_to_float</code></td><td>детекция спайка, сброс, пост-спайковый толчок, конвертация масок</td></tr>
+            <tr><td><code class="inline">refractory</code></td><td><code class="inline">refractory_clamp</code></td><td>абсолютная рефрактерность</td></tr>
+            <tr><td><code class="inline">gate</code></td><td><code class="inline">gate_integrate</code></td><td>кинетика ворот: g ← g + dt·(g∞ − g)/τ</td></tr>
+            <tr><td><code class="inline">adaptation</code></td><td><code class="inline">m_current</code></td><td>M-ток адаптации</td></tr>
+            <tr><td><code class="inline">calcium</code></td><td><code class="inline">calcium_step</code></td><td>динамика Ca²⁺</td></tr>
+            <tr><td><code class="inline">synapse</code></td><td><code class="inline">dual_exp_step</code></td><td>двойная экспонента (AMPA/GABA-подобные токи)</td></tr>
+            <tr><td><code class="inline">polynomial</code></td><td>полином Ижикевича</td><td>v·(0.04·v + 5) + 140 — в форме Горнера</td></tr>
+            <tr><td><code class="inline">triangulated</code></td><td><code class="inline">quantize_v</code>, <code class="inline">lookup</code></td><td>LUT-инференс вместо ODE</td></tr>
+            <tr><td><code class="inline">channels</code></td><td><code class="inline">kir</code>, <code class="inline">hcn</code>, <code class="inline">gap</code>, <code class="inline">glucl</code>, <code class="inline">km</code>, <code class="inline">leak</code></td><td>ионные каналы</td></tr>
+            <tr><td><code class="inline">physics</code></td><td><code class="inline">diffusion</code>, <code class="inline">field</code>, <code class="inline">force</code>, <code class="inline">heating</code>, <code class="inline">metabolism</code></td><td>биофизика ткани</td></tr>
+            <tr><td><code class="inline">neurochemistry</code></td><td><code class="inline">gpcr</code>, <code class="inline">receptors</code>, <code class="inline">signaling</code></td><td>химический сигналинг</td></tr>
+            <tr><td><code class="inline">plasticity</code></td><td><code class="inline">stdp</code>, <code class="inline">stp</code>, <code class="inline">homeostatic</code>, <code class="inline">trace</code></td><td>синаптическая пластичность</td></tr>
+            <tr><td><code class="inline">learning</code></td><td><code class="inline">hebbian</code>, <code class="inline">sgd</code>, <code class="inline">surrogate</code></td><td>правила обучения</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Пример из «внутренностей» — спайк-детекция как чистые функции:</p>
+      <pre class="code-wrap" data-label="crates/pillars/src/ops/spike.rs"><code class="rust">// fire-and-reset: спайк если v ≥ v_thresh, сброс в v_reset
+pub fn fire_reset&lt;S: SimdLane&gt;(v: S, v_thresh: S, v_reset: S) -&gt; (S, S) {
+    let spike = v.cmp_ge(v_thresh);
+    let v_new = spike.cond().then(v_reset).else_(v);
+    (v_new, spike)
+}
+
+// edge-triggered: только нарастающий фронт — защита от «залипания» над порогом
+pub fn edge_spike&lt;S: SimdLane&gt;(is_above: S, was_below: S) -&gt; (S, S) {
+    let spike = is_above.and(was_below.cmp_gt(S::zero()));
+    let was_below_next = is_above.cond().then(S::zero()).else_(S::one());
+    (spike, was_below_next)
+}</code></pre>
+    </section>
+
+    <!-- ════════════ 05 · MACRO ════════════ -->
+    <section class="block" id="macro">
+      <h2><span class="no">05</span>Что генерирует #[derive(NeuronModel)]</h2>
+      <p class="sub">Из 20 строк модели — полный типизированный API за бесплатно</p>
+
+      <p>Для структуры <code class="inline">MyLIF</code> макрос порождает:</p>
+      <ul>
+        <li><code class="inline">MyLIFState&lt;S&gt;</code> / <code class="inline">MyLIFParams&lt;S&gt;</code> — типизированные структуры (поле = лейн <code class="inline">S</code>).</li>
+        <li><code class="inline">MyLIFModelParamIdx</code> / <code class="inline">MyLIFModelStateIdx</code> — энумы-индексы: вариант = номер колонки, никаких магических чисел.</li>
+        <li>Реализацию <code class="inline">Model</code> — мост: загрузил типизированные state/params из SoA → вызвал <code class="inline">ComputeNeuron::step</code> → записал обратно + спайк-маску.</li>
+        <li>Константы <code class="inline">PARAM_COLS</code>, <code class="inline">STATE_COLS</code> и <code class="inline">HAS_SPIKE</code> (ложь при <code class="inline">#[no_spike]</code>).</li>
+      </ul>
+
+      <p>Заполнение параметров — теперь по имени, а не по номеру колонки:</p>
+      <pre class="code-wrap" data-label="типизированные индексы vs legacy"><code class="rust">let mut pop = NeuralPopulation::&lt;MyLIF&gt;::new(8);
+
+// Новый путь — сгенерированный энум:
+pop.fill_param(MyLIFModelParamIdx::InvTauM.into(), 0.1);
+pop.fill_param(MyLIFModelParamIdx::VThresh.into(), -54.0);
+pop.fill_state(MyLIFModelStateIdx::V.into(), -70.0);
+
+// Legacy-путь — по номеру колонки (порядок = порядку полей):
+pop.fill_param(0, 0.5);   // dt
+pop.fill_param(1, 0.1);   // inv_tau_m</code></pre>
+    </section>
+
+    <!-- ════════════ 06 · NEURALPOPULATION ════════════ -->
+    <section class="block" id="run">
+      <h2><span class="no">06</span>Запуск: NeuralPopulation</h2>
+      <p class="sub">Безопасный API: выравненная SIMD-память, типизированные колонки, один вызов шага</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Метод</th><th>Что делает</th></tr></thead>
+          <tbody>
+            <tr><td><code class="inline">new(count)</code></td><td>создаёт популяцию, память дополняется до кратности 8</td></tr>
+            <tr><td><code class="inline">fill_param(col, v)</code> / <code class="inline">fill_state(col, v)</code></td><td>заполнить колонку у всех нейронов (паникует при выходе за диапазон)</td></tr>
+            <tr><td><code class="inline">param_slice / param_slice_mut</code>, <code class="inline">state_slice / state_slice_mut</code></td><td>безопасный доступ к колонкам</td></tr>
+            <tr><td><code class="inline">enable_buses() / disable_buses()</code></td><td>включить шины i_pre / i_post для пластичности</td></tr>
+            <tr><td><code class="inline">step(i_in, spikes_out)</code></td><td>один шаг: SIMD для n&gt;8, скаляр для n≤8 + хвост</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="code-wrap" data-label="быстрый старт — 138 000 нейронов"><code class="rust">use pillars::prelude::*;
+
+let mut pop = NeuralPopulation::&lt;LIFModel&gt;::new(138_000);
+pop.fill_param(0, 0.5);            // dt (мс)
+pop.fill_param(1, 1.0 / 10.0);     // inv_tau_m
+pop.fill_param(2, -70.0);          // v_rest
+pop.fill_param(3, -54.0);          // v_thresh
+pop.fill_param(4, -70.0);          // v_reset
+pop.fill_param(5, 2.0);            // tau_ref
+pop.fill_state(0, -70.0);          // v
+
+let i_in = vec![30.0; 138_000];
+let mut spikes = vec![0i32; 138_000];
+pop.step(&amp;i_in, &amp;mut spikes);      // ← один вызов, один шаг всей популяции</code></pre>
+    </section>
+
+    <!-- ════════════ 07 · RUN_NEURON ════════════ -->
+    <section class="block" id="fast">
+      <h2><span class="no">07</span>Быстрый путь: run_neuron</h2>
+      <p class="sub">Для абсолютного максимума пропускной способности — сырые указатели, никаких обёрток</p>
+
+      <p>
+        Если <code class="inline">NeuralPopulation</code> нужен для разработки и отладки, то
+        <code class="inline">run_neuron::&lt;M&gt;</code> — для «боя»: прямой SIMD-цикл по
+        колонкам, без валидаций и аллокаций. Тот же движок, тот же код модели — только ближе к металлу.
+      </p>
+      <pre class="code-wrap" data-label="crates/pillars/src/core/runner.rs"><code class="rust">// n должно быть кратно 8 для максимальной скорости
+unsafe {
+    run_neuron::&lt;LIFModel&gt;(
+        v.as_mut_ptr(),        // state 0: v
+        refr.as_mut_ptr(),     // state 1: refr
+        ptr::null_mut(),       // state 2..5: не используются
+        ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
+        I.as_ptr(),            // входной ток
+        spikes.as_mut_ptr(),   // спайки (0/1)
+        params.as_ptr(),       // [n×N_PARAMS], колонки
+        n,
+    );
+}</code></pre>
+      <div class="callout warn">
+        <span class="t">Когда что использовать</span>
+        <b>NeuralPopulation</b> — безопасный путь по умолчанию. <b>run_neuron</b> — если нужна
+        абсолютная скорость (например, realtime-дрозофила на 130K нейронов). Есть также
+        <code class="inline">run_neuron_ext</code> и <code class="inline">run_neuron_par</code>
+        (Rayon-параллель по чанкам).
+      </div>
+    </section>
+
+    <!-- ════════════ 08 · PARADIGMS ════════════ -->
+    <section class="block" id="paradigms">
+      <h2><span class="no">08</span>Три парадигмы исполнения</h2>
+      <p class="sub">Один движок — три способа считать нейроны, все намеренные</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Парадигма</th><th>Где живёт</th><th>Зачем</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>Компилируемый SIMD</b></td>
+              <td><code class="inline">core/ + ops/ + zoo/</code></td>
+              <td>Основной движок: модель мономорфизируется в f32x8/f32 на этапе компиляции.</td>
+            </tr>
+            <tr>
+              <td><b>Интерпретатор программ</b></td>
+              <td><code class="inline">api::formula</code></td>
+              <td>Графы OpNode, исполняемые <code class="inline">run_program</code> — для node-редактора в UI.</td>
+            </tr>
+            <tr>
+              <td><b>Табличный поиск (LUT)</b></td>
+              <td><code class="inline">zoo::neurons::TriangulatedModel</code></td>
+              <td>Инференс через lookup вместо ODE — калибруется по эталонной модели, почти нулевая стоимость шага.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ════════════ 09 · ZOO ════════════ -->
+    <section class="block" id="zoo">
+      <h2><span class="no">09</span>Зоопарк моделей</h2>
+      <p class="sub">Всё, что уже есть в crates/pillars/src/zoo — как пример и как библиотека</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Класс</th><th>Модели</th></tr></thead>
+          <tbody>
+            <tr><td><b>Нейроны</b></td><td><code class="inline">LIF</code>, <code class="inline">LIF-AT</code> (GLIF2), <code class="inline">GLIF3</code>, <code class="inline">GLIF4</code>, <code class="inline">Izhikevich</code> (+dual), <code class="inline">Hodgkin–Huxley</code>, <code class="inline">AdEx</code>, <code class="inline">FHN</code>, <code class="inline">HR</code>, <code class="inline">Morris-Lecar</code>, <code class="inline">WC</code> (Вилсон–Коуэн), <code class="inline">SAW</code>, <code class="inline">Rate</code>, <code class="inline">GCO</code> (фазовый осциллятор), <code class="inline">HAAP</code>, <code class="inline">VSN</code>, <code class="inline">Triangulated</code> (LUT), <code class="inline">Atlasov</code> (нейромотор)</td></tr>
+            <tr><td><b>Синапсы</b></td><td><code class="inline">exp2syn</code> (двойная экспонента), <code class="inline">NMDA</code>, <code class="inline">Tsodyks–Markram</code> (STP), <code class="inline">Ca-пластичность</code></td></tr>
+            <tr><td><b>Глия</b></td><td><code class="inline">Astrocyte</code> — астроцит, модуляция синаптической передачи</td></tr>
+            <tr><td><b>Сенсоры</b></td><td><code class="inline">Chordotonal</code> — сенсор растяжения (насекомые)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Каждая модель валидируется: parity-тесты против легаси-эталонов и против NEURON
+        (<code class="inline">resources/validate</code>) — HH, Izhikevich, AdEx, FHN. Если добавляете
+        модель в <code class="inline">zoo/neurons/</code> — по образцу <code class="inline">lif.rs</code>
+        или <code class="inline">haap.rs</code>, и не забудьте про <code class="inline">mod.rs</code>.
+      </p>
+    </section>
+
+    <!-- ════════════ 10 · LIVE ════════════ -->
+    <section class="block" id="live">
+      <h2><span class="no">10</span>Живой пример: LIF в реальном времени</h2>
+      <p class="sub">Этот raster-график считает тот же LIF, что в разделе 02 — 64 нейрона, dt = 0.5 мс, Пуассоновский вход</p>
+
+      <div class="demo-card">
+        <div class="demo-head">
+          <span class="d-title">Raster-график популяции</span>
+          <span class="d-meta">64 × LIF · dt 0.5 мс · τ_m 10 мс · v_th −54 мВ</span>
+          <span class="d-rate" id="d-rate">— Гц</span>
+        </div>
+        <div class="demo-canvas-wrap">
+          <canvas id="raster"></canvas>
+        </div>
+        <div class="demo-controls">
+          <button class="dbtn primary" id="btn-play">⏸ Пауза</button>
+          <button class="dbtn" id="btn-reset">↺ Сброс</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════ 11 · CONVENTIONS ════════════ -->
+    <section class="block" id="conv">
+      <h2><span class="no">11</span>Конвенции движка</h2>
+      <p class="sub">Правила, которые держат численную стабильность и паритет SIMD/scalar/CUDA</p>
+
+      <ul>
+        <li><b>dt в миллисекундах</b> — везде. Ток — в относительных единицах модели (nA/pA).</li>
+        <li><b>Никаких делений</b>: храните <code class="inline">inv_tau</code>, <code class="inline">inv_cm</code> вместо τ и Cm. <code class="inline">inv_tau == 0</code> (τ ≤ 0) — легальная «заморозка» динамики.</li>
+        <li><b>Клампите аргументы exp до ±50</b>: SIMD-экспонента надёжна до ~±87 (wide возвращает 0 на +88), а <code class="inline">expf</code> уходит в inf. Кламп делает сигмоиду одинаковой на CPU-SIMD и CUDA.</li>
+        <li><b>Маска ≠ арифметика</b>: спайк-маска это NaN (SIMD) или −1.0 (скаляр). Не делайте <code class="inline">spike * x</code> — NaN протечёт в состояние. Только <code class="inline">cond().then()</code> / <code class="inline">blend</code>. Для конвертации — <code class="inline">spike_to_float</code>.</li>
+        <li><b>E_rev — константы</b>: <code class="inline">E_CL = −70</code>, <code class="inline">E_NA = 0</code>, <code class="inline">E_K = −80</code>, <code class="inline">E_CA = 0</code> (мВ).</li>
+        <li><b>Температура Q10</b>: <code class="inline">q10_from_celsius(t)</code>, τ_eff = τ/Q10 — конвенция NEURON.</li>
+        <li><b>Входной ток клампится до ±100</b> раннером (<code class="inline">I_SYN_CLAMP_RANGE</code>) — защита от переполнения и нефизичных частот.</li>
+        <li><b>Рефрактерность абсолютная</b>: в рефрактерном окне v заморожен, спайк невозможен — никаких back-to-back спайков.</li>
+        <li><b>Паритет обязателен</b>: новая модель = тесты SIMD/scalar + хвост, стресс NaN/взрыв, и по возможности parity против NEURON.</li>
+      </ul>
+    </section>
+
+    <!-- ════════════ 12 · RECIPE ════════════ -->
+    <section class="block" id="recipe">
+      <h2><span class="no">12</span>Полный рецепт: LIF-AT (GLIF2)</h2>
+      <p class="sub">Модель с адаптивным порогом θ — канонический пример из crates/pillars/src/zoo/neurons/lifat.rs</p>
+
+      <p>
+        LIF-AT добавляет к LIF динамический порог <code class="inline">θ</code>: после спайка порог
+        подрастает на β и экспоненциально затухает — это адаптация частоты спайков (частотная адаптация).
+      </p>
+      <pre class="code-wrap" data-label="полный пример — lifat.rs"><code class="rust">use pillars_macros::dual_neuron;
+
+#[dual_neuron]                        // ← генерирует ещё и скалярный близнец
+pub mod lifat {
+    use crate::core::compute::{ComputeNeuron, StepContext};
+    use crate::core::lane::SimdLane;
+    use pillars_macros::NeuronModel;
+
+    #[derive(NeuronModel)]
+    pub struct LIFAtModel {
+        #[state] pub v: f32,
+        #[state] pub theta: f32,      // адаптивный порог
+        #[state] pub refr: f32,
+
+        #[param] pub dt: f32,
+        #[param] pub inv_tau_m: f32,
+        #[param] pub v_rest: f32,
+        #[param] pub v_thresh: f32,
+        #[param] pub v_reset: f32,
+        #[param] pub inv_tau_theta: f32,  // 1/τ_θ
+        #[param] pub beta: f32,           // шаг адаптации порога
+        #[param] pub tau_ref: f32,
+    }
+
+    impl ComputeNeuron for LIFAtModel {
+        type State&lt;S: SimdLane&gt; = LIFAtState&lt;S&gt;;
+        type Params&lt;S: SimdLane&gt; = LIFAtParams&lt;S&gt;;
+
+        #[inline(always)]
+        fn step&lt;S: SimdLane&gt;(
+            state: &amp;mut Self::State&lt;S&gt;,
+            params: &amp;Self::Params&lt;S&gt;,
+            ctx: &amp;mut StepContext&lt;S&gt;,
+        ) {
+            let zero = S::zero();
+            let is_refr = state.refr.cmp_gt(zero);
+
+            // v — Forward Euler, заморожен в рефрактерности
+            let dv = (params.v_rest - state.v + ctx.i_syn)
+                * params.inv_tau_m * ctx.dt();
+            let v_new = is_refr.cond().then(state.v).else_(state.v + dv);
+
+            // θ — экспоненциальный спад ВСЕГДА (даже в рефрактерности)
+            let theta_new = state.theta
+                * (-ctx.dt() * params.inv_tau_theta).exp();
+
+            // Спайк: v ≥ v_thresh + θ, только вне рефрактерности
+            let spike = is_refr.cond().then(zero)
+                .else_(v_new.cmp_ge(params.v_thresh + theta_new));
+            ctx.emit_spike(spike);
+
+            state.v = spike.cond().then(params.v_reset).else_(v_new);
+            // θ += β через blend — НЕ через `spike * beta` (NaN-утечка!)
+            state.theta = spike.cond()
+                .then(theta_new + params.beta).else_(theta_new);
+
+            let refr_dec = state.refr - ctx.dt();
+            state.refr = spike.cond().then(params.tau_ref)
+                .else_(refr_dec).max(zero);
+        }
+    }
+}</code></pre>
+
+      <h3>Как добавить в проект</h3>
+      <ol>
+        <li>Файл <code class="inline">crates/pillars/src/zoo/neurons/&lt;имя&gt;.rs</code> с моделью (по образцу выше).</li>
+        <li>Реэкспорт в <code class="inline">zoo/neurons/mod.rs</code>.</li>
+        <li>Тесты: спайк при токе, тишина без тока, нет back-to-back, стресс NaN при I = ±1000, паритет SIMD/scalar.</li>
+        <li>Готово — модель доступна и из <code class="inline">NeuralPopulation</code>, и из <code class="inline">run_neuron</code>, и из Python-биндингов (<code class="inline">taas_checkmate.pillars</code>).</li>
+      </ol>
+
+      <div class="callout">
+        <span class="t">Под капотом: dual_neuron</span>
+        <code class="inline">#[dual_neuron]</code> — транспилятор поверх <code class="inline">#[derive(NeuronModel)]</code>,
+        который генерирует ещё и скалярный вариант модели. Нужен для парити-тестов и
+        низкоуровневых ядер, где удобнее скаляр.
+      </div>
+    </section>
+
+    <!-- ════════════ 13 · PYTHON FORMULA ════════════ -->
+    <section class="block" id="py">
+      <h2><span class="no">13</span>formula-API: свой нейрон из Python</h2>
+      <p class="sub">Реалтайм-сборка нейрона из ops на лету — тот же движок api::formula, теперь из Python (PyO3)</p>
+
+      <p>
+        В разделе 02 нейрон компилируется в момент сборки проекта. Здесь — тот же движок, но нейрон
+        собирается <b>в рантайме из ops</b>: билдер <code class="inline">Neuron</code> с dataflow-операциями,
+        прогон <code class="inline">simulate()</code>, компиляция в слот движка и SIMD-популяция.
+        Биндинг: <code class="inline">taas_checkmate.formula</code> (+ фасад
+        <code class="inline">taas_checkmate.pillars</code>).
+      </p>
+
+      <pre class="code-wrap" data-label="taas_checkmate.formula — свой нейрон из ops"><code class="python">from taas_checkmate.formula import Neuron
+
+# сборка — dataflow: результат одного op передаётся в другой
+n = Neuron("DualChannel")
+v    = n.state("v", -65.0)            # состояние + дефолт
+refr = n.state("refr", 0.0)
+n.param("dt", 0.5)                    # dt обязан быть первым
+n.param("inv_tau", 0.08)
+n.param("v_rest", -65.0)
+n.param("v_thresh", -50.0)
+n.param("v_reset", -70.0)
+n.param("tau_ref", 1.0)
+
+is_refr = n.cmp_gt(refr, n.const_(0.0))          # маска рефрактерности
+raw     = n.leak(v, n.I, n.inv_tau, n.v_rest)    # v + (v_rest - v + i)*inv_tau*dt
+gated   = n.blend(is_refr, v, raw)               # заморозка в рефрактерности
+n.fire_reset(gated, n.v_thresh, n.v_reset, into=v)
+n.refr_timer(refr, n.tau_ref, into=refr)
+
+print(n)                                # читаемый список опкодов
+tr = n.simulate(steps=500, i_syn=30.0)  # прогон одного нейрона
+
+model = n.compile()                     # слот движка (0..15)
+pop = model.population(138_000)         # SIMD-популяция f32x8
+pop.set(v_thresh=-48.0)                 # колонки по имени
+pop.step(i_in, spikes)                  # zero-copy numpy</code></pre>
+
+      <p>
+        Состояния и параметры — атрибуты билдера (<code class="inline">n.v</code>,
+        <code class="inline">n.inv_tau</code>) и одновременно имена колонок популяции.
+        Ошибки валидации приходят как <code class="inline">ValueError</code>.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Python (formula)</th><th>Rust (pillars)</th><th>Смысл</th></tr></thead>
+          <tbody>
+            <tr><td><code class="inline">Neuron("Name")</code></td><td><code class="inline">#[derive(NeuronModel)]</code></td><td>билдер нейрона</td></tr>
+            <tr><td><code class="inline">n.state(...)</code> / <code class="inline">n.param(...)</code></td><td><code class="inline">#[state]</code> / <code class="inline">#[param]</code></td><td>состояния (≤4) и параметры (≤8), доступ по имени</td></tr>
+            <tr><td><code class="inline">n.leak(...)</code>, <code class="inline">n.fire_reset(...)</code>…</td><td><code class="inline">ops::*</code> / <code class="inline">OpKind</code></td><td>17 био-кирпичей, dataflow-сборка</td></tr>
+            <tr><td><code class="inline">n.simulate(steps, i_syn)</code></td><td><code class="inline">run_program(f32)</code></td><td>прогон одного нейрона → <code class="inline">Trace.v / .spikes</code></td></tr>
+            <tr><td><code class="inline">n.compile()</code></td><td><code class="inline">FormulaModel&lt;ID&gt;::register</code></td><td>регистрация в слот движка (0..15)</td></tr>
+            <tr><td><code class="inline">model.population(n)</code></td><td><code class="inline">NeuralPopulation&lt;FormulaModel&lt;ID&gt;&gt;</code></td><td>SIMD-популяция f32x8</td></tr>
+            <tr><td><code class="inline">pop.set(...)</code>, <code class="inline">set_array(...)</code>, <code class="inline">step(i, sp)</code></td><td><code class="inline">fill_param</code> / <code class="inline">fill_state</code> / <code class="inline">step</code></td><td>колонки по имени, zero-copy numpy</td></tr>
+            <tr><td><code class="inline">OpKind</code>, <code class="inline">OpNode</code>, <code class="inline">run_program</code></td><td><code class="inline">api::formula</code> (сырой слой)</td><td>продвинутый путь: 64 регистра вручную</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <span class="t">Правила формула-API</span>
+        <code class="inline">dt</code> — всегда первый параметр (движок читает его из колонки 0).
+        До 4 состояний и 8 параметров; регистровый файл на 64 слота
+        (<code class="inline">s0..s3, p0..p7, i_syn, t0..t50</code>). Параметры read-only
+        (записывать можно только в состояния и темпы). Одновременно в движке живут до 16
+        скомпилированных моделей (<code class="inline">MAX_FORMULA_MODELS</code>). repr — ASCII.
+      </div>
+
+      <div class="demo-card">
+        <div class="demo-head">
+          <span class="d-title">Живой пример: simulate() в браузере</span>
+          <span class="d-meta">пресет lif() · 500 шагов · dt 0.5 мс · i_syn 30</span>
+          <span class="d-rate" id="tr-meta">— спайков</span>
+        </div>
+        <pre class="code-wrap" data-label="что выполняем"><code class="python">from taas_checkmate.formula import lif
+
+n = lif("MyLIF")                    # пресет = LIF из раздела 02
+tr = n.simulate(steps=500, i_syn=30.0)
+
+print(n)                            # опкоды (repr)
+print(tr)                           # Trace(steps=500, dt=0.5, spikes=N)</code></pre>
+        <div class="demo-canvas-wrap">
+          <canvas id="trace"></canvas>
+        </div>
+        <pre class="demo-console" id="py-console">// симуляция запустится при прокрутке к разделу</pre>
+        <div class="demo-controls">
+          <button class="dbtn primary" id="btn-py-run">▶ Выполнить</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <p><b>pillars</b> — zero-cost SIMD-движок нейродинамики · часть <code class="inline">taas-checkmate</code></p>
+  <p>Rust · SIMD f32x8 (AVX2/NEON) · CUDA · 390+ тестов · GPL-3.0</p>
+</footer>
+
+<div class="toast" id="toast">Скопировано</div>
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.classList.add("js");
+
+  /* ── syntax highlight ─────────────────────────── */
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  // два набора ключевых слов: python-слова не должны подсвечиваться в Rust
+  var KW_RUST = "fn|let|mut|pub|struct|impl|for|in|if|else|use|type|const|unsafe|return|match|where|trait|enum|mod|as|while|loop|break|continue|move|self";
+  var KW_PY = "from|import|def|class|lambda|None|True|False|elif|not|and|or|print|with|pass|raise|try|except|yield|global|nonlocal|del|is|assert|if|else|for|in|while|return|as|self";
+  function makeRe(kw) {
+    return new RegExp("(\\/\\/[^\\n]*)|(\"(?:[^\"\\\\]|\\\\.)*\")|(#\\[[^\\]]*\\])|(#[^\\n]*)|(\\b\\d[\\d_.eE+-]*\\b)|(\\b(?:" + kw + ")\\b)|(\\b(?:f32|f64|i32|i64|u32|u64|usize|isize|bool|Self|S|Vec|Option|Result|Box|String|PhantomData)\\b)|([A-Za-z_]\\w*!)", "g");
+  }
+  var RE = makeRe(KW_RUST);
+  var REPY = makeRe(KW_PY);
+  function highlight(el) {
+    var src = el.textContent;
+    var rx = el.classList.contains("python") ? REPY : RE;
+    var out = "", last = 0, m;
+    rx.lastIndex = 0;
+    while ((m = rx.exec(src)) !== null) {
+      out += esc(src.slice(last, m.index));
+      var cls, tok = m[0];
+      if (m[1] !== undefined || m[4] !== undefined) cls = "tc";   // комментарий (// или #)
+      else if (m[6] !== undefined) cls = "tk";                    // ключевое слово — жирное
+      else cls = "";
+      out += cls ? '<span class="' + cls + '">' + esc(tok) + "</span>" : esc(tok);
+      last = m.index + tok.length;
+    }
+    out += esc(src.slice(last));
+    el.innerHTML = out;
+  }
+  document.querySelectorAll("code.rust, code.python").forEach(highlight);
+
+  /* ── copy buttons ─────────────────────────────── */
+  var toast = document.getElementById("toast");
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () { toast.classList.remove("show"); }, 1400);
+  }
+  document.querySelectorAll("pre.code-wrap").forEach(function (pre) {
+    var btn = document.createElement("button");
+    btn.className = "copy";
+    btn.type = "button";
+    btn.textContent = "копировать";
+    btn.addEventListener("click", function () {
+      var code = pre.querySelector("code");
+      var txt = code.textContent;
+      function done(ok) {
+        btn.textContent = ok ? "скопировано ✓" : "ошибка";
+        btn.classList.add("done");
+        setTimeout(function () {
+          btn.textContent = "копировать";
+          btn.classList.remove("done");
+        }, 1500);
+        showToast(ok ? "Код скопирован" : "Не удалось скопировать");
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { fallback(); });
+      } else fallback();
+      function fallback() {
+        var ta = document.createElement("textarea");
+        ta.value = txt;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { done(document.execCommand("copy")); } catch (e) { done(false); }
+        document.body.removeChild(ta);
+      }
+    });
+    pre.appendChild(btn);
+  });
+
+  /* ── scrollspy ────────────────────────────────── */
+  var tocLinks = Array.prototype.slice.call(document.querySelectorAll("nav.toc a"));
+  var secs = tocLinks.map(function (a) { return document.querySelector(a.getAttribute("href")); });
+  var spy = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting) {
+        var id = en.target.id;
+        tocLinks.forEach(function (a) {
+          a.classList.toggle("active", a.getAttribute("href") === "#" + id);
+        });
+      }
+    });
+  }, { rootMargin: "-20% 0px -70% 0px" });
+  secs.forEach(function (s) { if (s) spy.observe(s); });
+
+  /* ── mobile nav ───────────────────────────────── */
+  var sel = document.getElementById("nav-select");
+  sel.addEventListener("change", function () {
+    location.hash = sel.value;
+    sel.value = "";
+  });
+
+  /* ── reveal on scroll ─────────────────────────── */
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    var rev = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add("in"); rev.unobserve(en.target); }
+      });
+    }, { threshold: 0.04 });
+    document.querySelectorAll("section.block").forEach(function (s) { rev.observe(s); });
+    // hero сразу виден
+    var hero = document.querySelector(".hero");
+    if (hero) hero.classList.add("in");
+  } else {
+    document.querySelectorAll("section.block").forEach(function (s) { s.classList.add("in"); });
+  }
+
+  /* ── live LIF raster ──────────────────────────── */
+  var canvas = document.getElementById("raster");
+  var btnPlay = document.getElementById("btn-play");
+  var btnReset = document.getElementById("btn-reset");
+  var rateEl = document.getElementById("d-rate");
+
+  var N = 64;
+  var DT = 0.5, TAU_M = 10, V_REST = -70, V_THRESH = -54, V_RESET = -70, TAU_REF = 2;
+  var v = new Float32Array(N);
+  var refr = new Float32Array(N);
+  var rates = new Float32Array(N);
+  for (var i = 0; i < N; i++) rates[i] = 2.5 + 20 * Math.pow(i / N, 2.2); // 2.5..22.5 Гц
+  var simTime = 0, rateEma = 0;
+  var running = true;
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var W = 0, H = 0, dpr = 1, pxPerMs = 0;
+  var ctx = canvas.getContext("2d");
+  // offscreen-история спайков: сетка рисуется поверх заново каждый кадр,
+  // поэтому старые линии не «плывут» и не дают призраков
+  var hist = document.createElement("canvas");
+  var hctx = hist.getContext("2d");
+  var PAD_T = 8, PAD_B = 18, PAD_L = 8, PAD_R = 8;
+
+  function sizeCanvas() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var rect = canvas.getBoundingClientRect();
+    W = Math.max(200, rect.width);
+    H = Math.max(120, rect.height);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    hist.width = canvas.width;
+    hist.height = canvas.height;
+    pxPerMs = (W - PAD_L - PAD_R) / 600; // окно 600 мс
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    clearCanvas();
+  }
+  function clearCanvas() {
+    hctx.fillStyle = "#0c0c0c";
+    hctx.fillRect(0, 0, W, H);
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(hist, 0, 0, W, H);
+    drawGrid();
+  }
+  window.addEventListener("resize", function () { sizeCanvas(); });
+
+  function stepLif(spikesArr) {
+    for (var i = 0; i < N; i++) {
+      var I = Math.random() < rates[i] * DT * 1e-3 ? 30 : 0;
+      var isRefr = refr[i] > 0;
+      var dv = (V_REST - v[i] + I) * (1 / TAU_M) * DT;
+      var vNew = v[i] + dv;
+      var spike = !isRefr && vNew >= V_THRESH;
+      v[i] = isRefr ? v[i] : (spike ? V_RESET : vNew);
+      refr[i] = Math.max(spike ? TAU_REF : refr[i] - DT, 0);
+      if (spike) spikesArr.push(i);
+    }
+  }
+
+  var SPK = "#e9e9e9";
+  function drawGrid() {
+    // свежая сетка поверх истории спайков — без накопления старых линий
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(hist, 0, 0, W, H);
+    ctx.strokeStyle = "rgba(255,255,255,0.09)";
+    ctx.fillStyle = "#8a8a8a";
+    ctx.font = "9.5px " + getComputedStyle(document.body).fontFamily;
+    var t0 = Math.floor((simTime - 600) / 50) * 50;
+    for (var t = t0; t <= simTime + 50; t += 50) {
+      var x = W - PAD_R - (simTime - t) * pxPerMs;
+      if (x < PAD_L || x > W - PAD_R) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, PAD_T);
+      ctx.lineTo(x, H - PAD_B);
+      ctx.stroke();
+      ctx.fillText(Math.round(t) + " мс", Math.min(x + 3, W - PAD_R - 34), H - PAD_B + 12);
+    }
+    ctx.fillStyle = "#6b6b6b";
+    ctx.font = "10px " + getComputedStyle(document.body).fontFamily;
+    ctx.fillText("нейрон 63", PAD_L + 2, H - PAD_B + 2);
+    ctx.fillText("нейрон 0", PAD_L + 2, PAD_T - 2);
+  }
+
+  function shiftLeft(dx) {
+    var sdx = Math.round(dx * dpr);
+    hctx.setTransform(1, 0, 0, 1, 0, 0);
+    try {
+      hctx.drawImage(hist, sdx, 0, hist.width - sdx, hist.height, 0, 0, hist.width - sdx, hist.height);
+    } catch (e) { /* ignore */ }
+    hctx.clearRect(hist.width - sdx, 0, sdx, hist.height);
+    hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  var lastTs = 0, frameId = null;
+  function frame(ts) {
+    if (!running) return;
+    frameId = requestAnimationFrame(frame);
+    if (ts - lastTs < 40) return; // ~25 fps достаточно для растра
+    lastTs = ts;
+
+    var msPerFrame = 8;                       // 8 мс симуляции за кадр
+    var dx = msPerFrame * pxPerMs;
+    var frameStart = simTime;
+    var spikesFrame = 0;
+    var steps = Math.round(msPerFrame / DT);
+
+    if (dx > 0.5) shiftLeft(dx);
+
+    for (var s = 0; s < steps; s++) {
+      var fired = [];
+      stepLif(fired);
+      spikesFrame += fired.length;
+      var x = W - PAD_R - (simTime - frameStart) * pxPerMs - DT * pxPerMs;
+      hctx.fillStyle = SPK;
+      for (var k = 0; k < fired.length; k++) {
+        var y = PAD_T + (1 - fired[k] / (N - 1)) * (H - PAD_T - PAD_B);
+        hctx.fillRect(x - 0.6, y - 0.8, 1.7, 1.7);
+      }
+      simTime += DT;
+    }
+
+    drawGrid();
+
+    rateEma = rateEma * 0.96 + (spikesFrame / (msPerFrame / 1000) / N) * 0.04;
+    rateEl.textContent = "активность: " + rateEma.toFixed(1) + " Гц / нейрон";
+  }
+
+  function start() {
+    if (reducedMotion) return;
+    running = true;
+    btnPlay.textContent = "⏸ Пауза";
+    if (frameId === null) frameId = requestAnimationFrame(frame);
+  }
+  function pause() {
+    running = false;
+    frameId = null; // важно: без этого после паузы анимация не перезапустится
+    btnPlay.textContent = "▶ Пуск";
+  }
+  btnPlay.addEventListener("click", function () {
+    if (running) pause(); else start();
+  });
+  btnReset.addEventListener("click", function () {
+    pause();
+    v.fill(V_REST);
+    refr.fill(0);
+    simTime = 0;
+    rateEma = 0;
+    sizeCanvas();
+    start();
+  });
+
+  sizeCanvas();
+  if (reducedMotion) {
+    pause();
+    rateEl.textContent = "демо приостановлено (reduced motion)";
+  } else {
+    frameId = requestAnimationFrame(frame);
+  }
+
+  /* ── live formula demo: simulate() как в Python ── */
+  var trCanvas = document.getElementById("trace");
+  var trMeta = document.getElementById("tr-meta");
+  var pyConsole = document.getElementById("py-console");
+  var btnPyRun = document.getElementById("btn-py-run");
+
+  // это ровно то, что печатает repr(n) в настоящем биндинге
+  var PYREPR =
+    "MyLIF - 6 ops, 2 states, 6 params\n" +
+    "  t0 <- Const(0)\n" +
+    "  t1 <- CmpGt(refr, t0)\n" +
+    "  t2 <- Leak(v, i_syn, inv_tau, v_rest)\n" +
+    "  t3 <- Blend(t1, v, t2)\n" +
+    "  v <- FireReset(t3, v_thresh, v_reset)  [spike]\n" +
+    "  refr <- RefrTimer(refr, tau_ref)\n";
+
+  if (trCanvas && pyConsole && btnPyRun) {
+    var tctx = trCanvas.getContext("2d");
+    var PY = { DT: 0.5, STEPS: 500, I: 30, INV_TAU: 0.1, V_REST: -70, V_THRESH: -54, V_RESET: -70, TAU_REF: 2 };
+    var tw = 0, th = 0, tdpr = 1;
+    var lastTrace = null;
+    var padL = 40, padR = 10, padT = 10, padB = 20;
+
+    // JS-порт пресета lif(): те же ops, та же математика, что у движка
+    function traceSim() {
+      var v = PY.V_REST, refr = 0, data = [], spikesAt = [], spk = 0;
+      for (var s = 0; s < PY.STEPS; s++) {
+        var isRefr = refr > 0;
+        var dv = (PY.V_REST - v + PY.I) * PY.INV_TAU * PY.DT;
+        var vNew = v + dv;
+        var spike = !isRefr && vNew >= PY.V_THRESH;
+        v = isRefr ? v : (spike ? PY.V_RESET : vNew);
+        refr = Math.max(spike ? PY.TAU_REF : refr - PY.DT, 0);
+        data.push(v);
+        if (spike) { spk++; spikesAt.push(s); }
+      }
+      lastTrace = { data: data, spikes: spk, spikesAt: spikesAt };
+      return lastTrace;
+    }
+
+    function traceSize() {
+      tdpr = Math.min(window.devicePixelRatio || 1, 2);
+      var r = trCanvas.getBoundingClientRect();
+      tw = Math.max(240, r.width);
+      th = Math.max(120, r.height);
+      trCanvas.width = Math.round(tw * tdpr);
+      trCanvas.height = Math.round(th * tdpr);
+      tctx.setTransform(tdpr, 0, 0, tdpr, 0, 0);
+    }
+    function yOf(v) { return padT + (1 - (v - -72) / (-50 - -72)) * (th - padT - padB); }
+    function xOf(s) { return padL + (s / (PY.STEPS - 1)) * (tw - padL - padR); }
+
+    function drawTrace(upto) {
+      if (!lastTrace) return;
+      var data = lastTrace.data;
+      var font = "10px " + getComputedStyle(document.body).fontFamily;
+      tctx.clearRect(0, 0, tw, th);
+      tctx.fillStyle = "#0c0c0c";
+      tctx.fillRect(0, 0, tw, th);
+
+      // порог — пунктиром
+      tctx.strokeStyle = "#8a8a8a";
+      tctx.setLineDash([4, 4]);
+      tctx.beginPath(); tctx.moveTo(padL, yOf(PY.V_THRESH)); tctx.lineTo(tw - padR, yOf(PY.V_THRESH)); tctx.stroke();
+      tctx.setLineDash([]);
+      tctx.fillStyle = "#8a8a8a";
+      tctx.font = font;
+      tctx.fillText("v_thresh -54", padL + 5, yOf(PY.V_THRESH) - 4);
+
+      // v_rest
+      tctx.strokeStyle = "#4a4a4a";
+      tctx.beginPath(); tctx.moveTo(padL, yOf(PY.V_REST)); tctx.lineTo(tw - padR, yOf(PY.V_REST)); tctx.stroke();
+      tctx.fillText("v_rest -70", padL + 5, yOf(PY.V_REST) - 4);
+
+      // ось времени
+      tctx.fillStyle = "#6b6b6b";
+      tctx.fillText("0 мс", padL, th - padB + 13);
+      tctx.fillText((PY.STEPS * PY.DT).toFixed(0) + " мс", tw - padR - 40, th - padB + 13);
+
+      // спайк-тики над порогом
+      tctx.strokeStyle = "#e9e9e9";
+      tctx.lineWidth = 1.2;
+      for (var i = 0; i < lastTrace.spikesAt.length; i++) {
+        var s = lastTrace.spikesAt[i];
+        if (s > upto) break;
+        var x = xOf(s);
+        tctx.beginPath();
+        tctx.moveTo(x, yOf(PY.V_THRESH) - 6);
+        tctx.lineTo(x, yOf(PY.V_THRESH) - 15);
+        tctx.stroke();
+      }
+      tctx.lineWidth = 1;
+
+      // траектория v(t)
+      tctx.strokeStyle = "#e9e9e9";
+      tctx.beginPath();
+      for (var k = 0; k <= upto && k < data.length; k++) {
+        var xk = xOf(k), yk = yOf(data[k]);
+        if (k === 0) tctx.moveTo(xk, yk); else tctx.lineTo(xk, yk);
+      }
+      tctx.stroke();
+    }
+
+    function runTrace(animate) {
+      traceSize();
+      var res = traceSim();
+      trMeta.textContent = "спайков: " + res.spikes;
+      pyConsole.innerHTML = PYREPR + '<span class="ok">>>> Trace(steps=' + PY.STEPS + ", dt=" + PY.DT + ", spikes=" + res.spikes + ")</span>";
+      var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!animate || reduced) { drawTrace(PY.STEPS); return; }
+      var t0 = performance.now();
+      var DUR = 1300;
+      function anim(ts) {
+        var p = Math.min(1, (ts - t0) / DUR);
+        drawTrace(Math.ceil(p * PY.STEPS));
+        if (p < 1) requestAnimationFrame(anim);
+      }
+      requestAnimationFrame(anim);
+    }
+
+    var pySec = document.getElementById("py");
+    var pyRan = false;
+    if (pySec) {
+      var pyVis = new IntersectionObserver(function (en) {
+        if (en[0].isIntersecting && !pyRan) {
+          pyRan = true;
+          // дать секции докончить reveal (opacity 0 → 1), чтобы анимация была видна
+          setTimeout(function () { runTrace(true); }, 350);
+          pyVis.disconnect();
+        }
+      }, { threshold: 0.2 });
+      pyVis.observe(pySec);
+    }
+    btnPyRun.addEventListener("click", function () { runTrace(true); });
+    window.addEventListener("resize", function () { if (pyRan) { traceSize(); drawTrace(PY.STEPS); } });
+  }
+})();
+</script>
+</body>
+</html>

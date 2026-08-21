@@ -109,8 +109,9 @@ import taas_checkmate as tc
 v, u, spikes = tc.step_izhikevich(v, u, I, dt=0.5)
 
 # Или симуляция полного коннектома мухи FlyWire
-brain = tc.BrainSimulator(n_neurons=130000, model="lif")
-spike_buffer = brain.step_batch(dt_ms=0.5, n_steps=100)
+conn = tc.ConnectomeData(rp, ci, vals, nt_types)   # CSR-массивы коннектома
+brain = tc.BrainRunner(conn, model="lif", dt_ms=0.5)
+spike_buffer = brain.run(n_steps=100)
 
 # Новый единый фасад (Фаза 9): все модели и коннектомы в одном модуле
 from taas_checkmate.pillars import LIFPopulation, ConnectomeBrain
@@ -125,6 +126,33 @@ from taas_checkmate.pillars import LIFPopulation, ConnectomeBrain
 | **Izhikevich (8K нейронов)** | **1 000 000 нейронов / сек** (в 5 раз быстрее NEST) |
 | **Осцилляторы ритмов T3** | **388x реального времени** @ 48kHz |
 | **GPU Connectome (CUDA)** | **130 000 нейронов FlyWire в реальном времени** |
+
+---
+
+## ⚙️ Сборка и SIMD-таргет
+
+Проект собирается с `-C target-cpu=native` (см. `.cargo/config.toml`) — это включает
+AVX2/FMA и даёт настоящие 256-битные пути для `wide::f32x8` (иначе `f32x8` молча
+эмулируется парой `f32x4` и хот-пути вроде `hh_poly_step` остаются на SSE).
+
+> ⚠️ Бинари/`.pyd` при этом **не переносимы** между машинами. Для портабельной
+> сборки: `RUSTFLAGS="-C target-cpu=x86-64" cargo build ...` (или удалите
+> `.cargo/config.toml`).
+
+**Runtime-диспетчеризация горячих листьев**: `wide::f32x8` выбирает реализацию
+на этапе компиляции (layout типа разный для AVX/SSE), поэтому весь SIMD-путь
+на лету не переключить. Но самый вызываемый примитив — `fast_exp_poly_simd`
+(полином exp для гейтов m/h/n/w) — продублирован на `core::arch` и выбирается
+через `is_x86_feature_detected!("avx2")`: даже портабельная сборка получает
+настоящий 256-битный exp на AVX2-машинах. Оба пути **бит-идентичны**
+(проверяется тестами на обеих сборках: FMA-ветка зеркалит wide).
+
+Проверка, что AVX2 реально в коде (release):
+
+```bash
+cargo rustc --release --lib -p pillars -- --emit=asm
+# в target/release/deps/pillars-*.s должны быть ymm-регистры и vfmadd-инструкции
+```
 
 ---
 

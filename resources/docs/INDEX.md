@@ -13,18 +13,17 @@ taas_checkmate/
 ├── build.rs            ← CUDA nvcc compilation
 ├── src/
 │   ├── lib.rs          ← Main crate: re-exports pillars, connectome (= pillars-connectome),
-│   │                      python bindings, unity ABI, karmac (inline), iit (inline)
+│   │                      python bindings, karmac (inline), iit (inline)
 │   ├── python/
 │   │   ├── mod.rs      ← PyO3 module registration (taas_checkmate.pillars facade)
 │   │   ├── neuron.rs   ← step_* нейронов (LIF, Izhikevich, HH, GCO, ...) — скаляр-или-массив
 │   │   ├── pillars.rs  ← NeuralPopulation, Network, ConnectomeBrain, SynapticConnectomeBrain
-│   │   ├── connectome_brain.rs ← BrainSimulator / BrainRunner PyO3 классы
+│   │   ├── connectome_brain.rs ← BrainRunner / SpikeRecorder PyO3 классы
 │   │   ├── connectome.rs       ← Connectome + BrainIO (legacy ABI)
 │   │   ├── sparse.rs   ← CSR sparse operations
 │   │   ├── karmac.rs   ← Cognitive architecture PyO3 классы
 │   │   ├── t3.rs       ← T3 oscillator + SPIGRAD
 │   │   ├── ...         ← 20+ additional Python modules
-│   ├── unity.rs        ← C ABI для Unity
 │   └── karmac/         ← [feature karmac] GNW, LOD, BasalGanglia (inline)
 │
 ├── crates/
@@ -104,7 +103,6 @@ taas-checkmate (root)
 | `karmac` | `karmac` | Cognitive architecture (GNW, LOD) |
 | `cuda` | `t3` + `connectome` + `pillars-cuda` + `pillars-connectome/cuda` | GPU acceleration |
 | `python` | `pyo3` + `numpy` + `pillars-connectome` + `connectome` + `t3` + `karmac` | Python bindings |
-| `unity` | `connectome` | Unity C ABI |
 | `all` | Everything | Full build |
 
 ---
@@ -141,7 +139,7 @@ taas-checkmate (root)
 
 See `.github/workflows/ci.yml`:
 - Rust stable build
-- `cargo clippy --features "t3,train,connectome,karmac,unity" -- -D warnings`
+- `cargo clippy --features "t3,train,connectome,karmac" -- -D warnings`
 - `cargo build` + `cargo test` с теми же фичами
 
 ---

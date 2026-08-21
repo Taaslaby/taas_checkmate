@@ -28,6 +28,9 @@ __pypackages__/
 # Generated binary data dumps (kept under examples/data/ when needed for examples)
 /*.dat
 /*.bin
+
+# Python extension binaries built via maturin (regenerated from src/python)
+*.pyd
 /nt_map*.bin
 /photo_map.bin
 

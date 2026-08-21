@@ -93,8 +93,9 @@ import taas_checkmate as tc
 v, u, spikes = tc.step_izhikevich(v, u, I, dt=0.5)
 
 # Муха коннектомун симуляциялыахха
-brain = tc.BrainSimulator(n_neurons=130000, model="lif")
-spike_buffer = brain.step_batch(dt_ms=0.5, n_steps=100)
+conn = tc.ConnectomeData(rp, ci, vals, nt_types)   # CSR-массивтар
+brain = tc.BrainRunner(conn, model="lif", dt_ms=0.5)
+spike_buffer = brain.run(n_steps=100)
 ```
 
 ---
