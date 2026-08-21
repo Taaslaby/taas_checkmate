@@ -76,6 +76,12 @@ pub(crate) fn compile(
         return Err(NeuromlError::parse("celsius must be finite"));
     }
 
+    // Validate the IR before compilation (non-fatal, errors become warnings)
+    let validation_errors = ir.validate();
+    for err in &validation_errors {
+        ir.warnings.insert(err.msg.clone());
+    }
+
     let cells: HashMap<&str, &Cell> = ir.cells.iter().map(|c| (c.id.as_str(), c)).collect();
     let synapses: HashMap<&str, &Synapse> =
         ir.synapses.iter().map(|s| (s.id.as_str(), s)).collect();
