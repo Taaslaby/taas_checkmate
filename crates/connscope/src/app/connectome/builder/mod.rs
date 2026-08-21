@@ -100,8 +100,6 @@ mod graph;
 mod presets;
 mod compile;
 mod io;
-mod view;
-mod sim;
 pub(crate) use graph::{Edge, GEdge, GNode, Node};
 use compile::{graph_to_program, input_reg_of};
 use io::{FileEdge, FileGraph, FileNode};
