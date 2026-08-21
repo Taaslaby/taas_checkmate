@@ -19,6 +19,7 @@ pub mod pst;
 pub mod pst_control;
 pub mod ridge;
 pub mod spiker;
+pub mod torus;
 pub mod trajectory;
 
 pub const PI: f32 = std::f32::consts::PI;

@@ -63,7 +63,10 @@ fn main() {
     let ms_simulated = dt as f64 * n_steps as f64;
     let neuron_steps = n as f64 * n_steps as f64;
     let secs = elapsed.as_secs_f64();
-    let rt_factor = ms_simulated / secs;
+    // Доля реального времени: симулированное время / стенное время.
+    // (Было: ms_simulated / secs — это мс биологии за секунду стенки, и
+    // печаталось как «быстрее реал.» с завышением в 1000×. Теперь честно.)
+    let rt_factor = ms_simulated / (secs * 1000.0);
     let mps = neuron_steps / secs / 1e6;
 
     println!();
@@ -73,7 +76,7 @@ fn main() {
     println!("  dt               = {dt} ms");
     println!("  симулировано     = {ms_simulated:.1} биол. мс");
     println!("  время стенки     = {secs:.3} с");
-    println!("  быстрее реал.    = {rt_factor:.1}×");
+    println!("  доля реальн. вр. = {rt_factor:.4}×");
     println!("  пропускная спос. = {mps:.1} млн нейрон-шагов/с");
     println!("  спайков          = {total_spikes}");
     println!("═══════════════════════════════════════════");

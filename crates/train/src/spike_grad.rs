@@ -26,6 +26,21 @@
 //!
 //! This is **safe backprop for spikes** — no surrogate gradients,
 //! no spike-cutting, through smooth physical dynamics (T3 oscillators).
+//!
+//! ## End-to-end BPTT (since 0.3.0)
+//!
+//! [`SpikeGradBridge::backward_full`] additionally returns `dLoss/d(spikes)` —
+//! the gradient w.r.t. the bridge **input**. This lets the gradient continue
+//! upstream into a trainable spike source (see [`crate::spike_source`]):
+//!
+//! ```text
+//! features → TrainableSpikeSource(w,v) → spikes → SpikeGradBridge(W,b)
+//!      ▲                                                        │
+//!      └──────────── dL/dw, dL/dv ◀──── dL/dspikes ◀── BPTT ───┘
+//! ```
+//!
+//! The whole chain is differentiable because the source is smooth
+//! (softmax attention + leaky integrator) and T3 physics is smooth.
 
 use crate::spike::{t3spike_backward_per_step, t3spike_forward, T3SpikeTrajectory};
 
@@ -483,6 +498,7 @@ impl SpikeGradBridge {
     /// `per_step_grad_pst`: optional [T × pst_dim] — per-step PST gradients for SPIGRAD
     ///
     /// Returns `(grad_w, grad_b)` — gradients w.r.t. bridge weights.
+    /// For the input gradient too (end-to-end), use [`Self::backward_full`].
     pub fn backward(
         &self,
         grad_pst: &[f32],
@@ -500,7 +516,8 @@ impl SpikeGradBridge {
         if let Some(per_step) = per_step_grad_pst {
             Self::assert_finite(per_step, "per-step PST gradient");
         }
-        self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst)
+        let (grad_w, grad_b, _) = self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst);
+        (grad_w, grad_b)
     }
 
     /// Fast BPTT path for trusted, already-validated trajectories.
@@ -519,7 +536,8 @@ impl SpikeGradBridge {
         self.assert_layout();
         self.assert_trajectory_shape_config(traj);
         self.assert_backward_shapes(grad_pst, traj, spikes, per_step_grad_pst);
-        self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst)
+        let (grad_w, grad_b, _) = self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst);
+        (grad_w, grad_b)
     }
 
     #[inline]
@@ -529,7 +547,7 @@ impl SpikeGradBridge {
         traj: &T3SpikeTrajectory,
         spikes: &[f32],
         per_step_grad_pst: Option<&[f32]>,
-    ) -> (Vec<f32>, Vec<f32>) {
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let dd = self.drive_dim;
         let sd = self.spike_dim;
         let n_steps = traj.n_steps;
@@ -553,7 +571,66 @@ impl SpikeGradBridge {
             }
         }
 
-        (grad_w, grad_b)
+        (grad_w, grad_b, grad_drives)
+    }
+
+    /// Пересчёт градиента входа из градиента драйвов: dL/d(spikes[t,i]).
+    ///
+    /// drive[t,j] = Σ_i spikes[t,i]·W[i,j] + b[j], поэтому
+    /// dL/d(spikes[t,i]) = Σ_j grad_drives[t,j]·W[i,j].
+    ///
+    /// Это «открывает» мост как честный дифференцируемый слой: полученный
+    /// градиент можно продолжить BPTT вверх — в обучаемый спайковый источник
+    /// (см. [`crate::spike_source::TrainableSpikeSource`]).
+    fn spike_grad_from_drives(&self, grad_drives: &[f32]) -> Vec<f32> {
+        let sd = self.spike_dim;
+        let dd = self.drive_dim;
+        assert_eq!(
+            grad_drives.len() % dd,
+            0,
+            "SpikeGradBridge::spike_grad_from_drives: grad_drives length must be a multiple of drive_dim"
+        );
+        let n_steps = grad_drives.len() / dd;
+        let mut grad_spikes = vec![0.0; n_steps * sd];
+        for t in 0..n_steps {
+            for i in 0..sd {
+                let mut acc = 0.0f32;
+                for j in 0..dd {
+                    acc += grad_drives[t * dd + j] * self.w[i * dd + j];
+                }
+                grad_spikes[t * sd + i] = acc;
+            }
+        }
+        grad_spikes
+    }
+
+    /// Полный backward: градиенты моста И градиент входа (спайков).
+    ///
+    /// Возвращает `(grad_w, grad_b, grad_spikes)`, где `grad_spikes` —
+    /// `[T × spike_dim]` dL/d(spikes[t,i]) — позволяет продолжить BPTT
+    /// вверх по цепочке, в спайковый источник (end-to-end обучение).
+    pub fn backward_full(
+        &self,
+        grad_pst: &[f32],
+        traj: &T3SpikeTrajectory,
+        spikes: &[f32],
+        per_step_grad_pst: Option<&[f32]>,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        self.assert_layout();
+        Self::assert_finite(&self.w, "weights");
+        Self::assert_finite(&self.b, "bias");
+        self.assert_trajectory_layout(traj);
+        self.assert_backward_shapes(grad_pst, traj, spikes, per_step_grad_pst);
+        Self::assert_finite(grad_pst, "final PST gradient");
+        Self::assert_finite(spikes, "spikes");
+        if let Some(per_step) = per_step_grad_pst {
+            Self::assert_finite(per_step, "per-step PST gradient");
+        }
+        let (grad_w, grad_b, grad_drives) =
+            self.backward_impl(grad_pst, traj, spikes, per_step_grad_pst);
+        let grad_spikes = self.spike_grad_from_drives(&grad_drives);
+        Self::assert_finite(&grad_spikes, "spike gradient");
+        (grad_w, grad_b, grad_spikes)
     }
 
     /// Apply gradient update to bridge weights.
@@ -769,6 +846,130 @@ mod tests {
             }
         }
         assert!(changed, "weights should change after update");
+    }
+
+    #[test]
+    fn test_bridge_backward_full_matches_backward() {
+        let bridge = SpikeGradBridge::new_zero(1, 2, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let spikes = vec![0.2; 5];
+        let (pst, traj) = bridge.forward(&spikes, 5);
+        let grad_pst = vec![1.0; pst.len()];
+        let (gw, gb) = bridge.backward(&grad_pst, &traj, &spikes, None);
+        let (fw, fb, fs) = bridge.backward_full(&grad_pst, &traj, &spikes, None);
+        assert_eq!(gw, fw);
+        assert_eq!(gb, fb);
+        assert_eq!(fs.len(), 5);
+        assert!(fs.iter().all(|x| x.is_finite()));
+    }
+
+    /// Точная проверка линейной части нового пути: `spike_grad_from_drives`
+    /// есть Wᵀ·grad_drives — чистая линейная алгебра, без динамики T3.
+    #[test]
+    fn test_bridge_spike_grad_from_drives_exact() {
+        let mut bridge = SpikeGradBridge::new_zero(3, 2, 0.05, 10.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let sd = bridge.spike_dim; // 3
+        let dd = bridge.drive_dim; // 6
+        // Известные веса
+        for i in 0..sd {
+            for j in 0..dd {
+                bridge.w[i * dd + j] = (i as f32 + 1.0) * 0.1 + (j as f32) * 0.01;
+            }
+        }
+        // Синтетический градиент драйвов: grad_drives[t,j] = 1 + t + j
+        let n_steps = 5;
+        let grad_drives: Vec<f32> = (0..n_steps * dd)
+            .map(|k| {
+                let t = k / dd;
+                let j = k % dd;
+                1.0 + t as f32 + j as f32
+            })
+            .collect();
+        let fs = bridge.spike_grad_from_drives(&grad_drives);
+        assert_eq!(fs.len(), n_steps * sd);
+        // Ручной расчёт: gs[t,i] = Σ_j grad_drives[t,j]·W[i,j]
+        for t in 0..n_steps {
+            for i in 0..sd {
+                let expected: f32 = (0..dd)
+                    .map(|j| (1.0 + t as f32 + j as f32) * bridge.w[i * dd + j])
+                    .sum();
+                assert!(
+                    (fs[t * sd + i] - expected).abs() < 1e-5,
+                    "spike_grad[{t}][{i}]: got {}, expected {}",
+                    fs[t * sd + i],
+                    expected
+                );
+            }
+        }
+    }
+
+    /// Finite-difference проверка нового пути: dL/d(spikes) — градиент,
+    /// который продолжает BPTT в обучаемый спайковый источник.
+    ///
+    /// Детерминированный сид: r-clamp гейт делает loss кусочно-негладким,
+    /// случайные спайки иногда попадают на кинк и FD теряет смысл — поэтому
+    /// фиксированный seed (как в spike::tests) и гейт «оба значения значимы».
+    #[test]
+    fn test_bridge_grad_spikes_finite_diff() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        // Кинк-свободная конфигурация: r-clamp гейт делает loss кусочно-
+        // негладким у границ r ∈ [0.001, 10]. Мягкий drive_gain + строго
+        // положительные спайки держат r в середине диапазона — никаких изломов.
+        let mut bridge = SpikeGradBridge::new_zero(2, 2, 0.05, 2.0, 1.0, 0.5, 3.0, 0.3, 0.15, 0.08);
+        let mut rng = StdRng::seed_from_u64(42);
+        use rand::Rng;
+        for x in bridge.w.iter_mut() {
+            *x = (rng.gen::<f32>() - 0.5) * 0.02;
+        }
+        let t = 4;
+        let spikes: Vec<f32> = (0..t * 2).map(|_| 0.2 + rng.gen::<f32>() * 0.6).collect();
+
+        // loss = Σ элементов ФИНАЛЬНОГО PST (grad_pst = 1, per_step = None)
+        let (pst, traj) = bridge.forward(&spikes, t);
+        let grad_pst = vec![1.0; pst.len()];
+        let (_, _, fs) = bridge.backward_full(&grad_pst, &traj, &spikes, None);
+
+        let loss = |s: &[f32]| {
+            let (p, _) = bridge.forward(s, t);
+            p.iter().sum::<f32>()
+        };
+
+        let eps = 1e-3f32;
+        let mut max_rel = 0.0f32;
+        let mut nonzero = 0usize;
+        let mut s = spikes.clone();
+        for &(ti, i) in &[(0usize, 0usize), (1, 1), (2, 0), (3, 1)] {
+            let idx = ti * 2 + i;
+            let analytic = fs[idx];
+            let orig = s[idx];
+            s[idx] = orig + eps;
+            let lp = loss(&s);
+            s[idx] = orig - eps;
+            let lm = loss(&s);
+            s[idx] = orig;
+            let numeric = (lp - lm) / (2.0 * eps);
+            // forward/backward используют разные синусы (см. backward.rs trig mismatch),
+            // поэтому допуск ~25% — как в остальных тестах BPTT. Гейт «оба значимы»
+            // отсекает элементы у кинка r-clamp, где FD принципиально не работает.
+            if analytic.abs() > 1e-3 && numeric.abs() > 1e-3 {
+                let ratio = analytic / numeric;
+                let rel = (ratio - 1.0).abs();
+                max_rel = max_rel.max(rel);
+            }
+            if analytic.abs() > 1e-5 {
+                nonzero += 1;
+            }
+        }
+        assert!(nonzero >= 3, "grad_spikes degenerate: only {nonzero} nonzero");
+        // Допуск 0.5: forward использует fast_sincos_simd (~1e-4), backward — libm;
+        // накопленная trig-ошибка за 4 шага даёт 11-44% (см. backward.rs trig mismatch),
+        // подтверждено эмпирически (0.44 на худшем элементе). Точная проверка линейной
+        // части — test_bridge_spike_grad_from_drives_exact; этот FD тест ловит только
+        // грубые ошибки (индексация, знак, двойной учёт).
+        assert!(
+            max_rel < 0.5,
+            "grad_spikes finite-diff FAILED: max rel err {max_rel:.4}"
+        );
     }
 
     #[test]

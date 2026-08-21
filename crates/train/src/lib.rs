@@ -7,11 +7,16 @@
 
 pub mod rl;
 
+pub mod eqprop;
+
 #[cfg(feature = "t3")]
 pub mod spike;
 
 #[cfg(feature = "t3")]
 pub mod spike_grad;
+
+#[cfg(feature = "t3")]
+pub mod spike_source;
 
 #[cfg(all(feature = "t3", feature = "cuda"))]
 pub mod spike_cuda;

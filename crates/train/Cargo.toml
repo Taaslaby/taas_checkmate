@@ -23,3 +23,7 @@ default = []
 name = "spikegrad_embodied"
 required-features = ["t3"]
 
+[[example]]
+name = "spikegrad_endtoend"
+required-features = ["t3"]
+
