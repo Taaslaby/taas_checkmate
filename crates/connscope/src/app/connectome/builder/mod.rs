@@ -633,8 +633,8 @@ impl NeuronBuilder {
         }
     }
 
-    fn draw_minimap(&self, painter: &egui::Painter, canvas_size: Vec2) {
-        let mm = self.minimap_rect(canvas_size);
+    fn draw_minimap(&self, painter: &egui::Painter, origin: Pos2, canvas_size: Vec2) {
+        let mm = self.minimap_rect(canvas_size).translate(origin.to_vec2());
         // мягкая тень под миникартой + muted бордер под тему
         painter.rect_filled(
             mm.expand(3.0),
@@ -663,7 +663,10 @@ impl NeuronBuilder {
         if self.nodes.is_empty() {
             return;
         }
-        let (grect, scale, gmn) = self.minimap_map(canvas_size);
+        let (grect, scale, gmn) = {
+            let (r, s, g) = self.minimap_map(canvas_size);
+            (r.translate(origin.to_vec2()), s, g)
+        };
         for n in &self.nodes {
             let sz = node_size_of(n.kind);
             let p = grect.min + (n.pos.to_vec2() - gmn) * scale;
@@ -968,7 +971,7 @@ impl NeuronBuilder {
 
         // minimap floats above everything
         if self.show_minimap {
-            self.draw_minimap(painter, size);
+            self.draw_minimap(painter, origin, size);
         }
     }
 
@@ -1052,29 +1055,14 @@ impl NeuronBuilder {
             ui.label(format!("⚡ {}", self.total_spikes));
         });
         ui.horizontal_wrapped(|ui| {
-            // File — схлопнуто в меню, как в Blender (не 3 кнопки в ряд)
-            egui::ComboBox::from_id_salt("file_ops")
-                .selected_text("▭ File")
-                .show_ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(160.0));
-                    });
-                    if ui.button("💾 Save").clicked() {
-                        self.save_graph();
-                    }
-                    if ui.button("📂 Load").clicked() {
-                        self.load_file();
-                    }
-                    if ui.button("🗑 Clear — очистить граф").clicked() {
-                        self.push_undo();
-                        self.nodes.clear();
-                        self.edges.clear();
-                        self.selected = None;
-                        self.selected_edge = None;
-                        self.running = false;
-                        self.reset_sim();
-                    }
-                });
+            ui.label("File:");
+            ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
+            if ui.button("💾 Save").clicked() {
+                self.save_graph();
+            }
+            if ui.button("📂 Load").clicked() {
+                self.load_file();
+            }
             ui.separator();
             // Ops — дропдаун + Add node (вместо 16 кнопок в ряд)
             egui::ComboBox::from_id_salt("ops_add")
