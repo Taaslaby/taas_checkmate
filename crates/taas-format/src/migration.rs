@@ -67,7 +67,8 @@ fn migrate_v0_1_to_v0_2(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     // Try to migrate TriOscillator to grouped format
     let skip_tri_components = if tri_migration_ok {
-        let n = reader.get_f32("th1").unwrap().len();
+        // get_f32("th1") уже проверен выше (tri_migration_ok) — безопасно.
+        let n = reader.get_f32("th1").map(|d| d.len()).unwrap_or(0);
         match load_trioscilator(&reader, n) {
             Ok(tri) => {
                 save_trioscilator(&tri, &mut writer);

@@ -165,10 +165,16 @@ impl SimdLane for f32x8 {
 
     #[inline(always)]
     fn round(self) -> Self {
-        let pos = (self + Self::splat(0.5)).floor();
-        let neg = (self - Self::splat(0.5)).ceil();
-        let ge_zero = SimdLane::cmp_ge(self, Self::zero());
-        SimdLane::blend(ge_zero, pos, neg)
+        // Round half away from zero (стандартный round):
+        //   round( 2.5) =  3, round(-2.5) = -3
+        // Старая формула `(x-0.5).ceil()` для отрицательных давала
+        // round(-2.5) = -2 (half toward +inf) — несимметрично и расходилось
+        // с std::f32::round. trunc(x + copysign(0.5, x)) — branchless и
+        // SIMD-дружественно.
+        let half = Self::splat(0.5);
+        let sign = SimdLane::signum(self);
+        let mag = self + half * sign;
+        SimdLane::trunc(mag)
     }
     #[inline(always)]
     fn floor(self) -> Self {

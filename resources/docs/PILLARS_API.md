@@ -30,7 +30,7 @@ core/
 
 ### SimdLane trait (stable — no changes)
 
-Every method maps to one hardware instruction. `f32x8` (SIMD) and `f32` (scalar) both implement it.
+Primitive methods map to one hardware instruction; composite helpers stay branchless. `f32x8` (SIMD) and `f32` (scalar) both implement it.
 
 ```rust
 pub trait SimdLane: Copy + Add<Output=Self> + ... {
@@ -52,7 +52,7 @@ Holds raw SoA pointers, processes 8 neurons at a time. **Not for user code.**
 
 ```rust
 pub struct SimdContext<S: SimdLane> {
-    pub state: [S; 16],      // MAX_STATES = 16, loaded from SoA
+    pub state: [S; 32],      // MAX_STATES = 32, loaded from SoA
     pub params_ptr: *const f32,
     pub n: usize, pub off: usize,
     pub i_syn: S, pub i_pre: S, pub i_post: S,

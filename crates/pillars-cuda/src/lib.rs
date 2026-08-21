@@ -43,15 +43,14 @@ pub use engine::CompiledModel;
 
 // ── Zoo models transpiled IN pillars (no copy here — single source) ──
 pub use pillars::zoo::neurons::{
-    AdExModel, AlphaLifModel, AtlasovNeuromotorModel, BeamModel, FHNModel, GLIF3Model, GLIF4Model,
-    HAAPModel, HHModel, HRModel, Izhikevich2007Model, IzhikevichDualModel, IzhikevichModel,
-    LIFAtModel, LIFModel, MorrisLecarModel,    RateModel, SAWModel, TransformerModel, VSNModel,
-    WCModel,
+    AdExModel, AlphaLifModel, BeamModel, FHNModel, GLIF3Model, GLIF4Model, HAAPModel, HHModel,
+    HRModel, Izhikevich2007Model, IzhikevichDualModel, IzhikevichModel, LIFAtModel, LIFModel,
+    MorrisLecarModel, NeuromotorModel, RateModel, SAWModel, TransformerModel, VSNModel, WCModel,
 };
 pub use pillars::zoo::neurons::{
-    ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE, BEAM_CUDA_SOURCE,
-    FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HH_CUDA_SOURCE,
-    HR_CUDA_SOURCE, IZHIKEVICH_2007_CUDA_SOURCE, IZHIKEVICH_CUDA_SOURCE,
-    IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, LIF_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE,
+    ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, BEAM_CUDA_SOURCE, FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE,
+    GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HH_CUDA_SOURCE, HR_CUDA_SOURCE,
+    IZHIKEVICH_2007_CUDA_SOURCE, IZHIKEVICH_CUDA_SOURCE, IZHIKEVICH_DUAL_CUDA_SOURCE,
+    LIFAT_CUDA_SOURCE, LIF_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE, NEUROMOTOR_CUDA_SOURCE,
     RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, TRANSFORMER_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };

@@ -365,11 +365,12 @@ impl<M: Model> NeuralPopulation<M> {
         let cap = self.capacity;
 
         for off in (0..n8).step_by(8) {
-            if off + 64 < n8 {
-                // SAFETY: off + 64 < n8 <= capacity — prefetch stays in bounds.
+            const PF: usize = crate::core::util::PREFETCH_DISTANCE;
+            if off + PF < n8 {
+                // SAFETY: off + PF < n8 <= capacity — prefetch stays in bounds.
                 unsafe {
-                    crate::core::util::prefetch_read(self.state.as_ptr(), off + 64);
-                    crate::core::util::prefetch_read(self.params.as_ptr(), off + 64);
+                    crate::core::util::prefetch_read(self.state.as_ptr(), off + PF);
+                    crate::core::util::prefetch_read(self.params.as_ptr(), off + PF);
                 }
             }
 

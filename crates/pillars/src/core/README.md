@@ -18,7 +18,10 @@ SimdLane trait (генерик S: SimdLane)
 └─────────────────┴─────────────────┘
 ```
 
-Каждый метод `SimdLane` компилируется в **ровно одну аппаратную инструкцию**.
+Каждый примитивный метод `SimdLane` (арифметика, сравнения, load/store)
+компилируется в **ровно одну аппаратную инструкцию**. Составные хелперы
+(`signum`, `round`, `hypot`, `cbrt`, `clamp01`) собираются из нескольких
+инструкций без ветвлений (branchless).
 
 ---
 
@@ -28,11 +31,11 @@ SimdLane trait (генерик S: SimdLane)
 |------|------|:------------:|
 | [`arch.rs`](arch.rs) | Детекция SIMD-ширины (`LANES`, `ALIGN`, `pad_lanes`, `SimdType`) | ✅ safe |
 | [`buf.rs`](buf.rs) | `AlignedVec` — выровненная куча (32 байта), auto-padding до ×8 | ⚠️ unsafe внутри |
-| [`lane.rs`](lane.rs) | Трейт `SimdLane` — интерфейс к железу (контракт «1 метод = 1 инструкция») | ✅ safe |
+| [`lane.rs`](lane.rs) | Трейт `SimdLane` — интерфейс к железу (примитивы = 1 инструкция) | ✅ safe |
 | [`lane_f32x8.rs`](lane_f32x8.rs) | `SimdLane for f32x8` — AVX2/NEON/WASM через `wide` | 🔒 unsafe |
 | [`lane_f32.rs`](lane_f32.rs) | `SimdLane for f32` — скалярный fallback (хвосты) | ✅ safe |
 | [`cond.rs`](cond.rs) | `Cond<S>` — читаемый branchless `cond().then().else_()` | ✅ safe |
-| [`context.rs`](context.rs) | `SimdContext<S>` — state/params/шины; `MAX_STATES = 16` | ⚠️ unsafe |
+| [`context.rs`](context.rs) | `SimdContext<S>` — state/params/шины; `MAX_STATES = 32` | ⚠️ unsafe |
 | [`compute.rs`](compute.rs) | `ComputeNeuron` + `StepContext` — типизированный API моделей | ✅ safe |
 | [`population.rs`](population.rs) | `NeuralPopulation` — безопасный SoA-раннер (главный вход) | ⚠️ unsafe внутри |
 | [`runner.rs`](runner.rs) | `run_neuron*` — legacy raw-pointer раннеры (≤6 состояний) + макросы load/save_state | 🔒 unsafe |
@@ -80,7 +83,7 @@ state:  [v×cap]  [u×cap]      [refr×cap]   …
 
 ## Ключевые контракты
 
-### `SimdLane` — «1 метод = 1 инструкция»
+### `SimdLane` — примитивы = 1 инструкция
 
 Трейт — единственный интерфейс, против которого пишут модели. У него две
 реализации: `f32x8` (SIMD) и `f32` (скаляр). Обе обязаны вести себя
@@ -90,11 +93,11 @@ state:  [v×cap]  [u×cap]      [refr×cap]   …
 ⚠️ Не путайте маску (`-1.0`/NaN) с арифметическим спайком (`1.0`) — для
 математики пластичности используйте `spike_to_float` (в `ops/spike.rs`).
 
-### `MAX_STATES = 16`
+### `MAX_STATES = 32`
 
 Единственное место, где ограничено число состояний модели. Макросы
 `load/save_state_{scalar,simd}!` итерируют до `M::N_STATE` на этапе компиляции
-с гвардом `const { assert!(M::N_STATE <= MAX_STATES); }` — модель с 17
+с гвардом `const { assert!(M::N_STATE <= MAX_STATES); }` — модель с 33
 состояниями **не скомпилируется**, а не упадёт в рантайме.
 
 Legacy `run_neuron*` принимают ровно 6 указателей по сигнатуре — для моделей
@@ -158,7 +161,7 @@ ctx.set_s(0, ctx.s(0) + (ctx.p(2) - ctx.s(0) + ctx.i()) * ctx.p(1) * ctx.dt());
 
 ## Изменение числа состояний
 
-1. Поднять `MAX_STATES` в `context.rs` (если нужно >16)
+1. Поднять `MAX_STATES` в `context.rs` (если нужно >32)
 2. Больше ничего! Макросы и `NeuralPopulation` уже итерируют до `M::N_STATE`
 3. Legacy `run_neuron*` — не трогаем: у них фиксированная сигнатура на 6
 

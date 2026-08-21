@@ -123,7 +123,17 @@ impl SimdLane for f32 {
     }
     #[inline(always)]
     fn signum(self) -> Self {
-        self.signum()
+        // std::f32::signum возвращает NaN для NaN и 1.0 для ±0.0 —
+        // это расходится с векторной реализацией (lane_f32x8), где
+        // NaN и ±0.0 дают 0.0. Выравниваем под SIMD-вариант: это
+        // обязательство «SIMD ≡ scalar» из lane_tests.rs.
+        if self.is_nan() || self == 0.0 {
+            0.0
+        } else if self > 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
     }
     #[inline(always)]
     fn mul_add(self, a: Self, b: Self) -> Self {
@@ -148,10 +158,9 @@ impl SimdLane for f32 {
 
     #[inline(always)]
     fn round(self) -> Self {
-        let pos = (self + Self::splat(0.5)).floor();
-        let neg = (self - Self::splat(0.5)).ceil();
-        let ge_zero = SimdLane::cmp_ge(self, Self::zero());
-        SimdLane::blend(ge_zero, pos, neg)
+        // Round half away from zero — совпадает с SIMD-вариантом
+        // (lane_f32x8::round) и std::f32::round.
+        self.round()
     }
     #[inline(always)]
     fn floor(self) -> Self {
@@ -345,8 +354,11 @@ mod tests {
 
     #[test]
     fn test_round_floor_ceil() {
+        // Round half away from zero (совпадает с std::f32::round и f32x8)
         assert!((f32::round(2.5) - 3.0).abs() < 1e-6, "round 2.5");
         assert!((f32::round(-2.5) - (-3.0)).abs() < 1e-6, "round -2.5");
+        assert!((f32::round(2.4) - 2.0).abs() < 1e-6, "round 2.4");
+        assert!((f32::round(-2.4) - (-2.0)).abs() < 1e-6, "round -2.4");
         assert!((f32::floor(2.7) - 2.0).abs() < 1e-6);
         assert!((f32::ceil(2.3) - 3.0).abs() < 1e-6);
     }
@@ -355,10 +367,13 @@ mod tests {
     fn test_abs_signum() {
         assert!((f32::abs(-5.0) - 5.0).abs() < 1e-6);
         assert!((f32::abs(5.0) - 5.0).abs() < 1e-6);
-        assert!(((-5.0f32).signum() - (-1.0)).abs() < 1e-6);
-        assert!(((5.0f32).signum() - 1.0).abs() < 1e-6);
-        // signum(0) = 1.0 (std::f32::signum returns 1.0 for +0.0)
-        assert!(((0.0f32).signum() - 1.0).abs() < 1e-6, "signum(0)");
+        assert!((SimdLane::signum(-5.0f32) - (-1.0)).abs() < 1e-6);
+        assert!((SimdLane::signum(5.0f32) - 1.0).abs() < 1e-6);
+        // SIMD-parity: signum(±0.0) = 0.0 (не 1.0 как у std::f32::signum)
+        assert_eq!(SimdLane::signum(0.0f32), 0.0, "signum(+0.0)");
+        assert_eq!(SimdLane::signum(-0.0f32), 0.0, "signum(-0.0)");
+        // SIMD-parity: signum(NaN) = 0.0 (не NaN как у std::f32::signum)
+        assert_eq!(SimdLane::signum(f32::NAN), 0.0, "signum(NaN)");
     }
 
     #[test]

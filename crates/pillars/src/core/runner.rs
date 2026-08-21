@@ -411,10 +411,11 @@ pub unsafe fn run_neuron_ext<M: Model>(
 
     for off in (0..n8).step_by(8) {
         unsafe {
-            if off + 64 < n8 {
-                crate::core::util::prefetch_read(params, off + 64);
+            const PF: usize = crate::core::util::PREFETCH_DISTANCE;
+            if off + PF < n8 {
+                crate::core::util::prefetch_read(params, off + PF);
                 if !v.is_null() {
-                    crate::core::util::prefetch_read(v, off + 64);
+                    crate::core::util::prefetch_read(v, off + PF);
                 }
             }
 

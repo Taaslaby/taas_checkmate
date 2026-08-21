@@ -13,8 +13,10 @@
 //! AVX2: vcmpps        scalar: ucomiss + setae
 //! ```
 //!
-//! Every method in `SimdLane` compiles to **exactly one hardware instruction**.
-//! No branching. No lookup tables. No runtime dispatch.
+//! Primitive methods in `SimdLane` (arithmetic, compares, loads) compile to
+//! **exactly one hardware instruction**; composite helpers (`signum`, `round`,
+//! `hypot`, `cbrt`) are short branchless sequences. No branching on data.
+//! No lookup tables. No runtime dispatch.
 //!
 //! ## Module Boundaries
 //!
@@ -35,7 +37,7 @@
 //! ## State-channel limit
 //!
 //! [`context::MAX_STATES`] — единственное место, где ограничивается число
-//! состояний модели (16). Макросы `load_state_*` / `save_state_*` и
+//! состояний модели (32). Макросы `load_state_*` / `save_state_*` и
 //! `NeuralPopulation` итерируют до `M::N_STATE` на этапе компиляции — новых
 //! состояний не нужно трогать unsafe-код. Legacy `run_neuron*` принимают
 //! ровно 6 указателей состояний по сигнатуре; для более сложных моделей

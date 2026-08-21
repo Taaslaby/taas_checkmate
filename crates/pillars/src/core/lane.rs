@@ -2,7 +2,10 @@
 //!
 //! **This is the critical boundary between Rust and hardware.**
 //!
-//! Every method maps to **exactly one hardware instruction**.
+//! Primitive methods map to **exactly one hardware instruction**
+//! (arithmetic, comparisons, loads/stores). Composite helpers
+//! (`signum`, `round`, `hypot`, `cbrt`, `clamp01`) are short branchless
+//! sequences built from those primitives.
 //! Writing a model against `SimdLane` means writing code that compiles
 //! to both AVX2 and scalar from the same source — without runtime checks.
 //!
@@ -39,13 +42,14 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use super::cond::Cond;
 
 // ═══════════════════════════════════════════════════════════════════
-//  SimdLane Trait — Every method maps to one hardware instruction
+//  SimdLane Trait — primitives map to one hardware instruction
 // ═══════════════════════════════════════════════════════════════════
 
 /// Zero-Cost SIMD Lane Abstraction.
 ///
 /// Implemented for `f32x8` (SIMD) and `f32` (scalar tail).
-/// Every method maps to a single hardware instruction where possible.
+/// Primitive methods map to a single hardware instruction where possible;
+/// composite helpers stay branchless.
 pub trait SimdLane:
     Copy
     + Sized

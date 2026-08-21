@@ -20,9 +20,9 @@ fn main() {
 
     // ── (0) градиент-чек: контраст vs backprop ──
     let net0 = EqPropNet::new(8, 1);
-    let (dw_bp, dV_bp) = net0.backprop_grad(&x, &t);
+    let (dw_bp, d_v_bp) = net0.backprop_grad(&x, &t);
     let mut dw_ch = vec![0.0f64; net0.w.len()];
-    let mut dV_ch = vec![0.0f64; net0.v.len()];
+    let mut d_v_ch = vec![0.0f64; net0.v.len()];
     for (x2, &tg) in x.iter().zip(&t) {
         let xv = [1.0, x2[0], x2[1]];
         let (h_free, y_free) = net0.settle(&xv, None, 0.0, 200);
@@ -32,17 +32,23 @@ fn main() {
                 dw_ch[i * 3 + j] += (h_nudge[i] - h_free[i]) * xv[j];
             }
         }
-        dV_ch[0] += y_nudge - y_free;
+        d_v_ch[0] += y_nudge - y_free;
         for i in 0..net0.n_hidden {
-            dV_ch[i + 1] += y_nudge * h_nudge[i] - y_free * h_free[i];
+            d_v_ch[i + 1] += y_nudge * h_nudge[i] - y_free * h_free[i];
         }
     }
     println!("\n── (0) ГРАДИЕНТ-ЧЕК: контраст vs backprop ──");
-    println!("  cos(dW) = {:+.4}   (|cos| → 1 = контраст вдоль градиента)", cosine(&dw_ch, &dw_bp));
+    println!(
+        "  cos(dW) = {:+.4}   (|cos| → 1 = контраст вдоль градиента)",
+        cosine(&dw_ch, &dw_bp)
+    );
     // dV: CHL ΔV — градиент симметричной энергетической сети, а backprop_grad
     // — feedforward-эталон (без Vᵀy обратной связи). Это разные задачи, поэтому
     // cos(dV) не обязан быть ≈ ±1 — и это ожидаемо, а не баг.
-    println!("  cos(dV) = {:+.4}   (≠1 ожидаемо: CHL ΔV vs feedforward-эталон)", cosine(&dV_ch, &dV_bp));
+    println!(
+        "  cos(dV) = {:+.4}   (≠1 ожидаемо: CHL ΔV vs feedforward-эталон)",
+        cosine(&d_v_ch, &d_v_bp)
+    );
 
     // ── (A) контрастное правило ──
     println!("\n── (A) КОНТРАСТНОЕ правило (EqProp) — «STDP с градиентом» ──");
@@ -81,8 +87,14 @@ fn main() {
     let acc_a = net.accuracy(&x, &t_usize);
     let acc_b = net2.accuracy(&x, &t_usize);
     println!("\n==============================================================");
-    println!("  Контраст (STDP+градиент): {:.0}%  ← решает XOR", acc_a * 100.0);
-    println!("  Чистый Хебб (STDP)      : {:.0}%  ← не решает (нет credit)", acc_b * 100.0);
+    println!(
+        "  Контраст (STDP+градиент): {:.0}%  ← решает XOR",
+        acc_a * 100.0
+    );
+    println!(
+        "  Чистый Хебб (STDP)      : {:.0}%  ← не решает (нет credit)",
+        acc_b * 100.0
+    );
     println!("==============================================================");
     println!("  Вывод: контраст двух фаз = ошибка = градиент. Это и есть");
     println!("         «STDP, но градиентный» — твоя формула, Антон.");

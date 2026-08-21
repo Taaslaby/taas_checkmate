@@ -9,10 +9,11 @@
 use pillars::core::population::NeuralPopulation;
 use pillars::zoo::Model;
 use pillars_cuda::{
-    CompiledModel, ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, ATLASOV_NEUROMOTOR_CUDA_SOURCE,
-    BEAM_CUDA_SOURCE, FHN_CUDA_SOURCE, GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE,
-    HR_CUDA_SOURCE, IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE,
-    RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, TRANSFORMER_CUDA_SOURCE, VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
+    CompiledModel, ADEX_CUDA_SOURCE, ALPHA_LIF_CUDA_SOURCE, BEAM_CUDA_SOURCE, FHN_CUDA_SOURCE,
+    GLIF3_CUDA_SOURCE, GLIF4_CUDA_SOURCE, HAAP_CUDA_SOURCE, HR_CUDA_SOURCE,
+    IZHIKEVICH_DUAL_CUDA_SOURCE, LIFAT_CUDA_SOURCE, MORRIS_LECAR_CUDA_SOURCE,
+    NEUROMOTOR_CUDA_SOURCE, RATE_CUDA_SOURCE, SAW_CUDA_SOURCE, TRANSFORMER_CUDA_SOURCE,
+    VSN_CUDA_SOURCE, WC_CUDA_SOURCE,
 };
 
 const N: usize = 64; // multiple of 8 → capacity == n, stride == n
@@ -107,13 +108,13 @@ fn alpha_lif_parity() {
         ALPHA_LIF_CUDA_SOURCE,
         &[(0, -52.0), (1, 0.0), (2, 22.0)], // v, g, refr_cnt (not refractory)
         &[
-            0.1,     // dt
-            0.005,   // time_factor = dt/tau_mem (0.1/20)
-            -52.0,   // v_rest
-            -45.0,   // v_thresh
-            -52.0,   // v_reset
-            22.0,    // refr_steps (tau_ref=2.2ms / dt=0.1ms)
-            0.98,    // syn_decay = 1 - dt/tau_syn (1 - 0.1/5)
+            0.1,   // dt
+            0.005, // time_factor = dt/tau_mem (0.1/20)
+            -52.0, // v_rest
+            -45.0, // v_thresh
+            -52.0, // v_reset
+            22.0,  // refr_steps (tau_ref=2.2ms / dt=0.1ms)
+            0.98,  // syn_decay = 1 - dt/tau_syn (1 - 0.1/5)
         ],
         0.1,
         50.0, // conductance input (delayed) in mV-equivalent
@@ -245,9 +246,7 @@ fn beam_parity() {
         "beam_kernel",
         BEAM_CUDA_SOURCE,
         &[(0, 0.0), (1, 0.9), (2, 0.0)], // phase, amp, echo
-        &[
-            0.5, 0.1, 0.05, 0.2, 0.05, 1.5, 0.9, 0.02, 0.5, 0.5, 0.6,
-        ], // dt, f0, k_i, k_echo, inv_tau_echo, w_echo, amp0, inv_tau_amp, k_amp, thresh, drain
+        &[0.5, 0.1, 0.05, 0.2, 0.05, 1.5, 0.9, 0.02, 0.5, 0.5, 0.6], // dt, f0, k_i, k_echo, inv_tau_echo, w_echo, amp0, inv_tau_amp, k_amp, thresh, drain
         0.5,
         1.0,
         1000,
@@ -271,8 +270,8 @@ fn transformer_parity() {
             (4, 0.0),
             (5, 0.0),
             (6, 0.0),
-            (7, 0.0),  // mem0..mem7
-            (8, 0.0),  // acc
+            (7, 0.0), // mem0..mem7
+            (8, 0.0), // acc
             (9, 1.0),
             (10, 1.0),
             (11, 1.0),
@@ -292,9 +291,9 @@ fn transformer_parity() {
         ],
         &[
             0.5, 0.95, 1.0, 0.5, 0.9, 0.5, // dt,decay,gain,inv_tau_acc,thresh,k_scale
-            0.01, 0.01,                       // eta_k, eta_v
-            1.0, 2.0,                         // w_base, w_span
-            1.0, 2.0,                         // v_base, v_span
+            0.01, 0.01, // eta_k, eta_v
+            1.0, 2.0, // w_base, w_span
+            1.0, 2.0, // v_base, v_span
         ],
         0.5,
         1.0,
@@ -428,12 +427,12 @@ fn wc_parity() {
 }
 
 #[test]
-fn atlasov_parity() {
-    // AtlasovNeuromotor: muscle, no spikes. i_in = 1.0 acts as the spike
+fn neuromotor_parity() {
+    // Neuromotor (Atlasov): muscle, no spikes. i_in = 1.0 acts as the spike
     // mask that drives Ca²⁺ influx.
-    let (spikes, bits) = run_parity::<pillars_cuda::AtlasovNeuromotorModel>(
-        "atlasovneuromotor_kernel",
-        ATLASOV_NEUROMOTOR_CUDA_SOURCE,
+    let (spikes, bits) = run_parity::<pillars_cuda::NeuromotorModel>(
+        "neuromotor_kernel",
+        NEUROMOTOR_CUDA_SOURCE,
         &[(0, 0.0), (1, 0.0), (2, 0.0), (3, 1.0), (4, 0.0)], // ca, tension, reset_flag, length, velocity
         &[1.0, 0.1, 0.9, 0.5, 1.0, 0.2, 1.0, 1.0, 1.0],
         1.0,
@@ -441,8 +440,8 @@ fn atlasov_parity() {
         200,
         2e-3,
     );
-    assert_eq!(spikes, 0, "atlasov is a muscle — must not spike");
-    eprintln!("[parity] atlasov: max bits={bits}");
+    assert_eq!(spikes, 0, "neuromotor is a muscle — must not spike");
+    eprintln!("[parity] neuromotor: max bits={bits}");
 }
 
 /// Every zoo-transpiled source must be self-contained (kernel + step fn).
@@ -454,7 +453,11 @@ fn zoo_sources_are_self_contained() {
         ("adex_kernel", "adex_step", ADEX_CUDA_SOURCE),
         ("glif3_kernel", "glif3_step", GLIF3_CUDA_SOURCE),
         ("beam_kernel", "beam_step", BEAM_CUDA_SOURCE),
-        ("transformer_kernel", "transformer_step", TRANSFORMER_CUDA_SOURCE),
+        (
+            "transformer_kernel",
+            "transformer_step",
+            TRANSFORMER_CUDA_SOURCE,
+        ),
         ("glif4_kernel", "glif4_step", GLIF4_CUDA_SOURCE),
         ("lifat_kernel", "lifat_step", LIFAT_CUDA_SOURCE),
         (
@@ -473,9 +476,9 @@ fn zoo_sources_are_self_contained() {
         ),
         ("wc_kernel", "wc_step", WC_CUDA_SOURCE),
         (
-            "atlasovneuromotor_kernel",
-            "atlasovneuromotor_step",
-            ATLASOV_NEUROMOTOR_CUDA_SOURCE,
+            "neuromotor_kernel",
+            "neuromotor_step",
+            NEUROMOTOR_CUDA_SOURCE,
         ),
         ("rate_kernel", "rate_step", RATE_CUDA_SOURCE),
     ];

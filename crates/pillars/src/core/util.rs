@@ -79,6 +79,12 @@ pub unsafe fn load8_i32(ptr: *const i32, off: usize) -> f32x8 {
     ])
 }
 
+/// How far ahead of the current SIMD chunk the population runners prefetch
+/// (in f32 elements). 64 floats = 256 bytes ≈ 2–4 cache lines — enough lead
+/// time to hide L2/L3 latency on AVX2-class CPUs without polluting L1.
+/// Tune only with a population benchmark (`benches/bench_lif.rs`).
+pub const PREFETCH_DISTANCE: usize = 64;
+
 /// Prefetch memory at `ptr + off` into L1 cache for subsequent SIMD iterations.
 ///
 /// Reduces L3 cache miss latency during steps over large populations.
