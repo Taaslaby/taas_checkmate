@@ -979,10 +979,10 @@ define_population! {
 }
 
 define_population! {
-    docs: "Atlasov neuromotor model — muscle calcium, tension, length and velocity dynamics driven by spikes.",
-    class: PyAtlasovNeuromotorPopulation,
-    py_name: "AtlasovNeuromotorPopulation",
-    model: AtlasovNeuromotorModel,
+    docs: "Neuromotor model — muscle calcium, tension, length and velocity dynamics driven by spikes.",
+    class: PyNeuromotorPopulation,
+    py_name: "NeuromotorPopulation",
+    model: NeuromotorModel,
     params: [
         (dt, set_dt, 0, 1.0), (d_ca, set_d_ca, 1, 0.1), (ca_decay_const, set_ca_decay_const, 2, 0.9),
         (eta_reset, set_eta_reset, 3, 0.5), (t_max, set_t_max, 4, 1.0), (kd, set_kd, 5, 0.2),
@@ -1207,7 +1207,7 @@ impl PySynapticConnectomeBrain {
     }
 }
 
-/// Human hand/forearm reference runtime backed by the Atlasov muscle model.
+/// Human hand/forearm reference runtime backed by the Neuromotor muscle model.
 ///
 /// Eight muscles (FCR, ECRL, FCU, ECU, FDS-II, FDP-II, ECRB, FDI) with
 /// forces in newtons and angle-dependent wrist moment arms.
@@ -1400,15 +1400,13 @@ pub fn make_population<'py>(py: Python<'py>, name: &str, n: usize) -> PyResult<P
         "saw" => Py::new(py, PySAWPopulation::new(n))?.into_any(),
         "wc" | "wilson_cowan" => Py::new(py, PyWCPopulation::new(n))?.into_any(),
         "triangulated" | "lut" => Py::new(py, PyTriangulatedPopulation::new(n))?.into_any(),
-        "atlasov_neuromotor" | "atlasov" => {
-            Py::new(py, PyAtlasovNeuromotorPopulation::new(n))?.into_any()
-        }
+        "neuromotor" => Py::new(py, PyNeuromotorPopulation::new(n))?.into_any(),
         "lifat" | "lif_at" => Py::new(py, PyLIFAtPopulation::new(n))?.into_any(),
         other => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "unknown neuron model '{name}' (normalized '{other}'); available: \
                  lif, izhikevich, izhikevich_dual, hh, vsn, rate, adex, glif3, glif4, \
-                 fhn, hr, haap, morris_lecar, saw, wc, triangulated, atlasov_neuromotor, lifat"
+                 fhn, hr, haap, morris_lecar, saw, wc, triangulated, neuromotor, lifat"
             )));
         }
     };
@@ -1441,7 +1439,7 @@ pub fn register<'py>(m: &Bound<'py, PyModule>) -> PyResult<Bound<'py, PyModule>>
             mod_.add_class::<PySAWPopulation>()?;
             mod_.add_class::<PyWCPopulation>()?;
             mod_.add_class::<PyTriangulatedPopulation>()?;
-            mod_.add_class::<PyAtlasovNeuromotorPopulation>()?;
+            mod_.add_class::<PyNeuromotorPopulation>()?;
             mod_.add_class::<PyTransformerPopulation>()?;
             mod_.add_class::<PyHumanHandState>()?;
             mod_.add_class::<PyConnectomeBrain>()?;

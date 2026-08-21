@@ -36,7 +36,7 @@
 //! | [`neurons`] | Stateful populations: EPropLIF, GLIF3/4, STP, somato-dendritic, chordotonal |
 //! | [`cpe`] | ChaosPatternEngine — dopamine-STDP + Kuramoto on connectomes |
 //! | [`autotune`] | E-Prop hyperparameter search: FR probe + config suggestion |
-//! | [`embodied`] | FlyWire embodied neuromotor engine (NMJ delay + Atlasov + joints) |
+//! | [`embodied`] | FlyWire embodied neuromotor engine (NMJ delay + Neuromotor + joints) |
 //!
 //! ## Quick start
 //!

@@ -1,10 +1,10 @@
-//! SNN → Atlasov → human wrist showcase.
+//! SNN → Neuromotor → human wrist showcase.
 //!
 //! A compact closed-loop vertical slice using only canonical `pillars` APIs:
 //!
 //! ```text
 //! target angle → proprioceptive current → VSN motor spikes
-//!             → Atlasov human-hand muscle forces (N)
+//!             → Neuromotor human-hand muscle forces (N)
 //!             → wrist moment (N·m) → inertial wrist dynamics
 //!             ↺
 //! ```
@@ -62,7 +62,7 @@ fn target_angle_deg(step: usize) -> f32 {
 /// Positive error recruits wrist flexors; negative error recruits extensors.
 ///
 /// These are dimensionless control currents for the VSN model, not calibrated
-/// physiological amperes. Atlasov's downstream force and torque outputs are
+/// physiological amperes. Neuromotor's downstream force and torque outputs are
 /// the SI-calibrated quantities in this showcase.
 fn motor_currents(error_deg: f32) -> [f32; 4] {
     let flex = BASE_CURRENT + DRIVE_GAIN * error_deg.max(0.0);
@@ -173,7 +173,7 @@ fn run_wrist(steps: usize, print_telemetry: bool) -> WristSummary {
 
 fn main() {
     println!("snn_human_wrist");
-    println!("pipeline=VSN[4] -> Atlasov[8 human channels] -> wrist torque");
+    println!("pipeline=VSN[4] -> Neuromotor[8 human channels] -> wrist torque");
     println!("dt_body={BODY_DT_S}s dt_neuron={NEURON_DT_MS}ms inertia={INERTIA_KG_M2}kg·m²");
     println!("muscles=FCR,ECRL,FCU,ECU | force=Newtons | moment=N·m");
 

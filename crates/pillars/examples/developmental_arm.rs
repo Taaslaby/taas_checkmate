@@ -14,7 +14,7 @@
 //! The policy is deliberately small and interpretable: a four-channel
 //! threshold spiking motor layer (two agonist/antagonist pairs) with a
 //! trainable linear readout. The body is the canonical
-//! `pillars::api::embodied::FlyEmbodiedState`, including Atlasov calcium,
+//! `pillars::api::embodied::FlyEmbodiedState`, including Neuromotor calcium,
 //! force, stiffness, damping, and joint integration.
 //!
 //! Run:
@@ -133,7 +133,7 @@ fn target_velocity(t: usize, joint: usize, phase: f32) -> f32 {
     (target_angle(t + h, joint, phase) - target_angle(t, joint, phase)) / DT
 }
 
-/// Expert torque is a bounded PD teacher. Atlasov's joint convention is
+/// Expert torque is a bounded PD teacher. Neuromotor's joint convention is
 /// `delta_f = extensor_tension - flexor_tension`, hence motor 1/3 are the
 /// positive-torque channels and motor 0/2 are the negative channels.
 fn expert_action(
@@ -227,8 +227,11 @@ fn run_episode(
             step_error += e * e;
         }
         squared_error += step_error * 0.5;
-        stiffness_sum += body.atlasov_state.joint_stiffness[..2].iter().sum::<f32>() * 0.5;
-        damping_sum += body.atlasov_state.joint_damping[..2].iter().sum::<f32>() * 0.5;
+        stiffness_sum += body.neuromotor_state.joint_stiffness[..2]
+            .iter()
+            .sum::<f32>()
+            * 0.5;
+        damping_sum += body.neuromotor_state.joint_damping[..2].iter().sum::<f32>() * 0.5;
     }
 
     let rmse = (squared_error / STEPS as f32).sqrt();
@@ -326,7 +329,7 @@ fn train_and_evaluate(regime: Regime, seed: u64) -> (f32, f32, f32, f32, f32) {
 
 fn main() {
     println!("developmental_embodied_arm");
-    println!("body=pillars::api::embodied::FlyEmbodiedState atlasov=true joints=2 dt={DT}");
+    println!("body=pillars::api::embodied::FlyEmbodiedState neuromotor=true joints=2 dt={DT}");
     println!("train_episodes={TRAIN_EPISODES} eval_episodes={EVAL_EPISODES} steps={STEPS}");
     // Same seeds are used for paired runs; aggregate across seeds below.
     // Direct is the pure-teacher reference, while the two annealed regimes

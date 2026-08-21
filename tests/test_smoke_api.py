@@ -457,7 +457,7 @@ from taas_checkmate import pillars as pillars_mod
 # optional getattr() check elsewhere in this legacy-compatible smoke script.
 required_pillars_classes = {
     "ActorCriticAgent", "AdExPopulation", "AstrocyteState",
-    "AtlasovNeuromotorPopulation", "ConnectomeBrain", "EPropIzhikevichMulti",
+    "NeuromotorPopulation", "ConnectomeBrain", "EPropIzhikevichMulti",
     "EPropLIF", "EPropTrainer", "FHNPopulation", "GLIF3Population",
     "GLIF4Population", "Glif3State", "Glif4State", "HAAPPopulation",
     "HHPopulation", "HRPopulation", "HeterogeneousConnectomeBrain",
@@ -481,7 +481,7 @@ required_pillars_functions = {
     "phase_encode", "phase_gate_apply", "population_rate_decode", "probe_eprop_fr",
     "propagate_spikes", "pst_decode", "rate_step", "ring_synthesis", "safety_clamp",
     "sigmoid_gate", "sim_step", "spike_entropy", "spike_raster_to_csv",
-    "stdp_homeostatic", "stdp_update", "step_adex", "step_atlasov_neuromotor",
+    "stdp_homeostatic", "stdp_update", "step_adex", "step_neuromotor",
     "step_eprop", "step_fhn", "step_gco", "step_gco_full", "step_haap", "step_hr",
     "step_izhikevich", "step_lif", "step_nmda", "step_saw", "step_wc",
     "stochastic_encoder", "suggest_eprop_config", "surrogate_gradient",
@@ -643,10 +643,10 @@ check(pop_lif.n == 8 and pop_hh.n == 8, "make_population accepts short and class
 check(type(pop_hh).__name__ == "HHPopulation", f"make_population('HHPopulation') -> {type(pop_hh).__name__}")
 # camelCase class-style forms resolve too (camel→snake normalization)
 pop_ml = pillars_mod.make_population("MorrisLecarPopulation", 8)
-pop_att = pillars_mod.make_population("AtlasovNeuromotorPopulation", 8)
+pop_att = pillars_mod.make_population("NeuromotorPopulation", 8)
 check(
     type(pop_ml).__name__ == "MorrisLecarPopulation"
-    and type(pop_att).__name__ == "AtlasovNeuromotorPopulation",
+    and type(pop_att).__name__ == "NeuromotorPopulation",
     "make_population resolves multi-word camelCase class names",
 )
 check(type(pop_dual).__name__ == "IzhikevichDualPopulation", "make_population('izhikevich_dual') class")
@@ -672,7 +672,7 @@ except ValueError:
 hetero_model_names = [
     "lif", "izhikevich", "izhikevich_dual", "hh", "vsn", "rate", "adex",
     "glif3", "glif4", "fhn", "hr", "haap", "morris_lecar", "saw", "wc",
-    "lifat", "atlasov_neuromotor",
+    "lifat", "neuromotor",
 ]
 for _model_name in hetero_model_names:
     _assembly = pillars_mod.make_brain([(_model_name, 4)], [[0.0]])

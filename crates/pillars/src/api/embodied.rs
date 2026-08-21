@@ -1,18 +1,18 @@
 //! FlyWire Embodied Neuromotor Engine — Phase 1 Pipeline
 //!
-//! Connects Motor Neuron Spikes → DelayBuffer (NMJ delay) → Atlasov Neuromotor Engine → Physical Joint Drive (ΔF, K_joint, B_joint).
+//! Connects Motor Neuron Spikes → DelayBuffer (NMJ delay) → Neuromotor Engine → Physical Joint Drive (ΔF, K_joint, B_joint).
 //!
-//! Author / Concept: Atlasov Anton (Атласов Антон)
+//! Author / Concept: Anton Atlasov (Атласов Антон)
 //!
 //! Перенесено из `core::neuron::embodied`— композиция
-//! `api::neurons::{DelayBuffer, atlasov::AtlasovState}`.
+//! `api::neurons::{DelayBuffer, neuromotor::NeuromotorState}`.
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::neurons::atlasov::AtlasovState;
+use crate::api::neurons::neuromotor::NeuromotorState;
 use crate::api::neurons::DelayBuffer;
 
-/// Joint mapping connecting a physical DOF to an Atlasov agonist-antagonist muscle pair.
+/// Joint mapping connecting a physical DOF to an Neuromotor agonist-antagonist muscle pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JointMapping {
     pub dof_idx: usize,
@@ -46,7 +46,7 @@ pub struct SimStepOutput {
 pub struct FlyEmbodiedState {
     pub n_joints: usize,
     pub n_muscles: usize,
-    pub atlasov_state: AtlasovState,
+    pub neuromotor_state: NeuromotorState,
     pub delay_buffers: Vec<DelayBuffer>,
     pub joint_mappings: Vec<JointMapping>,
     pub step_count: u64,
@@ -60,7 +60,7 @@ impl FlyEmbodiedState {
     pub fn new(n_joints: usize, dt: f32) -> Self {
         let unpadded_muscles = n_joints * 2;
         let n_muscles = unpadded_muscles.div_ceil(8) * 8;
-        let atlasov_state = AtlasovState::new(n_muscles);
+        let neuromotor_state = NeuromotorState::new(n_muscles);
 
         let mut delay_buffers = Vec::with_capacity(n_muscles);
         for _ in 0..n_muscles {
@@ -81,7 +81,7 @@ impl FlyEmbodiedState {
         Self {
             n_joints,
             n_muscles,
-            atlasov_state,
+            neuromotor_state,
             delay_buffers,
             joint_mappings,
             step_count: 0,
@@ -93,7 +93,7 @@ impl FlyEmbodiedState {
 
     /// Step the embodied pipeline:
     /// 1. Push motoneuron spikes through NMJ DelayBuffers
-    /// 2. Update Atlasov Calcium Muscle Dynamics & Tug-of-War
+    /// 2. Update Neuromotor Calcium Muscle Dynamics & Tug-of-War
     /// 3. Compute Net Applied Torque τ = ΔF - K*(q - q_rest) - B*q_dot
     /// 4. Integrate physical joint motion
     pub fn step(&mut self, motoneuron_spikes: &[i32], resets: &[i32]) -> SimStepOutput {
@@ -112,9 +112,9 @@ impl FlyEmbodiedState {
             }
         }
 
-        // 2. Atlasov Neuromotor Step (SIMD & Rayon) with Hill length/velocity modulation
+        // 2. Neuromotor Step (SIMD & Rayon) with Hill length/velocity modulation
         // No lengths/velocities from physics engine yet — use None for isometric mode
-        self.atlasov_state
+        self.neuromotor_state
             .step(&delayed_spikes, &reset_spikes, self.dt, None, None);
 
         // 3. Compute Generalized Joint Forces & Update Dynamics
@@ -126,9 +126,9 @@ impl FlyEmbodiedState {
             let q = self.simulated_joint_qpos[map.dof_idx];
             let q_dot = self.simulated_joint_qvel[map.dof_idx];
 
-            let df = self.atlasov_state.joint_delta_f[j];
-            let k_stf = self.atlasov_state.joint_stiffness[j];
-            let b_dmp = self.atlasov_state.joint_damping[j];
+            let df = self.neuromotor_state.joint_delta_f[j];
+            let k_stf = self.neuromotor_state.joint_stiffness[j];
+            let b_dmp = self.neuromotor_state.joint_damping[j];
 
             sum_stf += k_stf;
             sum_dmp += b_dmp;
@@ -146,7 +146,7 @@ impl FlyEmbodiedState {
         self.step_count += 1;
 
         let active_muscles = self
-            .atlasov_state
+            .neuromotor_state
             .ca
             .iter()
             .filter(|&&ca| ca > 0.01)
@@ -208,9 +208,9 @@ mod tests {
         }
 
         // Torque delta F should be ~0, but stiffness K and damping B should be high!
-        let df = fly.atlasov_state.joint_delta_f[0];
-        let k = fly.atlasov_state.joint_stiffness[0];
-        let b = fly.atlasov_state.joint_damping[0];
+        let df = fly.neuromotor_state.joint_delta_f[0];
+        let k = fly.neuromotor_state.joint_stiffness[0];
+        let b = fly.neuromotor_state.joint_damping[0];
 
         assert!(
             df.abs() < 1e-4,

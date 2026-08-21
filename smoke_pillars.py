@@ -31,7 +31,7 @@ def check(cond, name, detail=""):
 # ─────────────────────────────────────────────────────────────
 FNS = [
     "step_izhikevich", "step_saw", "step_gco", "step_lif", "step_adex", "step_fhn",
-    "step_haap", "step_nmda", "step_hr", "step_wc", "step_atlasov_neuromotor",
+    "step_haap", "step_nmda", "step_hr", "step_wc", "step_neuromotor",
     "stdp_update", "stdp_homeostatic", "firing_rates", "mean_firing_rate",
     "compute_isi", "compute_cvs", "step_eprop",
     "kuramoto_step_sparse", "t3_step_sparse", "interference", "interference_mean",

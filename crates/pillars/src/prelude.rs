@@ -43,9 +43,9 @@ pub use pillars_macros::{dual_neuron, NeuronModel};
 pub use crate::zoo::sensors::chordotonal_step;
 pub use crate::zoo::synapses::{nmda_mg_block_step, tsodyks_markram_step};
 pub use crate::zoo::{
-    AdExModel, AstrocyteModel, AtlasovNeuromotorModel, CaPlasticityModel, Exp2SynModel, FHNModel,
-    GLIF3Model, GLIF4Model, HAAPModel, HHModel, HRModel, IzhikevichModel, LIFModel, LIFParams,
-    LIFState, Model, MorrisLecarModel, SAWModel, VSNModel, WCModel,
+    AdExModel, AstrocyteModel, CaPlasticityModel, Exp2SynModel, FHNModel, GLIF3Model, GLIF4Model,
+    HAAPModel, HHModel, HRModel, IzhikevichModel, LIFModel, LIFParams, LIFState, Model,
+    MorrisLecarModel, NeuromotorModel, SAWModel, VSNModel, WCModel,
 };
 
 // ═══ Layer 3: core/ — SIMD engine ══════════════════════════

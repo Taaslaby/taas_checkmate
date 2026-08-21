@@ -156,7 +156,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn!(neurons, neuron::py_step_nmda);
     add_fn!(neurons, neuron::py_step_hr);
     add_fn!(neurons, neuron::py_step_wc);
-    add_fn!(neurons, neuron::py_step_atlasov_neuromotor);
+    add_fn!(neurons, neuron::py_step_neuromotor);
     add_fn!(neurons, neuron::py_stdp_update);
     add_fn!(neurons, neuron::py_stdp_homeostatic);
     add_fn!(neurons, neuron::py_firing_rates);
@@ -401,7 +401,7 @@ fn taas_checkmate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     add_fn_facade!(pillars, neuron::py_step_nmda);
     add_fn_facade!(pillars, neuron::py_step_hr);
     add_fn_facade!(pillars, neuron::py_step_wc);
-    add_fn_facade!(pillars, neuron::py_step_atlasov_neuromotor);
+    add_fn_facade!(pillars, neuron::py_step_neuromotor);
     add_fn_facade!(pillars, neuron::py_stdp_update);
     add_fn_facade!(pillars, neuron::py_stdp_homeostatic);
     add_fn_facade!(pillars, neuron::py_firing_rates);

@@ -21,7 +21,6 @@
 
 mod adex;
 mod alpha_lif;
-mod atlasov_neuromotor;
 mod beam;
 mod fhn;
 mod glif3;
@@ -35,6 +34,7 @@ mod izhikevich_dual;
 mod lif;
 mod lifat;
 mod morris_lecar;
+mod neuromotor;
 mod rate;
 mod saw;
 mod transformer;
@@ -53,11 +53,6 @@ pub use adex::{AdExModel, AdExModelParamIdx, AdExModelStateIdx, AdExParams, AdEx
 pub use alpha_lif::ALPHA_LIF_CUDA_SOURCE;
 pub use alpha_lif::{
     AlphaLifModel, AlphaLifModelParamIdx, AlphaLifModelStateIdx, AlphaLifParams, AlphaLifState,
-};
-pub use atlasov_neuromotor::ATLASOV_NEUROMOTOR_CUDA_SOURCE;
-pub use atlasov_neuromotor::{
-    AtlasovNeuromotorModel, AtlasovNeuromotorModelParamIdx, AtlasovNeuromotorModelStateIdx,
-    AtlasovNeuromotorParams, AtlasovNeuromotorState,
 };
 pub use beam::{BeamModel, BeamModelParamIdx, BeamModelStateIdx, BEAM_CUDA_SOURCE};
 pub use fhn::FHNModel;
@@ -100,6 +95,11 @@ pub use morris_lecar::MORRIS_LECAR_CUDA_SOURCE;
 pub use morris_lecar::{
     MorrisLecarModel, MorrisLecarModelParamIdx, MorrisLecarModelStateIdx, MorrisLecarParams,
     MorrisLecarState,
+};
+pub use neuromotor::NEUROMOTOR_CUDA_SOURCE;
+pub use neuromotor::{
+    NeuromotorModel, NeuromotorModelParamIdx, NeuromotorModelStateIdx, NeuromotorParams,
+    NeuromotorState,
 };
 pub use rate::RATE_CUDA_SOURCE;
 pub use rate::{RateModel, RateModelParamIdx, RateModelStateIdx, RateParams, RateState};

@@ -1,4 +1,4 @@
-//! Human hand/forearm reference profile for Atlasov validation.
+//! Human hand/forearm reference profile for Neuromotor validation.
 //!
 //! This is deliberately a **reference model**, not a clinical patient model.
 //! Morphology is taken from the open-access integrated forearm/hand dataset of
@@ -20,7 +20,7 @@
 //! - moment arm: `m`
 //! - joint torque: `N·m`
 
-use super::neurons::atlasov::{AtlasovState, BiomechanicsProfile};
+use super::neurons::neuromotor::{BiomechanicsProfile, NeuromotorState};
 
 /// Maximum muscle stress used by the cited wrist model: 35 N/cm².
 pub const HUMAN_SPECIFIC_TENSION_PA: f32 = 350_000.0;
@@ -233,7 +233,7 @@ impl HumanMuscleSpec {
 
     /// Linear capacity estimate at a normalized activation in `[0, 1]`.
     ///
-    /// This is deliberately named `capacity`: it is not Atlasov's nonlinear
+    /// This is deliberately named `capacity`: it is not Neuromotor's nonlinear
     /// `ca² / (ca² + kd²)` activation law and must not be read as a measured
     /// force response.
     #[inline]
@@ -374,15 +374,15 @@ impl Default for HumanHandProfile {
         Self::reference()
     }
 }
-/// Atlasov-backed runtime for the compact human hand reference.
+/// Neuromotor-backed runtime for the compact human hand reference.
 ///
-/// `tension` is in newtons because each channel's Atlasov `t_max` is populated
-/// from PCSA × specific tension. The Atlasov calcium pool remains dimensionless;
+/// `tension` is in newtons because each channel's Neuromotor `t_max` is populated
+/// from PCSA × specific tension. The Neuromotor calcium pool remains dimensionless;
 /// only the mechanical output is calibrated to SI force.
 #[derive(Debug, Clone)]
 pub struct HumanHandState {
     pub profile: HumanHandProfile,
-    pub atlasov: AtlasovState,
+    pub neuromotor: NeuromotorState,
     /// Current wrist flexion angle in degrees (positive = flexion).
     pub wrist_angle_deg: f32,
     /// Current muscle forces in newtons, one per profile channel.
@@ -411,18 +411,18 @@ impl HumanHandState {
             b0: 0.0,
             alpha: 0.0,
         };
-        let mut atlasov = crate::api::neurons::atlasov::AtlasovStateBuilder::new(8)
+        let mut neuromotor = crate::api::neurons::neuromotor::NeuromotorStateBuilder::new(8)
             .with_profile(base)
             .build();
         for (idx, spec) in profile.muscles.iter().enumerate() {
-            atlasov.t_max[idx] = spec.max_isometric_force_n();
-            atlasov.l0[idx] = spec.optimal_fibre_length_m;
-            atlasov.v_max[idx] = 1.0;
-            atlasov.kd[idx] = 0.2;
+            neuromotor.t_max[idx] = spec.max_isometric_force_n();
+            neuromotor.l0[idx] = spec.optimal_fibre_length_m;
+            neuromotor.v_max[idx] = 1.0;
+            neuromotor.kd[idx] = 0.2;
         }
         Self {
             profile,
-            atlasov,
+            neuromotor,
             wrist_angle_deg: 0.0,
             force_n: [0.0; 8],
             wrist_moment_nm: 0.0,
@@ -457,9 +457,9 @@ impl HumanHandState {
         lengths_m: Option<&[f32]>,
         velocities_m_s: Option<&[f32]>,
     ) {
-        self.atlasov
+        self.neuromotor
             .step(spikes, resets, dt, lengths_m, velocities_m_s);
-        self.force_n.copy_from_slice(&self.atlasov.tension[..8]);
+        self.force_n.copy_from_slice(&self.neuromotor.tension[..8]);
         self.wrist_moment_nm = self.wrist_moment_nm_at_angle(self.wrist_angle_deg);
         for (idx, (force, spec)) in self
             .force_n
@@ -501,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn atlasov_runtime_outputs_force_in_newtons() {
+    fn neuromotor_runtime_outputs_force_in_newtons() {
         let mut hand = HumanHandState::new();
         let spikes = [1_i32; 8];
         let resets = [0_i32; 8];

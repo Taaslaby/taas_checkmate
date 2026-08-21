@@ -3,7 +3,7 @@
 //! This is the SNN counterpart of `developmental_arm.rs`:
 //!
 //! ```text
-//! proprioception → VSN hard spikes → Atlasov body → joint feedback
+//! proprioception → VSN hard spikes → Neuromotor body → joint feedback
 //! ```
 //!
 //! The four VSN neurons are the two agonist/antagonist motor pairs. Their
@@ -246,8 +246,11 @@ fn episode(
             let e = target_angle(t + 1, joint, phase) - body.simulated_joint_qpos[joint];
             loss += 0.5 * e * e;
         }
-        stiffness += body.atlasov_state.joint_stiffness[..2].iter().sum::<f32>() * 0.5;
-        damping += body.atlasov_state.joint_damping[..2].iter().sum::<f32>() * 0.5;
+        stiffness += body.neuromotor_state.joint_stiffness[..2]
+            .iter()
+            .sum::<f32>()
+            * 0.5;
+        damping += body.neuromotor_state.joint_damping[..2].iter().sum::<f32>() * 0.5;
     }
 
     let final_error = (0..2)
@@ -327,7 +330,7 @@ fn train_eval(regime: Regime, seed: u64) -> (f32, f32, f32, f32, f32) {
 
 fn main() {
     println!("stateful_snn_developmental_arm");
-    println!("neuron=VSN states=[v,refr,surrogate] body=Atlasov joints=2");
+    println!("neuron=VSN states=[v,refr,surrogate] body=Neuromotor joints=2");
     for regime in [
         Regime::Direct,
         Regime::AnnealedNoCocontraction,

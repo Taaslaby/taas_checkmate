@@ -2,7 +2,6 @@ use super::*;
 use crate::api::delay::DelayBuffer;
 use crate::api::graph::MAX_DELAY_SLOTS;
 use crate::api::synapse::{exp_waveform_factor, PlasticityProfile, SynapseKinetics};
-use crate::api::NeuralPopulation;
 use crate::zoo::neurons::LIFModel;
 
 /// Helper: set up LIF params on a population.

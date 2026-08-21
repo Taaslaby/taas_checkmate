@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Atlasov against an external real-data recording.
+"""Validate Neuromotor against an external real-data recording.
 
 Accepted input formats:
 
@@ -13,11 +13,11 @@ not evaluated.  With ``force`` it reports RMSE/NRMSE/correlation; pass
 ``--max-nrmse`` when a calibrated acceptance criterion is available.
 
 Example:
-    python tests/validate_atlasov_real_data.py recording.csv \
+    python tests/validate_neuromotor_real_data.py recording.csv \
         --t-max 2e-6 --l0 3e-4 --v-max 0.5 --max-nrmse 0.25
 
 The units are not guessed. ``length``, ``velocity`` and ``force`` must use the
-same units as the explicitly supplied Atlasov parameters.
+same units as the explicitly supplied Neuromotor parameters.
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def simulate(data: dict[str, np.ndarray], args: argparse.Namespace) -> dict[str,
         raise ValueError("dt must be finite and > 0")
     relative_dt_error = float(np.max(np.abs(dt_samples - dt)) / dt)
 
-    pop = pillars.AtlasovNeuromotorPopulation(1)
+    pop = pillars.NeuromotorPopulation(1)
     pop.dt = float(dt)
     pop.d_ca = float(args.d_ca)
     pop.ca_decay_const = float(np.exp(-dt / args.tau_pump))
@@ -185,12 +185,12 @@ def main() -> int:
     try:
         result = simulate(load_recording(args.recording), args)
     except (AssertionError, ImportError, OSError, RuntimeError, ValueError) as exc:
-        print(f"Atlasov validation FAILED: {exc}", file=sys.stderr)
+        print(f"Neuromotor validation FAILED: {exc}", file=sys.stderr)
         return 1
     if args.as_json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print("Atlasov validation PASSED")
+        print("Neuromotor validation PASSED")
         for key, value in result.items():
             print(f"  {key}: {value}")
         if result["force_ground_truth"] == "missing":

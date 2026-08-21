@@ -74,7 +74,7 @@ fn process_chunk(
 /// Spike detection: x ≥ 1.0.
 ///
 /// Распараллеливание через rayon под `feature = "rayon"` (default),
-/// serial-fallback иначе — как `api::neurons::atlasov`.
+/// serial-fallback иначе — как `api::neurons::neuromotor`.
 pub fn step_hr(
     x: &mut [f32],
     y: &mut [f32],

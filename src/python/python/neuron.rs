@@ -626,15 +626,15 @@ pub fn py_step_wc(
     Ok(())
 }
 
-/// Atlasov Neuromotor Engine — один шаг симуляции мышц и суставов.
+/// Neuromotor Neuromotor Engine — один шаг симуляции мышц и суставов.
 ///
 /// Modifies ca, tension, joint_delta_f, joint_stiffness, joint_damping in-place.
 #[pyfunction]
-#[pyo3(name = "step_atlasov_neuromotor")]
+#[pyo3(name = "step_neuromotor")]
 #[pyo3(signature = (ca, tension, spikes, resets, dt, d_ca, tau_pump, eta_reset, t_max, kd, l0, v_max, lengths=None, velocities=None,
     joint_delta_f=None, joint_stiffness=None, joint_damping=None,
     k0=None, beta=None, b0=None, alpha=None))]
-pub fn py_step_atlasov_neuromotor(
+pub fn py_step_neuromotor(
     ca: Bound<'_, PyArray1<f32>>,
     tension: Bound<'_, PyArray1<f32>>,
     spikes: Bound<'_, PyArray1<i32>>,
@@ -681,7 +681,7 @@ pub fn py_step_atlasov_neuromotor(
     let b0_ro = b0.as_ref().map(|a| a.readonly());
     let alpha_ro = alpha.as_ref().map(|a| a.readonly());
 
-    neuron::step_atlasov_neuromotor(
+    neuron::step_neuromotor(
         ca_rw.as_slice_mut()?,
         tension_rw.as_slice_mut()?,
         spikes_ro.as_slice()?,

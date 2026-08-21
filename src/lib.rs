@@ -87,8 +87,9 @@ pub use pillars::kernels::spike_entropy;
 pub use pillars::api::neurons::{
     bsa_encode, bsa_kernel_hamming, compute_lfp, eprop_update, intrinsic_plasticity, phase_encode,
     population_rate_decode, probe_fr, stdp_homeostatic, stdp_update, step_adex,
-    step_atlasov_neuromotor, step_fhn, step_gco, step_hr, step_izhikevich, step_lif, step_lif_at,
-    step_saw, step_wc, suggest_config, surrogate_gradient, synaptic_normalization, AtlasovState,
+    step_fhn, step_gco, step_hr, step_izhikevich, step_lif, step_lif_at, step_neuromotor,
+    step_saw, step_wc, suggest_config, surrogate_gradient, synaptic_normalization,
+    NeuromotorState,
     DelayBuffer, DopamineSTDP, EPropAdExMulti, EPropIzhikevich, EPropIzhikevichMulti, EPropLIF,
     EPropSaw, EPropTunerConfig, FrProbePoint, PoissonGenerator, ShortTermPlasticity, SornNetwork,
     TtfsEncoder,

@@ -24,7 +24,7 @@
 //! |-----------|--------|------|
 //! | [`eprop`] | EPropIzhikevich/Multi, EPropSaw, EPropAdExMulti | `kernels::eprop` |
 //! | [`haap`] | HaapState/Profile/Builder + step_haap | `run_neuron::<HAAPModel>` |
-//! | [`atlasov`] | AtlasovState + профили/конфиги + step | `run_neuron::<AtlasovNeuromotorModel>` |
+//! | [`neuromotor`] | NeuromotorState + профили/конфиги + step | `run_neuron::<NeuromotorModel>` |
 //! | [`bcm`] | BcmSynapse, HomeostaticScale | `kernels::learning::{bcm_step, homeostatic_scale}` |
 //! | [`hr`] | step_hr (repacking-адаптер) | `run_neuron::<HRModel>` |
 //! | [`lif`] | step_lif / step_lif_at | `run_neuron::<LIFModel/LIFAtModel>` |
@@ -40,7 +40,6 @@
 // ─── Подмодули ─────────────────────────────────────────────
 
 pub mod adex;
-pub mod atlasov;
 pub mod bcm;
 pub mod eprop;
 pub mod fhn;
@@ -48,14 +47,11 @@ pub mod haap;
 pub mod hr;
 pub mod izhikevich;
 pub mod lif;
+pub mod neuromotor;
 pub mod saw;
 pub mod wc;
 
 pub use adex::step_adex;
-pub use atlasov::{
-    step_atlasov_neuromotor, AtlasovState, AtlasovStateBuilder, BiomechanicsProfile,
-    DrosophilaLegConfig, FiberPoolConfig,
-};
 pub use bcm::{BcmSynapse, HomeostaticScale};
 pub use eprop::{EPropAdExMulti, EPropIzhikevich, EPropIzhikevichMulti, EPropSaw};
 pub use fhn::step_fhn;
@@ -63,6 +59,10 @@ pub use haap::{step_haap, HaapProfile, HaapState, HaapStateBuilder};
 pub use hr::step_hr;
 pub use izhikevich::{step_izhikevich, step_izhikevich_dual};
 pub use lif::{step_lif, step_lif_at};
+pub use neuromotor::{
+    step_neuromotor, BiomechanicsProfile, DrosophilaLegConfig, FiberPoolConfig, NeuromotorState,
+    NeuromotorStateBuilder,
+};
 pub use saw::{step_gco, step_saw};
 pub use wc::step_wc;
 

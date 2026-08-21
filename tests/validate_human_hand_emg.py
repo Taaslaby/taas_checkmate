@@ -1,4 +1,4 @@
-"""Validate the human hand Atlasov reference against real sEMG + grip force.
+"""Validate the human hand Neuromotor reference against real sEMG + grip force.
 
 Dataset: "sEMG for grasp force estimation" (Zenodo 4554494, CC0), 5 subjects,
 300 trials, 6 sEMG channels (uV): ECU, FCU, FDS, FCR, Brachioradialis, ED;
@@ -11,7 +11,7 @@ Pipeline (per trial):
   2. Map dataset channels onto the eight HumanHandState muscles
      (FCR <- FCR, FCU <- FCU, FDS-II <- FDS, ECU <- ECU, ECRL <- ED;
      FDP-II/ECRB/FDI are not recorded in this dataset -> 0 drive).
-  3. Drive the Rust Atlasov human hand with deterministic Poisson motor
+  3. Drive the Rust Neuromotor human hand with deterministic Poisson motor
      spikes (rate = activation * f_max) at model dt.
   4. Model grasp force = FDS-II + FDP-II muscle force (the recorded force is
      grip, dominated by the finger flexors). Compare with measured force:

@@ -1,4 +1,4 @@
-//! Atlasov Neuromotor (Biomechanical Muscle & Calcium Dynamics) Model
+//! Neuromotor (Biomechanical Muscle & Calcium Dynamics) Model
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 //!
@@ -7,7 +7,7 @@
 //! - **Hill force-velocity**: branchless conc/ecc blend via masks
 //! - **Ca²⁺-tension**: T = T_max · Ca²/(Ca²+Kd²) · f_l · f_v
 
-#![allow(clippy::module_inception)] // deliberate: `pub mod atlasov_neuromotor` mirrors the file module
+#![allow(clippy::module_inception)] // deliberate: `pub mod neuromotor` mirrors the file module
 
 use pillars_macros::dual_neuron;
 
@@ -27,14 +27,14 @@ use pillars_macros::dual_neuron;
 /// - `dt`, `d_ca`, `ca_decay_const`, `eta_reset`, `t_max`,
 ///   `kd`, `l0`, `inv_vmax`, `inv_width`
 #[dual_neuron]
-pub mod atlasov_neuromotor {
+pub mod neuromotor {
     use crate::core::compute::{ComputeNeuron, StepContext};
     use crate::core::lane::SimdLane;
     use pillars_macros::NeuronModel;
 
     #[derive(NeuronModel)]
     #[no_spike]
-    pub struct AtlasovNeuromotorModel {
+    pub struct NeuromotorModel {
         #[state]
         pub ca: f32,
         #[state]
@@ -66,14 +66,14 @@ pub mod atlasov_neuromotor {
         pub inv_width: f32,
     }
 
-    impl ComputeNeuron for AtlasovNeuromotorModel {
-        type State<S: SimdLane> = AtlasovNeuromotorState<S>;
-        type Params<S: SimdLane> = AtlasovNeuromotorParams<S>;
+    impl ComputeNeuron for NeuromotorModel {
+        type State<S: SimdLane> = NeuromotorState<S>;
+        type Params<S: SimdLane> = NeuromotorParams<S>;
 
         #[inline(always)]
         fn step<S: SimdLane>(
-            state: &mut AtlasovNeuromotorState<S>,
-            params: &AtlasovNeuromotorParams<S>,
+            state: &mut NeuromotorState<S>,
+            params: &NeuromotorParams<S>,
             ctx: &mut StepContext<S>,
         ) {
             let one = S::one();
@@ -124,8 +124,8 @@ pub mod atlasov_neuromotor {
 }
 
 // Re-export so existing paths keep working:
-// `pillars::zoo::neurons::atlasov_neuromotor::AtlasovNeuromotorModel` etc.
-pub use atlasov_neuromotor::*;
+// `pillars::zoo::neurons::neuromotor::NeuromotorModel` etc.
+pub use neuromotor::*;
 
 // ===== Tests =====
 
@@ -138,21 +138,21 @@ mod tests {
     fn make_params(n: usize) -> Vec<f32> {
         let mut p = vec![0.0f32; n * 9];
         for i in 0..n {
-            p[AtlasovNeuromotorModelParamIdx::dt as usize * n + i] = 1.0;
-            p[AtlasovNeuromotorModelParamIdx::d_ca as usize * n + i] = 0.1;
-            p[AtlasovNeuromotorModelParamIdx::ca_decay_const as usize * n + i] = 0.9;
-            p[AtlasovNeuromotorModelParamIdx::eta_reset as usize * n + i] = 0.5;
-            p[AtlasovNeuromotorModelParamIdx::t_max as usize * n + i] = 1.0;
-            p[AtlasovNeuromotorModelParamIdx::kd as usize * n + i] = 0.2;
-            p[AtlasovNeuromotorModelParamIdx::l0 as usize * n + i] = 1.0;
-            p[AtlasovNeuromotorModelParamIdx::inv_vmax as usize * n + i] = 1.0;
-            p[AtlasovNeuromotorModelParamIdx::inv_width as usize * n + i] = 1.0;
+            p[NeuromotorModelParamIdx::dt as usize * n + i] = 1.0;
+            p[NeuromotorModelParamIdx::d_ca as usize * n + i] = 0.1;
+            p[NeuromotorModelParamIdx::ca_decay_const as usize * n + i] = 0.9;
+            p[NeuromotorModelParamIdx::eta_reset as usize * n + i] = 0.5;
+            p[NeuromotorModelParamIdx::t_max as usize * n + i] = 1.0;
+            p[NeuromotorModelParamIdx::kd as usize * n + i] = 0.2;
+            p[NeuromotorModelParamIdx::l0 as usize * n + i] = 1.0;
+            p[NeuromotorModelParamIdx::inv_vmax as usize * n + i] = 1.0;
+            p[NeuromotorModelParamIdx::inv_width as usize * n + i] = 1.0;
         }
         p
     }
 
     #[test]
-    fn test_atlasov_spike_triggers_ca() {
+    fn test_neuromotor_spike_triggers_ca() {
         let n = 8;
         let params = make_params(n);
         let mut ca = vec![0.0; n];
@@ -165,7 +165,7 @@ mod tests {
         let mut spikes = vec![0i32; n];
 
         unsafe {
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca.as_mut_ptr(),
                 tension.as_mut_ptr(),
                 reset.as_mut_ptr(),
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn test_atlasov_no_spike_no_ca() {
+    fn test_neuromotor_no_spike_no_ca() {
         let n = 8;
         let params = make_params(n);
         let mut ca = vec![0.0; n];
@@ -195,7 +195,7 @@ mod tests {
         let mut spikes = vec![0i32; n];
 
         unsafe {
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca.as_mut_ptr(),
                 tension.as_mut_ptr(),
                 reset.as_mut_ptr(),
@@ -224,7 +224,7 @@ mod tests {
         let mut params = make_params(n);
         let decay = 0.9_f32;
         for i in 0..n {
-            params[AtlasovNeuromotorModelParamIdx::ca_decay_const as usize * n + i] = decay;
+            params[NeuromotorModelParamIdx::ca_decay_const as usize * n + i] = decay;
         }
         let mut ca = vec![0.0; n];
         let mut tension = vec![0.0; n];
@@ -239,7 +239,7 @@ mod tests {
         for _ in 0..32 {
             expected = (expected + 0.1) * decay;
             unsafe {
-                run_neuron::<AtlasovNeuromotorModel>(
+                run_neuron::<NeuromotorModel>(
                     ca.as_mut_ptr(),
                     tension.as_mut_ptr(),
                     reset.as_mut_ptr(),
@@ -281,7 +281,7 @@ mod tests {
         let mut spikes = vec![0_i32; n];
 
         unsafe {
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca_passive.as_mut_ptr(),
                 tension_passive.as_mut_ptr(),
                 reset_passive.as_mut_ptr(),
@@ -293,7 +293,7 @@ mod tests {
                 params.as_ptr(),
                 n,
             );
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca_reset.as_mut_ptr(),
                 tension_reset.as_mut_ptr(),
                 reset_active.as_mut_ptr(),
@@ -329,7 +329,7 @@ mod tests {
         let mut spikes = vec![0_i32; n];
 
         unsafe {
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca.as_mut_ptr(),
                 tension.as_mut_ptr(),
                 reset.as_mut_ptr(),
@@ -362,7 +362,7 @@ mod tests {
         let mut length_velocity = vec![1.0; n];
         let mut dummy_velocity = vec![0.0; n];
         unsafe {
-            run_neuron::<AtlasovNeuromotorModel>(
+            run_neuron::<NeuromotorModel>(
                 ca_velocity.as_mut_ptr(),
                 tension_velocity.as_mut_ptr(),
                 reset_velocity.as_mut_ptr(),
