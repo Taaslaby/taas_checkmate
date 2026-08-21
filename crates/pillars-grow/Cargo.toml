@@ -1,0 +1,11 @@
+[package]
+name = "pillars-grow"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Developmental growth engine — CX3D-style morphogen-guided self-construction (Rust port of the instruction-language core)"
+
+[dependencies]
+rand = "0.8"
+flate2 = "1"
