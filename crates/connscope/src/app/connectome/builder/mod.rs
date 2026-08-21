@@ -1105,7 +1105,7 @@ impl NeuronBuilder {
                         let cat = cat_of(kind);
                         let col = cat_color(cat);
                         // цветной квадратик как в палитре нод
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                         ui.painter().rect_filled(r, 2.0, col);
                         if ui.button(spec.name).clicked() {
                             self.add_node(kind);
@@ -1636,7 +1636,7 @@ impl NeuronBuilder {
                     self.pan = s - anchor * self.zoom;
                 }
             }
-            // ── middle-drag or empty-drag pans ──
+            // ── middle-drag pans (даже если начали на ноде)
             if resp.dragged_by(PointerButton::Middle) {
                 self.pan += resp.drag_delta();
             }

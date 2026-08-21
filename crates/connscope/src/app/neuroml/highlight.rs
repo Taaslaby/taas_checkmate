@@ -13,7 +13,7 @@ use std::ops::Range;
 use eframe::egui::{
     epaint::text::ByteIndex,
     text::{LayoutJob, LayoutSection, TextFormat},
-    Color32, FontId,
+    Color32, FontId, Stroke,
 };
 
 use crate::app::shell::theme::DANGER;
@@ -275,8 +275,9 @@ fn push_section(
 ) {
     let mut f = fmt.clone();
     if err {
-        // Фон строки с ошибкой — из danger-красного темы (альфа 0x90).
-        f.background = Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 0x90);
+        // Фон + волнистое подчёркивание — как в VS Code (красный squiggle)
+        f.background = Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 0x5A);
+        f.underline = Stroke::new(1.2, DANGER);
     } else if cursor {
         // Строка курсора — едва заметная подсветка (как в IDE).
         f.background = Color32::from_rgba_unmultiplied(0xFF, 0xFF, 0xFF, 8);
