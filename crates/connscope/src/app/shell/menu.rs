@@ -377,6 +377,45 @@ impl ConnApp {
                     }
                 });
                 ui.add_space(tokens::SP_SM);
+                // Иконки типов файлов — скевоморф (старый Apple Aqua) для узнаваемости
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Image::from_bytes(
+                            "bytes://icon_taas_32",
+                            include_bytes!(concat!(
+                                env!("CARGO_MANIFEST_DIR"),
+                                "/../../resources/branding/icon_taas_skeuo_32.png"
+                            )),
+                        )
+                        .max_height(20.0),
+                    );
+                    ui.label(egui::RichText::new(".TAAS").small().strong());
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Image::from_bytes(
+                            "bytes://icon_nml_32",
+                            include_bytes!(concat!(
+                                env!("CARGO_MANIFEST_DIR"),
+                                "/../../resources/branding/icon_neuroml_skeuo_32.png"
+                            )),
+                        )
+                        .max_height(20.0),
+                    );
+                    ui.label(egui::RichText::new(".NML").small().strong());
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Image::from_bytes(
+                            "bytes://icon_flywire_32",
+                            include_bytes!(concat!(
+                                env!("CARGO_MANIFEST_DIR"),
+                                "/../../resources/branding/icon_flywire_skeuo_32.png"
+                            )),
+                        )
+                        .max_height(20.0),
+                    );
+                    ui.label(egui::RichText::new("FlyWire").small().strong());
+                });
+                ui.add_space(tokens::SP_XS);
                 // Путь: поле ввода + кнопка нативного диалога ОС (rfd).
                 // `set_parent(frame)` — задаём владельца (наше окно): иначе
                 // диалог Windows уходит ЗА wgpu-окно и его не видно.
