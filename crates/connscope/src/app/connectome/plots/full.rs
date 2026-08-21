@@ -30,16 +30,16 @@ const CLASS_NAMES: [&str; 8] = [
     "efferent",
 ];
 
-/// Цвета серий по классам — различимы и на тёмной, и на светлой теме.
+/// Цвета серий по классам — 1:1 с `core::color::klass_color` (проф muted).
 const CLASS_COLORS: [Color32; 8] = [
-    Color32::from_rgb(150, 150, 160),
-    Color32::from_rgb(235, 120, 60),
-    Color32::from_rgb(90, 210, 120),
-    Color32::from_rgb(80, 150, 255),
-    Color32::from_rgb(255, 170, 60),
-    Color32::from_rgb(200, 110, 230),
-    Color32::from_rgb(120, 210, 230),
-    Color32::from_rgb(180, 220, 90),
+    Color32::from_rgb(138, 138, 148), // other
+    Color32::from_rgb(212, 90, 78),   // motor
+    Color32::from_rgb(86, 160, 200),  // sensory
+    Color32::from_rgb(200, 148, 65),  // ascending
+    Color32::from_rgb(135, 115, 195), // descending
+    Color32::from_rgb(78, 168, 118),  // intrinsic
+    Color32::from_rgb(175, 175, 185), // glia
+    Color32::from_rgb(188, 110, 175), // efferent
 ];
 
 /// PSTH: популяционная частота (Гц на нейрон) + сглаживание окном 9 шагов.
@@ -366,15 +366,16 @@ pub(super) fn card_full_phase(ui: &mut egui::Ui, data: &MancData, r: &FullSimRes
     );
 }
 
-/// Тепловая шкала: 0 → тёмно-синий фон, 0.5 → циан, 1 → жёлто-белый.
+/// Тепловая шкала: 0 → deep navy, 0.5 → muted teal, 1 → warm amber.
+/// Проф ColorBrewer PuBu→YlOr, без неонового циана/жёлтого.
 fn heat_color(v: f32) -> Color32 {
     let v = v.clamp(0.0, 1.0);
     let (r, g, b) = if v < 0.5 {
-        let t = v / 0.5; // 0 → 1 (тёмно-синий → циан)
-        (10.0 + 40.0 * t, 30.0 + 140.0 * t, 60.0 + 150.0 * t)
+        let t = v / 0.5; // navy → teal
+        (18.0 + 40.0 * t, 28.0 + 95.0 * t, 58.0 + 92.0 * t)
     } else {
-        let t = (v - 0.5) / 0.5; // 0 → 1 (циан → жёлтый)
-        (50.0 + 205.0 * t, 170.0 + 80.0 * t, 210.0 * (1.0 - t))
+        let t = (v - 0.5) / 0.5; // teal → warm amber
+        (58.0 + 152.0 * t, 123.0 + 62.0 * t, 150.0 * (1.0 - t) + 45.0 * t)
     };
     Color32::from_rgb(r as u8, g as u8, b as u8)
 }

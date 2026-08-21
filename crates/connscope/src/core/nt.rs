@@ -26,15 +26,18 @@ impl Nt {
             _ => Nt::Unknown,
         }
     }
+    /// Проф-палитра для тёмного фона: приглушённая Okabe-Ito, colorblind-safe
+    /// (vermillion/sky-blue/bluish-green различаются при deuteranopia),
+    /// светлота выровнена (~60), чтобы ни один НТ не «кричал».
     pub fn color(self) -> Color32 {
         match self {
-            Nt::Ach => Color32::from_rgb(80, 210, 140), // возб. у насекомых
-            Nt::Gaba => Color32::from_rgb(225, 85, 85), // торм.
-            Nt::Glut => Color32::from_rgb(85, 145, 235), // GluCl — торм. Cl⁻
-            Nt::Da => Color32::from_rgb(215, 120, 225),
-            Nt::Ser => Color32::from_rgb(245, 165, 85),
-            Nt::Oct => Color32::from_rgb(235, 215, 95),
-            Nt::Unknown => Color32::from_rgb(125, 125, 135),
+            Nt::Ach => Color32::from_rgb(78, 175, 130),  // возб. — приглушённый teal (был 80,210,140 — неон)
+            Nt::Gaba => Color32::from_rgb(200, 85, 85),  // торм. — muted vermillion (был 225,85,85)
+            Nt::Glut => Color32::from_rgb(95, 150, 210), // торм. — steel blue (был 85,145,235)
+            Nt::Da => Color32::from_rgb(175, 110, 195),  // модул. — muted purple (был 215,120,225)
+            Nt::Ser => Color32::from_rgb(210, 145, 70),  // модул. — muted amber (был 245,165,85)
+            Nt::Oct => Color32::from_rgb(195, 180, 85),  // модул. — muted yellow (был 235,215,95 — слишком яркий)
+            Nt::Unknown => Color32::from_rgb(138, 138, 148), // серый чуть светлее для контраста на #1C2021
         }
     }
     pub fn name(self) -> &'static str {

@@ -124,12 +124,11 @@ impl AccentPreset {
                 rgb(0xe8, 0xa0, 0x20),
                 rgb(0xd1, 0x8f, 0x16),
             ),
-            // Сигнатурный «люминофор» neoMyelin — тот же зелёный, что раньше
-            // жил в `theme::ACCENT`.
+            // Проф teal — приглушённый, как в Houdini/DaVinci (был 5a d6 b2 — неон).
             Self::Green => (
-                rgb(0x5a, 0xd6, 0xb2),
-                rgb(0x2f, 0xbf, 0x7f),
-                rgb(0x27, 0xa5, 0x6c),
+                rgb(0x44, 0x9e, 0x8b),
+                rgb(0x2e, 0x8a, 0x77),
+                rgb(0x24, 0x74, 0x64),
             ),
             Self::Rose => (
                 rgb(0xf4, 0x6f, 0x9e),
