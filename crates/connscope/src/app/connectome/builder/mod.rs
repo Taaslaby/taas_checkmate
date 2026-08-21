@@ -53,6 +53,27 @@
 //!
 //! Engine: [`pillars::api::formula`] — a runtime opcode interpreter over
 //! [`crate::ops`] with a persistent register file `s0..s3 / p0..p7 / i_syn / t0..t10`.
+//!
+//! ## Module map (2272 строки — секционирован, но монофайл)
+//! ```text
+//! builder/mod.rs  ← ты здесь — фасад + состояние Builder
+//!   1. Layout constants       NODE_W/HEADER_H/PIN_R/GRID
+//!   2. Spec                  Spec/spec_of — шаблон пинов ноды
+//!   3. Category              NodeCat/cat_of/cat_color — цвет/иконка семейства
+//!   4. Geometry              bezier_ctrl/eval, node_size_of, HIT_R
+//!   5. Kind registry         ALL_KINDS/kind_index/palette_kinds/reg_name
+//!   6. Graph model           GNode/GEdge/Drag/CtxMenu/NeuronBuilder
+//!   7. Presets               PBuilder + default_lif/ml/hh_lite graphs
+//!   8. IO                    FileGraph — JSON save/load
+//!   9. Compile               input_reg_of/graph_to_program — граф → OpNode[]
+//!  10. View                  pan/zoom, minimap, grid, hit testing
+//!  11. Render                draw_grid/draw_canvas/draw_wire — паинтер
+//!  12. Sim                   step_sim/reset_sim, history/scope
+//!  13. UI                    dock_view, toolbar, inspector, context menus
+//! ```
+//! План: вынести 2-5 в `spec.rs`/`category.rs`/`geometry.rs`, 7 в `presets.rs`,
+//! 8 в `io.rs`, 10-11 в `view.rs`/`render.rs` — сейчас уже лежит в `builder/`
+//! директории, `connectome::neuron_builder` оставлен как алиас (`pub use builder as neuron_builder`).
 
 use std::collections::VecDeque;
 

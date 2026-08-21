@@ -18,17 +18,19 @@ use crate::app::mode::{Mode, ShellServices, Surface};
 use crate::app::shell::console::Console;
 use crate::io::data::MancData;
 
+pub(crate) mod builder;
 pub(crate) mod camera;
 pub(crate) mod canvas;
 pub(crate) mod cards;
 pub(crate) mod ego;
 pub(crate) mod inspector;
-pub(crate) mod neuron_builder;
 pub(crate) mod picking;
 pub(crate) mod plotlib;
 pub(crate) mod plots;
 pub(crate) mod sim_ui;
 pub(crate) mod state;
+// Совместимость: старый путь `connectome::neuron_builder::...` → `builder::...`
+pub(crate) use builder as neuron_builder;
 
 /// Режим «Коннектом»: все данные и UI вьюера коннектома.
 ///
@@ -51,7 +53,7 @@ pub(crate) struct ConnectomeMode {
     pub disin: DisinState,
 
     // ── конструктор нейрона (нодовый редактор Formula) ──
-    pub builder: neuron_builder::NeuronBuilder,
+    pub builder: builder::NeuronBuilder,
 
     // ── библиотека плоттеров (включение / открепление) ──
     pub plots: plotlib::PlotLib,
@@ -86,7 +88,7 @@ impl Default for ConnectomeMode {
             pharma: PharmaState::default(),
             live: LiveState::default(),
             disin: DisinState::default(),
-            builder: neuron_builder::NeuronBuilder::default(),
+            builder: builder::NeuronBuilder::default(),
             plots: plotlib::PlotLib::new(),
             console: Console::new(),
             ego_undocked: false,
@@ -191,7 +193,12 @@ impl Mode for ConnectomeMode {
     }
 
     /// Окна и модалки режима: «Плоттеры», откреплённый ego-граф, плоты в окнах ОС.
-    fn windows(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, _services: &mut ShellServices) {
+    fn windows(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &mut eframe::Frame,
+        _services: &mut ShellServices,
+    ) {
         if self.show_plots {
             self.plots_library_modal(ctx);
         }
