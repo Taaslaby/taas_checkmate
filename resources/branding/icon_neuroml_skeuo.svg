@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="paperW" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <linearGradient id="glossW" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="white" stop-opacity="0.85"/>
+      <stop offset="35%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadowW" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="black" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <!-- paper -->
+  <rect x="32" y="24" width="192" height="208" rx="8" fill="url(#paperW)" filter="url(#shadowW)" stroke="#CBD5E1" stroke-width="1.2"/>
+  <rect x="32" y="24" width="192" height="28" rx="8" fill="url(#glossW)"/>
+  <!-- folded corner -->
+  <path d="M 200 24 L 224 48 L 200 48 Z" fill="#E2E8F0" stroke="#94A3B8" stroke-width="0.8"/>
+  <!-- gray lines -->
+  <g stroke="#94A3B8" stroke-width="6" stroke-linecap="round" opacity="0.85">
+    <line x1="52" y1="68" x2="168" y2="68"/><line x1="52" y1="88" x2="180" y2="88"/><line x1="52" y1="108" x2="152" y2="108"/>
+    <line x1="52" y1="128" x2="172" y2="128"/><line x1="52" y1="148" x2="160" y2="148"/><line x1="52" y1="168" x2="176" y2="168"/><line x1="52" y1="188" x2="144" y2="188"/>
+  </g>
+  <!-- neuron — glossy Aqua -->
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- dendrites -->
+    <path d="M 172 56 L 158 72 L 142 68 L 132 80 L 118 74 L 108 88" fill="none" stroke="#3A7BD5" stroke-width="2.2"/>
+    <path d="M 182 62 L 168 74 L 180 84" fill="none" stroke="#3A7BD5" stroke-width="1.8"/>
+    <path d="M 142 68 L 136 52 L 124 48" fill="none" stroke="#3A7BD5" stroke-width="1.8"/>
+    <path d="M 132 80 L 128 98 L 116 108 L 108 124" fill="none" stroke="#3A7BD5" stroke-width="2"/>
+    <!-- soma — glossy red -->
+    <circle cx="132" cy="68" r="14" fill="#E85D75" stroke="#C94A62" stroke-width="1.2"/>
+    <circle cx="132" cy="62" r="6" fill="white" opacity="0.32"/>
+    <circle cx="132" cy="68" r="4.5" fill="#FFD166" stroke="#E8A020" stroke-width="0.8"/>
+    <!-- axon terminals -->
+    <circle cx="108" cy="88" r="2.2" fill="#3A7BD5"/><circle cx="108" cy="124" r="2.2" fill="#3A7BD5"/><circle cx="180" cy="84" r="2.2" fill="#3A7BD5"/>
+  </g>
+</svg>

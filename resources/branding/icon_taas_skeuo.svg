@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="folderGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3A6EA5"/>
+      <stop offset="55%" stop-color="#1E4A6B"/>
+      <stop offset="100%" stop-color="#163A56"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="white" stop-opacity="0.32"/>
+      <stop offset="45%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="black" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- folder back -->
+  <path d="M 28 72 L 28 208 C 28 220 38 230 50 230 L 206 230 C 218 230 228 220 228 208 L 228 52 L 108 52 L 92 72 Z" fill="url(#folderGrad)" filter="url(#shadow)"/>
+  <!-- folder gloss -->
+  <path d="M 28 72 L 92 72 L 108 52 L 228 52 L 228 78 L 28 78 Z" fill="url(#gloss)"/>
+  <!-- brain — soft pink, Aqua highlight -->
+  <g opacity="0.98">
+    <ellipse cx="128" cy="88" rx="52" ry="38" fill="#E8A0B8" stroke="#F2C2D0" stroke-width="1.2"/>
+    <ellipse cx="92" cy="96" rx="22" ry="20" fill="#E8A0B8"/>
+    <ellipse cx="164" cy="96" rx="22" ry="20" fill="#E8A0B8"/>
+    <path d="M 98 72 C 105 62, 122 58, 128 72 C 134 58, 151 62, 158 72" fill="none" stroke="#C47A90" stroke-width="1.1" opacity="0.6"/>
+    <path d="M 108 100 C 115 92, 122 92, 128 100 C 134 92, 141 92, 148 100" fill="none" stroke="#C47A90" stroke-width="1" opacity="0.45"/>
+    <ellipse cx="128" cy="88" rx="52" ry="22" fill="white" opacity="0.18"/>
+  </g>
+  <!-- .TAAS badge — Aqua pill -->
+  <rect x="48" y="148" width="160" height="48" rx="12" fill="#2A3441" stroke="#3A4A5E" stroke-width="1.2"/>
+  <rect x="48" y="148" width="160" height="24" rx="12" fill="white" opacity="0.07"/>
+  <text x="128" y="178" text-anchor="middle" font-family="'IBM Plex Sans', sans-serif" font-size="32" font-weight="700" fill="#A8D8EA" letter-spacing="3">.TAAS</text>
+</svg>
