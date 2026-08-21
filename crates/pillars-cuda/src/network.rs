@@ -149,14 +149,14 @@ struct NetworkGraphState {
 /// run on the GPU. State and buffers persist in VRAM across `step()` calls.
 pub struct CompiledNetwork {
     pops: Vec<PopDevice>,
-    d_ring: CUdeviceptr,      // MAX_DELAY_SLOTS * n_total * 4
-    d_i_in: CUdeviceptr,      // n_total * 4 (stable per-step input buffer)
-    d_slot: CUdeviceptr,      // 4 bytes: int `step % 32`, read by the graph kernels
-    d_spikes: CUdeviceptr,    // n_total * 4
-    d_row_ptr: CUdeviceptr,   // (n_total + 1) * 4
-    d_col_idx: CUdeviceptr,   // n_syn * 4
-    d_weights: CUdeviceptr,   // n_syn * 4
-    d_delays: CUdeviceptr,    // n_syn * 4
+    d_ring: CUdeviceptr,    // MAX_DELAY_SLOTS * n_total * 4
+    d_i_in: CUdeviceptr,    // n_total * 4 (stable per-step input buffer)
+    d_slot: CUdeviceptr,    // 4 bytes: int `step % 32`, read by the graph kernels
+    d_spikes: CUdeviceptr,  // n_total * 4
+    d_row_ptr: CUdeviceptr, // (n_total + 1) * 4
+    d_col_idx: CUdeviceptr, // n_syn * 4
+    d_weights: CUdeviceptr, // n_syn * 4
+    d_delays: CUdeviceptr,  // n_syn * 4
     copy_func: CUfunction,
     scatter_func: CUfunction,
     zero_func: CUfunction,
@@ -618,7 +618,11 @@ impl Drop for CompiledNetwork {
 /// # Safety
 /// `stream` must be a valid stream in capture mode; all device pointers belong
 /// to `net` and stay alive for the graph's lifetime.
-unsafe fn launch_network_step(d: &crate::ffi::Driver, net: &CompiledNetwork, stream: CUstream) -> Result<(), String> {
+unsafe fn launch_network_step(
+    d: &crate::ffi::Driver,
+    net: &CompiledNetwork,
+    stream: CUstream,
+) -> Result<(), String> {
     // 1. Copy the current ring slot into the stable input buffer.
     {
         let grid = (net.n_total as u32).div_ceil(BLOCK);
@@ -792,7 +796,10 @@ unsafe fn capture_network_graph(
     let _ = (d.cu_graph_destroy)(graph);
     if rc != 0 {
         let _ = (d.cu_stream_destroy)(stream);
-        return Err(format!("network graph instantiate: {}", driver_error(d, rc)));
+        return Err(format!(
+            "network graph instantiate: {}",
+            driver_error(d, rc)
+        ));
     }
 
     Ok(NetworkGraphState { exec, stream })
@@ -811,12 +818,13 @@ fn alloc(d: &crate::ffi::Driver, bytes: usize) -> Result<CUdeviceptr, String> {
 fn upload<T: Sized>(d: &crate::ffi::Driver, dst: CUdeviceptr, src: &[T]) -> Result<(), String> {
     // SAFETY: `dst` is a device pointer with at least `size_of_val(src)` bytes
     // allocated; `src` is a valid host slice of the same length.
-    check_cu(
-        d,
-        unsafe {
-            (d.cu_memcpy_htod)(dst, src.as_ptr() as *const c_void, std::mem::size_of_val(src))
-        },
-    )
+    check_cu(d, unsafe {
+        (d.cu_memcpy_htod)(
+            dst,
+            src.as_ptr() as *const c_void,
+            std::mem::size_of_val(src),
+        )
+    })
 }
 
 fn download<T: Sized>(
@@ -826,14 +834,11 @@ fn download<T: Sized>(
 ) -> Result<(), String> {
     // SAFETY: `src` is a device pointer with at least `size_of_val(dst)` bytes;
     // `dst` is a valid writable host slice of the same length.
-    check_cu(
-        d,
-        unsafe {
-            (d.cu_memcpy_dtoh)(
-                dst.as_mut_ptr() as *mut c_void,
-                src,
-                std::mem::size_of_val(dst),
-            )
-        },
-    )
+    check_cu(d, unsafe {
+        (d.cu_memcpy_dtoh)(
+            dst.as_mut_ptr() as *mut c_void,
+            src,
+            std::mem::size_of_val(dst),
+        )
+    })
 }

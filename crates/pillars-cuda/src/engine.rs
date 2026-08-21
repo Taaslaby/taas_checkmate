@@ -867,7 +867,8 @@ pub(crate) fn compile_source_function(
         // compute_90 is gone on CUDA 13.x — fall back to sm_89 (covers every
         // consumer GPU since RTX 20xx) instead of a dead arch.
         compile(major, minor).or_else(|native| {
-            compile(8, 9).map_err(|fallback| format!("{native}\nfallback compute_89 failed: {fallback}"))
+            compile(8, 9)
+                .map_err(|fallback| format!("{native}\nfallback compute_89 failed: {fallback}"))
         })
     }
 }
@@ -958,9 +959,7 @@ fn demangle_cpp_entry(name: &str) -> String {
         return name.to_string();
     }
     match rest[..digits].parse::<usize>() {
-        Ok(len)
-            if len > 0 && rest.len() >= digits + len && rest.is_char_boundary(digits + len) =>
-        {
+        Ok(len) if len > 0 && rest.len() >= digits + len && rest.is_char_boundary(digits + len) => {
             rest[digits..digits + len].to_string()
         }
         _ => name.to_string(),

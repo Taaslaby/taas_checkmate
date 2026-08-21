@@ -633,6 +633,6 @@ pub(crate) fn compile(
         duration_ms,
         gpu_pops,
         cable,
-        warnings: ir.warnings,
+        warnings: ir.warnings_sorted(),
     })
 }

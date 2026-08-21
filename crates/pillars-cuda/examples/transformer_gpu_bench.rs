@@ -5,10 +5,10 @@
 //!
 //! Run: cargo run -p pillars-cuda --example transformer_gpu_bench --release
 
-use std::time::Instant;
 use pillars::core::population::NeuralPopulation;
 use pillars::zoo::Model;
 use pillars_cuda::{CompiledModel, TransformerModel, TRANSFORMER_CUDA_SOURCE};
+use std::time::Instant;
 
 fn main() {
     let n: usize = std::env::args()
@@ -47,9 +47,7 @@ fn main() {
     for c in 0..ns {
         g_states[c * n..(c + 1) * n].copy_from_slice(pop.state_slice(c));
     }
-    let g_params: Vec<f32> = (0..np)
-        .flat_map(|c| pop.param_slice(c).to_vec())
-        .collect();
+    let g_params: Vec<f32> = (0..np).flat_map(|c| pop.param_slice(c).to_vec()).collect();
     let init_states = g_states.clone();
 
     // ── CPU SIMD baseline ─────────────────────────────────────────
@@ -62,43 +60,43 @@ fn main() {
     }
     let cpu_ms = t0.elapsed().as_secs_f64() * 1e3 / steps as f64;
 
-    println!("  [CPU SIMD]    {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={cpu_total}",
-        cpu_ms, n as f64 / cpu_ms / 1e3);
+    println!(
+        "  [CPU SIMD]    {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={cpu_total}",
+        cpu_ms,
+        n as f64 / cpu_ms / 1e3
+    );
 
     // ── GPU: persistent (state in VRAM, only spikes cross PCIe) ──
-    let model = CompiledModel::new(
-        TRANSFORMER_CUDA_SOURCE,
-        "transformer_kernel",
-        ns,
-        np,
-        n,
-        n,
-    ).expect("CUDA compile transformer kernel");
+    let model = CompiledModel::new(TRANSFORMER_CUDA_SOURCE, "transformer_kernel", ns, np, n, n)
+        .expect("CUDA compile transformer kernel");
 
-    model.upload(&init_states, &g_params, &i_in).expect("upload");
+    model
+        .upload(&init_states, &g_params, &i_in)
+        .expect("upload");
     let mut gpu_total = 0i64;
     let mut g_spikes = vec![0i32; n];
     let t1 = Instant::now();
     for _ in 0..steps {
         model.step_device(dt).expect("persistent step");
-        model.download_spikes(&mut g_spikes).expect("download spikes");
+        model
+            .download_spikes(&mut g_spikes)
+            .expect("download spikes");
         gpu_total += g_spikes.iter().map(|&s| s as i64).sum::<i64>();
     }
     let gpu_ms = t1.elapsed().as_secs_f64() * 1e3 / steps as f64;
 
-    println!("  [GPU persist] {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={gpu_total}",
-        gpu_ms, n as f64 / gpu_ms / 1e3);
+    println!(
+        "  [GPU persist] {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={gpu_total}",
+        gpu_ms,
+        n as f64 / gpu_ms / 1e3
+    );
 
     // ── GPU: persistent, spikes every 100 steps ───────────────────
-    let model2 = CompiledModel::new(
-        TRANSFORMER_CUDA_SOURCE,
-        "transformer_kernel",
-        ns,
-        np,
-        n,
-        n,
-    ).expect("CUDA compile");
-    model2.upload(&init_states, &g_params, &i_in).expect("upload");
+    let model2 = CompiledModel::new(TRANSFORMER_CUDA_SOURCE, "transformer_kernel", ns, np, n, n)
+        .expect("CUDA compile");
+    model2
+        .upload(&init_states, &g_params, &i_in)
+        .expect("upload");
     let mut gpu_total2 = 0i64;
     let mut g_spikes2 = vec![0i32; n];
     let t2 = Instant::now();
@@ -111,8 +109,11 @@ fn main() {
     }
     let batched_ms = t2.elapsed().as_secs_f64() * 1e3 / steps as f64;
 
-    println!("  [GPU batch]   {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={gpu_total2}",
-        batched_ms, n as f64 / batched_ms / 1e3);
+    println!(
+        "  [GPU batch]   {:.4} ms/step  ({:.1} M neuron-step/s)  spikes={gpu_total2}",
+        batched_ms,
+        n as f64 / batched_ms / 1e3
+    );
 
     // ── Comparison ────────────────────────────────────────────────
     println!();
@@ -130,7 +131,9 @@ fn main() {
     println!("  Spike parity: {parity_msg}");
 
     // State parity
-    model.download_states(&mut g_states).expect("download states");
+    model
+        .download_states(&mut g_states)
+        .expect("download states");
     let mut max_bits = 0u32;
     for c in 0..ns {
         for i in 0..n {

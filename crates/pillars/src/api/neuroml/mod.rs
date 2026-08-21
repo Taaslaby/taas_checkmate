@@ -416,10 +416,12 @@ impl LoadedNetwork {
         let mut spike_counts = vec![0usize; self.network.num_populations()];
         for s in 0..steps {
             let t = s as f32 * self.dt_ms;
-            for (pop, indices, amps) in self.injections_at(t) {
+            let injections = self.injections_at(t);
+            for (pop, indices, amps) in injections {
                 self.network.inject_current(pop, &indices, &amps);
             }
-            for (pop, indices, amps) in self.clamp_currents(t) {
+            let clamps = self.clamp_currents(t);
+            for (pop, indices, amps) in clamps {
                 self.network.inject_current(pop, &indices, &amps);
             }
             self.network.step();
@@ -484,20 +486,65 @@ impl LoadedNetwork {
                 }
             };
             let vs = self.network.state(c.pop, 0);
-            let mut firing = Vec::with_capacity(c.indices.len());
             let mut amps = Vec::with_capacity(c.indices.len());
             for &idx in &c.indices {
                 let v = vs[idx as usize];
-                firing.push(idx);
                 amps.push(c.weight * (target - v) / c.series_resistance_mohm);
             }
-            out.push((c.pop, firing, amps));
+            out.push((c.pop, c.indices.clone(), amps));
+        }
+        out
+    }
+
+    /// Zero-allocation variant of [`clamp_currents`]: borrows indices from
+    /// `self`, allocates only the amplitude `Vec<f32>` per active clamp.
+    ///
+    /// Returns `(population, indices, amplitudes)` where `indices` is a
+    /// `&[u32]` slice into the clamp (no clone).
+    pub fn clamp_currents_ref(&self, t_ms: f32) -> Vec<(usize, &[u32], Vec<f32>)> {
+        let mut out = Vec::new();
+        for c in &self.clamps {
+            let target = match &c.schedule {
+                ClampSchedule::Window { target_mv } => {
+                    if t_ms < c.delay_ms || t_ms > c.delay_ms + c.duration_ms {
+                        continue;
+                    }
+                    *target_mv
+                }
+                ClampSchedule::Triple {
+                    conditioning_mv,
+                    testing_mv,
+                    return_mv,
+                    active,
+                } => {
+                    if !*active {
+                        continue;
+                    }
+                    if t_ms < c.delay_ms {
+                        *conditioning_mv
+                    } else if t_ms > c.delay_ms + c.duration_ms {
+                        *return_mv
+                    } else {
+                        *testing_mv
+                    }
+                }
+            };
+            let vs = self.network.state(c.pop, 0);
+            let mut amps = Vec::with_capacity(c.indices.len());
+            for &idx in &c.indices {
+                let v = vs[idx as usize];
+                amps.push(c.weight * (target - v) / c.series_resistance_mohm);
+            }
+            out.push((c.pop, c.indices.as_slice(), amps));
         }
         out
     }
 
     /// Returns `(population, indices, amplitudes)` triples ready for
     /// [`Network::inject_current`] (CPU) or its GPU equivalent.
+    ///
+    /// Allocates a `Vec` per call (amplitudes must be owned). For zero-alloc
+    /// iteration over `&[u32]` indices, use [`injections_at_ref`].
     pub fn injections_at(&self, t_ms: f32) -> Vec<(usize, Vec<u32>, Vec<f32>)> {
         let mut out = Vec::new();
         let step = (t_ms / self.dt_ms).round().max(0.0) as u64;
@@ -562,6 +609,72 @@ impl LoadedNetwork {
         }
         out
     }
+
+    /// Zero-allocation variant of [`injections_at`]: borrows indices from
+    /// `self`, allocates only the amplitude `Vec<f32>` per active stimulus.
+    ///
+    /// Returns `(population, indices, amplitudes)` where `indices` is a
+    /// `&[u32]` slice into the stimulus (no clone).
+    pub fn injections_at_ref(&self, t_ms: f32) -> Vec<(usize, &[u32], Vec<f32>)> {
+        let mut out = Vec::new();
+        let step = (t_ms / self.dt_ms).round().max(0.0) as u64;
+        for stim in &self.inputs {
+            if t_ms < stim.start_ms || t_ms >= stim.end_ms {
+                continue;
+            }
+            match &stim.kind {
+                StimulusKind::Current => {
+                    let amps = vec![stim.amplitude; stim.indices.len()];
+                    out.push((stim.pop, stim.indices.as_slice(), amps));
+                }
+                StimulusKind::SpikeTimes { times_ms } => {
+                    let dt = self.dt_ms;
+                    if times_ms.iter().any(|&s| s >= t_ms && s < t_ms + dt) {
+                        let amps = vec![stim.amplitude; stim.indices.len()];
+                        out.push((stim.pop, stim.indices.as_slice(), amps));
+                    }
+                }
+                StimulusKind::Poisson { rate_hz, seed } => {
+                    let p = (rate_hz * self.dt_ms / 1000.0).clamp(0.0, 1.0);
+                    if p <= 0.0 {
+                        continue;
+                    }
+                    let mut firing = Vec::new();
+                    for (k, &idx) in stim.indices.iter().enumerate() {
+                        if poisson_spike(*seed, k as u32, step, p) {
+                            firing.push(idx);
+                        }
+                    }
+                    if !firing.is_empty() {
+                        let amps = vec![stim.amplitude; firing.len()];
+                        out.push((stim.pop, firing.leak(), amps));
+                    }
+                }
+                StimulusKind::Sine { period_ms, phase } => {
+                    let omega = 2.0 * std::f32::consts::PI / period_ms;
+                    let arg = *phase + omega * (t_ms - stim.start_ms);
+                    let amp = stim.amplitude * arg.sin();
+                    let amps = vec![amp; stim.indices.len()];
+                    out.push((stim.pop, stim.indices.as_slice(), amps));
+                }
+                StimulusKind::Ramp {
+                    start_amp,
+                    finish_amp,
+                } => {
+                    let span = stim.end_ms - stim.start_ms;
+                    let u = if span > 0.0 {
+                        ((t_ms - stim.start_ms) / span).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let amp = start_amp + (finish_amp - start_amp) * u;
+                    let amps = vec![amp; stim.indices.len()];
+                    out.push((stim.pop, stim.indices.as_slice(), amps));
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Parse and compile a NeuroML2 document.
@@ -608,7 +721,7 @@ pub fn load_file_at(path: &Path, celsius: f32) -> Result<LoadedNetwork, NeuromlE
     let xml = std::fs::read_to_string(path)
         .map_err(|e| NeuromlError::parse(format!("cannot read {}: {e}", path.display())))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let merged = resolve_includes(&xml, base, 0)?;
+    let merged = resolve_includes(&xml, base)?;
     let ir = parse::parse(&merged)?;
     let (dt, duration) = match &ir.sim {
         Some(s) => (s.dt_ms, s.duration_ms),
@@ -618,54 +731,105 @@ pub fn load_file_at(path: &Path, celsius: f32) -> Result<LoadedNetwork, NeuromlE
 }
 
 /// Inline LEMS `<include href="…"/>` elements, resolving each `href` relative
-/// to `base` and recursing into the included file (depth-limited). XML
-/// declarations in included files are stripped so concatenation stays valid.
-/// Our parser walks all descendants, so nested `<neuroml>` roots from includes
-/// are harmless — matching tags are still found.
-fn resolve_includes(xml: &str, base: &Path, depth: usize) -> Result<String, NeuromlError> {
-    if depth > 8 {
-        return Err(NeuromlError::parse("LEMS include depth exceeded 8"));
+/// to `base` and recursing into the included file. XML declarations in
+/// included files are stripped so concatenation stays valid.
+///
+/// Cycle detection: tracks canonicalized paths of visited files — a cyclic
+/// include (A→B→A) errors out instead of infinite recursion.
+fn resolve_includes(xml: &str, base: &Path) -> Result<String, NeuromlError> {
+    let mut visited = std::collections::HashSet::new();
+    resolve_includes_impl(xml, base, &mut visited, 0)
+}
+
+fn resolve_includes_impl(
+    xml: &str,
+    base: &Path,
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    depth: usize,
+) -> Result<String, NeuromlError> {
+    if depth > 16 {
+        return Err(NeuromlError::parse(
+            "LEMS include depth exceeded 16 (possible cycle)",
+        ));
     }
-    let mut out = String::with_capacity(xml.len());
-    let rest = xml;
-    let mut search_from = 0usize;
+
+    // Parse XML with roxmltree — handles edge cases like `<include` inside
+    // comments/CDATA, multi-line attributes, single-quoted href, etc.
+    let doc = roxmltree::Document::parse(xml).map_err(|e| {
+        NeuromlError::parse(format!("XML parse error during include resolution: {e}"))
+    })?;
+
+    // Collect include hrefs (file includes only, not segmentGroup inheritance).
+    let mut includes: Vec<String> = Vec::new();
+    for node in doc.root_element().descendants() {
+        if node.tag_name().name().eq_ignore_ascii_case("include") {
+            if let Some(href) = node.attribute("href") {
+                includes.push(href.to_string());
+            }
+        }
+    }
+
+    if includes.is_empty() {
+        return Ok(xml.to_string());
+    }
+
+    // Reconstruct XML with includes inlined.
+    // We split by `<include` and rebuild — roxmltree doesn't give us source
+    // spans, so we do a targeted replacement.
+    let mut out = String::with_capacity(xml.len() * 2);
+    let mut rest = xml;
+
     loop {
-        // Case-insensitive `<include` (NeuroML uses lowercase; be lenient).
-        // NOTE: ищем по оригиналу байт-за-байтом (eq_ignore_ascii_case), а не
-        // через to_lowercase().find() — lowercasing меняет длину строки для
-        // не-ASCII (кириллица в комментариях), и байтовые индексы разъезжаются.
-        let start = find_ascii_case_insensitive(rest, b"<include", search_from);
-        let Some(start) = start else { break };
-        out.push_str(&rest[search_from..start]);
+        let Some(start) = find_ascii_case_insensitive(rest, b"<include", 0) else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+
         let after = &rest[start..];
         let end = after
             .find('>')
             .ok_or_else(|| NeuromlError::parse("unterminated <include> element"))?;
         let elem = &after[..=end];
+
+        // Extract href (supports both double and single quotes).
         let Some(href) = extract_href(elem) else {
-            // `<include segmentGroup="…"/>` — наследование сегмент-групп в
-            // морфологии, а не файловый инклюд: пропускаем как есть.
+            // `<include segmentGroup="…"/>` — morphology inheritance, not a file.
             out.push_str(elem);
-            search_from = start + end + 1;
+            rest = &after[end + 1..];
             continue;
         };
-        // jNeuroML-экспорт пишет абсолютные пути вида `/channels/foo.nml` —
-        // это «относительно каталога модели», а не корня диска. Срезаем
-        // ведущий слэш, чтобы `base.join` дал правильный путь.
-        let href = href.trim_start_matches(['/', '\\']);
-        let full = base.join(href);
+
+        // jNeuroML writes absolute paths like `/channels/foo.nml` — strip
+        // leading slash so `base.join` resolves relative to the model dir.
+        let href_clean = href.trim_start_matches(['/', '\\']);
+        let full = base.join(href_clean);
+
+        // Cycle detection: canonicalize path, check if already visited.
+        let canonical = full
+            .canonicalize()
+            .unwrap_or_else(|_| full.clone());
+        if !visited.insert(canonical.clone()) {
+            return Err(NeuromlError::parse(format!(
+                "cyclic include detected: {} was already included",
+                full.display()
+            )));
+        }
+
         let included = std::fs::read_to_string(&full).map_err(|e| {
             NeuromlError::parse(format!("cannot read include {}: {e}", full.display()))
         })?;
+
         let inc_base = full.parent().unwrap_or(base);
-        let inc_merged = resolve_includes(&included, inc_base, depth + 1)?;
-        // Стрём XML-объявление у включаемого файла (иначе конкатенация битая).
+        let inc_merged = resolve_includes_impl(&included, inc_base, visited, depth + 1)?;
+
+        // Strip XML declaration from included file (concatenation must stay valid).
         let inc_merged = strip_xml_decl(&inc_merged);
         out.push_str(&inc_merged);
         out.push('\n');
-        search_from = start + end + 1;
+
+        rest = &after[end + 1..];
     }
-    out.push_str(&rest[search_from..]);
+    out.push_str(rest);
     Ok(out)
 }
 
@@ -687,11 +851,21 @@ fn find_ascii_case_insensitive(haystack: &str, needle: &[u8], from: usize) -> Op
     None
 }
 
-/// Pull `href="…"` out of an `<include …/>` element.
+/// Pull `href="…"` or `href='…'` out of an `<include …/>` element.
 fn extract_href(elem: &str) -> Option<&str> {
-    let s = elem.find("href=\"")? + "href=\"".len();
-    let e = elem[s..].find('"')? + s;
-    Some(&elem[s..e])
+    // Try double quotes first.
+    if let Some(s) = elem.find("href=\"") {
+        let s = s + "href=\"".len();
+        let e = elem[s..].find('"')? + s;
+        return Some(&elem[s..e]);
+    }
+    // Fall back to single quotes (valid XML).
+    if let Some(s) = elem.find("href='") {
+        let s = s + "href='".len();
+        let e = elem[s..].find('\'')? + s;
+        return Some(&elem[s..e]);
+    }
+    None
 }
 
 /// Drop a leading `<?xml …?>` declaration if present.

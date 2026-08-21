@@ -1,7 +1,7 @@
 // ─── Parser ────────────────────────────────────────────────────
 use super::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Parse a NeuroML2 (and/or LEMS) XML document into the IR.
 pub(crate) fn parse(xml: &str) -> Result<Ir, NeuromlError> {
@@ -113,7 +113,7 @@ pub(crate) fn parse(xml: &str) -> Result<Ir, NeuromlError> {
         concentration_models: HashMap::new(),
         morpho_cells: Vec::new(),
         sim: None,
-        warnings: Vec::new(),
+        warnings: HashSet::new(),
     };
 
     for node in doc.root_element().descendants() {
@@ -830,9 +830,7 @@ pub(crate) fn parse(xml: &str) -> Result<Ir, NeuromlError> {
             other => {
                 if let Some(note) = skipped_element_note(other) {
                     let msg = format!("<{other}> — не поддерживается, пропущено{note}");
-                    if !ir.warnings.contains(&msg) {
-                        ir.warnings.push(msg);
-                    }
+                    ir.warnings.insert(msg);
                 }
             }
         }
@@ -872,6 +870,12 @@ pub(crate) fn parse_cell_ref(target: &str) -> Result<(&str, usize), NeuromlError
     let close = target
         .find(']')
         .ok_or_else(|| NeuromlError::parse(format!("bad cell reference `{target}`")))?;
+    // Guard against malformed brackets: `pop]0[` would panic on slice.
+    if open >= close {
+        return Err(NeuromlError::parse(format!(
+            "bad cell reference `{target}` (brackets out of order)"
+        )));
+    }
     // Strip a leading path ("../") and keep the population id.
     let pop = target[..open].rsplit('/').next().unwrap_or(&target[..open]);
     let idx: usize = target[open + 1..close]

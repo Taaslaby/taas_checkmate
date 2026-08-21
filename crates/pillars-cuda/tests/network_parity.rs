@@ -12,11 +12,9 @@
 
 use pillars::api::{Edge, Network, SparseGraph};
 use pillars::core::population::NeuralPopulation;
-use pillars::zoo::Model;
 use pillars::zoo::neurons::{IzhikevichModel, IzhikevichModelParamIdx, LIFModel};
-use pillars_cuda::{
-    CompiledNetwork, IZHIKEVICH_CUDA_SOURCE, LIF_CUDA_SOURCE, NetworkPop,
-};
+use pillars::zoo::Model;
+use pillars_cuda::{CompiledNetwork, NetworkPop, IZHIKEVICH_CUDA_SOURCE, LIF_CUDA_SOURCE};
 
 const N: usize = 8; // per population
 const DT: f32 = 0.5;

@@ -52,8 +52,8 @@ use crate::engine::{
     check_cu, compile_source_function, device_context, module_function, CUDA_CALL_LOCK,
 };
 use crate::ffi::{
-    driver, CUdeviceptr, CUfunction, CUmodule, CUstream, CUgraph, CUgraphExec,
-    CU_STREAM_CAPTURE_MODE_THREAD_LOCAL, CU_STREAM_DEFAULT, CU_GRAPH_INSTANTIATE_DEFAULT,
+    driver, CUdeviceptr, CUfunction, CUgraph, CUgraphExec, CUmodule, CUstream,
+    CU_GRAPH_INSTANTIATE_DEFAULT, CU_STREAM_CAPTURE_MODE_THREAD_LOCAL, CU_STREAM_DEFAULT,
 };
 use pillars::zoo::neurons::ALPHA_LIF_CUDA_SOURCE;
 
@@ -319,8 +319,7 @@ impl AlphaLifGpu {
 
         // ── Compile one NVRTC module: neuron source + aux kernels ──
         let source = format!("{ALPHA_LIF_CUDA_SOURCE}\n\n{AUX_SOURCE}");
-        let (module, runner_kernel) =
-            compile_source_function(&source, "alpha_lif_runner_kernel")?;
+        let (module, runner_kernel) = compile_source_function(&source, "alpha_lif_runner_kernel")?;
         let d = driver().as_ref().map_err(|e| e.clone())?;
         device_context(d)?;
         let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -492,11 +491,7 @@ impl AlphaLifGpu {
             // device flag the ext kernel checks. Done once per call.
             let has_ext = !external_i.is_empty();
             let ext_flag = [if has_ext { 1.0f32 } else { 0.0f32 }];
-            upload(
-                d,
-                self.d_args + (ARG_HAS_EXT * 4) as CUdeviceptr,
-                &ext_flag,
-            )?;
+            upload(d, self.d_args + (ARG_HAS_EXT * 4) as CUdeviceptr, &ext_flag)?;
             let mut ext = vec![0.0f32; self.n];
             if has_ext {
                 for (i, slot) in ext.iter_mut().enumerate() {
@@ -568,7 +563,11 @@ impl AlphaLifGpu {
             let refr_col = vec![self.default_refr_steps; self.n];
             upload(d, self.d_states, &v_col)?; // column 0 (v) at offset 0
             upload(d, self.d_states + (self.stride * 4) as CUdeviceptr, &g_col)?;
-            upload(d, self.d_states + (2 * self.stride * 4) as CUdeviceptr, &refr_col)?;
+            upload(
+                d,
+                self.d_states + (2 * self.stride * 4) as CUdeviceptr,
+                &refr_col,
+            )?;
             let zeros_ring = vec![0.0f32; self.size * self.n];
             upload(d, self.d_ring, &zeros_ring)?;
             let zeros_spikes = vec![0i32; self.n];
@@ -576,7 +575,11 @@ impl AlphaLifGpu {
             upload(d, self.d_spikes[1], &zeros_spikes)?;
             // Rewind the device-side per-step scalars.
             let ring_reset = [(self.size - 1) as f32];
-            upload(d, self.d_args + (ARG_RING_POS * 4) as CUdeviceptr, &ring_reset)?;
+            upload(
+                d,
+                self.d_args + (ARG_RING_POS * 4) as CUdeviceptr,
+                &ring_reset,
+            )?;
             let step_reset = [0.0f32];
             upload(d, self.d_args + (ARG_STEP * 4) as CUdeviceptr, &step_reset)?;
         }
@@ -722,11 +725,24 @@ unsafe fn capture_graph(
             &mut ar as *mut CUdeviceptr as *mut c_void,
         ];
         let rc = (d.cu_launch_kernel)(
-            poisson_kernel, 1, 1, 1, 32, 1, 1, 0, stream, a.as_mut_ptr(), std::ptr::null_mut(),
+            poisson_kernel,
+            1,
+            1,
+            1,
+            32,
+            1,
+            1,
+            0,
+            stream,
+            a.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if rc != 0 {
             let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
-            return Err(format!("capture poisson: {}", crate::engine::driver_error(d, rc)));
+            return Err(format!(
+                "capture poisson: {}",
+                crate::engine::driver_error(d, rc)
+            ));
         }
     }
 
@@ -741,11 +757,24 @@ unsafe fn capture_graph(
             &mut ar as *mut CUdeviceptr as *mut c_void,
         ];
         let rc = (d.cu_launch_kernel)(
-            ext_kernel, grid, 1, 1, BLOCK, 1, 1, 0, stream, a.as_mut_ptr(), std::ptr::null_mut(),
+            ext_kernel,
+            grid,
+            1,
+            1,
+            BLOCK,
+            1,
+            1,
+            0,
+            stream,
+            a.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if rc != 0 {
             let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
-            return Err(format!("capture ext: {}", crate::engine::driver_error(d, rc)));
+            return Err(format!(
+                "capture ext: {}",
+                crate::engine::driver_error(d, rc)
+            ));
         }
     }
 
@@ -768,11 +797,24 @@ unsafe fn capture_graph(
             &mut tt as *mut CUdeviceptr as *mut c_void,
         ];
         let rc = (d.cu_launch_kernel)(
-            runner_kernel, grid, 1, 1, BLOCK, 1, 1, 0, stream, a.as_mut_ptr(), std::ptr::null_mut(),
+            runner_kernel,
+            grid,
+            1,
+            1,
+            BLOCK,
+            1,
+            1,
+            0,
+            stream,
+            a.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if rc != 0 {
             let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
-            return Err(format!("capture runner: {}", crate::engine::driver_error(d, rc)));
+            return Err(format!(
+                "capture runner: {}",
+                crate::engine::driver_error(d, rc)
+            ));
         }
     }
 
@@ -793,11 +835,24 @@ unsafe fn capture_graph(
             &mut ar as *mut CUdeviceptr as *mut c_void,
         ];
         let rc = (d.cu_launch_kernel)(
-            scatter_kernel, grid, 1, 1, BLOCK, 1, 1, 0, stream, a.as_mut_ptr(), std::ptr::null_mut(),
+            scatter_kernel,
+            grid,
+            1,
+            1,
+            BLOCK,
+            1,
+            1,
+            0,
+            stream,
+            a.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if rc != 0 {
             let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
-            return Err(format!("capture scatter: {}", crate::engine::driver_error(d, rc)));
+            return Err(format!(
+                "capture scatter: {}",
+                crate::engine::driver_error(d, rc)
+            ));
         }
     }
 
@@ -806,11 +861,24 @@ unsafe fn capture_graph(
         let mut ar = d_args;
         let mut a: [*mut c_void; 1] = [&mut ar as *mut CUdeviceptr as *mut c_void];
         let rc = (d.cu_launch_kernel)(
-            advance_kernel, 1, 1, 1, 1, 1, 1, 0, stream, a.as_mut_ptr(), std::ptr::null_mut(),
+            advance_kernel,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            stream,
+            a.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if rc != 0 {
             let _ = (d.cu_stream_end_capture)(stream, std::ptr::null_mut());
-            return Err(format!("capture advance: {}", crate::engine::driver_error(d, rc)));
+            return Err(format!(
+                "capture advance: {}",
+                crate::engine::driver_error(d, rc)
+            ));
         }
     }
 
@@ -823,7 +891,10 @@ unsafe fn capture_graph(
     let rc = (d.cu_graph_instantiate)(&mut exec, graph, CU_GRAPH_INSTANTIATE_DEFAULT);
     let _ = (d.cu_graph_destroy)(graph);
     if rc != 0 {
-        return Err(format!("graph instantiate: {}", crate::engine::driver_error(d, rc)));
+        return Err(format!(
+            "graph instantiate: {}",
+            crate::engine::driver_error(d, rc)
+        ));
     }
 
     Ok(exec)
@@ -844,7 +915,11 @@ unsafe fn upload<T: Sized>(
 ) -> Result<(), String> {
     check_cu(
         d,
-        (d.cu_memcpy_htod)(dst, src.as_ptr() as *const c_void, std::mem::size_of_val(src)),
+        (d.cu_memcpy_htod)(
+            dst,
+            src.as_ptr() as *const c_void,
+            std::mem::size_of_val(src),
+        ),
     )
 }
 

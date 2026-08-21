@@ -47,7 +47,18 @@ pub(crate) struct Ir {
     /// Non-fatal warnings: recognised NeuroML2 elements that we **silently
     /// skip** (gap junctions, graded synapses, …). Surfaced to callers so a
     /// model that "loads" but lost connectivity is never silently wrong.
-    pub warnings: Vec<String>,
+    /// Stored in a HashSet for O(1) dedup on large files (thousands of
+    /// repeated tags → O(n) instead of O(n²) Vec-scan).
+    pub warnings: HashSet<String>,
+}
+
+impl Ir {
+    /// Convert warnings to a sorted Vec for stable output order.
+    pub(crate) fn warnings_sorted(&self) -> Vec<String> {
+        let mut v: Vec<_> = self.warnings.iter().cloned().collect();
+        v.sort();
+        v
+    }
 }
 
 /// A cell (one of the supported point-neuron types).
