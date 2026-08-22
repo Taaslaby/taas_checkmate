@@ -31,7 +31,11 @@ pub(crate) fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, open: &
         } else {
             ic::CARET_RIGHT
         };
-        if ui.button(tokens::icon(chev, tokens::ICON_XS)).clicked() {
+        if ui
+            .button(tokens::icon(chev, tokens::ICON_XS))
+            .on_hover_text(if *open { "Свернуть" } else { "Развернуть" })
+            .clicked()
+        {
             *open = !*open;
             toggled = true;
         }
@@ -76,7 +80,7 @@ impl ConnectomeMode {
             if ui
                 .add(ElegButton::new(icon_label(
                     ic::STOP,
-                    "■ Остановить поток",
+                    "Остановить поток",
                     tokens::ICON_SM,
                 )))
                 .clicked()

@@ -38,8 +38,12 @@ pub(crate) const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(0x9A, 0x9E, 0
 /// Приглушённый красный — единственное цветное исключение: ошибки и «стоп».
 /// Один источник danger-красного для всего приложения (`ActionTone::Danger`).
 pub(crate) const DANGER: egui::Color32 = egui::Color32::from_rgb(0xA8, 0x44, 0x44);
+/// Светлый красный для текста ошибок на тёмном фоне (пара к [`DANGER`]).
+pub(crate) const DANGER_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xB8, 0xB8);
 /// Приглушённый янтарный — предупреждения (валидация, пропущенные элементы).
 pub(crate) const WARNING: egui::Color32 = egui::Color32::from_rgb(0xE0, 0xB8, 0x4A);
+/// Приглушённый зелёный — успех, «всё ок», применимо (pharma, валидация).
+pub(crate) const SUCCESS: egui::Color32 = egui::Color32::from_rgb(0x5A, 0xD6, 0x8B);
 /// Фон неактивного контрола (кнопки, комбо) — чуть светлее панели.
 pub(crate) const BG_CTRL: egui::Color32 = egui::Color32::from_rgb(0x25, 0x2A, 0x2B);
 /// Hover контрола.

@@ -23,7 +23,7 @@ use egui_phosphor::regular as ic;
 
 use crate::app::neuroml::NeuromlMode;
 use crate::app::shell::theme::{self, DANGER, WARNING};
-use crate::app::tokens::{self, icon_label};
+use crate::app::tokens;
 use crate::app::widgets::{action_button, icon_button, ActionTone};
 use crate::sim::neuroml;
 
@@ -208,8 +208,6 @@ enum EditorAction {
 const ERRORS_MAX_HEIGHT: f32 = 150.0;
 /// Высота статус-бара (имя файла · валидация · позиция курсора).
 const STATUS_H: f32 = 26.0;
-const W_SAVE: f32 = 110.0;
-const W_APPLY: f32 = 120.0;
 const W_RUN: f32 = 120.0;
 const W_OPEN: f32 = 100.0;
 
@@ -230,6 +228,72 @@ impl NeuromlMode {
         let err_lines = error_lines(&self.editor.errors);
         let cursor_line = self.editor.cursor_pos.0;
         let accent = theme::accent(ui);
+
+        // Пустое состояние — проф инструмент, не стекло (игрушечный глянец убрали)
+        if self.editor.text.trim().is_empty() {
+            egui::Frame::new()
+                .fill(theme::BG_INSET)
+                .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+                .corner_radius(tokens::RADIUS_MD)
+                .inner_margin(egui::Margin::symmetric(24, 20))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        // Иконка-инструмент 32px в кружке акцента (как в widgets::section_card)
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
+                        ui.painter().circle_filled(r.center(), 20.0, theme::accent(ui).gamma_multiply(0.14));
+                        ui.painter().circle_stroke(r.center(), 20.0, egui::Stroke::new(1.0, theme::accent(ui).gamma_multiply(0.4)));
+                        ui.painter().text(
+                            r.center(),
+                            egui::Align2::CENTER_CENTER,
+                            ic::CODE,
+                            egui::FontId::proportional(22.0),
+                            theme::accent(ui),
+                        );
+                        ui.add_space(tokens::SP_SM);
+                        ui.label(tokens::heading(egui::RichText::new("Начни с примера").size(tokens::TEXT_HEADING)));
+                        ui.label(
+                            egui::RichText::new("Выбери пресет — сразу увидишь сеть, морфологию и трассу спайков")
+                                .weak()
+                                .small(),
+                        );
+                        ui.add_space(tokens::SP_LG);
+                        ui.horizontal(|ui| {
+                            for (label, kind, tip) in [
+                                ("LIF сеть", SampleKind::ExcInh, "2 популяции Izhikevich"),
+                                ("HH аксон", SampleKind::HhAxon, "Hodgkin–Huxley 1952"),
+                                ("AdEx", SampleKind::AdEx, "Brette–Gerstner фиг.4"),
+                            ] {
+                                let icon = match kind {
+                                    SampleKind::ExcInh => ic::CIRCUITRY,
+                                    SampleKind::HhAxon => ic::WAVE_SINE,
+                                    SampleKind::AdEx => ic::ACTIVITY,
+                                };
+                                if action_button(ui, icon, label, ActionTone::Neutral, 118.0)
+                                    .on_hover_text(tip)
+                                    .clicked()
+                                {
+                                    self.editor.load_text(
+                                        match kind {
+                                            SampleKind::ExcInh => SAMPLE_NML,
+                                            SampleKind::HhAxon => HH_SAMPLE_NML,
+                                            SampleKind::AdEx => ADEX_SAMPLE_NML,
+                                        }
+                                        .to_string(),
+                                    );
+                                    self.editor.validate_if_dirty();
+                                }
+                            }
+                        });
+                        ui.add_space(tokens::SP_MD);
+                        ui.label(tokens::eyebrow("или"));
+                        ui.add_space(tokens::SP_XS);
+                        if action_button(ui, ic::FOLDER_OPEN, "Открыть .nml файл…", ActionTone::Neutral, 180.0).clicked() {
+                            self.show = true;
+                        }
+                    });
+                });
+            ui.add_space(tokens::SP_LG);
+        }
 
         // Высота области редактора: остаток вкладки минус статус-бар и
         // (если есть) список ошибок — вкладка не «распухает» и не режет.
@@ -274,8 +338,10 @@ impl NeuromlMode {
             for line in 1..=n_lines {
                 let is_err = err_lines.binary_search(&(line as u32)).is_ok();
                 let color = if is_err { DANGER } else { GUTTER_COLOR };
+                // Гаттер: ● для ошибки, иначе пробел — выравнивание не ломается
+                let prefix = if is_err { "● " } else { "  " };
                 job.append(
-                    &format!("{line:>w$}", w = digits + 1),
+                    &format!("{prefix}{line:>w$}", w = digits),
                     0.0,
                     TextFormat {
                         font_id: font.clone(),
@@ -298,31 +364,46 @@ impl NeuromlMode {
             ui.fonts_mut(|f| f.layout_job(job))
         };
 
-        let resp = egui::ScrollArea::vertical()
-            .id_salt("nml_editor_scroll")
-            .max_height(avail_h)
-            .auto_shrink([false, true])
+        // Chrome редактора: единый inset-frame как у проф IDE (VS Code, JetBrains)
+        // — BG_INSET утоплен относительно BG_CARD карточки вкладки, граница STROKE_SOFT,
+        // скругление RADIUS_MD, внутри gutter слева и код справа.
+        let resp = egui::Frame::new()
+            .fill(theme::BG_INSET)
+            .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+            .corner_radius(tokens::RADIUS_MD)
+            .inner_margin(egui::Margin::same(2))
             .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    // Тот же inner-margin (4×2), что у TextEdit — иначе
-                    // первая строка gutter сдвинута относительно текста.
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin::symmetric(4, 2))
-                        .show(ui, |ui| {
-                            ui.add(egui::Label::new(gutter_galley.clone()));
-                        });
-                    ui.separator();
-                    TextEdit::multiline(&mut self.editor.text)
-                        .code_editor()
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(desired_rows)
-                        // Поколение документа — ключ состояния egui:
-                        // новая загрузка = новый undo-стек.
-                        .id_salt(("neuroml_editor_text", self.editor.generation))
-                        .layouter(&mut layouter)
-                        .show(ui)
-                })
-                .inner
+                egui::ScrollArea::vertical()
+                    .id_salt("nml_editor_scroll")
+                    .max_height(avail_h)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            // Gutter — своя колонка с правым бордером (как в IDE)
+                            egui::Frame::NONE
+                                .fill(theme::BG_INSET)
+                                .inner_margin(egui::Margin::symmetric(6, 4))
+                                .show(ui, |ui| {
+                                    ui.add(egui::Label::new(gutter_galley.clone()));
+                                });
+                            // Вертикальный разделитель gutter | код
+                            let sep_rect = egui::Rect::from_min_max(
+                                egui::pos2(ui.cursor().min.x - 2.0, ui.min_rect().min.y),
+                                egui::pos2(ui.cursor().min.x - 1.0, ui.min_rect().max.y),
+                            );
+                            ui.painter().rect_filled(sep_rect, 0.0, theme::STROKE_SOFT);
+                            ui.add_space(4.0);
+                            TextEdit::multiline(&mut self.editor.text)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(desired_rows)
+                                .id_salt(("neuroml_editor_text", self.editor.generation))
+                                .layouter(&mut layouter)
+                                .show(ui)
+                        })
+                        .inner
+                    })
+                    .inner
             })
             .inner;
 
@@ -444,156 +525,215 @@ impl NeuromlMode {
 /// Цвет номеров строк (тихий, не конкурирует с кодом).
 const GUTTER_COLOR: egui::Color32 = egui::Color32::from_gray(0x66);
 
-/// Тулбар окна редактора: действия + примеры + зум. Чистая функция —
-/// возвращает выбранное действие (его выполняет владелец `&mut self`).
+/// Тулбар редактора: три группы в одну строку — действия | примеры | вид.
+/// Как в проф IDE: слева Primary-действие, в центре пресеты, справа зум.
 fn editor_toolbar(ui: &mut egui::Ui, font_size: f32) -> Option<EditorAction> {
     let mut action = None;
-    ui.horizontal_wrapped(|ui| {
-        if action_button(
-            ui,
-            ic::FLOPPY_DISK,
-            "Сохранить",
-            ActionTone::Neutral,
-            W_SAVE,
-        )
-        .on_hover_text("Записать текст в файл на диске (Ctrl+S)")
-        .clicked()
-        {
-            action = Some(EditorAction::Save);
-        }
-        if action_button(ui, ic::CHECK, "Применить", ActionTone::Neutral, W_APPLY)
-            .on_hover_text("Скомпилировать текст в сеть (обновить модалку/морфологию)")
-            .clicked()
-        {
-            action = Some(EditorAction::Apply);
-        }
-        if action_button(ui, ic::PLAY, "Запустить", ActionTone::Primary, W_RUN)
-            .on_hover_text("Применить + прогнать сеть на выбранном бэкенде")
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(tokens::SP_SM, tokens::SP_XS);
+        // ── Действия ──
+        if action_button(ui, ic::PLAY, "Запустить", ActionTone::Primary, W_RUN + 10.0)
+            .on_hover_text("Применить + прогнать сеть (Enter)")
             .clicked()
         {
             action = Some(EditorAction::Run);
         }
+        if icon_button(ui, ic::CHECK, false, tokens::ICON_SM)
+            .on_hover_text("Применить без запуска (Ctrl+Enter)")
+            .clicked()
+        {
+            action = Some(EditorAction::Apply);
+        }
+        if icon_button(ui, ic::FLOPPY_DISK, false, tokens::ICON_SM)
+            .on_hover_text("Сохранить (Ctrl+S)")
+            .clicked()
+        {
+            action = Some(EditorAction::Save);
+        }
         ui.separator();
-        ui.label(egui::RichText::new("Пример:").weak());
+        // ── Примеры ──
+        ui.label(tokens::eyebrow("Пример"));
+        ui.add_space(tokens::SP_XS);
         if let Some(kind) = sample_buttons(ui) {
             action = Some(EditorAction::LoadSample(kind));
         }
         ui.separator();
+        // ── Вид ──
         if action_button(ui, ic::FOLDER_OPEN, "Файл…", ActionTone::Neutral, W_OPEN)
-            .on_hover_text("Открыть модалку загрузки .nml")
+            .on_hover_text("Модалка загрузки .nml")
             .clicked()
         {
             action = Some(EditorAction::OpenModal);
         }
-        ui.separator();
-        if icon_button(ui, ic::MINUS, false, tokens::ICON_SM)
-            .on_hover_text("Уменьшить текст")
-            .clicked()
-        {
-            action = Some(EditorAction::Zoom(-1.0));
-        }
-        ui.label(
-            egui::RichText::new(format!("{font_size:.0}"))
-                .weak()
-                .monospace()
-                .size(tokens::TEXT_SMALL),
-        )
-        .on_hover_text("Размер текста");
-        if icon_button(ui, ic::PLUS, false, tokens::ICON_SM)
-            .on_hover_text("Увеличить текст")
-            .clicked()
-        {
-            action = Some(EditorAction::Zoom(1.0));
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_button(ui, ic::PLUS, false, tokens::ICON_SM)
+                .on_hover_text("Крупнее")
+                .clicked()
+            {
+                action = Some(EditorAction::Zoom(1.0));
+            }
+            ui.label(
+                egui::RichText::new(format!("{font_size:.0}"))
+                    .weak()
+                    .monospace()
+                    .size(tokens::TEXT_SMALL),
+            )
+            .on_hover_text("Размер шрифта редактора");
+            if icon_button(ui, ic::MINUS, false, tokens::ICON_SM)
+                .on_hover_text("Мельче")
+                .clicked()
+            {
+                action = Some(EditorAction::Zoom(-1.0));
+            }
+            ui.label(tokens::eyebrow("Масштаб"));
+            ui.add_space(tokens::SP_SM);
+        });
     });
+    ui.add_space(tokens::SP_XS);
     ui.separator();
     action
 }
 
-/// Статус валидации + список ошибок. Клик по ошибке с позицией возвращает
-/// (строка, колонка) — владелец прыгает курсором в редактор.
+/// Диагностика — как в проф IDE: карточка с иконкой + бейджом строки.
+/// Ошибки — кликабельные строки с ховером, предупреждения — янтарным.
 fn editor_errors(ui: &mut egui::Ui, editor: &EditorState, status: &str) -> Option<(u32, u32)> {
     let mut jump = None;
-    ui.horizontal_wrapped(|ui| {
+    // Заголовок диагностики — одна строка, без обёртки
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(tokens::SP_SM, tokens::SP_XS);
         if editor.valid {
-            ui.colored_label(
-                theme::accent(ui),
-                icon_label(ic::CHECK_CIRCLE, "документ валиден", tokens::ICON_SM),
+            ui.label(
+                tokens::icon_label(ic::CHECK_CIRCLE, "валиден", tokens::ICON_XS)
+                    .color(theme::accent(ui))
+                    .size(tokens::TEXT_SMALL),
             );
         } else if !editor.errors.is_empty() {
-            ui.colored_label(DANGER, format!("{} ошибок", editor.errors.len()));
+            ui.label(
+                tokens::icon_label(ic::WARNING_OCTAGON, &format!("{} ошибок", editor.errors.len()), tokens::ICON_XS)
+                    .color(DANGER)
+                    .size(tokens::TEXT_SMALL),
+            );
         }
         if !status.is_empty() {
             ui.separator();
-            ui.label(status);
+            ui.label(egui::RichText::new(status).weak().small());
         }
     });
     if !editor.errors.is_empty() {
         ui.add_space(tokens::SP_XS);
-        egui::ScrollArea::vertical()
-            .max_height(ERRORS_MAX_HEIGHT)
-            .id_salt("neuroml_editor_errors")
+        egui::Frame::new()
+            .fill(theme::BG_INSET)
+            .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+            .corner_radius(tokens::RADIUS_SM)
+            .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
-                for (pos, msg) in &editor.errors {
-                    match pos {
-                        Some((r, c)) => {
-                            if ui
-                                .add(
-                                    egui::Label::new(
-                                        egui::RichText::new(format!(
-                                            "строка {r}, колонка {c}: {msg}"
-                                        ))
-                                        .color(DANGER),
-                                    )
-                                    .sense(egui::Sense::click()),
-                                )
-                                .on_hover_text("Клик — перейти к строке")
-                                .clicked()
-                            {
-                                jump = Some((*r, *c));
+                egui::ScrollArea::vertical()
+                    .max_height(ERRORS_MAX_HEIGHT)
+                    .id_salt("neuroml_editor_errors")
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = tokens::SP_XS;
+                        for (pos, msg) in &editor.errors {
+                            match pos {
+                                Some((r, c)) => {
+                                    let resp = ui
+                                        .horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("{r}:{c}"))
+                                                    .monospace()
+                                                    .size(tokens::TEXT_SMALL)
+                                                    .color(theme::accent(ui)),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(msg)
+                                                    .color(DANGER)
+                                                    .size(tokens::TEXT_SMALL),
+                                            );
+                                        })
+                                        .response
+                                        .interact(egui::Sense::click());
+                                    if resp.hovered() {
+                                        ui.painter().rect_filled(
+                                            resp.rect.expand2(egui::vec2(4.0, 2.0)),
+                                            tokens::RADIUS_SM,
+                                            DANGER.gamma_multiply(0.08),
+                                        );
+                                    }
+                                    if resp.on_hover_text("Клик — перейти к строке").clicked() {
+                                        jump = Some((*r, *c));
+                                    }
+                                }
+                                None => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            tokens::icon(ic::WARNING, tokens::ICON_XS).color(WARNING),
+                                        );
+                                        ui.label(egui::RichText::new(msg).color(WARNING).small());
+                                    });
+                                }
                             }
                         }
-                        None => {
-                            ui.colored_label(WARNING, msg);
-                        }
-                    }
-                }
+                    });
             });
     }
     jump
 }
 
-/// Статус-бар: имя файла (+ «●» не сохранено), валидация, справа — позиция
-/// курсора и язык.
+/// Статус-бар — как в VS Code: тёмная планка BG_PANEL с разделителями,
+/// слева файл, справа язык + позиция курсора.
 fn editor_status_bar(ui: &mut egui::Ui, editor: &EditorState, path: &Path) {
-    ui.separator();
-    ui.horizontal(|ui| {
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "безымянный.nml".to_string());
-        if editor.modified {
-            ui.label(egui::RichText::new(format!("● {name}")).color(theme::accent(ui)))
-                .on_hover_text("Не сохранено — Ctrl+S");
-        } else {
-            ui.label(egui::RichText::new(name).weak());
-        }
-        ui.separator();
-        if editor.valid {
-            ui.colored_label(theme::accent(ui), "валиден");
-        } else if !editor.errors.is_empty() {
-            ui.colored_label(DANGER, format!("{} ошибок", editor.errors.len()));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.monospace(egui::RichText::new(format!(
-                "Стр {}, Кол {}",
-                editor.cursor_pos.0, editor.cursor_pos.1
-            )));
-            ui.separator();
-            ui.label(egui::RichText::new("NeuroML").weak());
+    ui.add_space(tokens::SP_XS);
+    egui::Frame::new()
+        .fill(theme::BG_PANEL)
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .corner_radius(tokens::RADIUS_SM)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(tokens::SP_SM, 0.0);
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "безымянный.nml".to_string());
+                if editor.modified {
+                    ui.label(
+                        tokens::icon_label(ic::CIRCLE, &name, tokens::ICON_XS)
+                            .color(theme::accent(ui))
+                            .size(tokens::TEXT_SMALL),
+                    )
+                    .on_hover_text("Не сохранено — Ctrl+S");
+                } else {
+                    ui.label(egui::RichText::new(&name).weak().small());
+                }
+                ui.separator();
+                if editor.valid {
+                    ui.label(
+                        tokens::icon_label(ic::CHECK, "валиден", tokens::ICON_XS)
+                            .color(theme::accent(ui))
+                            .small(),
+                    );
+                } else if !editor.errors.is_empty() {
+                    ui.label(
+                        tokens::icon_label(
+                            ic::WARNING_OCTAGON,
+                            &format!("{} ошибок", editor.errors.len()),
+                            tokens::ICON_XS,
+                        )
+                        .color(DANGER)
+                        .small(),
+                    );
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} : {}", editor.cursor_pos.0, editor.cursor_pos.1))
+                            .monospace()
+                            .size(tokens::TEXT_SMALL)
+                            .weak(),
+                    );
+                    ui.separator();
+                    ui.label(tokens::icon_label(ic::CODE, "NeuroML", tokens::ICON_XS).weak().small());
+                });
+            });
         });
-    });
 }
 
 /// Прыжок курсора в редактор на (строка, колонка) — по клику на ошибку.

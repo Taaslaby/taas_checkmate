@@ -4,7 +4,7 @@
 //! Работает только с `PharmaState` (узкая сигнатура — не требует `ConnApp`).
 //! Данные — `resources/pharma/drugs.toml`, математика — `core::pharma`.
 
-use eframe::egui::{self, Color32};
+use eframe::egui;
 
 use elegance::{Checkbox, Slider as ElegSlider};
 
@@ -88,16 +88,16 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState, mo
         let conc = pharma.conc_um();
         let occ = d.occupancy(conc);
         let scale = d.scale(conc);
-        // Депрессант = холодный, активатор = тёплый.
+        // Депрессант = danger, активатор = success (theme)
         let (status, col) = if d.effect.is_depressing() {
             (
                 format!("блокирует {:.0}%", occ * 100.0),
-                Color32::from_rgb(225, 120, 120),
+                crate::app::shell::theme::DANGER,
             )
         } else {
             (
                 format!("усиливает до {:.2}×", scale),
-                Color32::from_rgb(120, 220, 150),
+                crate::app::shell::theme::SUCCESS,
             )
         };
         ui.label(
@@ -122,10 +122,14 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState, mo
         );
         if let Some(note) = &d.note {
             ui.label(
-                egui::RichText::new(format!("⚠ {note}"))
-                    .weak()
-                    .small()
-                    .color(Color32::from_rgb(225, 180, 90)),
+                crate::app::tokens::icon_label(
+                    egui_phosphor::regular::WARNING,
+                    note,
+                    crate::app::tokens::ICON_XS,
+                )
+                .weak()
+                .small()
+                .color(crate::app::shell::theme::WARNING),
             );
         }
 
@@ -138,17 +142,25 @@ pub(crate) fn render_pharma_card(ui: &mut egui::Ui, pharma: &mut PharmaState, mo
         match pharma_target_fit(d.target, model) {
             Ok(()) => {
                 ui.label(
-                    egui::RichText::new(format!("✓ применится при ▶ (модель {mname})"))
-                        .weak()
-                        .small()
-                        .color(Color32::from_rgb(120, 220, 150)),
+                    crate::app::tokens::icon_label(
+                        egui_phosphor::regular::CHECK,
+                        &format!("применится при запуске (модель {mname})"),
+                        crate::app::tokens::ICON_XS,
+                    )
+                    .weak()
+                    .small()
+                    .color(crate::app::shell::theme::SUCCESS),
                 );
             }
             Err(reason) => {
                 ui.label(
-                    egui::RichText::new(format!("⚠ {reason} — модель {mname}"))
-                        .small()
-                        .color(Color32::from_rgb(225, 180, 90)),
+                    crate::app::tokens::icon_label(
+                        egui_phosphor::regular::WARNING,
+                        &format!("{reason} — модель {mname}"),
+                        crate::app::tokens::ICON_XS,
+                    )
+                    .small()
+                    .color(crate::app::shell::theme::WARNING),
                 );
             }
         }

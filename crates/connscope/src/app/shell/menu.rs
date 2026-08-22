@@ -115,9 +115,10 @@ impl ConnApp {
                         for p in DockPreset::ALL {
                             let sel = self.ui.active_preset == p;
                             let text = if sel {
-                                egui::RichText::new(format!("●  {}", p.label())).strong()
+                                tokens::icon_label(ic::CHECK_CIRCLE, p.label(), tokens::ICON_SM)
+                                    .strong()
                             } else {
-                                egui::RichText::new(format!("○  {}", p.label()))
+                                tokens::icon_label(ic::CIRCLE, p.label(), tokens::ICON_SM)
                             };
                             if ui
                                 .add_sized([MENU_ITEM_W, MENU_ITEM_H], egui::Button::new(text))
@@ -129,14 +130,23 @@ impl ConnApp {
                         menu_section(ui, "ТЕМА");
                         for t in BuiltInTheme::all() {
                             let sel = self.ui.theme == t;
-                            ui.horizontal(|ui| {
-                                ui.colored_label(theme_dot(t), "●");
-                                if ui
-                                    .add_sized(
-                                        [MENU_ITEM_W - 24.0, MENU_ITEM_H],
-                                        egui::Button::new(
-                                            egui::RichText::new(t.label())
-                                                .strong()
+                                ui.horizontal(|ui| {
+                                    // Цветная точка темы — как свотч, не глиф
+                                    let (r, _) = ui.allocate_exact_size(
+                                        egui::vec2(10.0, 10.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(
+                                        r.center(),
+                                        4.0,
+                                        theme_dot(t),
+                                    );
+                                    if ui
+                                        .add_sized(
+                                            [MENU_ITEM_W - 24.0, MENU_ITEM_H],
+                                            egui::Button::new(
+                                                egui::RichText::new(t.label())
+                                                    .strong()
                                                 .size(tokens::ICON_SM),
                                         )
                                         .fill(if sel {

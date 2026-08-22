@@ -150,19 +150,19 @@ fn tag_tokens(text: &str, start: usize, end: usize, out: &mut Vec<(Range<usize>,
     }
 }
 
-// Палитра подсветки — только внутри редактора (это «данные», как тепловая
-// карта Degree в коннектоме, а не хром оболочки). Имя тега красится текущим
-// сигнальным акцентом (параметр `accent`), остальное — тихие редакторные тона.
-/// Имя атрибута — песочный.
+// Палитра подсветки — VS Code Dark+ на проф тёмном BG_INSET.
+// Имя тега — акцент темы (параметр `accent`), остальное — проверенные тона
+// данных, не хром оболочки.
+/// Имя атрибута — песочный (VS Code #9CDCFE-аналог → кремовый читаем на тёмном).
 const SYN_ATTR: Color32 = Color32::from_rgb(0xDC, 0xDC, 0xAA);
-/// Значение атрибута — терракотовый.
+/// Значение атрибута — терракотовый (#CE9178).
 const SYN_VALUE: Color32 = Color32::from_rgb(0xCE, 0x91, 0x78);
-/// Комментарий — приглушённый серый.
-const SYN_COMMENT: Color32 = Color32::from_gray(0x88);
-/// Пунктуация тега.
-const SYN_PUNCT: Color32 = Color32::from_gray(0x99);
-/// Обычный текст.
-const SYN_TEXT: Color32 = Color32::from_gray(0xD4);
+/// Комментарий — приглушённый зелёный (#6A9955), не серый: сразу видно, что это не код.
+const SYN_COMMENT: Color32 = Color32::from_rgb(0x6A, 0x99, 0x55);
+/// Пунктуация тега — нейтральный 60% белый.
+const SYN_PUNCT: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
+/// Обычный текст — тёплый белый #D4D4D4.
+const SYN_TEXT: Color32 = Color32::from_rgb(0xD4, 0xD4, 0xD4);
 
 /// Цвет токена по виду (см. палитру выше). Имя тега — текущий акцент.
 fn tok_color(t: Tok, accent: Color32) -> Color32 {
@@ -275,12 +275,12 @@ fn push_section(
 ) {
     let mut f = fmt.clone();
     if err {
-        // Фон + волнистое подчёркивание — как в VS Code (красный squiggle)
-        f.background = Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 0x5A);
-        f.underline = Stroke::new(1.2, DANGER);
+        // squiggle + лёгкий красноватый фон (14% DANGER) — как в VS Code
+        f.background = Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 0x24);
+        f.underline = Stroke::new(1.4, DANGER);
     } else if cursor {
-        // Строка курсора — едва заметная подсветка (как в IDE).
-        f.background = Color32::from_rgba_unmultiplied(0xFF, 0xFF, 0xFF, 8);
+        // Строка курсора — заметнее: 6% белого на тёмном BG_INSET читается
+        f.background = Color32::from_rgba_unmultiplied(0xFF, 0xFF, 0xFF, 16);
     }
     job.sections.push(LayoutSection {
         leading_space: 0.0,

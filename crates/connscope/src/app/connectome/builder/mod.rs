@@ -86,6 +86,7 @@ use pillars::api::formula::{self, OpKind, OpNode, I_SYN, N_REGS, S0, S1, S2, S3,
 
 use egui_phosphor::regular as ic;
 use crate::app::tokens;
+use crate::app::widgets::{self, ActionTone};
 
 // ─── Layout constants ───────────────────────────────────────────
 
@@ -672,26 +673,26 @@ impl NeuronBuilder {
         painter.rect_filled(
             mm.expand(3.0),
             CornerRadius::same(8),
-            Color32::from_rgba_unmultiplied(0, 0, 0, 40),
+            Color32::from_black_alpha(40),
         );
         painter.rect_filled(
             mm,
             CornerRadius::same(6),
-            Color32::from_rgba_unmultiplied(22, 22, 32, 225),
+            crate::app::shell::theme::BG_CARD.gamma_multiply(0.9),
         );
         painter.rect_stroke(
             mm,
             CornerRadius::same(6),
-            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(70, 70, 95, 140)),
+            Stroke::new(1.0_f32, crate::app::shell::theme::STROKE_SOFT),
             StrokeKind::Inside,
         );
-        // caption stays visible even for an empty graph (after Clear)
+        // caption — TEXT_DIM вместо синего
         painter.text(
             mm.min + vec2(6.0, 5.0),
             Align2::LEFT_TOP,
-            "🗺 minimap — click / drag to navigate",
+            "minimap",
             FontId::proportional(10.0),
-            Color32::from_rgba_unmultiplied(170, 170, 200, 170),
+            crate::app::shell::theme::TEXT_DIM,
         );
         if self.nodes.is_empty() {
             return;
@@ -723,7 +724,7 @@ impl NeuronBuilder {
         painter.rect_stroke(
             vr,
             CornerRadius::same(1),
-            Stroke::new(1.0_f32, Color32::from_rgb(255, 255, 255)),
+            Stroke::new(1.0_f32, crate::app::shell::theme::TEXT),
             StrokeKind::Inside,
         );
     }
@@ -731,9 +732,19 @@ impl NeuronBuilder {
     // ── Rendering ──────────────────────────────────────────────
 
     fn draw_grid(&self, painter: &egui::Painter, origin: Pos2, size: Vec2) {
-        // Приглушённая сетка — как в Blender (тонкие пунктирные точки, не линии)
-        let color = Color32::from_rgba_unmultiplied(65, 65, 80, 28);
-        let dot = Color32::from_rgba_unmultiplied(75, 75, 92, 42);
+        // Приглушённая сетка — нейтральная (STROKE_SOFT), не синяя
+        let color = Color32::from_rgba_unmultiplied(
+            crate::app::shell::theme::STROKE_SOFT.r(),
+            crate::app::shell::theme::STROKE_SOFT.g(),
+            crate::app::shell::theme::STROKE_SOFT.b(),
+            28,
+        );
+        let dot = Color32::from_rgba_unmultiplied(
+            crate::app::shell::theme::STROKE_SOFT.r(),
+            crate::app::shell::theme::STROKE_SOFT.g(),
+            crate::app::shell::theme::STROKE_SOFT.b(),
+            42,
+        );
         let w_min = self.screen_to_world(Vec2::ZERO);
         let w_max = self.screen_to_world(size);
         // линии — очень тонкие и прозрачные
@@ -774,6 +785,7 @@ impl NeuronBuilder {
         origin: Pos2,
         size: Vec2,
         pointer_world: Option<Vec2>,
+        accent: Color32,
     ) {
         self.draw_grid(painter, origin, size);
 
@@ -786,7 +798,7 @@ impl NeuronBuilder {
             let b = origin + self.to_screen(self.in_pin_pos(e.to, e.to_pin));
             let base = cat_color(cat_of(self.nodes[e.from].kind));
             let (color, width) = if self.selected_edge == Some(i) {
-                (Color32::from_rgb(212, 175, 90), 3.0) // muted gold, не неон 255,230,120
+                (accent, 3.0) // ← акцент темы, не жёсткое золото
             } else if self.hover_edge == Some(i) {
                 (base.gamma_multiply(1.45), 2.8)
             } else {
@@ -810,7 +822,7 @@ impl NeuronBuilder {
                 if let Some(p) = pointer_world {
                     let a = origin + self.to_screen(self.out_pin_pos(from, from_pin));
                     let b = origin + self.to_screen(p);
-                    draw_wire(painter, a, b, Color32::from_rgb(255, 200, 80), 2.5);
+                    draw_wire(painter, a, b, accent, 2.5); // drag — акцент темы
                 }
             }
         }
@@ -842,13 +854,13 @@ impl NeuronBuilder {
                 Color32::from_rgba_unmultiplied(0, 0, 0, 70),
             );
 
-            // body — чуть светлее + subtle inner highlight сверху
-            let bg = if self.selected == Some(i) {
-                Color32::from_rgb(42, 42, 66)
-            } else {
-                Color32::from_rgb(30, 30, 48)
-            };
-            painter.rect_filled(rect, rounding, bg);
+        // body — нейтральные серые из темы (не синие)
+        let bg = if self.selected == Some(i) {
+            crate::app::shell::theme::BG_CARD // светлее при выделении
+        } else {
+            crate::app::shell::theme::BG_PANEL // темнее в покое
+        };
+        painter.rect_filled(rect, rounding, bg);
             // inner highlight — 1px сверху, 14 alpha
             painter.rect_filled(
                 Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + 1.5 * self.zoom)),
@@ -893,16 +905,16 @@ impl NeuronBuilder {
                 Align2::LEFT_CENTER,
                 format!("{}  {}", cat_icon(cat), spec.name),
                 FontId::proportional(12.5 * self.zoom),
-                Color32::from_rgb(235, 235, 245),
+                crate::app::shell::theme::TEXT,
             );
 
-            // border: muted gold = selected, category = hovered, soft gray = idle
+            // border: акцент темы = selected, category = hovered, soft gray = idle
             let border = if self.selected == Some(i) {
-                Color32::from_rgb(212, 175, 90) // muted gold, не неон 255,205,60
+                accent // ← Волна 1C: акцент темы вместо жёсткого золота
             } else if self.hover_node == Some(i) {
                 accent.gamma_multiply(1.3)
             } else {
-                Color32::from_rgba_unmultiplied(80, 80, 105, 180)
+                crate::app::shell::theme::STROKE_SOFT
             };
             let bw = if self.selected == Some(i) { 1.8 } else { 1.0 };
             painter.rect_stroke(
@@ -926,7 +938,7 @@ impl NeuronBuilder {
                     // outer glow
                     painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, Color32::from_rgb(22, 24, 38));
+                    painter.circle_filled(c, pr, crate::app::shell::theme::BG_INSET);
                 } else {
                     if hovered {
                         painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
@@ -951,9 +963,9 @@ impl NeuronBuilder {
                     *label,
                     FontId::proportional(10.5 * self.zoom),
                     if hovered {
-                        Color32::from_rgb(195, 205, 230)
+                        crate::app::shell::theme::TEXT
                     } else {
-                        Color32::from_rgb(155, 165, 185)
+                        crate::app::shell::theme::TEXT_DIM
                     },
                 );
             }
@@ -968,7 +980,7 @@ impl NeuronBuilder {
                 if connected {
                     painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, Color32::from_rgb(22, 24, 38));
+                    painter.circle_filled(c, pr, crate::app::shell::theme::BG_INSET);
                 } else {
                     if hovered {
                         painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
@@ -997,7 +1009,7 @@ impl NeuronBuilder {
                     Align2::LEFT_CENTER,
                     out_label,
                     FontId::proportional(11.0 * self.zoom),
-                    Color32::from_rgb(215, 180, 120),
+                    crate::app::shell::theme::TEXT,
                 );
             }
         }
@@ -1011,109 +1023,121 @@ impl NeuronBuilder {
     // ── Panels ─────────────────────────────────────────────────
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        // Одна компактная строка: заголовок · симуляция · вид · пресеты · файл
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(format!("{} Neuron Builder", ic::BRAIN)).strong().size(16.0));
+            ui.spacing_mut().item_spacing = egui::vec2(tokens::SP_SM, tokens::SP_XS);
+            ui.label(tokens::heading(tokens::icon_label(ic::BRAIN, "Neuron Builder", tokens::ICON_SM)));
             ui.separator();
-            if ui
-                .button(if self.running { "⏸ Pause" } else { "▶ Run" })
-                .clicked()
+
+            // ── Run / Pause / Reset / Fit ──
+            if widgets::tool_button(
+                ui,
+                if self.running { ic::PAUSE } else { ic::PLAY },
+                self.running,
+                tokens::ICON_SM,
+                30.0,
+                tokens::CONTROL_H,
+            )
+            .on_hover_text(if self.running { "Пауза [Space]" } else { "Старт [Space]" })
+            .clicked()
             {
                 self.running = !self.running;
             }
-            if ui.button("↺ Reset").clicked() {
+            if widgets::tool_button(ui, ic::ARROW_COUNTER_CLOCKWISE, false, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Сброс симуляции")
+                .clicked()
+            {
                 self.reset_sim();
             }
-            if ui.button("⟳ Fit view").clicked() {
+            if widgets::tool_button(ui, ic::CROSSHAIR, false, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Вписать вид [F]")
+                .clicked()
+            {
                 self.pan = vec2(20.0, 20.0);
                 self.zoom = 1.0;
             }
-            ui.checkbox(&mut self.show_minimap, "🗺 minimap");
-            ui.checkbox(&mut self.show_plot, "📈 scope");
             ui.separator();
-            ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=200).text("steps/frame"));
-            ui.add(egui::Slider::new(&mut self.dt, 0.01..=2.0).text("dt ms"));
-            ui.add(egui::Slider::new(&mut self.i_syn, -50.0..=100.0).text("I_syn"));
-            ui.add(egui::Slider::new(&mut self.v_init, -100.0..=50.0).text("v_init"));
-            ui.checkbox(&mut self.snap, "snap");
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Presets:");
-            if ui.button("LIF").clicked() {
-                self.dt = 0.5;
-                self.i_syn = 30.0;
-                self.v_init = -70.0;
-                self.init_gates = [0.0; 3];
-                self.spike_thresh = -54.0;
-                self.load_graph(default_lif_graph());
+
+            // ── Minimap / Scope / Snap ──
+            if widgets::tool_button(ui, ic::MAP_TRIFOLD, self.show_minimap, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Миникарта")
+                .clicked()
+            {
+                self.show_minimap = !self.show_minimap;
             }
-            if ui.button("Morris-Lecar").clicked() {
-                self.dt = 0.05;
-                self.i_syn = 50.0;
-                self.v_init = -60.0;
-                // w∞(-60) ≈ 0 — w gate starts at rest.
-                self.init_gates = [0.0003, 0.0, 0.0];
-                self.spike_thresh = 0.0;
-                self.load_graph(ml_graph());
+            if widgets::tool_button(ui, ic::WAVEFORM, self.show_plot, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Осциллограф")
+                .clicked()
+            {
+                self.show_plot = !self.show_plot;
             }
-            if ui.button("HH-lite").clicked() {
-                self.dt = 0.05;
-                self.i_syn = 10.0;
-                self.v_init = -65.0;
-                // Resting squid gates at v=-65: m≈0.015, h≈0.70, n≈0.18.
-                // A cold start (all 0) leaves h inactivated — the model
-                // can never regenerate a spike.
-                self.init_gates = [0.0153, 0.697, 0.182];
-                self.spike_thresh = 0.0;
-                self.load_graph(hh_lite_graph());
+            if widgets::tool_button(ui, ic::MAGNET_STRAIGHT, self.snap, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Привязка к сетке")
+                .clicked()
+            {
+                self.snap = !self.snap;
             }
             ui.separator();
-            ui.label("Trace:");
-            let trace_names = ["Scope", "s0", "s1", "s2", "s3"];
-            let old_trace = self.trace;
-            egui::ComboBox::from_id_salt("trace")
-                .selected_text(trace_names[self.trace])
-                .show_ui(ui, |ui| {
-                    for (i, name) in trace_names.iter().enumerate() {
-                        ui.selectable_value(&mut self.trace, i, *name);
+
+            // ── Presets ──
+            ui.label(tokens::eyebrow("Пресеты"));
+            for (label, apply) in [
+                ("LIF", 0u8),
+                ("Morris-Lecar", 1),
+                ("HH-lite", 2),
+            ] {
+                if widgets::action_button(ui, "", label, ActionTone::Neutral, 0.0).clicked() {
+                    match apply {
+                        0 => {
+                            self.dt = 0.5;
+                            self.i_syn = 30.0;
+                            self.v_init = -70.0;
+                            self.init_gates = [0.0; 3];
+                            self.spike_thresh = -54.0;
+                            self.load_graph(default_lif_graph());
+                        }
+                        1 => {
+                            self.dt = 0.05;
+                            self.i_syn = 50.0;
+                            self.v_init = -60.0;
+                            self.init_gates = [0.0003, 0.0, 0.0];
+                            self.spike_thresh = 0.0;
+                            self.load_graph(ml_graph());
+                        }
+                        _ => {
+                            self.dt = 0.05;
+                            self.i_syn = 10.0;
+                            self.v_init = -65.0;
+                            self.init_gates = [0.0153, 0.697, 0.182];
+                            self.spike_thresh = 0.0;
+                            self.load_graph(hh_lite_graph());
+                        }
                     }
-                });
-            if self.trace != old_trace {
-                // avoid a false spike from a stale crossing baseline
-                self.prev_trace = self.regs[self.trace_reg()];
-            }
-            ui.add(egui::Slider::new(&mut self.spike_thresh, -100.0..=50.0).text("spike mV"));
-            ui.add(egui::Slider::new(&mut self.window_ms, 50.0..=4000.0).text("window ms"));
-            ui.separator();
-            ui.label(format!("t = {:.1} ms", self.t));
-            ui.label(format!("{} {}", ic::LIGHTNING, self.total_spikes));
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.label("File:");
-            ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(180.0));
-            if ui.button(tokens::icon_label(ic::FLOPPY_DISK, "Save", tokens::ICON_SM)).clicked() {
-                self.save_graph();
-            }
-            if ui.button(tokens::icon_label(ic::FOLDER_OPEN, "Load", tokens::ICON_SM)).clicked() {
-                self.load_file();
+                }
             }
             ui.separator();
-            // Ops — дропдаун + Add node (вместо 16 кнопок в ряд)
+
+            // ── Add node ──
             egui::ComboBox::from_id_salt("ops_add")
-                .selected_text("＋ Add node…")
+                .selected_text(tokens::icon_label(ic::PLUS, "Узел…", tokens::ICON_XS))
+                .width(110.0)
                 .show_ui(ui, |ui| {
                     for &kind in palette_kinds() {
                         let spec = spec_of(kind);
-                        let cat = cat_of(kind);
-                        let col = cat_color(cat);
-                        // цветной квадратик как в палитре нод
-                        let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                        ui.painter().rect_filled(r, 2.0, col);
-                        if ui.button(spec.name).clicked() {
-                            self.add_node(kind);
-                        }
+                        let col = cat_color(cat_of(kind));
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                            ui.painter().rect_filled(r, 2.0, col);
+                            if ui.button(spec.name).clicked() {
+                                self.add_node(kind);
+                            }
+                        });
                     }
                 });
-            if ui.button(tokens::icon_label(ic::TRASH, "Clear", tokens::ICON_SM)).clicked() {
+            if widgets::tool_button(ui, ic::TRASH, false, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Очистить граф")
+                .clicked()
+            {
                 self.push_undo();
                 self.nodes.clear();
                 self.edges.clear();
@@ -1122,46 +1146,158 @@ impl NeuronBuilder {
                 self.running = false;
                 self.reset_sim();
             }
+            ui.separator();
+
+            // ── File ──
+            ui.add(egui::TextEdit::singleline(&mut self.filename).desired_width(140.0));
+            if widgets::tool_button(ui, ic::FLOPPY_DISK, false, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Сохранить граф")
+                .clicked()
+            {
+                self.save_graph();
+            }
+            if widgets::tool_button(ui, ic::FOLDER_OPEN, false, tokens::ICON_SM, 30.0, tokens::CONTROL_H)
+                .on_hover_text("Загрузить граф")
+                .clicked()
+            {
+                self.load_file();
+            }
+            ui.separator();
+
+            // ── Sim params ──
+            ui.label(tokens::eyebrow("Сим"));
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.steps_per_frame, 1..=200).text("шагов"),
+            );
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.dt, 0.01..=2.0).text("dt мс"),
+            );
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.i_syn, -50.0..=100.0).text("I_syn"),
+            );
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.v_init, -100.0..=50.0).text("v_init"),
+            );
+            ui.separator();
+
+            // ── Trace ──
+            let trace_names = ["Scope", "s0", "s1", "s2", "s3"];
+            let old_trace = self.trace;
+            egui::ComboBox::from_id_salt("trace")
+                .selected_text(trace_names[self.trace])
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in trace_names.iter().enumerate() {
+                        ui.selectable_value(&mut self.trace, i, *name);
+                    }
+                });
+            if self.trace != old_trace {
+                self.prev_trace = self.regs[self.trace_reg()];
+            }
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.spike_thresh, -100.0..=50.0).text("порог мВ"),
+            );
+            ui.add_sized(
+                [tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H],
+                egui::Slider::new(&mut self.window_ms, 50.0..=4000.0).text("окно мс"),
+            );
+            ui.separator();
+
+            // ── Status ──
+            ui.label(
+                egui::RichText::new(format!("t = {:.1} мс", self.t))
+                    .family(egui::FontFamily::Monospace)
+                    .size(tokens::TEXT_MONO)
+                    .weak(),
+            );
+            ui.label(
+                egui::RichText::new(format!("{} {}", ic::LIGHTNING, self.total_spikes))
+                    .family(egui::FontFamily::Monospace)
+                    .size(tokens::TEXT_MONO)
+                    .weak(),
+            );
         });
         ui.separator();
     }
 
     fn status_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            // Статус слева (weak text)
             ui.label(egui::RichText::new(&self.status).weak());
+            
+            // Справа: zoom + selection info
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("zoom {:.0}%", self.zoom * 100.0));
+                ui.spacing_mut().item_spacing.x = tokens::SP_MD;
+                
+                // Zoom в моноширинном
+                ui.label(egui::RichText::new(format!("zoom {:.0}%", self.zoom * 100.0))
+                    .family(egui::FontFamily::Monospace)
+                    .weak());
+                
+                // Selection info
                 if self.selected_edge.is_some() {
-                    ui.label("wire selected — Del to remove");
+                    ui.label(egui::RichText::new("wire selected — Del to remove")
+                        .family(egui::FontFamily::Monospace)
+                        .weak());
                 } else if let Some(s) = self.selected {
-                    ui.label(format!("node {} ({})", s, spec_of(self.nodes[s].kind).name));
+                    ui.label(egui::RichText::new(format!("node {} ({})", s, spec_of(self.nodes[s].kind).name))
+                        .family(egui::FontFamily::Monospace)
+                        .weak());
                 }
             });
         });
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Inspector");
-        if let Some(ei) = self.selected_edge {
-            if let Some(e) = self.edges.get(ei) {
-                let from = spec_of(self.nodes[e.from].kind).name;
-                let to = spec_of(self.nodes[e.to].kind).name;
-                ui.label(format!("Wire: {from}.{} → {to}.{}", e.from_pin, e.to_pin));
-                if ui.button(tokens::icon_label(ic::TRASH, "Delete wire", tokens::ICON_SM)).clicked() {
-                    self.delete_edge(ei);
+        // Карточка инспектора через виджет-кит
+        widgets::section_card(ui, ic::MAGNIFYING_GLASS, "Inspector", |ui| {
+            if let Some(ei) = self.selected_edge {
+                if let Some(e) = self.edges.get(ei) {
+                    let from = spec_of(self.nodes[e.from].kind).name;
+                    let to = spec_of(self.nodes[e.to].kind).name;
+                    
+                    // Wire info
+                    widgets::key_value_fields(ui, &[
+                        ("Wire", format!("{from}.{} → {to}.{}", e.from_pin, e.to_pin), "Провод связи"),
+                        ("From pin", e.from_pin.to_string(), "Исходный пин"),
+                        ("To pin", e.to_pin.to_string(), "Целевой пин"),
+                    ]);
+                    
+                    ui.add_space(tokens::SP_SM);
+                    
+                    // Кнопка удаления через action_button
+                    widgets::action_button(ui, ic::TRASH, "Delete wire", widgets::ActionTone::Danger, ui.available_width());
+                    
+                    ui.add_space(tokens::SP_SM);
+                    ui.separator();
+                    ui.add_space(tokens::SP_SM);
                 }
-                ui.separator();
             }
-        }
-        match self.selected {
-            Some(i) => self.inspector_node(ui, i),
-            None if self.selected_edge.is_none() => {
-                ui.weak("Select a node (left-click), a wire, or drag from an orange output pin to a cyan input pin.");
+            
+            match self.selected {
+                Some(i) => self.inspector_node(ui, i),
+                None if self.selected_edge.is_none() => {
+                    ui.label(egui::RichText::new("Select a node (left-click), a wire, or drag from an orange output pin to a cyan input pin.")
+                        .weak()
+                        .small());
+                }
+                None => {}
             }
-            None => {}
-        }
-        ui.separator();
-        egui::CollapsingHeader::new("Program (opcodes)")
+        });
+        
+        ui.add_space(tokens::SP_SM);
+        
+        // Program opcodes — collapsible section
+        egui::CollapsingHeader::new(
+            egui::RichText::new("Program (opcodes)")
+                .family(egui::FontFamily::Monospace)
+                .size(tokens::TEXT_SMALL)
+        )
             .default_open(true)
             .show(ui, |ui| {
                 let prog = self.build_program();
@@ -1173,14 +1309,21 @@ impl NeuronBuilder {
 
     fn inspector_node(&mut self, ui: &mut egui::Ui, i: usize) {
         let spec = spec_of(self.nodes[i].kind);
-        ui.label(egui::RichText::new(spec.name).strong().size(16.0));
+        
+        // Заголовок ноды через tokens
+        ui.label(tokens::heading(egui::RichText::new(spec.name).size(tokens::TEXT_HEADING)));
+        ui.add_space(tokens::SP_XS);
         ui.separator();
+        ui.add_space(tokens::SP_SM);
+        
+        // Pins — таблица
         for (pin, label) in spec.ins.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(format!("◀ {label}"));
                 if let Some(src) = self.edge_source(i, pin) {
                     ui.monospace(src);
-                    if ui.small_button("✕").clicked() {
+                    // Кнопка удаления — small icon button
+                    if widgets::icon_button(ui, ic::X, false, tokens::ICON_XS).clicked() {
                         self.push_undo();
                         self.edges.retain(|e| !(e.to == i && e.to_pin == pin));
                     }
@@ -1189,10 +1332,12 @@ impl NeuronBuilder {
                 }
             });
         }
+        
+        // Output register
         if !spec.outs.is_empty() && !matches!(self.nodes[i].kind, OpKind::State | OpKind::Stimulus)
         {
-            ui.separator();
-            ui.label("Output register:");
+            ui.add_space(tokens::SP_SM);
+            ui.label(tokens::eyebrow("Output register:"));
             egui::ComboBox::from_id_salt("out_reg")
                 .selected_text(reg_name(self.nodes[i].out_reg))
                 .show_ui(ui, |ui| {
@@ -1201,22 +1346,38 @@ impl NeuronBuilder {
                     }
                 });
         }
+        
+        // Слайдеры параметров (Const, Sigmoid)
         match self.nodes[i].kind {
             OpKind::Const => {
-                ui.add(egui::Slider::new(&mut self.nodes[i].c, -500.0..=500.0).text("value"));
+                ui.add_space(tokens::SP_SM);
+                let slider_size = vec2(tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H);
+                ui.add_sized(slider_size,
+                    egui::Slider::new(&mut self.nodes[i].c, -500.0..=500.0)
+                        .text("Значение"));
             }
             OpKind::Sigmoid => {
-                ui.add(egui::Slider::new(&mut self.nodes[i].c, -200.0..=100.0).text("v_half"));
-                ui.add(egui::Slider::new(&mut self.nodes[i].c2, -100.0..=100.0).text("k"));
+                ui.add_space(tokens::SP_SM);
+                let slider_size = vec2(tokens::TOOL_SLIDER_W, tokens::TOOL_SLIDER_H);
+                ui.add_sized(slider_size,
+                    egui::Slider::new(&mut self.nodes[i].c, -200.0..=100.0)
+                        .text("v_half"));
+                ui.add_sized(slider_size,
+                    egui::Slider::new(&mut self.nodes[i].c2, -100.0..=100.0)
+                        .text("k"));
             }
             _ => {}
         }
+        
+        // Кнопки действий
+        ui.add_space(tokens::SP_LG);
         ui.separator();
+        ui.add_space(tokens::SP_SM);
+        
         ui.horizontal(|ui| {
-            if ui.button("📄 Duplicate").clicked() {
-                self.duplicate_node(i);
-            }
-            if ui.button(tokens::icon_label(ic::TRASH, "Delete node", tokens::ICON_SM)).clicked() {
+            widgets::action_button(ui, ic::COPY, "Duplicate", widgets::ActionTone::Neutral, 0.0)
+                .clicked();
+            if widgets::action_button(ui, ic::TRASH, "Delete node", widgets::ActionTone::Danger, 0.0).clicked() {
                 self.delete_node(i);
             }
         });
@@ -1264,16 +1425,17 @@ impl NeuronBuilder {
         plot.show(ui, |pui| {
             if !pts.is_empty() {
                 pui.line(
-                    Line::new("V(t)", PlotPoints::from(pts)).color(Color32::from_rgb(90, 220, 130)),
+                    Line::new("V(t)", PlotPoints::from(pts))
+                        .color(crate::app::shell::theme::SUCCESS), // зелёный — как в осциллографе
                 );
             }
             pui.hline(
                 HLine::new("thresh", self.spike_thresh as f64)
-                    .color(Color32::from_rgb(120, 160, 255)),
+                    .color(crate::app::shell::theme::WARNING), // ← amber вместо синего
             );
             for &s in &self.spike_times {
                 if s >= t_min {
-                    pui.vline(VLine::new("spike", s).color(Color32::from_rgb(255, 130, 100)));
+                    pui.vline(VLine::new("spike", s).color(crate::app::shell::theme::DANGER));
                 }
             }
         });
@@ -1555,13 +1717,13 @@ impl NeuronBuilder {
         let errs = self.validate();
         if !errs.is_empty() {
             egui::Frame::new()
-                .fill(Color32::from_rgba_unmultiplied(90, 30, 30, 200))
+                .fill(Color32::from_rgba_unmultiplied(crate::app::shell::theme::DANGER.r(), crate::app::shell::theme::DANGER.g(), crate::app::shell::theme::DANGER.b(), 200))
                 .inner_margin(egui::Margin::same(8))
                 .corner_radius(6)
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new(format!("{} {}", ic::WARNING_CIRCLE, "Граф не запустится:")).strong().color(Color32::from_rgb(255, 180, 180)));
+                    ui.label(egui::RichText::new(format!("{} {}", ic::WARNING_CIRCLE, "Граф не запустится:")).strong().color(crate::app::shell::theme::DANGER_TEXT));
                     for e in errs.iter().take(3) {
-                        ui.label(egui::RichText::new(format!("• {e}")).small().color(Color32::from_rgb(255, 200, 180)));
+                        ui.label(egui::RichText::new(format!("• {e}")).small().color(crate::app::shell::theme::DANGER_TEXT));
                     }
                     if errs.len() > 3 {
                         ui.label(egui::RichText::new(format!("и ещё {}…", errs.len() - 3)).small().weak());
@@ -1740,7 +1902,8 @@ impl NeuronBuilder {
                 Drag::None => {}
             }
 
-            self.draw_canvas(&painter, origin, size, pointer_world);
+            let accent = crate::app::shell::theme::accent(ui);
+            self.draw_canvas(&painter, origin, size, pointer_world, accent);
 
             // ── context menu ──
             if let Some(menu) = self.ctx_menu.clone() {
@@ -1754,31 +1917,74 @@ impl NeuronBuilder {
                     .order(egui::Order::Foreground)
                     .show(&ctx, |ui| {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.set_min_width(140.0);
+                            ui.set_min_width(160.0);
+                            ui.spacing_mut().item_spacing = tokens::ITEM_SPACING;
                             match action {
                                 CtxMenuAction::Canvas { world } => {
-                                    ui.label("Add op:");
+                                    ui.label(tokens::eyebrow("Добавить узел"));
+                                    ui.add_space(tokens::SP_XS);
                                     for &kind in palette_kinds() {
-                                        if ui.button(spec_of(kind).name).clicked() {
-                                            self.add_node_at(kind, world);
-                                            self.ctx_menu = None;
-                                        }
+                                        let spec = spec_of(kind);
+                                        let cat = cat_of(kind);
+                                        let col = cat_color(cat);
+                                        ui.horizontal(|ui| {
+                                            let (r, _) = ui.allocate_exact_size(
+                                                vec2(10.0, 10.0),
+                                                Sense::hover(),
+                                            );
+                                            ui.painter().rect_filled(r, 2.0, col);
+                                            if ui
+                                                .add(egui::Button::new(
+                                                    tokens::icon_label(cat_icon(cat), spec.name, tokens::ICON_XS),
+                                                ))
+                                                .clicked()
+                                            {
+                                                self.add_node_at(kind, world);
+                                                self.ctx_menu = None;
+                                            }
+                                        });
                                     }
                                 }
                                 CtxMenuAction::Node { idx } => {
-                                    ui.label("Node:");
-                                    if ui.button("📄 Duplicate").clicked() {
+                                    ui.label(tokens::eyebrow("Узел"));
+                                    ui.add_space(tokens::SP_XS);
+                                    if widgets::action_button(
+                                        ui,
+                                        ic::COPY,
+                                        "Дублировать",
+                                        ActionTone::Neutral,
+                                        0.0,
+                                    )
+                                    .clicked()
+                                    {
                                         self.duplicate_node(idx);
                                         self.ctx_menu = None;
                                     }
-                                    if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
+                                    if widgets::action_button(
+                                        ui,
+                                        ic::TRASH,
+                                        "Удалить",
+                                        ActionTone::Danger,
+                                        0.0,
+                                    )
+                                    .clicked()
+                                    {
                                         self.delete_node(idx);
                                         self.ctx_menu = None;
                                     }
                                 }
                                 CtxMenuAction::Wire { idx } => {
-                                    ui.label("Wire:");
-                                    if ui.button(tokens::icon_label(ic::TRASH, "Delete", tokens::ICON_SM)).clicked() {
+                                    ui.label(tokens::eyebrow("Провод"));
+                                    ui.add_space(tokens::SP_XS);
+                                    if widgets::action_button(
+                                        ui,
+                                        ic::TRASH,
+                                        "Удалить",
+                                        ActionTone::Danger,
+                                        0.0,
+                                    )
+                                    .clicked()
+                                    {
                                         self.delete_edge(idx);
                                         self.ctx_menu = None;
                                     }
@@ -1792,8 +1998,10 @@ impl NeuronBuilder {
             }
 
             if self.show_plot {
-                ui.separator();
-                self.plot_ui(ui);
+                ui.add_space(tokens::SP_SM);
+                widgets::compact_card(ui, ic::WAVEFORM, "Осциллограф", "", |ui| {
+                    self.plot_ui(ui);
+                });
             }
         }
     }

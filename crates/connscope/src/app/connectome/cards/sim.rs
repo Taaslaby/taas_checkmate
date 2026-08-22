@@ -170,7 +170,7 @@ pub(crate) fn render_sim_card(
             if crate::app::widgets::full_width_action(
                 ui,
                 ic::STOP,
-                "■ Остановить поток",
+                "Остановить поток",
                 ActionTone::Danger,
             ) {
                 action = Some(SimAction::Stop);
