@@ -10,6 +10,13 @@
 //!
 //! The `IzhikevichModelParamIdx` enum is generated for manual param setting via `fill_param()`.
 //!
+//! # Do NOT merge with the other two Izhikevich families
+//! `izhikevich_2007` (conductance-based, different ODE) and
+//! `izhikevich_dual` (single-step Euler, guarded bit-parity) share the
+//! `0.04·v² + 5·v + 140` polynomial with this model, but each rounds it
+//! differently (substep ×2 here vs one step there). Unifying the step bodies
+//! would break the legacy/NeuroML bit-exactness the test suites pin down.
+//!
 //! # Dual-source (CPU SIMD + CUDA)
 //! The `#[dual_neuron]` wrapper emits `IZHIKEVICH_CUDA_SOURCE: &str` — the
 //! same step body transpiled to CUDA C++ (NVRTC-ready). `pillars-cuda`

@@ -26,7 +26,7 @@
 //! # Spike convention
 //! All `spike` parameters accept a SIMD **mask** (`NaN`/`0.0` from `cmp_ge`) OR
 //! an **arithmetic** flag (`1.0`/`0.0`) OR a scalar `-1.0` mask. Converted via
-//! [`spike_to_float`](crate::ops::spike::spike_to_float), which uses IEEE 754
+//! [`spike_to_float`], which uses IEEE 754
 //! NaN-detection (`x >= x` is false only for NaN) — see that function for the
 //! full contract.
 
@@ -35,7 +35,7 @@ use crate::ops::spike::spike_to_float;
 
 /// Convert any spike representation (NaN mask, -1.0 mask, or 1.0 float) to 1.0/0.0.
 ///
-/// Thin wrapper over [`spike_to_float`](crate::ops::spike::spike_to_float) — the
+/// Thin wrapper over [`spike_to_float`] — the
 /// single source of truth for spike-format conversion (NaN-detection via the
 /// IEEE 754 property that `x >= x` is false only for NaN; see spike.rs).
 #[inline(always)]

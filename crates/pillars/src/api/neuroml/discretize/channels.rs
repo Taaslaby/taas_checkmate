@@ -1,5 +1,7 @@
 use super::*;
 
+use std::sync::Arc as Rc;
+
 use crate::kernels::hh_channels::{
     markov_open_fraction, markov_steady_state, markov_step, GateKinetics, MarkovGateSpec,
 };
@@ -8,14 +10,19 @@ use rand::{Rng, SeedableRng};
 
 /// An active (voltage-gated) channel attached to one compartment: HH gates
 /// (data-driven [`GateKinetics`]) + reversal potential + absolute max
-/// conductance (µS). Gate state is integrated with **exponential Euler** at the
+/// conductance (µS). Gate state is integrated with **exponential euler** at the
 /// old voltage, then the resulting conductance enters the Hines solve
 /// (semi-implicit).
+///
+/// `gates`/`q10s` are `Arc`-shared: every compartment of a segment group
+/// references the same resolved channel spec (read-only at runtime), so a
+/// 5000-compartment morphology carries one copy per channel *type*, not per
+/// compartment.
 #[derive(Clone)]
 pub(crate) struct ActiveChannel {
-    pub gates: Vec<(GateKinetics, u32)>,
+    pub gates: Rc<[(GateKinetics, u32)]>,
     /// Per-gate Q10 rate multiplier (parallel to `gates`) — from `q10Settings`.
-    pub q10s: Vec<f32>,
+    pub q10s: Rc<[f32]>,
     /// Reversal potential, mV.
     pub e_rev: f32,
     /// Absolute max conductance, µS (already density × membrane area).
@@ -29,16 +36,18 @@ impl ActiveChannel {
     /// `v_rest` (mV). `q10s` is parallel to `gates` (1.0 = no temperature
     /// scaling, the NeuroML default without `q10Settings`).
     pub fn new(
-        gates: Vec<(GateKinetics, u32)>,
-        q10s: Vec<f32>,
+        gates: impl Into<Rc<[(GateKinetics, u32)]>>,
+        q10s: impl Into<Rc<[f32]>>,
         e_rev: f32,
         g_max_us: f32,
         v_rest: f32,
     ) -> Self {
+        let gates = gates.into();
+        let q10s = q10s.into();
         debug_assert_eq!(gates.len(), q10s.len(), "ActiveChannel: q10s length");
         let gate_state = gates
             .iter()
-            .map(|(k, _)| gate_steady_state(k.clone(), v_rest))
+            .map(|(k, _)| gate_steady_state(k, v_rest))
             .collect();
         Self {
             gates,
@@ -58,7 +67,7 @@ impl ActiveChannel {
 /// resting occupancy. V-only gates ignore `ca`, so this is a no-op for them
 /// (and for `gateHHInstantaneous`, whose value is recomputed algebraically
 /// every step).
-pub(crate) fn gate_steady_state(kinetics: GateKinetics, v: f32) -> f32 {
+pub(crate) fn gate_steady_state(kinetics: &GateKinetics, v: f32) -> f32 {
     let (a, b) = kinetics.alpha_beta_at(v, 1e-4);
     let sum = a + b;
     if sum > 1e-12 {
@@ -70,7 +79,7 @@ pub(crate) fn gate_steady_state(kinetics: GateKinetics, v: f32) -> f32 {
 
 /// One exponential-Euler step of a gate: `q' = q_inf + (q−q_inf)·exp(−dt·(α+β)·q10)`.
 /// `gateHHInstantaneous` is algebraic: `q = steady_state(v, ca)` (no ODE).
-pub(crate) fn gate_step(kinetics: GateKinetics, q: f32, v: f32, ca: f32, dt: f32, q10: f32) -> f32 {
+pub(crate) fn gate_step(kinetics: &GateKinetics, q: f32, v: f32, ca: f32, dt: f32, q10: f32) -> f32 {
     match kinetics {
         GateKinetics::Instantaneous { steady_state } => steady_state.eval_at(v, ca),
         kinetics => {
@@ -92,9 +101,9 @@ pub(crate) fn gate_step(kinetics: GateKinetics, q: f32, v: f32, ca: f32, dt: f32
 /// (HH gates) — the cable solver carries both lists.
 #[derive(Clone)]
 pub(crate) struct MarkovActiveChannel {
-    pub gates: Vec<MarkovGateSpec>,
+    pub gates: Rc<[MarkovGateSpec]>,
     /// Per-gate Q10 rate multiplier (parallel to `gates`) — from `q10Settings`.
-    pub q10s: Vec<f32>,
+    pub q10s: Rc<[f32]>,
     pub e_rev: f32,
     pub g_max_us: f32,
     /// Flattened occupancy (gate-major): gate `g` state `s` at `gate_off[g]+s`.
@@ -107,16 +116,18 @@ impl MarkovActiveChannel {
     /// Build a channel with every gate initialised to its steady-state
     /// occupancy at `v_rest` (mV). `q10s` is parallel to `gates`.
     pub fn new(
-        gates: Vec<MarkovGateSpec>,
-        q10s: Vec<f32>,
+        gates: impl Into<Rc<[MarkovGateSpec]>>,
+        q10s: impl Into<Rc<[f32]>>,
         e_rev: f32,
         g_max_us: f32,
         v_rest: f32,
     ) -> Self {
+        let gates = gates.into();
+        let q10s = q10s.into();
         debug_assert_eq!(gates.len(), q10s.len(), "MarkovActiveChannel: q10s length");
         let mut occ = Vec::new();
         let mut gate_off = Vec::with_capacity(gates.len());
-        for gate in &gates {
+        for gate in gates.iter() {
             gate_off.push(occ.len());
             occ.extend(markov_steady_state(gate, v_rest));
         }

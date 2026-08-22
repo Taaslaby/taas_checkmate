@@ -21,6 +21,8 @@
 mod biophysics;
 mod channels;
 mod ir;
+mod ir_validate;
+mod prepass;
 mod morphology;
 mod parser;
 mod standard;
@@ -28,10 +30,7 @@ mod standard;
 mod tests;
 mod units;
 
-pub(crate) use biophysics::*;
-pub(crate) use channels::*;
 pub(crate) use ir::*;
-pub(crate) use morphology::*;
 pub(crate) use parser::*;
 pub(crate) use standard::*;
 pub(crate) use units::*;
@@ -39,5 +38,5 @@ pub(crate) use units::*;
 // Shared imports re-exported so sibling submodules can `use super::*` (the
 // `NeuromlError` type and LEMS component types live in the parent `neuroml`
 // module, one level up from here).
-pub(crate) use super::lems::{parse_component_type, ComponentType};
+pub(crate) use super::lems::ComponentType;
 pub(crate) use super::NeuromlError;

@@ -29,8 +29,10 @@
 //! ## Accuracy
 //!
 //! - **LIF** (1st-order, fully captured by V): `spike_count` ratio ~0.5-1.5
-//! - **HH** (4th-order: V, m, h, n): 16-bit key loses m/h/n state →
-//!   coarse approximation, spike count error 2-100×
+//! - **HH** (4th-order: V, m, h, n): the 4th history bit encodes the ΔV
+//!   direction, separating the rising/falling branches of the limit cycle,
+//!   so the LUT neuron keeps spiking (ratio ~0.2-1.5 vs ODE). The hidden
+//!   gates are still not captured — spike timing stays coarse.
 //! - **Morris-Lecar** (2nd-order: V, w): unknown, needs calibration
 
 use pillars_macros::NeuronModel;
@@ -190,8 +192,18 @@ impl ComputeNeuron for TriangulatedModel {
             };
             let entry = lut.lookup(v_q, h_cur);
 
-            v_out[i] = v_cur + entry.delta_v;
-            let new_hist = (((h_cur as u16) << 1 | input_bit as u16) as u8) & hist_mask;
+            // Clamp to the representable range (see the AVX2 path): the
+            // saturated top bin's mean ΔV can be positive → unphysical drift.
+            v_out[i] = (v_cur + entry.delta_v).min(lut.v_max);
+            // 3 input bits + direction bit of this ΔV (see ops::triangulated).
+            let dir_bit = if entry.delta_v >= 0.0 {
+                crate::ops::triangulated::DIR_BIT
+            } else {
+                0
+            };
+            let new_hist = ((h_cur << 1) & crate::ops::triangulated::INPUT_HIST_MASK)
+                | input_bit
+                | dir_bit;
             hist_out[i] = new_hist as f32;
             spike_out[i] = entry.spike;
         }
@@ -582,15 +594,17 @@ mod tests {
     // ═══════════════════════════════════════════════════════════
     //  HH Accuracy: ODE vs LUT
     //
-    //  NOTE: HH — 4th-order system (V, m, h, n). A 16-bit LUT key
-    //  (V_q + 8-bit input history) CANNOT capture the full state.
-    //  Hidden gate variables m, h, n evolve independently even at
-    //  the same V, leading to 2-100× error in spike count.
+    //  HH — 4th-order system (V, m, h, n); a 12-bit key cannot capture the
+    //  hidden gates. Two fixes keep the LUT neuron oscillating (previously
+    //  it froze sub-threshold with 0 spikes):
+    //  1. The 4th history bit encodes the ΔV direction — rising and falling
+    //     branches of the limit cycle land in separate bins, so the mean ΔV
+    //     no longer collapses the cycle into a stable fixed point.
+    //  2. Calibration picks input modes randomly instead of round-robin, so
+    //     constant-input histories are actually visited.
+    //  Spike counts land at ratio ~0.2 vs ODE; timing stays coarse.
     //
     //  For LIF (1st-order, V is the full state) the LUT is near-perfect.
-    //
-    //  Future work: expand key to 24+ bits (V_q + history + q(h-gate))
-    //  for accurate HH approximation.
     // ═══════════════════════════════════════════════════════════
 
     fn make_hh_params_for_lut() -> Vec<f32> {
@@ -669,13 +683,10 @@ mod tests {
         (pop.state_slice(0).to_vec(), total)
     }
 
-    /// KNOWN LIMITATION (see module docs): HH is 4th-order (V, m, h, n).
-    /// The 12-bit LUT key `(V_q, 4-bit history)` cannot capture the hidden
-    /// gate state → in isolation the LUT produces 0 spikes vs ODE 96.
-    /// Kept as `#[ignore]` so the suite stays honest; re-enable only after
-    /// the key gains gate dimensions.
+    /// HH ODE vs LUT under mixed calibration (see the block comment above
+    /// for how the ΔV-direction bit keeps the LUT cycle alive).
     #[test]
-    #[ignore = "HH LUT limitation: 12-bit key can't capture m/h/n gates (see module docs)"]
+    #[ignore = "slow: 1M-step calibration per LUT (fast with --release)"]
     fn test_triang_hh_accuracy_mixed_input() {
         let lut = make_hh_lut(1_000_000, true);
         TriangulatedModel::set_lut(lut);
@@ -716,10 +727,10 @@ mod tests {
         eprintln!("  ✓ LUT alive, ratios within bounds");
     }
 
-    /// KNOWN LIMITATION (see module docs): same as `test_triang_hh_accuracy_mixed_input`.
-    /// ODE=96 spikes, LUT=0 in isolation.
+    /// HH ODE vs LUT under constant I=50 (same calibration fixes as the
+    /// mixed-input test).
     #[test]
-    #[ignore = "HH LUT limitation: 12-bit key can't capture m/h/n gates (see module docs)"]
+    #[ignore = "slow: 1M-step calibration per LUT (fast with --release)"]
     fn test_triang_hh_accuracy_constant_current() {
         let lut = make_hh_lut(1_000_000, false);
         TriangulatedModel::set_lut(lut);

@@ -17,13 +17,13 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`poisson`] | `PoissonGenerator` |
-//! | [`bsa`] | `bsa_encode`, `bsa_kernel_hamming` |
-//! | [`phase`] | `phase_encode` |
-//! | [`pwm`] | `PwmEncoder` |
-//! | [`linear`] | `LinearDecoder` |
-//! | [`ttfs`] | `TtfsEncoder` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `poisson` | `PoissonGenerator` |
+//! | `bsa` | `bsa_encode`, `bsa_kernel_hamming` |
+//! | `phase` | `phase_encode` |
+//! | `pwm` | `PwmEncoder` |
+//! | `linear` | `LinearDecoder` |
+//! | `ttfs` | `TtfsEncoder` |
+//! | `tests` | unit tests (test-only) |
 
 mod bsa;
 mod linear;

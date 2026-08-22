@@ -77,7 +77,7 @@ impl MarkovGateSpec {
     ///
     /// Returns `Ok(())` if the spec is well-formed, otherwise a descriptive
     /// error. Guards against the indexing panics a malformed **public** spec
-    /// would otherwise trigger inside [`markov_step`]/[`markov_rate_matrix`]:
+    /// would otherwise trigger inside [`markov_step`]/`markov_rate_matrix`:
     /// out-of-range transition endpoints, empty/non-finite state weights, and
     /// non-finite or negative rates/`tau`.
     pub fn validate(&self) -> Result<(), String> {

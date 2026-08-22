@@ -7,11 +7,11 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`decode`] | `population_rate_decode` |
-//! | [`rates`] | `firing_rates`, `mean_firing_rate` |
-//! | [`isi`] | `compute_isi`, `compute_cvs` |
-//! | [`raster`] | `SpikeRaster`, `spike_raster_to_csv` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `decode` | `population_rate_decode` |
+//! | `rates` | `firing_rates`, `mean_firing_rate` |
+//! | `isi` | `compute_isi`, `compute_cvs` |
+//! | `raster` | `SpikeRaster`, `spike_raster_to_csv` |
+//! | `tests` | unit tests (test-only) |
 
 mod decode;
 mod isi;

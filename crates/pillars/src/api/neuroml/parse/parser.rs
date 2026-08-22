@@ -19,68 +19,12 @@ pub(crate) fn parse(xml: &str) -> Result<Ir, NeuromlError> {
         }
     })?;
 
-    // Pre-pass: collect custom LEMS `ComponentType`s (gate time courses /
-    // steady states) FIRST — ion channels reference them by `type`, and a
-    // `ComponentType` may be declared after the channel that uses it.
-    // `extends="concentrationModel"` types are Ca-pool ODEs, parsed separately
-    // (their `Parameter` dimensions — concentration/length — are not gate
-    // parameters), so they are excluded here.
-    let mut comp_types: HashMap<String, ComponentType> = HashMap::new();
-    let mut pool_type_names: Vec<String> = Vec::new();
-    for node in doc.root_element().descendants() {
-        if node.tag_name().name() == "ComponentType" {
-            if let Some(name) = node.attribute("name") {
-                let is_pool = node
-                    .attribute("extends")
-                    .map(|e| e == "concentrationModel")
-                    .unwrap_or(false);
-                if is_pool {
-                    pool_type_names.push(name.to_string());
-                } else {
-                    comp_types.insert(name.to_string(), parse_component_type(node)?);
-                }
-            }
-        }
-    }
 
-    // Pre-pass: collect ion channels (HH and KS) so `hhCell` can resolve
-    // `channelDensity` references regardless of document order, and
-    // morphologies/biophysics so `cell` can reference them in any order.
-    let mut channels: HashMap<String, IrChannel> = HashMap::new();
-    let mut ks_channels: HashMap<String, IrKsChannel> = HashMap::new();
-    let mut morphologies: Vec<MorphoIR> = Vec::new();
-    let mut biophysics: HashMap<String, BiophysicalProperties> = HashMap::new();
-    let mut concentration_models: HashMap<String, IrConcentrationModel> = HashMap::new();
-    for node in doc.root_element().descendants() {
-        match node.tag_name().name() {
-            "ionChannel" | "ionChannelHH" => {
-                let ch = parse_ion_channel(node, &comp_types)?;
-                channels.insert(ch.id.clone(), ch);
-            }
-            "ionChannelKS" => {
-                let ch = parse_ion_channel_ks(node, &comp_types)?;
-                ks_channels.insert(ch.id.clone(), ch);
-            }
-            "morphology" => morphologies.push(parse_morphology(node)?),
-            "biophysicalProperties" => {
-                let bp = parse_biophysical_properties(node)?;
-                biophysics.insert(attr(node, "id")?.to_string(), bp);
-            }
-            "decayingPoolConcentrationModel"
-            | "fixedFactorConcentrationModel"
-            | "fixedFactorConcentrationModelTraub" => {
-                let cm = parse_concentration_model(node)?;
-                concentration_models.insert(cm.id().to_string(), cm);
-            }
-            // Custom LEMS pool instances: `<PoiraziCaConcentrationModel id="…"
-            // restingConc=… decayConstant=… shellThickness=…/>`.
-            _ if pool_type_names.iter().any(|t| t == node.tag_name().name()) => {
-                let cm = parse_custom_concentration_model(node)?;
-                concentration_models.insert(cm.id().to_string(), cm);
-            }
-            _ => {}
-        }
-    }
+    // Pre-passes (see `prepass`): order-independent resolution of LEMS
+    // ComponentTypes, ion channels, morphologies and biophysics.
+    let (comp_types, pool_type_names) = super::prepass::collect_component_types(&doc)?;
+    let (channels, ks_channels, morphologies, biophysics, concentration_models) =
+        super::prepass::collect_channels_morphologies(&doc, &comp_types, &pool_type_names)?;
 
     let mut ir = Ir {
         cells: Vec::new(),

@@ -265,11 +265,11 @@ impl HumanHandProfile {
     ///
     /// PCSA/fibre lengths:
     /// Kerkhof et al., *The digital human forearm and hand*, Table 1,
-    /// https://pmc.ncbi.nlm.nih.gov/articles/PMC6183001/.
+    /// <https://pmc.ncbi.nlm.nih.gov/articles/PMC6183001/>.
     ///
     /// Maximum stress:
     /// Goislard de Monsabert et al., Table 6/model methods,
-    /// https://pmc.ncbi.nlm.nih.gov/articles/PMC5754461/.
+    /// <https://pmc.ncbi.nlm.nih.gov/articles/PMC5754461/>.
     ///
     /// Moment arms are representative fixed values for this reduced model,
     /// not a claim that one value is valid over the full wrist range of motion.

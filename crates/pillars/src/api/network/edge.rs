@@ -6,7 +6,7 @@
 /// (index in the target population), `weight` and axonal `delay` (steps,
 /// `0` = delivered on the next step).
 ///
-/// See [`Network::connect_edges`] for ergonomic connection.
+/// See [`connect_edges`](crate::api::network::Network::connect_edges) for ergonomic connection.
 #[derive(Debug, Clone, Copy)]
 pub struct Edge {
     pub pre: u32,
@@ -14,10 +14,10 @@ pub struct Edge {
     pub weight: f32,
     pub delay: u8,
     /// Synapse type: `0` = static current (default), `1..` = a kinetic
-    /// profile id from [`Network::register_kinetics`].
+    /// profile id from [`register_kinetics`](crate::api::network::Network::register_kinetics).
     pub syn_type: u8,
     /// Short-term plasticity profile: `0` = none (default), `1..` = a profile
-    /// id from [`Network::register_plasticity`].
+    /// id from [`register_plasticity`](crate::api::network::Network::register_plasticity).
     pub plast_type: u8,
 }
 
@@ -34,7 +34,7 @@ impl Edge {
         }
     }
 
-    /// An edge with a kinetic synapse type (see [`Network::register_kinetics`]).
+    /// An edge with a kinetic synapse type (see [`register_kinetics`](crate::api::network::Network::register_kinetics)).
     #[inline]
     pub fn with_synapse(pre: u32, post: u32, weight: f32, delay: u8, syn_type: u8) -> Self {
         Self {
@@ -48,7 +48,7 @@ impl Edge {
     }
 
     /// An edge with a kinetic synapse type **and** a short-term plasticity
-    /// profile (see [`Network::register_kinetics`] / [`Network::register_plasticity`]).
+    /// profile (see [`register_kinetics`](crate::api::network::Network::register_kinetics) / [`register_plasticity`](crate::api::network::Network::register_plasticity)).
     #[inline]
     pub fn with_synapse_plasticity(
         pre: u32,

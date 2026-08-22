@@ -1,5 +1,7 @@
 use super::*;
 
+use std::sync::Arc as Rc;
+
 use crate::kernels::hh_channels::{
     markov_open_fraction, markov_steady_state, markov_step, GateKinetics, MarkovGateSpec,
 };
@@ -164,9 +166,9 @@ pub(crate) fn thin_shell_pool_flux_scale(area_um2: f32, shell_thickness_um: f32)
 /// the compartment's Ca²⁺ pool (`iCa`).
 #[derive(Clone)]
 pub(crate) struct NernstActiveChannel {
-    pub gates: Vec<(GateKinetics, u32)>,
+    pub gates: Rc<[(GateKinetics, u32)]>,
     /// Per-gate Q10 rate multiplier (parallel to `gates`) — from `q10Settings`.
-    pub q10s: Vec<f32>,
+    pub q10s: Rc<[f32]>,
     /// External Ca²⁺ concentration (mM) — fixed, from the `<species>`.
     pub ca_ext_mm: f32,
     /// Absolute max conductance, µS (density × membrane area).
@@ -179,16 +181,18 @@ impl NernstActiveChannel {
     /// Build a channel with every gate initialised to its steady state at
     /// `v_rest` (mV). `q10s` is parallel to `gates`.
     pub fn new(
-        gates: Vec<(GateKinetics, u32)>,
-        q10s: Vec<f32>,
+        gates: impl Into<Rc<[(GateKinetics, u32)]>>,
+        q10s: impl Into<Rc<[f32]>>,
         ca_ext_mm: f32,
         g_max_us: f32,
         v_rest: f32,
     ) -> Self {
+        let gates = gates.into();
+        let q10s = q10s.into();
         debug_assert_eq!(gates.len(), q10s.len(), "NernstActiveChannel: q10s length");
         let gate_state = gates
             .iter()
-            .map(|(k, _)| gate_steady_state(k.clone(), v_rest))
+            .map(|(k, _)| gate_steady_state(k, v_rest))
             .collect();
         Self {
             gates,
@@ -212,7 +216,7 @@ impl NernstActiveChannel {
         {
             // Ca-dependent gates (Instantaneous h2, kca tau/ss) read the
             // compartment's [Ca²⁺].
-            *q = gate_step(kinetics.clone(), *q, v, ca_int_mm, dt, *q10);
+            *q = gate_step(kinetics, *q, v, ca_int_mm, dt, *q10);
             fopen *= q.powi(*power as i32);
         }
         (fopen, nernst_reversal_mv(ca_int_mm, self.ca_ext_mm, temp_k))
@@ -225,9 +229,9 @@ impl NernstActiveChannel {
 /// from the compartment's dynamic [Ca²⁺] each step and fed back into the pool.
 #[derive(Clone)]
 pub(crate) struct GhkActiveChannel {
-    pub gates: Vec<(GateKinetics, u32)>,
+    pub gates: Rc<[(GateKinetics, u32)]>,
     /// Per-gate Q10 rate multiplier (parallel to `gates`) — from `q10Settings`.
-    pub q10s: Vec<f32>,
+    pub q10s: Rc<[f32]>,
     /// External Ca²⁺ concentration (mM) — fixed, from the `<species>`.
     pub ca_ext_mm: f32,
     /// Absolute max conductance, µS (density × membrane area).
@@ -240,16 +244,18 @@ impl GhkActiveChannel {
     /// Build a channel with every gate initialised to its steady state at
     /// `v_rest` (mV). `q10s` is parallel to `gates`.
     pub fn new(
-        gates: Vec<(GateKinetics, u32)>,
-        q10s: Vec<f32>,
+        gates: impl Into<Rc<[(GateKinetics, u32)]>>,
+        q10s: impl Into<Rc<[f32]>>,
         ca_ext_mm: f32,
         g_max_us: f32,
         v_rest: f32,
     ) -> Self {
+        let gates = gates.into();
+        let q10s = q10s.into();
         debug_assert_eq!(gates.len(), q10s.len(), "GhkActiveChannel: q10s length");
         let gate_state = gates
             .iter()
-            .map(|(k, _)| gate_steady_state(k.clone(), v_rest))
+            .map(|(k, _)| gate_steady_state(k, v_rest))
             .collect();
         Self {
             gates,
@@ -273,7 +279,7 @@ impl GhkActiveChannel {
         {
             // Ca-dependent gates (Instantaneous h2, kca tau/ss) read the
             // compartment's [Ca²⁺].
-            *q = gate_step(kinetics.clone(), *q, v, ca_int_mm, dt, *q10);
+            *q = gate_step(kinetics, *q, v, ca_int_mm, dt, *q10);
             fopen *= q.powi(*power as i32);
         }
         fopen

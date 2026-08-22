@@ -59,6 +59,63 @@ pub(crate) use inhomogeneous::*;
 pub(crate) use population::*;
 pub(crate) use stimulus::*;
 
+/// Compile a bare SWC morphology into a one-population passive cable
+/// network (the SWC entry point — see `neuroml::load_swc`).
+///
+/// No biophysics is attached (`CableParams::default()`, leak −65 mV): the
+/// tree is immediately simulable/visualisable; active channels require the
+/// NeuroML `<cell>` path.
+pub(crate) fn compile_swc(
+    morpho: MorphoIR,
+    dt_ms: f32,
+    duration_ms: f32,
+    celsius: f32,
+) -> Result<LoadedNetwork, NeuromlError> {
+    if !dt_ms.is_finite() || dt_ms <= 0.0 {
+        return Err(NeuromlError::parse("dt must be finite and > 0"));
+    }
+    if !duration_ms.is_finite() || duration_ms <= 0.0 {
+        return Err(NeuromlError::parse("duration must be finite and > 0"));
+    }
+    let cell = MorphoCell {
+        id: "swc_cell".to_string(),
+        morphology: morpho.id.clone(),
+        biophysics: None,
+    };
+    let morphologies = HashMap::from([(morpho.id.as_str(), &morpho)]);
+    let no_bp: HashMap<&str, &BiophysicalProperties> = HashMap::new();
+    let no_hh: HashMap<&str, &IrChannel> = HashMap::new();
+    let no_ks: HashMap<&str, &IrKsChannel> = HashMap::new();
+    let no_conc: HashMap<&str, &IrConcentrationModel> = HashMap::new();
+    let mut warnings = Vec::new();
+    let mut net = Network::new();
+    let (pid, gpu_meta, info) = cable::add_morpho_population(
+        &mut net,
+        &cell,
+        &morphologies,
+        &no_bp,
+        &no_hh,
+        &no_ks,
+        &no_conc,
+        &mut warnings,
+        1,
+        dt_ms,
+        celsius,
+    )?;
+    debug_assert_eq!(pid, 0);
+    net.build();
+    Ok(LoadedNetwork {
+        network: net,
+        inputs: Vec::new(),
+        clamps: Vec::new(),
+        dt_ms,
+        duration_ms,
+        gpu_pops: vec![gpu_meta],
+        cable: vec![Some(info)],
+        warnings,
+    })
+}
+
 /// Lower the IR into a built network + stimulus schedule.
 pub(crate) fn compile(
     mut ir: Ir,

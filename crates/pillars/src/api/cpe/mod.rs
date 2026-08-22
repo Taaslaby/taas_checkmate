@@ -34,7 +34,12 @@ pub use stdp::{stdp_update, EligibilityTrace};
 
 /// Kuramoto step on sparse CSR connectome.
 ///
-/// Calls `crate::kernels::phase::kuramoto_prepare` + `kuramoto_update`.
+/// Wraps `crate::kernels::phase::kuramoto_prepare` + `kuramoto_update`.
+/// Coupling uses the angle-difference identity
+/// `sin(θ_j − θ_i) = sin_j·cos_i − cos_j·sin_i` on the vectors produced by
+/// `kuramoto_prepare` — same math as the canonical
+/// [`kuramoto_step_sparse`](crate::kernels::phase::kuramoto_step_sparse),
+/// no per-edge `sin()` call.
 pub fn kuramoto_step(
     phases: &mut [f32],
     omegas: &[f32],
@@ -48,21 +53,20 @@ pub fn kuramoto_step(
     let mut cos_out = vec![0.0f32; n];
     let mut sin_out = vec![0.0f32; n];
 
-    // Prepare cos/sin from current phases
+    // Wrap phases into [0, τ) and compute the shared sin/cos vectors.
     crate::kernels::phase::kuramoto_prepare(phases, &mut cos_out, &mut sin_out);
 
-    // Build coupling from CSR if no explicit coupling provided
-    // coupling[i] = Σ_j w_ij · sin(θ_j − θ_i)
+    // coupling[i] = Σ_j w_ij · sin(θ_j − θ_i), via the identity above.
     let mut coupling = vec![0.0f32; n];
     for i in 0..n {
+        let cos_i = cos_out[i];
+        let sin_i = sin_out[i];
         let start = row_ptr[i] as usize;
         let end = row_ptr[i + 1] as usize;
         for idx in start..end {
             let j = col_indices[idx] as usize;
             if j < n {
-                let w = values[idx];
-                let phase_diff = phases[j] - phases[i];
-                coupling[i] += w * phase_diff.sin();
+                coupling[i] += values[idx] * (sin_out[j] * cos_i - cos_out[j] * sin_i);
             }
         }
     }

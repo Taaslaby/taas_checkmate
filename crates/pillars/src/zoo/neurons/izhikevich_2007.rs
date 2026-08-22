@@ -4,6 +4,8 @@
 //! This is the **NeuroML2 `izhikevich2007Cell`** — a *different* parametrization
 //! than the 2003 `IzhikevichModel` (which uses `0.04·v² + 5·v + 140`). The 2007
 //! form is conductance-based and generalizes it:
+//! (do NOT merge the step bodies with the 2003/dual families — the
+//! ODE structure differs, and NeuroML reference tests pin the numerics.)
 //!
 //! ```text
 //! C·dv/dt = k·(v − vr)·(v − vt) − u + I

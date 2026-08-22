@@ -12,6 +12,7 @@ wide = "0.7"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
 rayon = { version = "1.8", optional = true }
 pillars-macros = { path = "../pillars-macros" }
 
@@ -43,6 +44,9 @@ harness = false
 [features]
 default = ["rayon", "hh-precise-gates"]
 rayon = ["dep:rayon"]
+# JSON-эталоны NEURON/Brian2 в api::validate (файлы gen_*_ref.py).
+# Опционально, чтобы не тащить serde_json в основной сборке.
+validate-json = ["dep:serde_json"]
 # Переключатель точности: включает полиномиальную аппроксимацию exp()
 # в SimdLane (~1e-5 rel err вместо ~1 ULP). Модели не меняются —
 # exp() маршрутизируется на fast_exp() на этапе компиляции.

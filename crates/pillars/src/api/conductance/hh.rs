@@ -147,7 +147,7 @@ impl ConductancePopulation {
         }
     }
 
-    /// Advance one time step: clamp input, integrate via [`hh_poly_step`],
+    /// Advance one time step: clamp input, integrate via [`hh_poly_step_slices`],
     /// then detect spikes as rising edges through 0 mV.
     pub fn step(&mut self, i_in: &[f32], spikes_out: &mut [i32]) {
         assert_eq!(i_in.len(), self.n, "i_in length mismatch");

@@ -12,7 +12,7 @@ impl Network {
     /// After `build()`, new populations cannot be added.
     ///
     /// # Panics
-    /// If called twice: `build()` **drains** [`Self::edges`], so a second call
+    /// If called twice: `build()` **drains** `Self::edges`, so a second call
     /// would silently rebuild the graph with no connections. Rebuilding is
     /// rejected explicitly rather than corrupting the graph.
     pub fn build(&mut self) {

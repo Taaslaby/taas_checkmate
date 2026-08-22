@@ -38,10 +38,10 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`izhikevich`] | `fused_hidden_izhikevich_step` |
-//! | [`output_lif`] | `fused_output_lif_step` |
-//! | [`poisson`] | `poisson_fused_hidden_step` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `izhikevich` | `fused_hidden_izhikevich_step` |
+//! | `output_lif` | `fused_output_lif_step` |
+//! | `poisson` | `poisson_fused_hidden_step` |
+//! | `tests` | unit tests (test-only) |
 
 mod izhikevich;
 mod output_lif;

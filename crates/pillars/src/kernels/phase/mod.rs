@@ -25,11 +25,11 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`kuramoto`] | `kuramoto_prepare`, `kuramoto_update`, `kuramoto_update_viscous` |
-//! | [`t3`] | `t3_update`, `t3_step_sparse` is in [`sparse`] |
-//! | [`gco`] | `gco_step` |
-//! | [`sparse`] | sparse helpers + `kuramoto_step_sparse`/`kuramoto_step_dense`/`t3_step_sparse` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `kuramoto` | `kuramoto_prepare`, `kuramoto_update`, `kuramoto_update_viscous` |
+//! | `t3` | `t3_update`, `t3_step_sparse` is in `sparse` |
+//! | `gco` | `gco_step` |
+//! | `sparse` | sparse helpers + `kuramoto_step_sparse`/`kuramoto_step_dense`/`t3_step_sparse` |
+//! | `tests` | unit tests (test-only) |
 
 mod gco;
 mod kuramoto;

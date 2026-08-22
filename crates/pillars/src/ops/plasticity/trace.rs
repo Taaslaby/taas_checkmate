@@ -14,7 +14,7 @@
 //! # Spike convention
 //! Accepts SIMD NaN masks (from `cmp_ge`), scalar `-1.0` masks, or arithmetic
 //! flags (`1.0`/`0.0`). Converted via
-//! [`spike_to_float`](crate::ops::spike::spike_to_float) (IEEE 754
+//! [`spike_to_float`] (IEEE 754
 //! NaN-detection).
 
 use crate::core::lane::SimdLane;

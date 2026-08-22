@@ -9,11 +9,11 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`topology`] | `bound_row`/`bound_col`, `ValidatedCsrTopology`, `ValidatedCsrGraph` |
-//! | [`propagate`] | `propagate_spikes` (+ topology-validated variant) |
-//! | [`dynamics`] | Hamiltonian, full oscillator step, rate-based step |
-//! | [`plasticity`] | STDP LTD + the `_with_topology` variants |
-//! | [`tests`] | unit tests (test-only) |
+//! | `topology` | `bound_row`/`bound_col`, `ValidatedCsrTopology`, `ValidatedCsrGraph` |
+//! | `propagate` | `propagate_spikes` (+ topology-validated variant) |
+//! | `dynamics` | Hamiltonian, full oscillator step, rate-based step |
+//! | `plasticity` | STDP LTD + the `_with_topology` variants |
+//! | `tests` | unit tests (test-only) |
 
 mod dynamics;
 mod plasticity;

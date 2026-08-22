@@ -17,6 +17,9 @@ pub struct DelayBuffer {
 
 impl DelayBuffer {
     pub fn new(n: usize) -> Self {
+        // n = 0 would make push/read compute `% 0` (divide-by-zero panic on
+        // first use) — reject at construction instead.
+        assert!(n > 0, "DelayBuffer::new: capacity must be > 0, got 0");
         let padded = n.div_ceil(8) * 8;
         Self {
             buf: vec![0.0f32; padded],
@@ -31,6 +34,12 @@ impl DelayBuffer {
             self.buf[idx] = v;
         }
         self.pos = (self.pos + data.len()) % self.n;
+    }
+
+    /// The most recently pushed value, without allocating (unlike
+    /// [`read`](Self::read), which returns a fresh `Vec`).
+    pub fn latest(&self) -> f32 {
+        self.buf[(self.pos + self.n - 1) % self.n]
     }
 
     pub fn read(&self, delay: usize) -> Vec<f32> {

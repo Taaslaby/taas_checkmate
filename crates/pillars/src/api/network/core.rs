@@ -357,6 +357,14 @@ impl Network {
                 "Network::connect_poisson_source: weight {i} must be finite, got {}",
                 weights[i]
             );
+            // Same contract as SparseGraph::from_triplets: a delay >=
+            // MAX_DELAY_SLOTS silently aliases modulo 32 at delivery time.
+            assert!(
+                (delays[i] as usize) < crate::api::graph::MAX_DELAY_SLOTS,
+                "Network::connect_poisson_source: delay {} >= MAX_DELAY_SLOTS ({})",
+                delays[i],
+                crate::api::graph::MAX_DELAY_SLOTS
+            );
             let post = u32::try_from(to_offset + ti)
                 .expect("Network::connect_poisson_source: global post index exceeds u32::MAX");
             src.outgoing
@@ -564,6 +572,13 @@ impl Network {
         );
         k.validate()?;
         let id = self.kinetics.len() + 1;
+        // Profile ids are u8 (0 = "no profile"); a 256th registration would
+        // silently wrap to 0 and read as "no kinetics" downstream.
+        assert!(
+            id <= u8::MAX as usize,
+            "Network::register_kinetics: profile id overflow (max {} profiles)",
+            u8::MAX
+        );
         self.kinetics.push(KineticRuntime::new(k, dt));
         Ok(id as u8)
     }
@@ -590,6 +605,12 @@ impl Network {
         );
         p.validate()?;
         let id = self.plast_profiles.len() + 1;
+        // Same u8-id contract as register_kinetics.
+        assert!(
+            id <= u8::MAX as usize,
+            "Network::register_plasticity: profile id overflow (max {} profiles)",
+            u8::MAX
+        );
         self.plast_profiles.push(PlastRtProfile {
             u0: p.init_release_prob,
             a_rec: (-dt / p.tau_rec).exp(),

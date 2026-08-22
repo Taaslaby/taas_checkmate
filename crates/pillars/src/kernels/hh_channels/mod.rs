@@ -28,10 +28,10 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`spec`] | Channel specification types: `ClosedForm`, `GateKinetics`, `GateSpec`, `ChannelSpec`, canonical rate fns |
-//! | [`markov`] | Markov kinetic-scheme gates (`gateKS`/`gateFractional`): `MarkovGateSpec`, master-equation integrator |
-//! | [`engine`] | Polynomial HH engine: `hh_poly_step` / `fused_hh_poly_step` (SIMD + scalar tail), `ChannelMeta` |
-//! | [`tests`] | Scalar reference integrator + parity/validation tests (test-only) |
+//! | `spec` | Channel specification types: `ClosedForm`, `GateKinetics`, `GateSpec`, `ChannelSpec`, canonical rate fns |
+//! | `markov` | Markov kinetic-scheme gates (`gateKS`/`gateFractional`): `MarkovGateSpec`, master-equation integrator |
+//! | `engine` | Polynomial HH engine: `hh_poly_step` / `fused_hh_poly_step` (SIMD + scalar tail), `ChannelMeta` |
+//! | `tests` | Scalar reference integrator + parity/validation tests (test-only) |
 
 mod engine;
 mod markov;

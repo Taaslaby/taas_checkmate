@@ -38,6 +38,12 @@
 /// * `map_mn_idx` / `map_act_idx` / `map_scale` / `map_leg_idx` — mapping entries
 /// * `mirror_left` / `mirror_right` — symmetrization index pairs
 /// * `ctrl_out` — output actuator control values `[n_actuators]`
+///
+/// # Why f64 in an f32 engine
+/// This kernel sits on the Python interop boundary (called from
+/// `src/python/python/vnc.rs`): Python floats are f64, and the gain/boost
+/// inputs arrive as `numpy.float64` without a lossy round-trip. The f64
+/// signature is deliberate — do not "fix" it to f32.
 #[allow(clippy::too_many_arguments)]
 pub fn vnc_step_mapping(
     mn_rates: &[f32],

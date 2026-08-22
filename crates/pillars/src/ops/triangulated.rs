@@ -29,6 +29,19 @@ pub const LUT_SIZE: usize = 4096;
 pub const HISTORY_BITS: usize = 4;
 pub const HISTORY_MASK: u8 = 0x0F;
 
+/// History layout: bits 0–2 = last 3 input bits, bit 3 = direction of the
+/// previous ΔV (1 = rising/stationary, 0 = falling).
+///
+/// The direction bit separates the rising and falling branches of an
+/// oscillator's limit cycle (HH, Morris-Lecar). Without it, ΔV averaged over
+/// both branches collapses the cycle into a stable fixed point — the LUT
+/// neuron freezes sub-threshold and never spikes. The direction of the last
+/// step is computable both in calibration (from the reference trajectory) and
+/// at inference (from the applied `entry.delta_v`), so it costs no extra
+/// state.
+pub const INPUT_HIST_MASK: u8 = 0b0111;
+pub const DIR_BIT: u8 = 0b1000;
+
 /// A single LUT entry.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct LutEntry {
@@ -207,8 +220,18 @@ impl LutBuilder {
 
         for _step in 0..cfg.n_steps {
             let v_before = v[0];
-            let v_q = lut_tmp.quantize_v(v_before); // Select input mode for this step (cycle through modes)
-            let mode_idx = _step % cfg.input_modes.len();
+            let v_q = lut_tmp.quantize_v(v_before);
+            // Select input mode for this step. Random (not round-robin):
+            // round-robin `step % n_modes` makes the input alternate
+            // strictly between modes, so histories of a *constant* input
+            // (all-ones input bits) are never visited and those LUT bins
+            // degrade to `nearest_valid` guesses.
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let mode_rnd = ((rng_state >> 33) as u32) as f32 / 4294967296.0;
+            let mode_idx = ((mode_rnd * cfg.input_modes.len() as f32) as usize)
+                .min(cfg.input_modes.len() - 1);
             let (mode_rate, mode_weight, _mode_dur) = cfg.input_modes[mode_idx];
 
             // Poisson spike within current mode
@@ -247,8 +270,11 @@ impl LutBuilder {
             }
             count[key] += 1;
 
-            // Shift history (4-bit: mask to 0x0F)
-            history = (history << 1 | input_bit) & HISTORY_MASK;
+            // Shift history: 3 input bits + direction bit of this ΔV (see
+            // `INPUT_HIST_MASK`/`DIR_BIT` — keeps rising/falling branches of
+            // the limit cycle in separate LUT bins).
+            let dir_bit = if delta_v >= 0.0 { DIR_BIT } else { 0 };
+            history = ((history << 1) & INPUT_HIST_MASK) | input_bit | dir_bit;
         }
 
         // Build final LUT by averaging
@@ -333,7 +359,7 @@ fn nearest_valid(lut: &TriangLUT, v_q: u16, hist: u8) -> LutEntry {
 pub mod avx2 {
     //! Native SIMD LUT gather using `_mm256_i32gather_ps`.
     //! Bypasses to_array/from_array — processes 8 neurons entirely in registers.
-    use super::TriangLUT;
+    use super::{TriangLUT, INPUT_HIST_MASK, DIR_BIT};
     use core::arch::x86_64::*;
 
     /// Single-step inference for 8 neurons using raw __m256 AVX2 gather.
@@ -380,15 +406,26 @@ pub mod avx2 {
         let spike_base = (lut.entries.as_ptr() as *const u8).add(4) as *const f32;
         let spike_f32 = _mm256_i32gather_ps(spike_base, index, 8);
 
-        // 6. V += delta_v
-        let v_new = _mm256_add_ps(v, delta_v);
+        // 6. V += delta_v, clamped to the LUT's representable range — above
+        // v_max the quantizer saturates at bin 255, whose mean ΔV can be
+        // positive and push V into an unphysical runaway (observed +260 mV).
+        let v_new_raw = _mm256_add_ps(v, delta_v);
+        let v_new = _mm256_min_ps(v_new_raw, v_max);
 
-        // 7. New history = (old_hist << 1) | input_bit
+        // 7. New history = 3 input bits (shifted) | direction bit of this ΔV
         // input_bit = i_syn > input_thresh (bitmask 0 or 1)
         let input_cmp = _mm256_cmp_ps(i_syn, _mm256_set1_ps(input_thresh), _CMP_GT_OQ);
         let input_cmp_i32 = _mm256_castps_si256(input_cmp);
         let input_bit = _mm256_and_si256(input_cmp_i32, one_epi32);
-        let new_hist_i32 = _mm256_or_si256(_mm256_slli_epi32(hist_masked, 1), input_bit);
+        // Bits 0..2: shifted input history (old dir bit in bit 3 drops out).
+        let mask_3bit = _mm256_set1_epi32(INPUT_HIST_MASK as i32);
+        let input_part =
+            _mm256_or_si256(_mm256_and_si256(_mm256_slli_epi32(hist_masked, 1), mask_3bit), input_bit);
+        // Bit 3: ΔV direction (1 = rising) — see `DIR_BIT` for why this is
+        // part of the key.
+        let dir_cmp = _mm256_cmp_ps(delta_v, _mm256_setzero_ps(), _CMP_GE_OQ);
+        let dir_bit = _mm256_and_si256(_mm256_castps_si256(dir_cmp), _mm256_set1_epi32(DIR_BIT as i32));
+        let new_hist_i32 = _mm256_or_si256(input_part, dir_bit);
         let new_hist = _mm256_cvtepi32_ps(new_hist_i32);
 
         // 8. Edge-triggered spike: (v_new >= thresh) AND (v < thresh)

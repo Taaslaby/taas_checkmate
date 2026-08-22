@@ -30,6 +30,9 @@
 //! - Порог спайка хардкод 30.0 (передаётся как параметр `v_thresh`).
 //! - Бит-идентичность: guarded by `crates/kernels/tests/izhikevich_dual_parity.rs`
 //!   (обычная не-fused арифметика — та же группировка, что у легаси).
+//!   Не объединять step-тело с `izhikevich.rs`/`izhikevich_2007.rs`: общая
+//!   полиномиальная строка считается с разной группировкой округлений
+//!   (single-step Euler здесь vs substep ×2 там) — паритет битов важнее DRY.
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 

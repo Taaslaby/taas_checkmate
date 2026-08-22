@@ -169,7 +169,7 @@ pub(crate) fn push_spikes(
 ///
 /// Each worker thread collects `(post, slot, weight)` triples for its chunk
 /// of active neurons; the caller scatters them into the delay buffer after
-/// join. Delays ARE respected: `slot = (step + delay) % MAX_DELAY_SLOTS`.
+/// join. Delays ARE respected: `slot = (step + max(delay, 1)) % MAX_DELAY_SLOTS` (delay 0 = next step).
 ///
 /// Falls back to the sequential [`push_spikes`] when there is no parallelism
 /// to exploit (`active` too small or single-threaded machine).
@@ -207,54 +207,25 @@ pub(crate) fn push_spikes_par(
 
     // Use rayon::scope to reuse thread pool instead of spawning OS threads.
     // SparseGraph is Sync, so &SparseGraph is Send across the scope.
-    #[cfg(feature = "rayon")]
-    {
-        use rayon::prelude::*;
-        let triples: Vec<_> = (0..num_threads)
-            .into_par_iter()
-            .filter(|tid| tid * chunk_size < active_len)
-            .flat_map(|tid| {
-                let chunk_start = tid * chunk_size;
-                let chunk_end = (chunk_start + chunk_size).min(active_len);
-                let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
-                collect_push_triples(&chunk, graph, step_counter)
-            })
-            .collect();
+    use rayon::prelude::*;
+    let triples: Vec<_> = (0..num_threads)
+        .into_par_iter()
+        .filter(|tid| tid * chunk_size < active_len)
+        .flat_map(|tid| {
+            let chunk_start = tid * chunk_size;
+            let chunk_end = (chunk_start + chunk_size).min(active_len);
+            let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
+            collect_push_triples(&chunk, graph, step_counter)
+        })
+        .collect();
 
-        // Scatter: each triple is (post, slot, weight, syn_type).
-        for (post, slot, w, syn_type) in triples {
-            if syn_type == 0 {
-                delay.add(slot, post as usize, w);
-            } else {
-                kinetic_delay[(syn_type as usize) - 1].add(slot, post as usize, w);
-            }
+    // Scatter: each triple is (post, slot, weight, syn_type).
+    for (post, slot, w, syn_type) in triples {
+        if syn_type == 0 {
+            delay.add(slot, post as usize, w);
+        } else {
+            kinetic_delay[(syn_type as usize) - 1].add(slot, post as usize, w);
         }
-    }
-    #[cfg(not(feature = "rayon"))]
-    {
-        // Fallback: std::thread::scope when rayon is disabled
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..num_threads)
-                .filter(|tid| tid * chunk_size < active_len)
-                .map(|tid| {
-                    let chunk_start = tid * chunk_size;
-                    let chunk_end = (chunk_start + chunk_size).min(active_len);
-                    let chunk: Vec<u32> = active[chunk_start..chunk_end].to_vec();
-                    s.spawn(move || collect_push_triples(&chunk, graph, step_counter))
-                })
-                .collect();
-
-            for handle in handles {
-                let triples = handle.join().expect("push thread panicked");
-                for (post, slot, w, syn_type) in triples {
-                    if syn_type == 0 {
-                        delay.add(slot, post as usize, w);
-                    } else {
-                        kinetic_delay[(syn_type as usize) - 1].add(slot, post as usize, w);
-                    }
-                }
-            }
-        });
     }
 }
 
@@ -263,7 +234,7 @@ pub(crate) fn push_spikes_par(
 ///
 /// Each thread processes its chunk of active neurons and returns quadruples;
 /// the caller scatters them into the ring buffer on the main thread after
-/// join. Delays ARE respected: `slot = (step + delay) % MAX_DELAY_SLOTS`.
+/// join. Delays ARE respected: `slot = (step + max(delay, 1)) % MAX_DELAY_SLOTS` (delay 0 = next step).
 #[cfg(feature = "rayon")]
 pub(crate) fn collect_push_triples(
     active: &[u32],

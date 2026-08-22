@@ -28,6 +28,7 @@ pub use crate::api::formula::{
     run_program, FormulaModel, OpKind, OpNode, I_SYN, MAX_FORMULA_MODELS, N_REGS, P0, S0, S1, S2,
     S3, TEMP0,
 };
+pub use crate::error::{Error, Result};
 pub use crate::api::{
     HumanHandProfile, HumanHandState, HumanMuscle, HumanMuscleSpec, Network, Population,
     PopulationId, SparseGraph, HUMAN_SPECIFIC_TENSION_PA,

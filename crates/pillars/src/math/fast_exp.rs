@@ -85,8 +85,8 @@ pub fn fast_exp_simd(x: f32x8) -> f32x8 {
 /// SIMD fast exponential — polynomial, **bit-identical to scalar [`fast_exp`]**.
 ///
 /// Runtime-dispatch entry: on x86_64 with AVX2 available this uses the native
-/// `core::arch` implementation ([`fast_exp_poly_avx2`]); otherwise falls back
-/// to the portable `wide::f32x8` version ([`fast_exp_poly_wide`]). Both are
+/// `core::arch` implementation (`fast_exp_poly_avx2`); otherwise falls back
+/// to the portable `wide::f32x8` version (`fast_exp_poly_wide`). Both are
 /// bit-identical to scalar [`fast_exp`] and to each other, so switching SIMD
 /// width at runtime does not change results.
 ///
@@ -154,7 +154,7 @@ fn fast_exp_poly_wide(x: f32x8) -> f32x8 {
     poly * scale
 }
 
-/// Native AVX2 polynomial — same algorithm as [`fast_exp_poly_wide`], expressed
+/// Native AVX2 polynomial — same algorithm as `fast_exp_poly_wide`, expressed
 /// with `core::arch` intrinsics on 256-bit lanes. Selected at runtime by
 /// [`fast_exp_poly_simd`] via `is_x86_feature_detected!("avx2")`, so a binary
 /// built for the baseline target still gets the wide SIMD path on AVX2 CPUs.

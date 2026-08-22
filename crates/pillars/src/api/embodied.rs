@@ -53,6 +53,10 @@ pub struct FlyEmbodiedState {
     pub dt: f32,
     pub simulated_joint_qpos: Vec<f32>,
     pub simulated_joint_qvel: Vec<f32>,
+    /// Per-step scratch (delayed spikes / resets), reused across `step`
+    /// calls — the hot loop must not allocate.
+    scratch_spikes: Vec<i32>,
+    scratch_resets: Vec<i32>,
 }
 
 impl FlyEmbodiedState {
@@ -88,6 +92,8 @@ impl FlyEmbodiedState {
             dt,
             simulated_joint_qpos: vec![0.0; n_joints],
             simulated_joint_qvel: vec![0.0; n_joints],
+            scratch_spikes: vec![0; n_muscles],
+            scratch_resets: vec![0; n_muscles],
         }
     }
 
@@ -97,20 +103,28 @@ impl FlyEmbodiedState {
     /// 3. Compute Net Applied Torque τ = ΔF - K*(q - q_rest) - B*q_dot
     /// 4. Integrate physical joint motion
     pub fn step(&mut self, motoneuron_spikes: &[i32], resets: &[i32]) -> SimStepOutput {
-        let n_in = motoneuron_spikes.len().min(self.n_muscles);
+        // `n_muscles` is padded to a SIMD multiple — driving fewer lanes is
+        // fine (padding stays silent), but dropping extra spikes would be a
+        // silent wiring bug upstream.
+        assert!(
+            motoneuron_spikes.len() <= self.n_muscles,
+            "FlyEmbodiedState::step: {} motoneuron spikes > {} muscles",
+            motoneuron_spikes.len(),
+            self.n_muscles
+        );
 
-        // 1. NMJ Synaptic Delay via DelayBuffer
-        let mut delayed_spikes = vec![0i32; self.n_muscles];
-        let mut reset_spikes = vec![0i32; self.n_muscles];
+        // 1. NMJ Synaptic Delay via DelayBuffer (scratch reused — no allocs)
+        let delayed_spikes = &mut *self.scratch_spikes;
+        let reset_spikes = &mut *self.scratch_resets;
+        delayed_spikes.fill(0);
+        reset_spikes.fill(0);
 
-        for m in 0..n_in {
-            self.delay_buffers[m].push(&[motoneuron_spikes[m] as f32]);
-            let delayed = self.delay_buffers[m].read(1);
-            delayed_spikes[m] = delayed[0] as i32;
-            if m < resets.len() {
-                reset_spikes[m] = resets[m];
-            }
+        for (m, &spike) in motoneuron_spikes.iter().enumerate() {
+            self.delay_buffers[m].push(&[spike as f32]);
+            delayed_spikes[m] = self.delay_buffers[m].latest() as i32;
         }
+        reset_spikes[..resets.len().min(self.n_muscles)]
+            .copy_from_slice(&resets[..resets.len().min(self.n_muscles)]);
 
         // 2. Neuromotor Step (SIMD & Rayon) with Hill length/velocity modulation
         // No lengths/velocities from physics engine yet — use None for isometric mode
@@ -151,8 +165,17 @@ impl FlyEmbodiedState {
             .iter()
             .filter(|&&ca| ca > 0.01)
             .count();
-        let avg_joint_stiffness = sum_stf / self.n_joints as f32;
-        let avg_joint_damping = sum_dmp / self.n_joints as f32;
+        // n_joints = 0 → 0.0, not NaN (sum/0).
+        let avg_joint_stiffness = if self.n_joints > 0 {
+            sum_stf / self.n_joints as f32
+        } else {
+            0.0
+        };
+        let avg_joint_damping = if self.n_joints > 0 {
+            sum_dmp / self.n_joints as f32
+        } else {
+            0.0
+        };
 
         SimStepOutput {
             t: self.step_count as f32 * self.dt,
@@ -221,5 +244,34 @@ mod tests {
             b > 0.2,
             "Co-contraction increases joint damping for posture stability"
         );
+    }
+
+    /// Лишние мотонейронные спайки — ошибка проводки upstream, а не молчаливое
+    /// отбрасывание (см. регрессию «silent spike loss»).
+    #[test]
+    #[should_panic(expected = "motoneuron spikes >")]
+    fn step_rejects_extra_spikes() {
+        let mut fly = FlyEmbodiedState::new(2, 0.001);
+        let spikes = vec![1i32; fly.n_muscles + 1];
+        let resets = vec![0i32; fly.n_muscles + 1];
+        let _ = fly.step(&spikes, &resets);
+    }
+
+    /// Меньше спайков, чем SIMD-паддинг мышц, — законно (паддинг молчит).
+    #[test]
+    fn step_accepts_unpadded_input() {
+        let mut fly = FlyEmbodiedState::new(2, 0.001); // 4 мышцы → паддинг 8
+        let out = fly.step(&[1, 0, 1, 0], &[0, 0, 0, 0]);
+        assert!(out.t > 0.0);
+        assert!(out.avg_joint_stiffness.is_finite());
+    }
+
+    /// n_joints = 0: средние — нули, не NaN.
+    #[test]
+    fn zero_joints_no_nan() {
+        let mut fly = FlyEmbodiedState::new(0, 0.001);
+        let out = fly.step(&[], &[]);
+        assert_eq!(out.avg_joint_stiffness, 0.0);
+        assert_eq!(out.avg_joint_damping, 0.0);
     }
 }

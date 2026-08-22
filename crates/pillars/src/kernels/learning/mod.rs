@@ -13,12 +13,12 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`eprop`] | `surrogate_gradient`, `eprop_update` |
-//! | [`stdp`] | `stdp_update`, `stdp_homeostatic` |
-//! | [`bcm`] | `bcm_step`, `homeostatic_scale` |
-//! | [`hebbian`] | `hebbian_csr_step` |
-//! | [`sorn`] | `intrinsic_plasticity`, `synaptic_normalization`, `SornNetwork` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `eprop` | `surrogate_gradient`, `eprop_update` |
+//! | `stdp` | `stdp_update`, `stdp_homeostatic` |
+//! | `bcm` | `bcm_step`, `homeostatic_scale` |
+//! | `hebbian` | `hebbian_csr_step` |
+//! | `sorn` | `intrinsic_plasticity`, `synaptic_normalization`, `SornNetwork` |
+//! | `tests` | unit tests (test-only) |
 
 mod bcm;
 mod eprop;

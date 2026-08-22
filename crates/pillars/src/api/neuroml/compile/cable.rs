@@ -1,6 +1,7 @@
 use super::*;
 
 use std::collections::HashMap;
+use std::sync::Arc as Rc;
 
 use crate::api::network::Network;
 use crate::api::neuroml::discretize::{
@@ -18,12 +19,15 @@ use crate::api::population::PopulationId;
 use crate::kernels::hh_channels::{ChannelMeta, GateKinetics, GateType, MarkovGateSpec};
 
 /// A resolved active cable channel (before area scaling): HH gates (exponential
-/// Euler) or Markov gates (master equation) + reversal potential.
+/// Euler) or Markov gates (master equation) + reversal potential. The gate
+/// spec is `Arc`-shared — every compartment of a segment group attaches the
+/// same resolved channel (only `g_max_us` differs), so the spec is copied
+/// once per channel *type*, not per compartment.
 enum CableChannel {
     /// `(gates, per-gate q10, e_rev)`.
-    Hh(Vec<(GateKinetics, u32)>, Vec<f32>, f32),
+    Hh(Rc<[(GateKinetics, u32)]>, Rc<[f32]>, f32),
     /// `(gates, per-gate q10, e_rev)`.
-    Markov(Vec<MarkovGateSpec>, Vec<f32>, f32),
+    Markov(Rc<[MarkovGateSpec]>, Rc<[f32]>, f32),
 }
 
 /// Resolve a non-passive `channelDensity` into a cable channel: `ionChannelHH` →
@@ -52,16 +56,16 @@ fn resolve_cable_channel_ion(
     if let Some(ch) = hh.get(ion_channel) {
         if ch.fractional_gates.is_empty() {
             let r = resolve_channel(ch, erev, 0.0, celsius)?;
-            Ok(CableChannel::Hh(r.gates, r.q10s, r.e_rev))
+            Ok(CableChannel::Hh(r.gates.into(), r.q10s.into(), r.e_rev))
         } else {
             let r = resolve_markov_channel(ch, erev, 0.0, celsius)?;
-            Ok(CableChannel::Markov(r.gates, r.q10s, r.e_rev))
+            Ok(CableChannel::Markov(r.gates.into(), r.q10s.into(), r.e_rev))
         }
     } else if let Some(ch) = ks.get(ion_channel) {
         Ok(CableChannel::Markov(
-            ch.gates.clone(),
+            ch.gates.clone().into(),
             // ionChannelKS gates carry no q10Settings.
-            vec![1.0; ch.gates.len()],
+            vec![1.0; ch.gates.len()].into(),
             erev,
         ))
     } else {
@@ -215,8 +219,8 @@ pub(crate) fn add_morpho_population(
                 match &channel {
                     CableChannel::Hh(gates, q10s, e_rev) => {
                         hh_by_comp.entry(comp).or_default().push(ActiveChannel::new(
-                            gates.clone(),
-                            q10s.clone(),
+                            Rc::clone(gates),
+                            Rc::clone(q10s),
                             *e_rev,
                             g_max_us,
                             e_leak,
@@ -226,8 +230,8 @@ pub(crate) fn add_morpho_population(
                         .entry(comp)
                         .or_default()
                         .push(MarkovActiveChannel::new(
-                            gates.clone(),
-                            q10s.clone(),
+                            Rc::clone(gates),
+                            Rc::clone(q10s),
                             *e_rev,
                             g_max_us,
                             e_leak,
@@ -299,8 +303,8 @@ pub(crate) fn add_morpho_population(
                     match &channel {
                         CableChannel::Hh(gates, q10s, e_rev) => {
                             hh_by_comp.entry(comp).or_default().push(ActiveChannel::new(
-                                gates.clone(),
-                                q10s.clone(),
+                                Rc::clone(gates),
+                                Rc::clone(q10s),
                                 *e_rev,
                                 g_max_us,
                                 e_leak,
@@ -310,8 +314,8 @@ pub(crate) fn add_morpho_population(
                             .entry(comp)
                             .or_default()
                             .push(MarkovActiveChannel::new(
-                                gates.clone(),
-                                q10s.clone(),
+                                Rc::clone(gates),
+                                Rc::clone(q10s),
                                 *e_rev,
                                 g_max_us,
                                 e_leak,

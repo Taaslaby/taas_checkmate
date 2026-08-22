@@ -1,6 +1,6 @@
 //! # Network — Spike Routing Orchestrator
 //!
-//! Connects [`NeuralPopulation`](crate::api::NeuralPopulation)s via a [`SparseGraph`] and drives
+//! Connects [`NeuralPopulation`](crate::api::NeuralPopulation)s via a [`SparseGraph`](crate::api::graph::SparseGraph) and drives
 //! the simulation loop. Uses a **ring buffer of currents** (Approach 2)
 //! for axonal delays — on spike, weights are written to a future ring
 //! buffer slot; each step reads the current slot and clears it.
@@ -40,29 +40,39 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use pillars::api::{Network, SparseGraph};
+//! ```rust
+//! use pillars::api::Network;
 //! use pillars::zoo::neurons::LIFModel;
 //!
 //! let mut net = Network::new();
 //!
-//! // Add populations
-//! let sensory = net.add_population::<LIFModel>(100).unwrap();
-//! let motor = net.add_population::<LIFModel>(50).unwrap();
+//! // Add populations — `add_population` returns the `PopulationId`.
+//! let sensory = net.add_population::<LIFModel>(100);
+//! let motor = net.add_population::<LIFModel>(50);
 //!
-//! // Connect sensory[0..10] → motor[0..5] with weight 0.8, no delay
+//! // Configure the LIFs (param indices: dt, 1/tau, v_rest, v_thresh...).
+//! for pop in [sensory, motor] {
+//!     let lif = net.pop_typed_mut::<LIFModel>(pop).unwrap();
+//!     lif.fill_param(0, 0.5);   // dt (ms)
+//!     lif.fill_param(1, 0.1);   // 1/tau
+//!     lif.fill_param(2, -70.0); // v_rest
+//!     lif.fill_param(3, -54.0); // v_thresh
+//!     lif.fill_param(4, -70.0); // v_reset
+//! }
+//!
+//! // Connect sensory[0..10] → motor[0..5]: weight 0.8, no delay
+//! // (delay 0 = delivered on the next step).
 //! net.connect(
 //!     sensory, &[0,1,2,3,4,5,6,7,8,9],
 //!     motor,   &[0,0,1,1,2,2,3,3,4,4],
 //!     &[0.8; 10], &[0; 10],
 //! );
 //!
-//! // Build graph and run
+//! // Build the routing graph and run.
 //! net.build();
 //! for _ in 0..1000 {
 //!     net.step();
 //! }
-//!
 //! println!("Motor spikes: {:?}", &net.spikes(motor)[..10]);
 //! ```
 

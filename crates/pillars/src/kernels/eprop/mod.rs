@@ -41,12 +41,12 @@
 //!
 //! | File | Contains |
 //! |------|----------|
-//! | [`lif`] | `eprop_lif_step` |
-//! | [`izhikevich`] | `eprop_izhikevich_step` (single-input) |
-//! | [`izhikevich_multi`] | `eprop_izhikevich_step_multi` (dense, per-synapse eligibility) |
-//! | [`adex`] | `eprop_adex_step_multi` |
-//! | [`saw`] | `eprop_saw_step` |
-//! | [`tests`] | unit tests (test-only) |
+//! | `lif` | `eprop_lif_step` |
+//! | `izhikevich` | `eprop_izhikevich_step` (single-input) |
+//! | `izhikevich_multi` | `eprop_izhikevich_step_multi` (dense, per-synapse eligibility) |
+//! | `adex` | `eprop_adex_step_multi` |
+//! | `saw` | `eprop_saw_step` |
+//! | `tests` | unit tests (test-only) |
 
 use wide::f32x8;
 

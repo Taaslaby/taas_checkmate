@@ -30,7 +30,9 @@ impl EligibilityTrace {
     /// For each neuron that spiked, add `config.elig_add` to all its
     /// outgoing synapses. Then decay the entire trace.
     pub fn update(&mut self, spikes: &[i32], rp: &[i32], config: &CpeConfig) {
-        let n = rp.len() - 1;
+        // rp is a CSR row_ptr: empty input has no neurons — `len() - 1`
+        // would underflow usize.
+        let n = rp.len().saturating_sub(1);
         for pre in 0..n {
             if pre >= spikes.len() || spikes[pre] == 0 {
                 continue;

@@ -80,6 +80,7 @@
 
 pub mod api;
 pub mod core;
+pub mod error;
 pub mod kernels;
 pub mod math;
 pub mod ops;
@@ -87,6 +88,7 @@ pub mod prelude;
 pub mod zoo;
 
 pub use api::NeuralPopulation;
+pub use error::{Error, Result};
 pub use pillars_macros::{dual_neuron, NeuronModel};
 
 use wide::f32x8;

@@ -74,6 +74,7 @@ pub mod population;
 pub mod push;
 pub mod synapse;
 pub mod trainer;
+pub mod validate;
 
 pub use crate::core::population::NeuralPopulation;
 pub use builder::{

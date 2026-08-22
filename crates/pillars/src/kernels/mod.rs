@@ -13,7 +13,7 @@
 //!   [`crate::core::util::load8`] / [`store8`](crate::core::util::store8).
 //! - **Bit-identical SIMD/scalar on exp paths** — exponential-based kernels
 //!   use [`fast_exp_poly_simd`](crate::math::fast_exp::fast_exp_poly_simd) on
-//!   lanes and [`fast_exp`](crate::math::fast_exp::fast_exp) in tails: the
+//!   lanes and [`fast_exp`] in tails: the
 //!   same polynomial, the same bits. Trig paths (`kuramoto_prepare`,
 //!   `interference_mean`) use the minimax [`fast_sincos_simd`] on lanes and
 //!   libm in tails — accurate to ~1e-4, not bit-identical.

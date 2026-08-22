@@ -232,7 +232,7 @@ impl ActiveCableSolver {
                 {
                     // Ca-dependent gates (Instantaneous h2, kca tau/ss) read
                     // the compartment's [Ca²⁺].
-                    *q = gate_step(kinetics.clone(), *q, v, self.ca[i], dt, *q10);
+                    *q = gate_step(kinetics, *q, v, self.ca[i], dt, *q10);
                     fopen *= q.powi(*power as i32);
                 }
                 let g_ch = ch.g_max_us * fopen;

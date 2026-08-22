@@ -262,6 +262,16 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn delay_buffer_latest_matches_read1() {
+        let mut buf = DelayBuffer::new(4);
+        buf.push(&[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(buf.latest(), buf.read(1)[0]);
+        buf.push(&[9.0, 8.0, 7.0, 6.0]);
+        assert_eq!(buf.latest(), buf.read(1)[0]);
+    }
+
     #[test]
     fn ttfs_encoder_basic() {
         let mut enc = TtfsEncoder::new(4, 10);

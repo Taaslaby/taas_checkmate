@@ -289,4 +289,21 @@ mod tests {
             "пустой → ошибка"
         );
     }
+
+
+    /// Сквозной путь: SWC-файл → load_swc → пассивная кабельная сеть,
+    /// которая реально интегрируется (V конечен, без warnings).
+    #[test]
+    fn swc_file_loads_into_runnable_passive_cable() {
+        let path = std::env::temp_dir().join("pillars_swc_it.swc");
+        std::fs::write(&path, SIMPLE_SWC).unwrap();
+        let mut ln = super::super::load_swc(&path, 0.1, 10.0).unwrap();
+        assert!(ln.warnings.is_empty(), "{:?}", ln.warnings);
+        let info = ln.cable_info(0).expect("SWC — морфологическая клетка");
+        assert!(info.compartments.len() >= 3, "сома + 2 дендрита");
+        ln.run();
+        let v = ln.network.state(0, 0).to_vec();
+        assert!(v.iter().all(|x| x.is_finite()), "V конечен: {v:?}");
+        let _ = std::fs::remove_file(&path);
+    }
 }
