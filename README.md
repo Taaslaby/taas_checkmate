@@ -126,6 +126,17 @@ from taas_checkmate.pillars import LIFPopulation, ConnectomeBrain
 | **Izhikevich (8K нейронов)** | **1 000 000 нейронов / сек** (в 5 раз быстрее NEST) |
 | **Осцилляторы ритмов T3** | **388x реального времени** @ 48kHz |
 | **GPU Connectome (CUDA)** | **130 000 нейронов FlyWire в реальном времени** |
+| **Growth engine (`prometheus-grow`)** | **8.9M клетко-шагов/с на 6 ядрах** (vs BioDynaMo 15.7M на 72 серверных ядрах; по ядру мы в ~6.8× быстрее) |
+
+> 📈 Подробное сравнение с BioDynaMo (тот же бенчмарк `soma_clustering`,
+> эволюция 3.48M → 5.62M → 8.9M клетко-шагов/с) — см.
+> [`docs/PERFORMANCE_GROW.md`](docs/PERFORMANCE_GROW.md).
+>
+> 🧪 Флагманский эксперимент «из генома — в гамма-ритм» (200 нейронов
+> вырастают из правил развития и дают пространственно-когерентные ансамбли +
+> бета/гамма ритм; контроль с теми же степенями — плоский) — см.
+> [`docs/EXPERIMENT_GENOME_TO_GAMMA.md`](docs/EXPERIMENT_GENOME_TO_GAMMA.md),
+> запуск: `cargo run -p pillars-connectome --example genome_to_gamma --release`.
 
 ---
 

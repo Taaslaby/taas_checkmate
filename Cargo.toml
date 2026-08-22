@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/pillars", "crates/pillars-macros", "crates/pillars-cuda",
     "crates/pillars-connectome",
-    "crates/pillars-grow",
+    "crates/prometheus-grow",
     "crates/t3",
     "crates/train",
     "crates/taas-format",

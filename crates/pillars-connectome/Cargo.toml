@@ -9,7 +9,7 @@ description = "Universal connectome brain simulator — pillars-native engine + 
 [dependencies]
 pillars = { path = "../pillars" }
 pillars-cuda = { path = "../pillars-cuda", optional = true }
-pillars-grow = { path = "../pillars-grow" }
+prometheus-grow = { path = "../prometheus-grow" }
 serde = { version = "1", features = ["derive"] }
 rand = "0.8"
 

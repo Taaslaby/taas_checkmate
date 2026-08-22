@@ -4,7 +4,7 @@
 //! genome (synapse_strength, chemo_speed, diffusion)
 //!      │ mutate
 //!      ▼
-//! pillars-grow ──► CSR ──► pillars HAAP ──► (phase, period)
+//! prometheus-grow ──► CSR ──► pillars HAAP ──► (phase, period)
 //!      ▲                                      │
 //!      └──────────── (1+1)-ES keeps the best ─┘
 //! ```
@@ -20,7 +20,7 @@
 use rand::Rng;
 
 use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
-use pillars_grow::{
+use prometheus_grow::{
     Bounds, CellType, ChemoAttraction, DivideOnce, Grid, Secretor, Substance, Vec3, World,
 };
 

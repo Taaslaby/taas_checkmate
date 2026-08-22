@@ -1,8 +1,8 @@
-//! Grow a half-center in `pillars-grow`, then run it through the **real**
+//! Grow a half-center in `prometheus-grow`, then run it through the **real**
 //! pillars engine (HAAP with rebound, the same model as `tripod_cpg`).
 //!
 //! ```text
-//! pillars-grow: 1 GABA progenitor ──divide──► 2 cells ──axons──► mutual inhibition
+//! prometheus-grow: 1 GABA progenitor ──divide──► 2 cells ──axons──► mutual inhibition
 //!                                                              │  (weights from geometry)
 //!                                                              ▼
 //! CSR (ConnectomeData) ──► BrainRunner (HAAP synaptic) ──► anti-phase
@@ -13,7 +13,7 @@
 //! ```
 
 use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
-use pillars_grow::{
+use prometheus_grow::{
     Bounds, CellType, ChemoAttraction, DivideOnce, Grid, Secretor, Substance, Vec3, World,
 };
 

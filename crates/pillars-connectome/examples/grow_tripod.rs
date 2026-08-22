@@ -17,7 +17,7 @@
 use pillars::api::embodied::FlyEmbodiedState;
 use pillars::api::neurons::{ChordotonalBuilder, ChordotonalProfile};
 use pillars_connectome::{BrainConfig, BrainRunner, ConnectomeData};
-use pillars_grow::{
+use prometheus_grow::{
     ArtificialGradient, Bounds, CellType, Differentiate, DivideOnce, Grid, Substance, Vec3, World,
 };
 

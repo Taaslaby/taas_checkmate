@@ -1,0 +1,98 @@
+[package]
+name = "prometheus-grow"
+version = "0.1.0"
+edition = "2021"
+description = "Developmental growth engine — CX3D-style morphogen-guided self-construction (Rust port of the instruction-language core)"
+
+[dependencies]
+rand = "0.8"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1"
+
+# CX3D tutorial ports (examples/cx3d/)
+[[example]]
+name = "cx3d_01_soma_random_walk"
+path = "examples/cx3d/cx3d_01_soma_random_walk.rs"
+
+[[example]]
+name = "cx3d_02_soma_clustering"
+path = "examples/cx3d/cx3d_02_soma_clustering.rs"
+
+[[example]]
+name = "cx3d_03_neurite_chemo_attraction"
+path = "examples/cx3d/cx3d_03_neurite_chemo_attraction.rs"
+
+[[example]]
+name = "cx3d_04_random_branching"
+path = "examples/cx3d/cx3d_04_random_branching.rs"
+
+[[example]]
+name = "cx3d_05_small_network"
+path = "examples/cx3d/cx3d_05_small_network.rs"
+
+[[example]]
+name = "cx3d_06_dividing_cell"
+path = "examples/cx3d/cx3d_06_dividing_cell.rs"
+
+[[example]]
+name = "cx3d_07_simple_synapse"
+path = "examples/cx3d/cx3d_07_simple_synapse.rs"
+
+[[example]]
+name = "cx3d_08_membrane_contact"
+path = "examples/cx3d/cx3d_08_membrane_contact.rs"
+
+[[example]]
+name = "cx3d_09_intracellular_diffusion"
+path = "examples/cx3d/cx3d_09_intracellular_diffusion.rs"
+
+
+# BioDynaMo demo ports (examples/bdm/)
+[[example]]
+name = "bdm_01_cell_division"
+path = "examples/bdm/bdm_01_cell_division.rs"
+[[example]]
+name = "bdm_02_diffusion"
+path = "examples/bdm/bdm_02_diffusion.rs"
+[[example]]
+name = "bdm_03_pyramidal_cell"
+path = "examples/bdm/bdm_03_pyramidal_cell.rs"
+[[example]]
+name = "bdm_04_binding_cells"
+path = "examples/bdm/bdm_04_binding_cells.rs"
+[[example]]
+name = "bdm_bench_soma_clustering"
+path = "examples/bdm/bdm_bench_soma_clustering.rs"
+
+# Bridge to taas-checkmate spike simulator
+[[example]]
+name = "grow_to_sim"
+path = "examples/grow_to_sim.rs"
+
+# Ported from pillars-grow (merged into prometheus-grow)
+[[example]]
+name = "pg_cell_fate"
+path = "examples/pillars/cell_fate.rs"
+[[example]]
+name = "pg_grow"
+path = "examples/pillars/grow.rs"
+[[example]]
+name = "pg_grow_fasciculation"
+path = "examples/pillars/grow_fasciculation.rs"
+[[example]]
+name = "pg_grow_from_dna"
+path = "examples/pillars/grow_from_dna.rs"
+[[example]]
+name = "pg_grow_halfcenter"
+path = "examples/pillars/grow_halfcenter.rs"
+[[example]]
+name = "pg_grow_pattern"
+path = "examples/pillars/grow_pattern.rs"
+[[example]]
+name = "pg_grow_prune"
+path = "examples/pillars/grow_prune.rs"
+[[example]]
+name = "pg_load_dna"
+path = "examples/pillars/load_dna.rs"
