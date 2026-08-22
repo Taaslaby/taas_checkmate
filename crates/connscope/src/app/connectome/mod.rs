@@ -146,8 +146,8 @@ impl Mode for ConnectomeMode {
             Surface::Console => self.console_view(ui),
             Surface::Sim => self.dock_tab_sim(ui),
             Surface::Builder => self.builder.dock_view(ui),
-            // Рисуют оболочка из NeuromlMode; сюда не приходят.
-            Surface::Morphology | Surface::Editor => {}
+            // Рисуют оболочка из NeuromlMode/GrowMode; сюда не приходят.
+            Surface::Morphology | Surface::Editor | Surface::Grow | Surface::GrowPlots => {}
         }
     }
 

@@ -1339,6 +1339,7 @@ dependencies = [
  "pillars",
  "pillars-connectome",
  "pillars-cuda",
+ "prometheus-grow",
  "ratatui",
  "rfd",
  "roxmltree",

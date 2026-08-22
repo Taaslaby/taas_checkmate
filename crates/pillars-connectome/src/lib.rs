@@ -26,6 +26,7 @@
 
 pub mod brain;
 pub mod data;
+pub mod grow_engine;
 pub mod propagate;
 pub mod rcm;
 pub mod record;

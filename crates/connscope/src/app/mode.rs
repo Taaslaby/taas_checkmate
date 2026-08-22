@@ -54,10 +54,14 @@ pub(crate) enum Surface {
     Editor,
     /// Нодовый конструктор нейрона (Formula: граф опов → программа → сим).
     Builder,
+    /// Рост микросхемы из правил развития (prometheus-grow → pillars).
+    Grow,
+    /// Анализ: популяционная частота, спектр, пространственная синхронизация.
+    GrowPlots,
 }
 
 impl Surface {
-    pub(crate) const ALL: [Surface; 9] = [
+    pub(crate) const ALL: [Surface; 11] = [
         Surface::Inspector,
         Surface::Atlas,
         Surface::Ego,
@@ -67,6 +71,8 @@ impl Surface {
         Surface::Morphology,
         Surface::Editor,
         Surface::Builder,
+        Surface::Grow,
+        Surface::GrowPlots,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -80,6 +86,8 @@ impl Surface {
             Self::Morphology => "Морфология",
             Self::Editor => "Редактор",
             Self::Builder => "Конструктор",
+            Self::Grow => "Развитие",
+            Self::GrowPlots => "Анализ гамма",
         }
     }
 
@@ -94,6 +102,8 @@ impl Surface {
             Self::Morphology => ic::TREE_STRUCTURE,
             Self::Editor => ic::TEXT_T,
             Self::Builder => ic::FLOW_ARROW,
+            Self::Grow => ic::DNA,
+            Self::GrowPlots => ic::CHART_BAR,
         }
     }
 }

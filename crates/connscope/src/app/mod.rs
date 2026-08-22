@@ -42,11 +42,13 @@ use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use elegance::{BuiltInTheme, Theme};
 
 use crate::app::connectome::ConnectomeMode;
+use crate::app::grow::GrowMode;
 use crate::app::mode::{Mode, ShellServices, Surface};
 use crate::app::neuroml::NeuromlMode;
 use crate::app::shell::theme;
 
 pub(crate) mod connectome;
+pub(crate) mod grow;
 pub(crate) mod mode;
 pub(crate) mod neuroml;
 pub(crate) mod shell;
@@ -269,6 +271,8 @@ struct ConnApp {
     mode: Box<dyn Mode>,
     /// Режим «NeuroML» (модалка + редактор + поверхность «Морфология»).
     neuroml: NeuromlMode,
+    /// Режим «Развитие» (рост микросхемы + анализ, кросс-режимные поверхности).
+    grow: GrowMode,
     /// Дерево доков рабочего пространства (владеет оболочка).
     dock: DockState<Surface>,
     /// Раскладка дока уже загружена из персистентного хранилища egui.
@@ -293,12 +297,15 @@ impl Default for ConnApp {
         let mut nml = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         nml.push("../../resources/examples/neuroml/exc_inh_loop.nml");
         neuroml.path = nml;
+        // Режим «Развитие» — растёт и симулирует по кнопке (в фоновом потоке).
+        let grow = GrowMode::default();
         // Стартовый вид камера сама «впишет» при первом кадре канваса
         // (см. `fit_pending` в `load_data`) — жёсткий pan тут не нужен.
         Self {
             ui,
             mode: Box::new(mode),
             neuroml,
+            grow,
             dock: default_dock(),
             dock_loaded: false,
             return_to_dock: Vec::new(),
@@ -341,6 +348,7 @@ impl ConnApp {
 
         // Покадровый тик режима (камера, живые потоки, repaint).
         self.mode.frame_tick(&ctx);
+        self.grow.frame_tick(&ctx);
 
         // Сглаженный FPS для статус-бара (EMA).
         let dt = ctx.input(|i| i.stable_dt).max(1e-4);
@@ -548,6 +556,8 @@ impl TabViewer for ConnApp {
             match *surface {
                 Surface::Morphology => self.neuroml.cable_dock_view(ui),
                 Surface::Editor => self.neuroml.editor_dock_view(ui),
+                Surface::Grow => self.grow.grow_dock_view(ui),
+                Surface::GrowPlots => self.grow.plots_dock_view(ui),
                 _ => self.mode.dock_surface(ui, *surface, &mut services),
             }
             services.focus_surface
@@ -604,6 +614,8 @@ fn full_dock() -> DockState<Surface> {
         vec![
             Surface::Atlas,
             Surface::Ego,
+            Surface::Grow,
+            Surface::GrowPlots,
             Surface::Morphology,
             Surface::Editor,
             Surface::Builder,
@@ -726,12 +738,12 @@ fn load_file_icon(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui:
 mod tests {
     use super::*;
 
-    /// Минимальный `ConnApp` без загрузки данных — для чистых тестов дерева дока.
     fn test_app() -> ConnApp {
         ConnApp {
             ui: UiState::default(),
             mode: Box::new(ConnectomeMode::default()),
             neuroml: NeuromlMode::default(),
+            grow: GrowMode::default(),
             dock: default_dock(),
             dock_loaded: false,
             return_to_dock: Vec::new(),

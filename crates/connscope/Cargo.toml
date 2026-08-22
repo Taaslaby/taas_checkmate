@@ -18,6 +18,7 @@ cuda = ["dep:pillars-cuda"]
 [dependencies]
 pillars = { path = "../pillars" }
 pillars-connectome = { path = "../pillars-connectome" }
+prometheus-grow = { path = "../prometheus-grow" }
 pillars-cuda = { path = "../pillars-cuda", optional = true }
 eframe = { workspace = true }
 egui-elegance = { workspace = true }
