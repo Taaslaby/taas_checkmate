@@ -81,7 +81,7 @@ impl ValidationResult {
         let mut result = Self::new("spike-count");
         let diff = (expected - actual).abs();
         
-        result.spike_count_diff = Some(actual as i64 - expected as i64);
+        result.spike_count_diff = Some(actual - expected);
         result.passed = diff <= tol;
         
         if !result.passed {

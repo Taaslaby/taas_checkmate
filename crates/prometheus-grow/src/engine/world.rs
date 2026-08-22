@@ -249,8 +249,11 @@ pub struct World {
     /// cell set changes, so `form_synapses` can reuse its contact grid across
     /// steps that leave geometry untouched (huge win for cell-only sims).
     geom_epoch: u64,
-    contact_cache: Option<(f64, UniformGrid, Vec<(Vec3, usize)>)>,
+    contact_cache: Option<ContactCache>,
 }
+
+/// Кэш контактной сетки `form_synapses`: (шаг, сетка, центры сом).
+type ContactCache = (f64, UniformGrid, Vec<(Vec3, usize)>);
 
 impl World {
     pub fn new(grid: Grid, dt: f64, bounds: Bounds, seed: u64) -> Self {
@@ -1168,7 +1171,7 @@ impl World {
                 .filter(|neur| neur.is_axon)
                 .map(|neur| neur.tip())
                 .collect();
-            let mut nearest: Vec<(usize, f64)> = nearest_posts(&grid, &points, &tips, dist)
+            let mut nearest: Vec<(usize, f64)> = nearest_posts(grid, points, &tips, dist)
                 .into_iter()
                 .collect();
             nearest.sort_by_key(|&(b, _)| b); // deterministic RNG order
@@ -1669,9 +1672,7 @@ impl World {
         let base_counts: Vec<usize> = self.cells.iter().map(|c| c.neurites.len()).collect();
 
         // Phase 1: run every pre-existing module (speed updates, branching).
-        let n = self.cells.len();
-        for ci in 0..n {
-            let nneur = base_counts[ci];
+        for (ci, &nneur) in base_counts.iter().enumerate() {
             for ni in 0..nneur {
                 let mut mods = std::mem::take(&mut self.cells[ci].neurites[ni].modules);
                 for mut m in mods.drain(..) {
@@ -1683,8 +1684,7 @@ impl World {
 
         // Phase 2: finish_step (allocation) with all speeds final, so the
         // resource split is order-independent and conserves the arbor total.
-        for ci in 0..n {
-            let nneur = base_counts[ci];
+        for (ci, &nneur) in base_counts.iter().enumerate() {
             for ni in 0..nneur {
                 let mut mods = std::mem::take(&mut self.cells[ci].neurites[ni].modules);
                 for mut m in mods.drain(..) {
@@ -1903,7 +1903,7 @@ impl World {
         // splitting pays only synchronization overhead (BDM does the same:
         // threads own contiguous agent blocks).
         let n_threads = rayon::current_num_threads().max(1);
-        let block = (n + n_threads - 1) / n_threads;
+        let block = n.div_ceil(n_threads);
         let cell_base = cells.as_mut_ptr() as usize;
         let par_base = par.as_mut_ptr() as usize;
         let ops_base = ops_flat.as_mut_ptr() as usize;

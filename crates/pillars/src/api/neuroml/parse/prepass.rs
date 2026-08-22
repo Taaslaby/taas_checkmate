@@ -43,22 +43,23 @@ pub(super) fn collect_component_types(
     Ok((comp_types, pool_type_names))
 }
 
+/// Собранные pre-pass'ом каналы/морфологии/biophysics (см.
+/// [`collect_channels_morphologies`]).
+pub(super) type ChannelMorphoPrepass = (
+    HashMap<String, IrChannel>,
+    HashMap<String, IrKsChannel>,
+    Vec<MorphoIR>,
+    HashMap<String, BiophysicalProperties>,
+    HashMap<String, IrConcentrationModel>,
+);
+
 /// Собрать ионные каналы (HH/KS), морфологии, biophysics и concentration
 /// models — независимо от порядка объявления в документе.
 pub(super) fn collect_channels_morphologies(
     doc: &roxmltree::Document,
     comp_types: &HashMap<String, ComponentType>,
     pool_type_names: &[String],
-) -> Result<
-    (
-        HashMap<String, IrChannel>,
-        HashMap<String, IrKsChannel>,
-        Vec<MorphoIR>,
-        HashMap<String, BiophysicalProperties>,
-        HashMap<String, IrConcentrationModel>,
-    ),
-    NeuromlError,
-> {
+) -> Result<ChannelMorphoPrepass, NeuromlError> {
     // Pre-pass: collect ion channels (HH and KS) so `hhCell` can resolve
     // `channelDensity` references regardless of document order, and
     // morphologies/biophysics so `cell` can reference them in any order.
@@ -70,11 +71,11 @@ pub(super) fn collect_channels_morphologies(
     for node in doc.root_element().descendants() {
         match node.tag_name().name() {
             "ionChannel" | "ionChannelHH" => {
-                let ch = parse_ion_channel(node, &comp_types)?;
+                let ch = parse_ion_channel(node, comp_types)?;
                 channels.insert(ch.id.clone(), ch);
             }
             "ionChannelKS" => {
-                let ch = parse_ion_channel_ks(node, &comp_types)?;
+                let ch = parse_ion_channel_ks(node, comp_types)?;
                 ks_channels.insert(ch.id.clone(), ch);
             }
             "morphology" => morphologies.push(parse_morphology(node)?),

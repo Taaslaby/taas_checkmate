@@ -175,7 +175,7 @@ impl FlyGenome {
     /// gene (Dscam1/CadN/Tl) implies isoform-specific same-type recognition
     /// (the DNA → topology link); no adhesion gene → unrestricted wiring.
     pub fn recognition(&self, channel_map: &[ChannelGene]) -> crate::Recognition {
-        let has = self.adhesion_gene.as_deref().map_or(false, |g| {
+        let has = self.adhesion_gene.as_deref().is_some_and(|g| {
             channel_map
                 .iter()
                 .any(|c| c.gene == g && c.param == "cell-recognition")

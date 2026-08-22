@@ -65,7 +65,7 @@ impl Default for GrowConfig {
             w_e_gain: 0.15,
             w_i_gain: 0.8,
             tau_syn: 3.0,
-            seed: 0xC0FF_EE,
+            seed: 0xC0_FF_EE,
         }
     }
 }

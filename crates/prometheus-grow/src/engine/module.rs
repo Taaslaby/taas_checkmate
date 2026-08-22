@@ -87,12 +87,12 @@ impl<'a> ParWorldView<'a> {
     /// Trilinear concentration of `substance_idx` at `p` (grid field only;
     /// artificial gradients are pre-baked by the caller via `add_analytic`).
     pub fn concentration(&self, substance_idx: usize, p: crate::Vec3) -> f64 {
-        self.grid.trilinear(&self.fields[substance_idx], p)
+        self.grid.trilinear(self.fields[substance_idx], p)
     }
 
     /// Analytic gradient of the grid field of `substance_idx` at `p`.
     pub fn gradient(&self, substance_idx: usize, p: crate::Vec3) -> crate::Vec3 {
-        self.grid.trilinear_gradient(&self.fields[substance_idx], p)
+        self.grid.trilinear_gradient(self.fields[substance_idx], p)
     }
 }
 

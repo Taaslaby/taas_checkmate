@@ -129,7 +129,7 @@ impl FlyEmbodiedState {
         // 2. Neuromotor Step (SIMD & Rayon) with Hill length/velocity modulation
         // No lengths/velocities from physics engine yet — use None for isometric mode
         self.neuromotor_state
-            .step(&delayed_spikes, &reset_spikes, self.dt, None, None);
+            .step(delayed_spikes, reset_spikes, self.dt, None, None);
 
         // 3. Compute Generalized Joint Forces & Update Dynamics
         let mut sum_stf = 0.0f32;

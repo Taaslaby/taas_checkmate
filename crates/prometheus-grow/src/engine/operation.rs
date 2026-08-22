@@ -7,6 +7,12 @@ pub trait Operation {
 
 pub struct Scheduler { ops: Vec<Box<dyn Operation>> }
 
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scheduler {
     pub fn new() -> Self { Scheduler { ops: Vec::new() } }
     pub fn add(&mut self, op: Box<dyn Operation>) { self.ops.push(op); }
