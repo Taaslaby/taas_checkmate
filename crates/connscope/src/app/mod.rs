@@ -725,12 +725,6 @@ fn load_logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     Some(ctx.load_texture("neoMyelin_logo", color, egui::TextureOptions::LINEAR))
 }
 
-fn load_file_icon(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
-}
 
 // ── Тесты раскладки рабочего пространства ─────────────────────
 
