@@ -678,12 +678,12 @@ impl NeuronBuilder {
         painter.rect_filled(
             mm,
             CornerRadius::same(6),
-            crate::app::shell::theme::BG_CARD.gamma_multiply(0.9),
+            crate::app::shell::theme::card_bg(painter.ctx()).gamma_multiply(0.9),
         );
         painter.rect_stroke(
             mm,
             CornerRadius::same(6),
-            Stroke::new(1.0_f32, crate::app::shell::theme::STROKE_SOFT),
+            Stroke::new(1.0_f32, crate::app::shell::theme::stroke_soft(painter.ctx())),
             StrokeKind::Inside,
         );
         // caption — TEXT_DIM вместо синего
@@ -692,7 +692,7 @@ impl NeuronBuilder {
             Align2::LEFT_TOP,
             "minimap",
             FontId::proportional(10.0),
-            crate::app::shell::theme::TEXT_DIM,
+            crate::app::shell::theme::text_dim(painter.ctx()),
         );
         if self.nodes.is_empty() {
             return;
@@ -724,7 +724,7 @@ impl NeuronBuilder {
         painter.rect_stroke(
             vr,
             CornerRadius::same(1),
-            Stroke::new(1.0_f32, crate::app::shell::theme::TEXT),
+            Stroke::new(1.0_f32, crate::app::shell::theme::text(painter.ctx())),
             StrokeKind::Inside,
         );
     }
@@ -734,15 +734,15 @@ impl NeuronBuilder {
     fn draw_grid(&self, painter: &egui::Painter, origin: Pos2, size: Vec2) {
         // Приглушённая сетка — нейтральная (STROKE_SOFT), не синяя
         let color = Color32::from_rgba_unmultiplied(
-            crate::app::shell::theme::STROKE_SOFT.r(),
-            crate::app::shell::theme::STROKE_SOFT.g(),
-            crate::app::shell::theme::STROKE_SOFT.b(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).r(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).g(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).b(),
             28,
         );
         let dot = Color32::from_rgba_unmultiplied(
-            crate::app::shell::theme::STROKE_SOFT.r(),
-            crate::app::shell::theme::STROKE_SOFT.g(),
-            crate::app::shell::theme::STROKE_SOFT.b(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).r(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).g(),
+            crate::app::shell::theme::stroke_soft(painter.ctx()).b(),
             42,
         );
         let w_min = self.screen_to_world(Vec2::ZERO);
@@ -856,9 +856,9 @@ impl NeuronBuilder {
 
         // body — нейтральные серые из темы (не синие)
         let bg = if self.selected == Some(i) {
-            crate::app::shell::theme::BG_CARD // светлее при выделении
+            crate::app::shell::theme::card_bg(painter.ctx()) // светлее при выделении
         } else {
-            crate::app::shell::theme::BG_PANEL // темнее в покое
+            crate::app::shell::theme::panel_bg(painter.ctx()) // темнее в покое
         };
         painter.rect_filled(rect, rounding, bg);
             // inner highlight — 1px сверху, 14 alpha
@@ -905,7 +905,7 @@ impl NeuronBuilder {
                 Align2::LEFT_CENTER,
                 format!("{}  {}", cat_icon(cat), spec.name),
                 FontId::proportional(12.5 * self.zoom),
-                crate::app::shell::theme::TEXT,
+                crate::app::shell::theme::text(painter.ctx()),
             );
 
             // border: акцент темы = selected, category = hovered, soft gray = idle
@@ -914,7 +914,7 @@ impl NeuronBuilder {
             } else if self.hover_node == Some(i) {
                 accent.gamma_multiply(1.3)
             } else {
-                crate::app::shell::theme::STROKE_SOFT
+                crate::app::shell::theme::stroke_soft(painter.ctx())
             };
             let bw = if self.selected == Some(i) { 1.8 } else { 1.0 };
             painter.rect_stroke(
@@ -938,7 +938,7 @@ impl NeuronBuilder {
                     // outer glow
                     painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, crate::app::shell::theme::BG_INSET);
+                    painter.circle_filled(c, pr, crate::app::shell::theme::inset_bg(painter.ctx()));
                 } else {
                     if hovered {
                         painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
@@ -963,9 +963,9 @@ impl NeuronBuilder {
                     *label,
                     FontId::proportional(10.5 * self.zoom),
                     if hovered {
-                        crate::app::shell::theme::TEXT
+                        crate::app::shell::theme::text(painter.ctx())
                     } else {
-                        crate::app::shell::theme::TEXT_DIM
+                        crate::app::shell::theme::text_dim(painter.ctx())
                     },
                 );
             }
@@ -980,7 +980,7 @@ impl NeuronBuilder {
                 if connected {
                     painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.18));
                     painter.circle_filled(c, pr + 1.5 * self.zoom, col);
-                    painter.circle_filled(c, pr, crate::app::shell::theme::BG_INSET);
+                    painter.circle_filled(c, pr, crate::app::shell::theme::inset_bg(painter.ctx()));
                 } else {
                     if hovered {
                         painter.circle_filled(c, pr + 3.0 * self.zoom, col.gamma_multiply(0.22));
@@ -1009,7 +1009,7 @@ impl NeuronBuilder {
                     Align2::LEFT_CENTER,
                     out_label,
                     FontId::proportional(11.0 * self.zoom),
-                    crate::app::shell::theme::TEXT,
+                    crate::app::shell::theme::text(painter.ctx()),
                 );
             }
         }
@@ -1721,9 +1721,9 @@ impl NeuronBuilder {
                 .inner_margin(egui::Margin::same(8))
                 .corner_radius(6)
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new(format!("{} {}", ic::WARNING_CIRCLE, "Граф не запустится:")).strong().color(crate::app::shell::theme::DANGER_TEXT));
+                    ui.label(egui::RichText::new(format!("{} {}", ic::WARNING_CIRCLE, "Граф не запустится:")).strong().color(crate::app::shell::theme::danger_text(ui.ctx())));
                     for e in errs.iter().take(3) {
-                        ui.label(egui::RichText::new(format!("• {e}")).small().color(crate::app::shell::theme::DANGER_TEXT));
+                        ui.label(egui::RichText::new(format!("• {e}")).small().color(crate::app::shell::theme::danger_text(ui.ctx())));
                     }
                     if errs.len() > 3 {
                         ui.label(egui::RichText::new(format!("и ещё {}…", errs.len() - 3)).small().weak());

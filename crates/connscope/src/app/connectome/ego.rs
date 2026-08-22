@@ -157,7 +157,7 @@ impl<E: Clone, Ty: EdgeType, Ix: IndexType> DisplayNode<EgoNode, E, Ty, Ix> for 
                 f.layout_no_wrap(
                     self.label.clone(),
                     FontId::proportional(11.0),
-                    crate::app::shell::theme::TEXT,
+                    crate::app::shell::theme::text(ctx.ctx),
                 )
             });
             let label_pos = Pos2::new(center.x - galley.size().x / 2.0, center.y + radius + 2.0);

@@ -232,8 +232,8 @@ impl NeuromlMode {
         // Пустое состояние — проф инструмент, не стекло (игрушечный глянец убрали)
         if self.editor.text.trim().is_empty() {
             egui::Frame::new()
-                .fill(theme::BG_INSET)
-                .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+                .fill(theme::inset_bg(ui.ctx()))
+                .stroke(egui::Stroke::new(1.0, theme::stroke_soft(ui.ctx())))
                 .corner_radius(tokens::RADIUS_MD)
                 .inner_margin(egui::Margin::symmetric(24, 20))
                 .show(ui, |ui| {
@@ -368,8 +368,8 @@ impl NeuromlMode {
         // — BG_INSET утоплен относительно BG_CARD карточки вкладки, граница STROKE_SOFT,
         // скругление RADIUS_MD, внутри gutter слева и код справа.
         let resp = egui::Frame::new()
-            .fill(theme::BG_INSET)
-            .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+            .fill(theme::inset_bg(ui.ctx()))
+            .stroke(egui::Stroke::new(1.0, theme::stroke_soft(ui.ctx())))
             .corner_radius(tokens::RADIUS_MD)
             .inner_margin(egui::Margin::same(2))
             .show(ui, |ui| {
@@ -381,7 +381,7 @@ impl NeuromlMode {
                         ui.horizontal_top(|ui| {
                             // Gutter — своя колонка с правым бордером (как в IDE)
                             egui::Frame::NONE
-                                .fill(theme::BG_INSET)
+                                .fill(theme::inset_bg(ui.ctx()))
                                 .inner_margin(egui::Margin::symmetric(6, 4))
                                 .show(ui, |ui| {
                                     ui.add(egui::Label::new(gutter_galley.clone()));
@@ -391,7 +391,7 @@ impl NeuromlMode {
                                 egui::pos2(ui.cursor().min.x - 2.0, ui.min_rect().min.y),
                                 egui::pos2(ui.cursor().min.x - 1.0, ui.min_rect().max.y),
                             );
-                            ui.painter().rect_filled(sep_rect, 0.0, theme::STROKE_SOFT);
+                            ui.painter().rect_filled(sep_rect, 0.0, theme::stroke_soft(ui.ctx()));
                             ui.add_space(4.0);
                             TextEdit::multiline(&mut self.editor.text)
                                 .code_editor()
@@ -622,8 +622,8 @@ fn editor_errors(ui: &mut egui::Ui, editor: &EditorState, status: &str) -> Optio
     if !editor.errors.is_empty() {
         ui.add_space(tokens::SP_XS);
         egui::Frame::new()
-            .fill(theme::BG_INSET)
-            .stroke(egui::Stroke::new(1.0, theme::STROKE_SOFT))
+            .fill(theme::inset_bg(ui.ctx()))
+            .stroke(egui::Stroke::new(1.0, theme::stroke_soft(ui.ctx())))
             .corner_radius(tokens::RADIUS_SM)
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
@@ -683,7 +683,7 @@ fn editor_errors(ui: &mut egui::Ui, editor: &EditorState, status: &str) -> Optio
 fn editor_status_bar(ui: &mut egui::Ui, editor: &EditorState, path: &Path) {
     ui.add_space(tokens::SP_XS);
     egui::Frame::new()
-        .fill(theme::BG_PANEL)
+        .fill(theme::panel_bg(ui.ctx()))
         .inner_margin(egui::Margin::symmetric(8, 4))
         .corner_radius(tokens::RADIUS_SM)
         .show(ui, |ui| {

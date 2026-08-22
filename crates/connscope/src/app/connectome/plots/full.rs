@@ -199,7 +199,7 @@ fn heatmap_classes(ui: &mut egui::Ui, r: &FullSimResult, n: f64, dt: f64) {
     painter.rect_stroke(
         area,
         1.0,
-        egui::Stroke::new(1.0, crate::app::shell::theme::STROKE_SOFT),
+        egui::Stroke::new(1.0, crate::app::shell::theme::stroke_soft(ui.ctx())),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -207,7 +207,7 @@ fn heatmap_classes(ui: &mut egui::Ui, r: &FullSimResult, n: f64, dt: f64) {
         Align2::LEFT_TOP,
         format!("{:.1} мс → {:.1} мс", 0.0, r.steps as f64 * dt),
         FontId::monospace(9.0),
-        crate::app::shell::theme::TEXT_DIM,
+        crate::app::shell::theme::text_dim(ui.ctx()),
     );
 }
 

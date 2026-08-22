@@ -34,8 +34,8 @@ pub(crate) fn section_card(
 ) {
     // Стекло: полупрозрачный фон + размытая тень + тонкий бордер
     let frame = egui::Frame::new()
-        .fill(crate::app::shell::theme::BG_CARD.gamma_multiply(0.9))
-        .stroke(egui::Stroke::new(1.0, crate::app::shell::theme::STROKE_SOFT))
+        .fill(crate::app::shell::theme::card_bg(ui.ctx()).gamma_multiply(0.9))
+        .stroke(egui::Stroke::new(1.0, crate::app::shell::theme::stroke_soft(ui.ctx())))
         .corner_radius(10)
         .inner_margin(tokens::PAD_CARD)
         .shadow(egui::Shadow {
@@ -77,8 +77,8 @@ pub(crate) fn compact_card(
 ) {
     // Компактное стекло — как section_card, но меньше паддинг и заголовок без SemiBold
     let frame = egui::Frame::new()
-        .fill(crate::app::shell::theme::BG_CARD.gamma_multiply(0.8))
-        .stroke(egui::Stroke::new(1.0, crate::app::shell::theme::STROKE_SOFT))
+        .fill(crate::app::shell::theme::card_bg(ui.ctx()).gamma_multiply(0.8))
+        .stroke(egui::Stroke::new(1.0, crate::app::shell::theme::stroke_soft(ui.ctx())))
         .corner_radius(8)
         .inner_margin(tokens::PAD_CARD_SM)
         .shadow(egui::Shadow {

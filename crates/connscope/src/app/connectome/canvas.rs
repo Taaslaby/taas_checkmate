@@ -220,7 +220,7 @@ impl ConnectomeMode {
                 Align2::CENTER_CENTER,
                 &self.status,
                 FontId::proportional(16.0),
-                crate::app::shell::theme::TEXT_DIM,
+                crate::app::shell::theme::text_dim(painter.ctx()),
             );
             return;
         };
@@ -230,7 +230,7 @@ impl ConnectomeMode {
                 Align2::CENTER_CENTER,
                 "нет 3D-позиций: граф доступен через поиск, ego-граф и симуляцию",
                 FontId::proportional(15.0),
-                crate::app::shell::theme::TEXT_DIM,
+                crate::app::shell::theme::text_dim(painter.ctx()),
             );
             return;
         }
@@ -455,7 +455,7 @@ impl ConnectomeMode {
                 painter.circle_stroke(
                     c,
                     10.0,
-                    Stroke::new(2.2_f32, crate::app::shell::theme::TEXT),
+                    Stroke::new(2.2_f32, crate::app::shell::theme::text(painter.ctx())),
                 );
             }
         }
@@ -630,7 +630,7 @@ impl ConnectomeMode {
 
     /// Координатная сетка (только в 2D-режиме) — нейтральная, как в builder.
     fn draw_grid(&self, painter: &egui::Painter, origin: Pos2, size: Vec2) {
-        let base = crate::app::shell::theme::STROKE_SOFT;
+        let base = crate::app::shell::theme::stroke_soft(painter.ctx());
         let color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 38);
         let major_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 72);
         let wr = self.world_rect(size);
@@ -652,9 +652,9 @@ impl ConnectomeMode {
                     format!("{x:.1}"),
                     FontId::monospace(10.0),
                     Color32::from_rgba_unmultiplied(
-                        crate::app::shell::theme::TEXT_DIM.r(),
-                        crate::app::shell::theme::TEXT_DIM.g(),
-                        crate::app::shell::theme::TEXT_DIM.b(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).r(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).g(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).b(),
                         120,
                     ),
                 );
@@ -679,9 +679,9 @@ impl ConnectomeMode {
                     format!("{y:.1}"),
                     FontId::monospace(10.0),
                     Color32::from_rgba_unmultiplied(
-                        crate::app::shell::theme::TEXT_DIM.r(),
-                        crate::app::shell::theme::TEXT_DIM.g(),
-                        crate::app::shell::theme::TEXT_DIM.b(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).r(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).g(),
+                        crate::app::shell::theme::text_dim(painter.ctx()).b(),
                         120,
                     ),
                 );
@@ -697,12 +697,12 @@ impl ConnectomeMode {
         painter.rect_filled(
             r,
             CornerRadius::same(5),
-            crate::app::shell::theme::BG_INSET.gamma_multiply(0.9),
+            crate::app::shell::theme::inset_bg(painter.ctx()).gamma_multiply(0.9),
         );
         painter.rect_stroke(
             r,
             CornerRadius::same(5),
-            Stroke::new(1.0_f32, crate::app::shell::theme::STROKE_SOFT),
+            Stroke::new(1.0_f32, crate::app::shell::theme::stroke_soft(painter.ctx())),
             egui::StrokeKind::Inside,
         );
         painter.text(
@@ -710,7 +710,7 @@ impl ConnectomeMode {
             Align2::LEFT_TOP,
             "OVERVIEW",
             FontId::monospace(9.0),
-            crate::app::shell::theme::TEXT_DIM,
+            crate::app::shell::theme::text_dim(painter.ctx()),
         );
         let Some(data) = self.data.as_ref() else {
             return;
@@ -736,7 +736,7 @@ impl ConnectomeMode {
         painter.rect_stroke(
             Rect::from_min_max(a, b),
             CornerRadius::ZERO,
-            Stroke::new(1.0_f32, crate::app::shell::theme::TEXT),
+            Stroke::new(1.0_f32, crate::app::shell::theme::text(painter.ctx())),
             egui::StrokeKind::Inside,
         );
     }
@@ -756,11 +756,11 @@ impl ConnectomeMode {
         let w = 152.0;
         let h = 20.0 + n as f32 * 16.0;
         let r = Rect::from_min_size(origin + vec2(8.0, 8.0), vec2(w, h));
-        painter.rect_filled(r, 6.0, crate::app::shell::theme::BG_CARD.gamma_multiply(0.9));
+        painter.rect_filled(r, 6.0, crate::app::shell::theme::card_bg(painter.ctx()).gamma_multiply(0.9));
         painter.rect_stroke(
             r,
             6.0,
-            Stroke::new(1.0, crate::app::shell::theme::STROKE_SOFT),
+            Stroke::new(1.0, crate::app::shell::theme::stroke_soft(painter.ctx())),
             egui::StrokeKind::Inside,
         );
         painter.text(
@@ -768,7 +768,7 @@ impl ConnectomeMode {
             Align2::LEFT_TOP,
             title,
             FontId::proportional(10.0),
-            crate::app::shell::theme::TEXT,
+            crate::app::shell::theme::text(painter.ctx()),
         );
         for (i, (name, col, _cnt)) in rows.iter().take(n).enumerate() {
             let y = r.min.y + 20.0 + i as f32 * 16.0;
@@ -786,7 +786,7 @@ impl ConnectomeMode {
                 Align2::LEFT_CENTER,
                 label,
                 FontId::proportional(10.0),
-                crate::app::shell::theme::TEXT_DIM,
+                crate::app::shell::theme::text_dim(painter.ctx()),
             );
         }
     }
@@ -797,12 +797,12 @@ impl ConnectomeMode {
         painter.circle_filled(
             center,
             r + 10.0,
-            crate::app::shell::theme::BG_INSET.gamma_multiply(0.85),
+            crate::app::shell::theme::inset_bg(painter.ctx()).gamma_multiply(0.85),
         );
         painter.circle_stroke(
             center,
             r + 10.0,
-            Stroke::new(1.0_f32, crate::app::shell::theme::STROKE_SOFT),
+            Stroke::new(1.0_f32, crate::app::shell::theme::stroke_soft(painter.ctx())),
         );
         let axes: [(&str, f32, f32, f32, Color32); 3] = [
             ("X", 1.0, 0.0, 0.0, Color32::from_rgb(255, 95, 95)),

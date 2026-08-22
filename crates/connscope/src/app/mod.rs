@@ -330,6 +330,26 @@ impl ConnApp {
         let mut theme = self.ui.theme.theme();
         self.ui.accent.apply(&mut theme);
         theme.install(ui.ctx());
+        // eframe создаёт корневой ui (и фиксирует его стиль) ДО вызова
+        // App::ui — elegant-тема применяется к контексту уже «после».
+        // Переустанавливаем стиль корневого ui, иначе все панели кадра
+        // (меню/тулбар/рейл/статус) остаются со стартовым тёмным стилем —
+        // в светлых темах это выглядело чёрным хромом вокруг светлого дока.
+        ui.set_style(ui.ctx().global_style());
+        // Нативный заголовок окна/скроллбары следуют за theme_preference,
+        // а elegance красит только visuals активного слота. Зеркалим стиль
+        // в слот светлой/тёмной темы и переключаем preference — иначе в
+        // светлых темах заголовок окна остаётся тёмным.
+        let pref = if ui.style().visuals.dark_mode {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        };
+        if ui.ctx().theme() != pref {
+            let style = ui.ctx().global_style();
+            ui.ctx().set_style_of(pref, style);
+            ui.ctx().set_theme(pref);
+        }
 
         // Горячие клавиши: сначала оболочка (F1/? — справка, Ctrl+O — открыть,
         // Ctrl+R — перезагрузить, Ctrl+Shift+D — профайлер), затем режим

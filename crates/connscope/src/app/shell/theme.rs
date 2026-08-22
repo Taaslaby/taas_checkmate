@@ -53,6 +53,45 @@ pub(crate) const BG_CTRL_ACTIVE: egui::Color32 = egui::Color32::from_rgb(0x3A, 0
 /// Открытый/развёрнутый контрол (попап-кнопка).
 pub(crate) const BG_CTRL_OPEN: egui::Color32 = egui::Color32::from_rgb(0x2A, 0x30, 0x31);
 
+// ── динамические токены ────────────────────────────────────────
+// Константы выше — тёмные дефолты (ими красится стартовый стиль).
+// В рантайме поверхности должны читать токены ИЗ visuals — тогда любая
+// тема elegance (Charcoal/Frost/Paper) красит приложение согласованно.
+// Синхронно с `accent(ui)` ниже.
+
+/// Базовая поверхность оболочки (панели).
+pub(crate) fn panel_bg(ctx: &egui::Context) -> egui::Color32 {
+    ctx.global_style().visuals.panel_fill
+}
+/// Поднятая поверхность карточек/доков/окон.
+pub(crate) fn card_bg(ctx: &egui::Context) -> egui::Color32 {
+    ctx.global_style().visuals.window_fill
+}
+/// Поля ввода и «утопленные» области.
+pub(crate) fn inset_bg(ctx: &egui::Context) -> egui::Color32 {
+    ctx.global_style().visuals.extreme_bg_color
+}
+/// Тихая рамка-разделитель — граница окон текущей темы.
+pub(crate) fn stroke_soft(ctx: &egui::Context) -> egui::Color32 {
+    ctx.global_style().visuals.window_stroke.color
+}
+/// Основной текст темы.
+pub(crate) fn text(ctx: &egui::Context) -> egui::Color32 {
+    ctx.global_style().visuals.text_color()
+}
+/// Второстепенный текст — притемнённый основной (AA на panel_bg).
+pub(crate) fn text_dim(ctx: &egui::Context) -> egui::Color32 {
+    text(ctx).gamma_multiply(0.62)
+}
+/// Текст ошибок: светлый красный на тёмном, тёмно-красный на светлом.
+pub(crate) fn danger_text(ctx: &egui::Context) -> egui::Color32 {
+    if ctx.global_style().visuals.dark_mode {
+        DANGER_TEXT
+    } else {
+        egui::Color32::from_rgb(0xB3, 0x26, 0x26)
+    }
+}
+
 /// Имя семейства заголовков (SemiBold-начертание Plex).
 pub(crate) const HEADING_FAMILY: &str = "heading";
 

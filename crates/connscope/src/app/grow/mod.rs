@@ -211,7 +211,7 @@ impl GrowMode {
                     let pb = self.project(pos[b], center, rect);
                     p.line_segment(
                         [pa, pb],
-                        Stroke::new(0.5, Color32::from_rgba_unmultiplied(crate::app::shell::theme::STROKE_SOFT.r(), crate::app::shell::theme::STROKE_SOFT.g(), crate::app::shell::theme::STROKE_SOFT.b(), 50)),
+                        Stroke::new(0.5, Color32::from_rgba_unmultiplied(crate::app::shell::theme::stroke_soft(ui.ctx()).r(), crate::app::shell::theme::stroke_soft(ui.ctx()).g(), crate::app::shell::theme::stroke_soft(ui.ctx()).b(), 50)),
                     );
                 }
             }

@@ -54,10 +54,10 @@ impl ConnectomeMode {
     /// превращая верхнюю строку в набор разрозненных кнопок.
     fn top_tool_shelf(&mut self, ui: &mut egui::Ui, services: &mut ShellServices) {
         egui::Frame::new()
-            .fill(crate::app::shell::theme::BG_INSET)
+            .fill(crate::app::shell::theme::inset_bg(ui.ctx()))
             .stroke(egui::Stroke::new(
                 1.0,
-                crate::app::shell::theme::STROKE_SOFT,
+                crate::app::shell::theme::stroke_soft(ui.ctx()),
             ))
             .corner_radius(egui::CornerRadius::same(
                 crate::app::tokens::RADIUS_MD as u8,
@@ -161,7 +161,7 @@ impl ConnectomeMode {
             egui::RichText::new("Поиск нейрона")
                 .weak()
                 .small()
-                .color(crate::app::shell::theme::TEXT_DIM),
+                .color(crate::app::shell::theme::text_dim(ui.ctx())),
         );
         let resp = ui.add(
             egui::TextEdit::singleline(&mut self.sel.search)
