@@ -1,171 +1,29 @@
-//! # NeuroML2 → pillars (`api::neuroml`)
+//! -------------------------------------------------------------------------
+//! Filename:    src/neuroml/mod.rs
+//! Class:       neuroml
+//! Purpose:     NeuroML2 → pillars
+//! Description: Compiles NeuroML2 XML straight into pillars runtime.
+//!              One call parses XML, builds populations, wires inputs and
+//!              returns a ready-to-step Network.
+//!              Layering: parse.rs (XML→Ir via roxmltree) | compile.rs
+//!              (Ir→Network+stimuli) | mod.rs (public API: load/LoadedNetwork::run).
+//!              Scope: izhikevichCell/2007 → IzhikevichModel; iaf* → LIFModel;
+//!              adExIaFCell → AdExModel; fitzHughNagumo* → FHNModel;
+//!              hhCell (channelDensity Na/K+leak, ionChannelHH/gateHHrates) →
+//!              HHModel or ConductancePopulation; expOne/Two/alpha/expThree +
+//!              projection → SynapseKinetics; blockingPlasticSynapse → STP;
+//!              doubleSynapse → two edges; pulse/sine/ramp/compound/spikeArray/
+//!              poissonFiring/transientPoisson/spikeGenerator* → StimulusKind;
+//!              gapJunction/electricalProjection → ohmic; linear/silent/graded
+//!              + continuousProjection → graded synapses; Simulation/include →
+//!              dt/duration/includes. Warnings for unsupported (stdpSynapse, *DL).
+//!              Kinetics (ionChannelKS/gateKS/gateFractional) → MarkovPopulation.
+//!              Morphology+SWC → MorphoIR → d_lambda discretize → passive/active
+//!              cable (Hines, BDF1↔BDF2, Ca2+ Nernst pool, channelPopulation
+//!              Binomial noise); GUI bridge: LoadedNetwork::cable / cable_voltage.
 //!
-//! Compiles a **NeuroML2** network description straight into the pillars
-//! runtime. One call parses the XML, builds populations, wires inputs and
-//! returns a ready-to-step [`Network`]:
-//!
-//! ```rust,ignore
-//! use pillars::api::neuroml;
-//! let mut ln = neuroml::load(include_str!("my.nml"))?;
-//! let res = ln.run();
-//! ```
-//!
-//! ## Layering
-//!
-//! ```text
-//! parse.rs    NeuroML2 XML → Ir (intermediate representation, roxmltree)
-//! compile.rs  Ir → Network + stimulus schedule (Izhikevich 2003)
-//! mod.rs      public API: load / LoadedNetwork::run
-//! ```
-//!
-//! ## Scope (documented honestly)
-//!
-//! * `izhikevichCell` (2003) → `IzhikevichModel`;
-//! * `izhikevich2007Cell` (DSN 2007) → `Izhikevich2007Model`;
-//! * `iafCell` / `iafTauCell` / `iafTauRefCell` / `iafRefCell` → `LIFModel`;
-//! * `adExIaFCell` → `AdExModel`;
-//! * `fitzHughNagumoCell` / `fitzHughNagumo1969Cell` → `FHNModel` (bias `I`);
-//! * `hhCell` (классический HH через `channelDensity` Na/K + leak) → `HHModel`;
-//!   каналы можно объявлять полным NeuroML2 (`ionChannelHH` + `gateHHrates`/
-//!   `gateHHtauInf`) — стандартные NaV m³h / KV n⁴ резолвятся бит-в-бит против
-//!   движка и запускаются как `HHModel`;
-//! * `expOneSynapse` / `expTwoSynapse` / `alphaSynapse` / `expThreeSynapse` +
-//!   `<projection>` → synapses; with time constants the waveform is a kinetic
-//!   conductance ([`SynapseKinetics`](crate::api::SynapseKinetics), current
-//!   `g(t)·(erev − V)`: expOne = single-exponential decay, expTwo =
-//!   peak-normalised double-exponential, alpha = alpha function, expThree = two
-//!   decay components sharing one rise time), without one — a static delta
-//!   synapse (weight · gbase as edge weight, `delay` as axonal delay);
-//! * `blockingPlasticSynapse` (с `tsodyksMarkramDepMechanism` /
-//!   `tsodyksMarkramDepFacMechanism`) → **short-term plasticity**: the
-//!   delivered weight of every spike is scaled by the edge's current
-//!   Tsodyks–Markram `R·U` (depression / depression+facilitation, per-edge
-//!   state in the [`Network`], see
-//!   [`Network::register_plasticity`](crate::api::Network::register_plasticity));
-//! * `doubleSynapse` (`synapse1`/`synapse2`) → one connection carrying two
-//!   independent synaptic mechanisms (e.g. AMPA + NMDA), lowered to **two
-//!   edges** per connection — each child synapse keeps its own gbase, kinetics
-//!   and plasticity;
-//! * `pulseGenerator` + `explicitInput` → external drive;
-//! * `sineGenerator` / `rampGenerator` / `compoundInput` + `explicitInput` →
-//!   dynamic currents (LEMS formulas: `i = A·sin(phase + 2π(t−delay)/period)`
-//!   for sine — phase in radians; linear `start→finish` ramp, baseline held
-//!   outside the window; compound = sum of its child generators);
-//! * `timedSynapticInput` + `explicitInput` → deterministic spike-time input
-//!   scaled by the referenced synapse's `gbase` (current pulses, like
-//!   `spikeArray`);
-//! * `voltageClamp` / `voltageClampTriple` + `explicitInput` → **patch clamp**:
-//!   each active step injects `weight·(target(t) − V)/seriesResistance` against
-//!   the neuron's live membrane potential (proportional controller, see
-//!   [`VoltageClamp`] / [`ClampSchedule`] — window clamp, or the three-step
-//!   conditioning/testing/return protocol with the return voltage held
-//!   indefinitely);
-//! * `spikeArray` / `spikeArrayRef` + `explicitInput` → deterministic spike-time
-//!   input (one `dt`-wide current pulse per listed time);
-//! * `poissonFiringSynapse` + `explicitInput` → seeded deterministic
-//!   pseudo-Poisson input (`P(spike) = rate·dt` per step, see
-//!   [`StimulusKind::Poisson`]); as the **presynaptic population** of a
-//!   `<projection>` its spikes route through synapses (weight × gbase, axonal
-//!   delay, optional kinetics) to the postsynaptic population;
-//! * `transientPoissonFiringSynapse` + `explicitInput` → the same seeded
-//!   pseudo-Poisson input, active only within `[delay, delay+duration]`;
-//! * `spikeGenerator` / `spikeGeneratorPoisson` + `explicitInput` → a regular
-//!   spike train (first spike at `period`, then every `period`) / a seeded
-//!   pseudo-Poisson train;
-//! * `spikeGeneratorRandom` / `spikeGeneratorRefPoisson` + `explicitInput` →
-//!   seeded ISI trains: uniform `[minISI, maxISI]` intervals, respectively the
-//!   maximum-entropy `[minimumISI, ∞)` intervals with mean `1/rate` (the whole
-//!   schedule is precomputed from the seed at compile time → deterministic,
-//!   stateless runtime);
-//! * `gapJunction` + `electricalProjection` → electrical synapses: symmetric
-//!   ohmic coupling `I = g·(V_j − V_i)` per step (see
-//!   [`Network::connect_gap_junction`](crate::api::Network::connect_gap_junction));
-//! * `linearGradedSynapse` / `silentSynapse` / `gradedSynapse` +
-//!   `continuousProjection` → analog (graded) synapses: `linearGradedSynapse`
-//!   is a **one-way** ohmic coupling `I_post = g·(V_pre − V_post)` per step (see
-//!   [`Network::connect_graded_synapse`](crate::api::Network::connect_graded_synapse));
-//!   `gradedSynapse` is a **stateful** sigmoid conductance `s` driven by V_pre
-//!   (`I = w·g·s·(erev − V)`, see
-//!   [`SigmoidGradedSynapse`](crate::api::SigmoidGradedSynapse));
-//! * LEMS `<Simulation length step>` → dt/duration (else [`load_with`]);
-//! * LEMS `<include href>` (мультифайловые модели) — резолвится в
-//!   [`load_file`] относительно пути файла, рекурсивно.
-//!
-//! Recognised-but-unsupported elements are **not silently dropped**: they
-//! surface in [`LoadedNetwork::warnings`] (`stdpSynapse` — в самом NeuroML
-//! помечен «EXAMPLE NOT YET WORKING»; dimensionless
-//! `pulseGeneratorDL`/`sineGeneratorDL`/`rampGeneratorDL`/`compoundInputDL`).
-//! Кинетические схемы
-//! (`ionChannelKS`/`gateKS`) **поддерживаются**: парсятся в марковские схемы и
-//! запускаются скалярным master-equation движком
-//! ([`MarkovPopulation`](crate::api::MarkovPopulation)); `gateFractional`
-//! (взвешенная сумма tau-inf субгейтов) опускается до марковской схемы над
-//! декартовым произведением состояний субгейтов.
-//!
-//! Морфология (`morphology`/`segment`/`segmentGroup`/`biophysicalProperties`/
-//! `cell`) и SWC-импорт **парсятся** в единый `MorphoIR`, а модуль `discretize`
-//! умеет d_λ-дискретизацию, пассивный кабельный солвер (implicit Euler /
-//! Hines; топология кэширована, ноль аллокаций на шаг — 1000-компартментный
-//! кабель сверен с NEURON на машинную точность), активные HH-каналы,
-//! адаптивный шаг с **переменным порядком** (CVODE-аналог: BDF1 ↔ BDF2 через
-//! Richardson-экстраполяцию, рестарт порядка на отказе шага) и мост
-//! пассивной биофизики
-//! (`resistivity`/`specificCapacitance`/`pas` → кабельные параметры).
-//! Морфологическая клетка (`<cell>`) **запускается** как кабельная популяция в
-//! `load()` → [`Network`]: пассивный кабель + активные каналы (HH и Марков),
-//! привязанные к компартментам по `segmentGroup`; ток в сому, спайк на 0 мВ.
-//! Плотности бывают и неравномерными (`channelDensityNonUniform` +
-//! `<variableParameter>` с `<proximal>`/`<distal>`): плотность линейно
-//! интерполируется вдоль пути группы (proximal у корня → distal на конце).
-//! Марков-каналы (`ionChannelKS`/`gateKS`) в кабеле сверены с NEURON
-//! (`gen_cable_ks_ref.py`, max |ΔV| ≈ 0.014 мВ на ball-and-stick).
-//!
-//! **Дискретные популяции каналов** (`channelPopulation` — `number` каналов
-//! вместо плотности) поддерживаются как **стохастические**: master equation
-//! даёт открытую вероятность `p_open`, а открытая доля в каждом шаге —
-//! биномиальная выборка `n_open ~ Binomial(number, p_open)`, так что
-//! проводимость = `single_channel_conductance · n_open`. Это канонический
-//! канальный шум (∝ 1/√N) для мелких нейронов/аксонов; каждый нейрон
-//! получает независимый (но воспроизводимый по сиду) поток шума.
-//!
-//! **Ca²⁺-подсистема** (`channelDensityNernst`/`channelPopulationNernst` +
-//! `species` + `decayingPoolConcentrationModel`) поддерживается: обращение
-//! потенциала Ca-канала — Nernst от внутриклеточного [Ca²⁺] (пересчитывается
-//! каждый шаг, `ca_ext` из `<species>`), а [Ca²⁺] интегрируется пулом-ODE
-//! `d[Ca]/dt = iCa/(2F·V_shell) − (Ca−rest)/τ` (сферическая оболочка, точная
-//! экспонента). `channelPopulationNernst` — та же семантика как **дискретная
-//! популяция** (биномиальный канальный шум `n_open ~ Binomial(N, p_open)`,
-//! mean-field ≡ `channelDensityNernst`). Сверено с NEURON (`gen_ca_ref.py`:
-//! `cachan_simple.mod` + `cacum.mod`): max |ΔV| ≈ 0.08 мВ, max rel |ΔCa| ≈
-//! 0.9% (единственная расходимость — тонкая оболочка NEURON vs сферическая
-//! LEMS, ~1%); mean-field стохастики — до <0.001 мВ / 0.3% от детерминистики.
-//!
-//! **Публичный мост в GUI/анализ:** геометрия дерева доступна через
-//! [`LoadedNetwork::cable`]/[`LoadedNetwork::cable_info`] ([`CableInfo`] —
-//! компартменты с родителями, позициями и path-дистанцией, имена сегментов),
-//! а живой покомпартментный потенциал — через
-//! [`Network::cable_voltage`](crate::api::Network::cable_voltage) (зеркало
-//! `v[neuron][comp]`, обновляется каждый шаг). Connscope (neoMyelin) рисует по
-//! нему окно «Морфология»: дерево + клик + V(t) по компартментам.
-//!
-//! Произвольные нестандартные каналы **запускаются**: `ionChannelHH`/
-//! `gateHHrates`/`gateHHtauInf` парсятся в data-driven
-//! [`ChannelSpec`]-подобный IR (round-trip бит-в-бит против `na_m_alpha` и
-//! т.д.); стандартные m³h/n⁴ идут быстрым путём через `HHModel`, а
-//! нестандартные наборы — через
-//! [`ConductancePopulation`](crate::api::ConductancePopulation) (generic-движок).
-//! Кастомные LEMS-`ComponentType` для гейтов (реальные OSB-модели, например
-//! Ih Poirazi 2003 `Poirazi_h_tau`) тоже парсятся: `timeCourse`/`steadyState`
-//! с нестандартным `type` нижются в [`LemsExpr`] (арифметика/`exp`/piecewise
-//! с `Case`-условиями), параметры биндятся из атрибутов гейта.
-//! Биофизическая калибровка единиц (time→ms, voltage→mV, `nA`→внутренний
-//! ток) выполнена.
-//!
-//! [`LemsExpr`]: crate::kernels::hh_channels::LemsExpr
-//!
-//! [`ChannelSpec`]: crate::kernels::hh_channels::ChannelSpec
-//!
-//! [`Network`]: crate::api::network::Network
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::fmt;
 

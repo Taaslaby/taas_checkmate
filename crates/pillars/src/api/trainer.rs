@@ -1,10 +1,15 @@
-//! # Batched E-Prop Izhikevich Multi trainer (Hogwild! parallelism)
-//!
-//! Канон pillars::api: перенесён из core.
+//! -------------------------------------------------------------------------
+//! Filename:    src/trainer.rs
+//! Class:       train_suite
+//! Purpose:
+//! Description: Batched E-Prop Izhikevich Multi trainer (Hogwild! parallelism)
 //!
 //! Each worker has its **own copy** of weights. Workers process images
 //! in parallel with zero sharing. After a micro-batch completes, all
 //! weight copies are averaged back into the master copy and redistributed.
+//!
+//! author: Atlasov anton
+//! -------------------------------------------------------------------------
 
 use rand::rngs::StdRng;
 use rand::Rng;

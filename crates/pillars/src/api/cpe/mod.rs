@@ -1,24 +1,17 @@
-//! # ChaosPatternEngine (CPE) — канон pillars::api
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/mod.rs
+//! Class:       cpe
+//! Purpose:     ChaosPatternEngine (CPE)
+//! Description: Contrastive dopamine-STDP + T2-SPIGRAD on Kuramoto
+//!              connectomes. Compares pattern (meaningful input) vs chaos
+//!              (random noise); dopamine delta gates plasticity:
+//!              delta = reward + beta*[(R_pat - alpha*|H_pat-H0|) - (R_chaos - alpha*|H_chaos-H0|)].
+//!              delta>0 → STDP strengthens; delta<0 → weakens.
+//!              Levels: 1) Kuramoto phase dynamics (kernels::phase),
+//!              2) dopamine-STDP (contrastive), 3) T2-SPIGRAD (optional).
 //!
-//! Contrastive dopamine-STDP + T2-SPIGRAD learning on Kuramoto connectomes.
-//!
-//! ## Core Idea
-//!
-//! Compare network dynamics under **pattern** (meaningful input, e.g. Pong)
-//! vs **chaos** (random noise). The dopamine signal δ gates plasticity:
-//!
-//! ```text
-//! δ = reward + β · [(R_pat − α·|H_pat−H₀|) − (R_chaos − α·|H_chaos−H₀|)]
-//! ```
-//!
-//! δ > 0 → network does better than chaos → STDP strengthens.
-//! δ < 0 → network does worse than chaos → STDP weakens.
-//!
-//! ## Levels
-//!
-//! 1. **Kuramoto** — phase dynamics on sparse connectome (`kernels::phase`)
-//! 2. **dopamine-STDP** — unsupervised contrastive plasticity
-//! 3. **T2-SPIGRAD** — exact spike-based gradients (optional)
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 pub mod coherence;
 pub mod config;

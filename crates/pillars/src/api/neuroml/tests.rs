@@ -1,5 +1,12 @@
-// Хардкоженные NEURON-эталоны несут полную измеренную точность — лишних
-// знаков нет, это точные значения сэмплов (excessive_precision не применим).
+//! -------------------------------------------------------------------------
+//! Filename:    src/neuroml/tests.rs
+//! Class:       test suite
+//! Purpose:     hardcode neuroml gold results
+//! Description:
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
+
 #![allow(clippy::excessive_precision)]
 use super::*;
 

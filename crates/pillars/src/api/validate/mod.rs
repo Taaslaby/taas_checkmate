@@ -1,23 +1,15 @@
-//! # NeuroML Validation Suite
+//! -------------------------------------------------------------------------
+//! Filename:    src/validate/mod.rs
+//! Class:       validate
+//! Purpose:     NeuroML Validation Suite
+//! Description: Сверка NeuroML-моделей pillars с эталонами NEURON/Brian2/OSB.
+//!              validate/reference.rs — парсер трасс (NEURON JSON {name,t,v});
+//!              metrics.rs — max |dV|, RMSE, spike count; benchmarks.rs —
+//!              HH-аксон, AdEx Figure 4, Poirazi CA1; mod.rs — run_validation_suite().
+//!              Запуск: cargo test -p pillars --lib api::validate [-- poirazi].
 //!
-//! Сверка NeuroML-моделей pillars с эталонными данными NEURON/Brian2/OSB.
-//!
-//! ## Структура
-//!
-//! ```text
-//! validate/
-//!   ├── reference.rs   // парсер эталонных трасс (NEURON JSON: {name, t, v})
-//!   ├── metrics.rs     // max |ΔV|, RMSE, подсчёт спайков
-//!   ├── benchmarks.rs  // HH-аксон, AdEx Figure 4, Poirazi CA1
-//!   └── mod.rs         // оркестрация: run_validation_suite()
-//! ```
-//!
-//! ## Запуск
-//!
-//! ```bash
-//! cargo test -p pillars --lib api::validate
-//! cargo test -p pillars --lib api::validate -- poirazi   # конкретный бенчмарк
-//! ```
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 pub mod benchmarks;
 pub mod metrics;

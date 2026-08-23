@@ -1,6 +1,11 @@
-//! # Population — Type Erasure for Heterogeneous Networks
+//! -------------------------------------------------------------------------
+//! Filename:    src/Population.rs
+//! Class:       train_suite
+//! Purpose:
+//! Description: Population — Type Erasure for Heterogeneous Networks
 //!
-//! === BOUNDARY: Safe Rust ===
+//! BOUNDARY: Safe Rust
+//!
 //! The [`Population`] trait hides the concrete model type (`LIF`, `HH`, …)
 //! behind an object-safe interface so a single [`Network`](crate::api::Network) can drive
 //! heterogeneous populations through one `Vec<Box<dyn Population>>`.
@@ -8,11 +13,14 @@
 //! [`PopulationId`] is the opaque handle the network hands out when a
 //! population is added — it is just the index into that boxed vector.
 //!
-//! ## Why separate from `Network`?
+//! Why separate from `Network`?
 //!
 //! Keeps the type-erasure contract (this file) independent of the
 //! orchestration concerns (routing, delays, threads — see [`Network`](crate::api::Network)):
 //! both sides evolve without touching each other.
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::any::Any;
 

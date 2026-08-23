@@ -1,19 +1,20 @@
-//! # Compact Spikes — SIMD move_mask + tzcnt compaction
+//! -------------------------------------------------------------------------
+//! Filename:    src/compact.rs
+//! Class:       compact
+//! Purpose:     Compact Spikes — SIMD move_mask + tzcnt compaction
+//! Description: Extracts indices of active neurons from a dense spike array.
 //!
-//! Extracts indices of active neurons from a dense spike array.
+//! How it works: spikes arrive as i32 0/1. Each chunk of 8 is converted
+//! into an f32x8 where active = -0.0 (sign bit set) and silent = +0.0:
+//! ((spike != 0) as u32) << 31 is the sign bit. The 8-lane conversion is
+//! a fixed, fully unrolled scalar loop — data-independent, hence
+//! branchless, but not SIMD arithmetic. One move_mask() extracts sign bits
+//! of all 8 lanes in a single vmovmskps (AVX2), and trailing_zeros (tzcnt)
+//! walks only the set bits. For 1-5% sparsity (typical SNN) this avoids
+//! up to 8 data-dependent branches per chunk.
 //!
-//! ## How it works
-//! Spikes arrive as `i32` 0/1. Each chunk of 8 is converted into an `f32x8`
-//! where an active spike is `-0.0` (sign bit set) and a silent one is `+0.0`:
-//! `((spike != 0) as u32) << 31` is the sign bit. The 8-lane conversion is a
-//! fixed, fully unrolled scalar loop — data-independent, hence *branchless*,
-//! but it is not SIMD arithmetic. One `move_mask()` then extracts the sign
-//! bits of all 8 lanes in a single `vmovmskps` (AVX2), and `trailing_zeros`
-//! (`tzcnt`) walks only the set bits.
-//!
-//! For 1–5% sparsity (typical SNN) this avoids up to 8 data-dependent
-//! branches per chunk — the previous implementation paid them on every
-//! non-empty chunk.
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use wide::f32x8;
 

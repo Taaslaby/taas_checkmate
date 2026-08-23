@@ -1,4 +1,8 @@
-//! # Formula — Assemble Neurons from Ops (Runtime Programs)
+//! -------------------------------------------------------------------------
+//! Filename:    src/formula.rs
+//! Class:       api
+//! Purpose:     Formula — Assemble Neurons from Ops
+//! Description:
 //!
 //! The runtime counterpart of the compile-time `#[derive(NeuronModel)]`
 //! bridge. A [`OpNode`] program is a flat list of biological ops
@@ -39,6 +43,9 @@
 //! Absolute refractory FREEZES v (no integration, no spike breakthrough),
 //! matching [`crate::zoo::neurons::LIFModel`] (verified by the
 //! `formula_lif_matches_zoo_lif` test).
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::sync::OnceLock;
 

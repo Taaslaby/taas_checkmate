@@ -1,22 +1,24 @@
-//! # DelayBuffer — Ring Buffer of Synaptic Currents
+//! -------------------------------------------------------------------------
+//! Filename:    src/delay.rs
+//! Class:       buffer
+//! Purpose:     DelayBuffer — Ring Buffer of Synaptic Currents
+//! Description: Owns MAX_DELAY_SLOTS aligned current vectors, one per
+//!              future simulation step. On spike, weights are scattered
+//!              into slot (step + delay) % MAX_DELAY_SLOTS; each step
+//!              reads and clears the current slot.
 //!
-//! === BOUNDARY: Safe Rust → unsafe SoA ===
-//! Owns `MAX_DELAY_SLOTS` aligned current vectors, one per future
-//! simulation step. On spike, weights are scattered into the slot
-//! `(step + delay) % MAX_DELAY_SLOTS`; each step reads and clears the
-//! current slot.
-//!
-//! ## Ring-buffer ordering (read-before-write)
-//!
+//! Ring-buffer ordering (read-before-write):
 //! ```text
 //! step s:  read  slot[s % 32]  → i_in
 //!          clear slot[s % 32]
 //!          step neurons
 //!          write spikes into slot[(s + delay) % 32]  (delay ≥ 1)
 //! ```
-//!
-//! A spike fired at step `s` is delivered at step `s + max(delay, 1)` —
+//! A spike fired at step s is delivered at step s + max(delay, 1) —
 //! it can never land in the slot that was already read and cleared.
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use crate::api::graph::MAX_DELAY_SLOTS;
 use crate::core::buf::AlignedVec;

@@ -1,12 +1,13 @@
-//! # Network — Spike Routing Orchestrator
+//! -------------------------------------------------------------------------
+//! Filename:    src/api/network/mod.rs
+//! Class:       network
+//! Purpose:     Network — Spike Routing Orchestrator
+//! Description: Connects NeuralPopulations via SparseGraph and drives the
+//!              simulation loop. Uses a ring buffer of currents (Approach 2)
+//!              for axonal delays — on spike, weights are written to a
+//!              future ring buffer slot; each step reads and clears it.
 //!
-//! Connects [`NeuralPopulation`](crate::api::NeuralPopulation)s via a [`SparseGraph`](crate::api::graph::SparseGraph) and drives
-//! the simulation loop. Uses a **ring buffer of currents** (Approach 2)
-//! for axonal delays — on spike, weights are written to a future ring
-//! buffer slot; each step reads the current slot and clears it.
-//!
-//! ## Architecture
-//!
+//! Architecture:
 //! ```text
 //!     Neuron step (all pops)
 //!           ↓
@@ -19,38 +20,19 @@
 //!           ↓
 //!     Clear current slot, advance step_counter
 //! ```
+//! Module boundaries: population (type erasure) | graph (CSR) | delay
+//! (ring buffer) | push (event-driven scatter seq+par) | edge/sources
+//! (synapse specs) | core/build/step (orchestration, this module).
+//! Push vs Pull: Pull scans all neurons every step; Push scatters only
+//! for active neurons (1-5%), 20-100x cheaper at typical sparsity.
 //!
-//! ## Module boundaries (anti-monolith)
-//!
-//! | Concern | Module |
-//! |---------|--------|
-//! | Type erasure (`Population`, `PopulationId`) | [`population`](crate::api::population) |
-//! | CSR adjacency | [`graph`](crate::api::graph) |
-//! | Delay ring buffer | [`delay`](crate::api::delay) |
-//! | Event-driven scatter (seq + par) | [`push`](crate::api::push) |
-//! | Edge / synapse spec types | [`edge`](self), [`sources`](self) |
-//! | **Orchestration (this module)** | [`core`](self), [`build`](self), [`step`](self) |
-//!
-//! ## Push vs Pull
-//!
-//! | Approach | Operation |
-//! |:---------|:----------|
-//! | ❌ Pull  | For every neuron, scan incoming synapses → `i_in[i] += w` |
-//! | ✅ Push  | For every **active** neuron (1–5%), scatter to future slots |
-//!
-//! ## Usage
-//!
+//! Usage:
 //! ```rust
 //! use pillars::api::Network;
 //! use pillars::zoo::neurons::LIFModel;
-//!
 //! let mut net = Network::new();
-//!
-//! // Add populations — `add_population` returns the `PopulationId`.
 //! let sensory = net.add_population::<LIFModel>(100);
 //! let motor = net.add_population::<LIFModel>(50);
-//!
-//! // Configure the LIFs (param indices: dt, 1/tau, v_rest, v_thresh...).
 //! for pop in [sensory, motor] {
 //!     let lif = net.pop_typed_mut::<LIFModel>(pop).unwrap();
 //!     lif.fill_param(0, 0.5);   // dt (ms)
@@ -59,22 +41,13 @@
 //!     lif.fill_param(3, -54.0); // v_thresh
 //!     lif.fill_param(4, -70.0); // v_reset
 //! }
-//!
-//! // Connect sensory[0..10] → motor[0..5]: weight 0.8, no delay
-//! // (delay 0 = delivered on the next step).
-//! net.connect(
-//!     sensory, &[0,1,2,3,4,5,6,7,8,9],
-//!     motor,   &[0,0,1,1,2,2,3,3,4,4],
-//!     &[0.8; 10], &[0; 10],
-//! );
-//!
-//! // Build the routing graph and run.
+//! net.connect(sensory, &[0,1,2,3,4,5,6,7,8,9], motor, &[0,0,1,1,2,2,3,3,4,4], &[0.8; 10], &[0; 10]);
 //! net.build();
-//! for _ in 0..1000 {
-//!     net.step();
-//! }
-//! println!("Motor spikes: {:?}", &net.spikes(motor)[..10]);
+//! for _ in 0..1000 { net.step(); }
 //! ```
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 mod build;
 mod core;

@@ -1,11 +1,14 @@
-//! FlyWire Embodied Neuromotor Engine — Phase 1 Pipeline
-//!
-//! Connects Motor Neuron Spikes → DelayBuffer (NMJ delay) → Neuromotor Engine → Physical Joint Drive (ΔF, K_joint, B_joint).
-//!
-//! Author / Concept: Anton Atlasov (Атласов Антон)
+//! -------------------------------------------------------------------------
+//! Filename:    embodied.rs
+//! Class:       тонкий клиент
+//! Purpose:     Connects Motor Neuron Spikes → DelayBuffer (NMJ delay) → Neuromotor Engine → Physical Joint Drive (ΔF, K_joint, B_joint).
+//! Description:
 //!
 //! Перенесено из `core::neuron::embodied`— композиция
-//! `api::neurons::{DelayBuffer, neuromotor::NeuromotorState}`.
+//! api::neurons::{DelayBuffer, neuromotor::NeuromotorState}.
+//!
+//! Author/Concept: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};
 

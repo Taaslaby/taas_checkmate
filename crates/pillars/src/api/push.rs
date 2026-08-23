@@ -1,4 +1,8 @@
-//! # Spike Push — Event-Driven Synaptic Current Routing
+//! -------------------------------------------------------------------------
+//! Filename:    push.rs
+//! Class:       router
+//! Purpose:     Spike Push — Event-Driven Synaptic Current Routing
+//! Description:
 //!
 //! For every **active** neuron (1–5% of population in typical SNN),
 //! scatters its weight into future ring buffer slots based on axonal delay.
@@ -7,10 +11,13 @@
 //!
 //! | Approach | Cost | When |
 //! |:---------|:-----|:-----|
-//! | ❌ Pull | O(N × avg_degree) | Every step, even silent neurons |
-//! | ✅ Push | O(N_active × avg_degree) | Scales with sparsity |
+//! | x Pull | O(N × avg_degree) | Every step, even silent neurons |
+//! | + Push | O(N_active × avg_degree) | Scales with sparsity |
 //!
 //! With 1–5% activity and avg_degree ~100, push is 20–100× cheaper.
+//!
+//! Author/Concept: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 use crate::api::delay::DelayBuffer;
 use crate::api::graph::{SparseGraph, MAX_DELAY_SLOTS};

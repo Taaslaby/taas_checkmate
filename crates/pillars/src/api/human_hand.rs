@@ -1,4 +1,8 @@
-//! Human hand/forearm reference profile for Neuromotor validation.
+//! -------------------------------------------------------------------------
+//! Filename:    Human_hand.rs
+//! Class:       valide
+//! Purpose:     Human hand/forearm reference profile for Neuromotor validation.
+//! Description:
 //!
 //! This is deliberately a **reference model**, not a clinical patient model.
 //! Morphology is taken from the open-access integrated forearm/hand dataset of
@@ -6,7 +10,7 @@
 //! muscle stress convention follows Goislard de Monsabert et al. (2018,
 //! DOI: 10.1007/s10439-017-1936-z).
 //!
-//! The compact profile uses eight representative muscles: wrist flexors and
+//! //! The compact profile uses eight representative muscles: wrist flexors and
 //! extensors plus the index finger flexors and first dorsal interosseous. PCSA
 //! and force are source-backed; the signed moment arms are explicitly marked
 //! as representative geometry for this reduced model and must be replaced by
@@ -19,6 +23,9 @@
 //! - force: `N`
 //! - moment arm: `m`
 //! - joint torque: `N·m`
+//!
+//! Author/Concept: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 use super::neurons::neuromotor::{BiomechanicsProfile, NeuromotorState};
 

@@ -1,23 +1,13 @@
-//! # Builder API — Type-Safe Model Construction
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/mod.rs
+//! Class:       builder
+//! Purpose:     Builder API — Type-Safe Model Construction
+//! Description: Eliminates magic param indices; named, validated config.
+//!              Old: pop.fill_param(0, 0.5) // what is 0?
+//!              New: IzhikevichBuilder::new(1000).dt(0.5).pattern(RegularSpiking).build()
 //!
-//! Eliminates magic parameter indices and provides named, validated configuration.
-//!
-//! ## Example
-//! ```rust,ignore
-//! use pillars::prelude::*;
-//!
-//! // Old way (error-prone):
-//! let mut pop = NeuralPopulation::<IzhikevichModel>::new(1000);
-//! pop.fill_param(0, 0.5);   // what is 0?
-//! pop.fill_param(1, 0.02);  // what is 1?
-//! // ...
-//!
-//! // New way (type-safe):
-//! let pop = IzhikevichBuilder::new(1000)
-//!     .dt(0.5)
-//!     .pattern(IzhPattern::RegularSpiking)
-//!     .build();
-//! ```
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use crate::core::population::NeuralPopulation;
 

@@ -1,4 +1,8 @@
-//! # Synaptic kinetics (`api::synapse`)
+//! -------------------------------------------------------------------------
+//! Filename:    src/synapse.rs
+//! Class:       Synaptic kinetics
+//! Purpose:     (`api::synapse`)
+//! Description:
 //!
 //! Arbitrary-tau exponential synaptic **conductances** — NeuroML
 //! `expOneSynapse` / `expTwoSynapse` / `alphaSynapse` / `expThreeSynapse` —
@@ -8,14 +12,13 @@
 //! a positive term depolarises). Per-spike magnitudes follow the NeuroML/LEMS
 //! component definitions exactly:
 //!
-//! ```text
+//! text
 //! expOneSynapse:  g(t) = A · e^(−t/τ_decay)                    peak A (instant)
 //! expTwoSynapse:  g(t) = A · norm · (e^(−t/τ_decay) − e^(−t/τ_rise))
 //!                                                               peak A at t_peak
 //! alphaSynapse:   g(t) = A · (t/τ) · e^(1 − t/τ)               peak A at t = τ
 //! expThreeSynapse: g(t) = gbase1·(B−A) + gbase2·(C−A)          two decay components
 //!                                                               sharing one rise time
-//! ```
 //!
 //! where `A = weight · gbase` is the per-spike peak conductance (see
 //! [`Network::register_kinetics`](crate::api::Network::register_kinetics)).
@@ -24,6 +27,9 @@
 //! [`PlasticityProfile`] and applied per spike: the delivered weight is scaled
 //! by `R·U` (recovery × release probability), with the canonical spike-time
 //! updates `R ← R·(1−U)` (depression) and `U ← U + U0·(1−U)` (facilitation).
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::fmt;
 

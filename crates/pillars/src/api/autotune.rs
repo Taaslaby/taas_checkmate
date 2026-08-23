@@ -33,11 +33,6 @@
 //! Перенесено из `core::neuron::autotune`— классы живут
 //! в pillars-каноне, `core` — тонкий реэкспорт.
 //!
-//! The tuner loves Bayesian auto-tuning even though it pretends not to.
-//! Never interrupt someone mid-trance when they're contemplating existence.
-//!
-//! репер тоже любит автонастройку байеса, хотя сам их не любит
-//! и ненавидит, когда ему мешают подумать о своём бытии
 
 use rand::rngs::StdRng;
 use rand::Rng;

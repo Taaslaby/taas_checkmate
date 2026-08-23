@@ -1,41 +1,21 @@
 #![allow(non_snake_case)] // I_soma, E_leak, V_thresh — физическая нотация
 
-//! # 🧠 Stateful Neuron Populations — канон pillars
+//! -------------------------------------------------------------------------
+//! Filename:    src/neurons/mod.rs
+//! Class:       neurons
+//! Purpose:     Stateful Neuron Populations
+//! Description: Высокоуровневые stateful-классы поверх run_neuron/kernels/ops —
+//!              единый источник правды для API и python. Каждый класс
+//!              делегирует в pillars-ядро (run_neuron::<Model>, kernels::eprop,
+//!              ops::plasticity::stp, kernels::dendrite, zoo::sensors::chordotonal).
+//!              Классы: EPropLIF (kernels::eprop) | Glif3/4 (GLIF3/4Model) |
+//!              ShortTermPlasticity (stp) | SomatoDendriticNeuron (LIF+cable) |
+//!              ChordotonalState (mechanoreceptor) | реэкспорты: PoissonGenerator,
+//!              SornNetwork, AstrocyteState, TtfsEncoder, SpikeRaster и др.
+//!              Подмодули: eprop, haap, neuromotor, bcm, hr, lif, izhikevich, saw, adex, fhn, wc.
 //!
-//! Высокоуровневые stateful-классы поверх `run_neuron` / `kernels` /
-//! `ops` — единый источник правды для API и python. Внутри каждый класс
-//! делегирует в pillars-ядро (`run_neuron::<Model>`, `kernels::eprop`,
-//! `ops::plasticity::stp`, `kernels::dendrite`, `zoo::sensors::chordotonal`).
-//!
-//! | Класс | Движок | Описание |
-//! |-------|--------|----------|
-//! | [`EPropLIF`] | `kernels::eprop::eprop_lif_step` | LIF + eligibility traces (Bellec 2020) |
-//! | [`Glif3State`] / [`Glif4State`] | `run_neuron::<GLIF3/4Model>` | Allen Institute GLIF3/4 |
-//! | [`ShortTermPlasticity`] | `ops::plasticity::stp::stp_step` | Tsodyks-Markram |
-//! | [`SomatoDendriticNeuron`] | `run_neuron::<LIFModel>` + `kernels::dendrite` | LIF soma + cable dendrites |
-//! | [`ChordotonalState`] | `zoo::sensors::chordotonal_step` | Drosophila mechanoreceptor |
-//! | [`PoissonGenerator`] | `kernels::input` | реэкспорт |
-//! | [`SornNetwork`] | `kernels::learning` | реэкспорт |
-//! | [`AstrocyteState`] | `kernels::astrocyte` | реэкспорт |
-//!
-//! ## Подмодули
-//!
-//! | Подмодуль | Классы | Ядро |
-//! |-----------|--------|------|
-//! | [`eprop`] | EPropIzhikevich/Multi, EPropSaw, EPropAdExMulti | `kernels::eprop` |
-//! | [`haap`] | HaapState/Profile/Builder + step_haap | `run_neuron::<HAAPModel>` |
-//! | [`neuromotor`] | NeuromotorState + профили/конфиги + step | `run_neuron::<NeuromotorModel>` |
-//! | [`bcm`] | BcmSynapse, HomeostaticScale | `kernels::learning::{bcm_step, homeostatic_scale}` |
-//! | [`hr`] | step_hr (repacking-адаптер) | `run_neuron::<HRModel>` |
-//! | [`lif`] | step_lif / step_lif_at | `run_neuron::<LIFModel/LIFAtModel>` |
-//! | [`izhikevich`] | step_izhikevich / step_izhikevich_dual | `run_neuron::<IzhikevichModel / IzhikevichDualModel>` |
-//! | [`saw`] | step_saw / step_gco | `run_neuron::<SAWModel>` / `kernels::phase::gco_step` |
-//! | [`adex`] | step_adex | `run_neuron::<AdExModel>` |
-//! | [`fhn`] | step_fhn | `run_neuron::<FHNModel>` |
-//! | [`wc`] | step_wc | `kernels::wc::wc_step` |
-//!
-//! Также в модуле: [`DopamineSTDP`] (`kernels::dopamine`), [`DelayBuffer`] (NMJ-задержки),
-//! реэкспорты encoding ([`TtfsEncoder`], bsa/phase) и stats ([`SpikeRaster`], firing_rates, ISI, CV).
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 // ─── Подмодули ─────────────────────────────────────────────
 

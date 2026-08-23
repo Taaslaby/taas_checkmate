@@ -1,5 +1,13 @@
-//! Файловая загрузка NeuroML: `load*`-функции, resolution `<include>`
-//! (рекурсивный, с цикл-детекцией) и helpers поверх байтового скана.
+//! -------------------------------------------------------------------------
+//! Filename:    src/neuroml/loader.rs
+//! Class:       i/o
+//! Purpose:
+//! Description:
+//!
+//! NeuroML: `load*`-функции, resolution `<include>`
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::path::Path;
 
@@ -7,7 +15,6 @@ use super::{
     compile, parse, swc, LoadedNetwork, NeuromlError, CONDUCTANCE_CELSIUS, DEFAULT_DT_MS,
     DEFAULT_DURATION_MS,
 };
-
 
 /// Parse and compile a NeuroML2 document.
 ///
@@ -145,9 +152,7 @@ fn resolve_includes_impl(
         let full = base.join(href_clean);
 
         // Cycle detection: canonicalize path, check if already visited.
-        let canonical = full
-            .canonicalize()
-            .unwrap_or_else(|_| full.clone());
+        let canonical = full.canonicalize().unwrap_or_else(|_| full.clone());
         if !visited.insert(canonical.clone()) {
             return Err(NeuromlError::parse(format!(
                 "cyclic include detected: {} was already included",

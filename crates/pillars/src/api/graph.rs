@@ -1,9 +1,13 @@
-//! # SparseGraph — CSR Adjacency for Dendritic Spike Routing
+//! -------------------------------------------------------------------------
+//! Filename:    src/Graph.rs
+//! Class:       sparse
+//! Purpose:
+//! Description: SparseGraph — CSR Adjacency for Dendritic Spike Routing
 //!
 //! A minimal **Compressed Sparse Row** graph built specifically for
 //! event-driven spike propagation. Contains weight + axonal delay per synapse.
 //!
-//! ## Example
+//! Example
 //!
 //! ```rust,ignore
 //! use pillars::api::SparseGraph;
@@ -18,6 +22,9 @@
 //! assert_eq!(g.num_synapses(), 5);
 //! assert_eq!(g.row(0).len(), 2); // neuron 0 → 1, 2
 //! ```
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use crate::core::buf::AlignedVec;
 

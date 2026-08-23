@@ -1,4 +1,4 @@
-//! # SWC morphology import (Фаза 5b) — Import3D-аналог
+//! # SWC morphology import
 //!
 //! Reads the SWC point-list format — one `n T x y z R P` record per line — and
 //! lowers it to the **same** [`MorphoIR`](super::parse::MorphoIR) that NeuroML
@@ -25,9 +25,6 @@
 //! id (fractional length 1.0). The root (`P = -1`) has no parent and no
 //! `proximal`. Segment groups are auto-derived per sample type.
 
-// Парсер «вперёд» Фазы 5d (cable equation): пока MorphoIR только собирается
-// и потребляется тестами, поэтому весь модуль помечен dead_code — так же, как
-// сами морфологические типы в `parse.rs`.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -289,7 +286,6 @@ mod tests {
             "пустой → ошибка"
         );
     }
-
 
     /// Сквозной путь: SWC-файл → load_swc → пассивная кабельная сеть,
     /// которая реально интегрируется (V конечен, без warnings).
