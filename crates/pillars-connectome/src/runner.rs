@@ -75,7 +75,7 @@ use pillars::zoo::{
 /// `[dt, time_factor, v_rest, v_thresh, v_reset, refr_steps, syn_decay]` and
 /// initialises state `[v=v_rest, g=0, refr_cnt=refr_steps]` (start out of
 /// refractory so the first step accepts input, matching the reference model).
-fn alpha_lif_population(
+pub(crate) fn alpha_lif_population(
     n: usize,
     dt_ms: f32,
     tau_ref: f32,
@@ -1073,6 +1073,27 @@ impl BrainRunner {
             Some(pop) => pop.param_slice(col).to_vec(),
             None => Vec::new(),
         }
+    }
+
+    /// Read one live HAAP state column (`v`=0, `u`=1, `h`=2) — membrane
+    /// diagnostics for GUIs/protocols. Empty for non-HAAP runners.
+    pub fn get_haap_state_column(&self, col: usize) -> Vec<f32> {
+        match &self.haap_pop {
+            Some(pop) => pop.state_slice(col).to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Write one HAAP state column (`v`=0, `u`=1, `h`=2) — e.g. initialize
+    /// gates at a custom profile's resting equilibrium instead of the
+    /// canonical defaults. Returns neurons written (0 for non-HAAP runners).
+    pub fn set_haap_state_column(&mut self, col: usize, values: &[f32]) -> usize {
+        let Some(pop) = self.haap_pop.as_mut() else {
+            return 0;
+        };
+        let n = values.len().min(self.n_neurons);
+        pop.state_slice_mut(col)[..n].copy_from_slice(&values[..n]);
+        n
     }
 
     /// Scale one per-neuron HH parameter column (e.g. `HHModelParamIdx::g_Na`)
