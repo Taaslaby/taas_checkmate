@@ -79,6 +79,334 @@ pub fn load_connectome(reader: &TaasReader) -> Result<pillars_connectome::Connec
     Ok(conn)
 }
 
+// ─── HeteroSnapshot (гетерогенный мозг) ────────────────
+
+/// Сохранить полный слепок [pillars_connectome::HeteroSnapshot] в .taas.
+///
+/// Компоненты:
+/// - metadata: `snapshot_kind=HeteroRunner`, `step_counter`, `dt_ms`,
+///   `rng_seed` (hex), `n_groups`;
+/// - connectome — как [save_connectome];
+/// - на каждую группу: `g{i}_indices` (i32[]), `g{i}_kind`,
+///   скаляры `g{i}_drive`/`g{i}_rec`, и по модели:
+///   - pop-группы (alpha/hh/haap): колонки `g{i}_p_{c}`/`g{i}_s_{c}`
+///     (так же, как `save_population` — SoA)
+///   - alpha: `g{i}_delay_ring` (f32), `g{i}_delay_size`/`g{i}_delay_pos`
+///   - haap: `g{i}_syn` (f32), `g{i}_decay`
+///   - izh: `g{i}_v/u/trace/refr/a/b/c/d` (f32) + `g{i}_dt_ms`/`g{i}_tau_ref`
+///   - rate: `g{i}_v` (f32) + `g{i}_tau`/`g{i}_dt_ms`
+pub fn save_hetero_snapshot(
+    snap: &pillars_connectome::HeteroSnapshot,
+    writer: &mut TaasWriter,
+) {
+    writer.add_metadata("snapshot_kind", "HeteroRunner");
+    writer.add_metadata("step_counter", &snap.step_counter.to_string());
+    writer.add_metadata(
+        "rng_seed",
+        &snap
+            .poisson_seed
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+    );
+    writer.add_metadata("n_groups", &snap.groups.len().to_string());
+    writer.add_scalar_f32("h_snapshot_dt", "HeteroSnapshot", snap.dt_ms);
+
+    save_connectome(&snap.connectome, writer);
+
+    for (i, g) in snap.groups.iter().enumerate() {
+        let p = format!("g{i}");
+        writer.add_metadata(&format!("{p}_kind"), g.kind());
+        let idx: Vec<i32> = g.indices().iter().map(|&v| v as i32).collect();
+        writer.add_i32(&format!("{p}_indices"), "HeteroSnapshot", &idx);
+        match g {
+            pillars_connectome::HeteroGroupState::Alpha {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                params,
+                state,
+                delay_ring,
+                delay_size,
+                delay_pos,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                save_cols(&p, writer, params, state);
+                writer.add_f32(&format!("{p}_delay_ring"), "HeteroSnapshot", delay_ring);
+                writer.add_metadata(&format!("{p}_delay_size"), &delay_size.to_string());
+                writer.add_metadata(&format!("{p}_delay_pos"), &delay_pos.to_string());
+            }
+            pillars_connectome::HeteroGroupState::Hh {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                params,
+                state,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                save_cols(&p, writer, params, state);
+            }
+            pillars_connectome::HeteroGroupState::Transformer {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                params,
+                state,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                save_cols(&p, writer, params, state);
+            }
+            pillars_connectome::HeteroGroupState::Haap {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                params,
+                state,
+                syn,
+                decay,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                save_cols(&p, writer, params, state);
+                writer.add_f32(&format!("{p}_syn"), "HeteroSnapshot", syn);
+                writer.add_scalar_f32(&format!("{p}_decay"), "HeteroSnapshot", *decay);
+            }
+            pillars_connectome::HeteroGroupState::Izh {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                v,
+                u,
+                trace,
+                refr,
+                a,
+                b,
+                c,
+                d,
+                dt_ms,
+                tau_ref,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                for (name, col) in [
+                    ("v", v),
+                    ("u", u),
+                    ("trace", trace),
+                    ("refr", refr),
+                    ("a", a),
+                    ("b", b),
+                    ("c", c),
+                    ("d", d),
+                ] {
+                    writer.add_f32(&format!("{p}_{name}"), "HeteroSnapshot", col);
+                }
+                writer.add_scalar_f32(&format!("{p}_dt_ms"), "HeteroSnapshot", *dt_ms);
+                writer.add_scalar_f32(&format!("{p}_tau_ref"), "HeteroSnapshot", *tau_ref);
+            }
+            pillars_connectome::HeteroGroupState::Rate {
+                indices: _,
+                drive_scale,
+                rec_scale,
+                v,
+                tau,
+                dt_ms,
+            } => {
+                writer.add_scalar_f32(&format!("{p}_drive"), "HeteroSnapshot", *drive_scale);
+                writer.add_scalar_f32(&format!("{p}_rec"), "HeteroSnapshot", *rec_scale);
+                writer.add_f32(&format!("{p}_v"), "HeteroSnapshot", v);
+                writer.add_scalar_f32(&format!("{p}_tau"), "HeteroSnapshot", *tau);
+                writer.add_scalar_f32(&format!("{p}_dt_ms"), "HeteroSnapshot", *dt_ms);
+            }
+        }
+    }
+}
+
+/// Колонки param/state группы с префиксом (тот же формат, что save_population).
+fn save_cols(prefix: &str, writer: &mut TaasWriter, params: &[Vec<f32>], state: &[Vec<f32>]) {
+    for (c, col) in params.iter().enumerate() {
+        writer.add_f32(&format!("{prefix}_p_{c}"), "HeteroSnapshot", col);
+    }
+    for (c, col) in state.iter().enumerate() {
+        writer.add_f32(&format!("{prefix}_s_{c}"), "HeteroSnapshot", col);
+    }
+}
+
+/// Прочитать полный слепок HeteroRunner из .taas.
+pub fn load_hetero_snapshot(
+    reader: &TaasReader,
+) -> Result<pillars_connectome::HeteroSnapshot, String> {
+    if reader.metadata().get("snapshot_kind").map(String::as_str) != Some("HeteroRunner") {
+        return Err("not a HeteroRunner snapshot".to_string());
+    }
+    let step_counter: usize = reader
+        .metadata()
+        .get("step_counter")
+        .and_then(|s| s.parse().ok())
+        .ok_or("step_counter not found")?;
+    let n_groups: usize = reader
+        .metadata()
+        .get("n_groups")
+        .and_then(|s| s.parse().ok())
+        .ok_or("n_groups not found")?;
+    let poisson_seed = {
+        let hex = reader.metadata().get("rng_seed").cloned().unwrap_or_default();
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .filter_map(|i| u8::from_str_radix(&hex[i..(i + 2).min(hex.len())], 16).ok())
+            .collect();
+        let mut seed = [0u8; 32];
+        let n = bytes.len().min(32);
+        seed[..n].copy_from_slice(&bytes[..n]);
+        seed
+    };
+    let dt_ms = reader
+        .get_scalar_f32("h_snapshot_dt")
+        .unwrap_or(0.0);
+
+    let conn = load_connectome(reader)?;
+    let mut groups = Vec::with_capacity(n_groups);
+    for i in 0..n_groups {
+        let p = format!("g{i}");
+        let kind = reader
+            .metadata()
+            .get(&format!("{p}_kind"))
+            .cloned()
+            .unwrap_or_default();
+        let indices_raw = reader.get_i32(&format!("{p}_indices"))?;
+        let indices: Vec<usize> = indices_raw.iter().map(|&v| v as usize).collect();
+        let drive = reader.get_scalar_f32(&format!("{p}_drive")).unwrap_or(1.0);
+        let rec = reader.get_scalar_f32(&format!("{p}_rec")).unwrap_or(1.0);
+        match kind.as_str() {
+            "alpha" => {
+                let cols = load_cols(&p, reader)?;
+                let delay_ring = reader.get_f32(&format!("{p}_delay_ring"))?;
+                let delay_size: usize = reader
+                    .metadata()
+                    .get(&format!("{p}_delay_size"))
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("delay_size not found")?;
+                let delay_pos: usize = reader
+                    .metadata()
+                    .get(&format!("{p}_delay_pos"))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                groups.push(pillars_connectome::HeteroGroupState::Alpha {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    params: cols.0,
+                    state: cols.1,
+                    delay_ring,
+                    delay_size,
+                    delay_pos,
+                });
+            }
+            "hh" => {
+                let cols = load_cols(&p, reader)?;
+                groups.push(pillars_connectome::HeteroGroupState::Hh {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    params: cols.0,
+                    state: cols.1,
+                });
+            }
+            "transformer" => {
+                let cols = load_cols(&p, reader)?;
+                groups.push(pillars_connectome::HeteroGroupState::Transformer {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    params: cols.0,
+                    state: cols.1,
+                });
+            }
+            "haap" => {
+                let cols = load_cols(&p, reader)?;
+                let syn = reader.get_f32(&format!("{p}_syn"))?;
+                let decay = reader.get_scalar_f32(&format!("{p}_decay")).unwrap_or(0.0);
+                groups.push(pillars_connectome::HeteroGroupState::Haap {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    params: cols.0,
+                    state: cols.1,
+                    syn,
+                    decay,
+                });
+            }
+            "izh" => {
+                let v = reader.get_f32(&format!("{p}_v"))?;
+                let u = reader.get_f32(&format!("{p}_u"))?;
+                let trace = reader.get_f32(&format!("{p}_trace"))?;
+                let refr = reader.get_f32(&format!("{p}_refr"))?;
+                let a = reader.get_f32(&format!("{p}_a"))?;
+                let b = reader.get_f32(&format!("{p}_b"))?;
+                let c = reader.get_f32(&format!("{p}_c"))?;
+                let d = reader.get_f32(&format!("{p}_d"))?;
+                let dt_ms = reader.get_scalar_f32(&format!("{p}_dt_ms")).unwrap_or(0.0);
+                let tau_ref = reader.get_scalar_f32(&format!("{p}_tau_ref")).unwrap_or(2.0);
+                groups.push(pillars_connectome::HeteroGroupState::Izh {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    v, u, trace, refr, a, b, c, d, dt_ms, tau_ref,
+                });
+            }
+            "rate" => {
+                let v = reader.get_f32(&format!("{p}_v"))?;
+                let tau = reader.get_scalar_f32(&format!("{p}_tau")).unwrap_or(10.0);
+                let dt_ms = reader.get_scalar_f32(&format!("{p}_dt_ms")).unwrap_or(0.0);
+                groups.push(pillars_connectome::HeteroGroupState::Rate {
+                    indices,
+                    drive_scale: drive,
+                    rec_scale: rec,
+                    v, tau, dt_ms,
+                });
+            }
+            other => return Err(format!("unknown group kind {other}")),
+        }
+    }
+
+    Ok(pillars_connectome::HeteroSnapshot {
+        connectome: conn,
+        step_counter,
+        dt_ms,
+        poisson_seed,
+        groups,
+    })
+}
+
+fn load_cols(prefix: &str, reader: &TaasReader) -> Result<(Vec<Vec<f32>>, Vec<Vec<f32>>), String> {
+    // Количество колонок не знаем заранее — читаем до первой ошибки.
+    let mut params = Vec::new();
+    let mut c = 0;
+    loop {
+        match reader.get_f32(&format!("{prefix}_p_{c}")) {
+            Ok(col) => {
+                params.push(col);
+                c += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    let mut state = Vec::new();
+    let mut c = 0;
+    loop {
+        match reader.get_f32(&format!("{prefix}_s_{c}")) {
+            Ok(col) => {
+                state.push(col);
+                c += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok((params, state))
+}
+
 // ─── TriOscillator ──────────────────────────────────────
 
 pub fn save_trioscilator(tri: &taas_t3::TriOscillator, writer: &mut TaasWriter) {

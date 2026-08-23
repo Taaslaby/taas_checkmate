@@ -25,6 +25,39 @@ pub struct NeuronGroup {
     pub indices: Vec<usize>,
 }
 
+/// Филогенетический фенотип: как интерпретировать знак NT при назначении
+/// рецепторов синаптической кинетики. У млекопитающих ведущий быстрый
+/// возбуждающий — AMPA (Na⁺), тормозной — GABA_A (Cl⁻). У насекомых
+/// (дрозофила) быстрый возбуждающий — nAChR (ацетилхолин), а тормозной
+/// хлорный ток идёт и через GABA_A (RDL), и через GluCl — на глутамат
+/// (в ЦНС/НМJ у насекомых глутамат часто ион-тормозной!).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NtPhenotype {
+    /// Млекопитающий маппинг: exc → AMPA (0), inh → GABA_A (2).
+    #[default]
+    Mammal,
+    /// Насекомый (Drosophila) маппинг: exc → nAChR (4), inh → GluCl (5).
+    Insect,
+}
+
+impl NtPhenotype {
+    /// Рецепторный код для знака пресинапса (+1 возбуждающий, −1 тормозной).
+    pub fn receptor_for_sign(&self, nt: f32) -> u8 {
+        if nt > 0.0 {
+            match self {
+                NtPhenotype::Mammal => 0, // AMPA
+                NtPhenotype::Insect => 4, // nAChR (быстрый возбуждающий у дрозофилы)
+            }
+        } else {
+            match self {
+                NtPhenotype::Mammal => 2, // GABA_A
+                NtPhenotype::Insect => 5, // GluCl (хлорный тормозной — насекомый глутамат)
+            }
+        }
+    }
+}
+
 /// Universal connectome: CSR matrix + NT types + typed neuron groups.
 ///
 /// # Example
@@ -59,10 +92,14 @@ pub struct ConnectomeData {
     pub nt_types: Vec<f32>,
     /// Receptor type per synapse (optional): 0=AMPA, 1=NMDA, 2=GABA_A, 3=GABA_B,
     /// 4=nAChR, 5=GluCl, 6=mAChR.
-    /// If empty, synaptic kinetics uses simple instant-current (nt_types only).
+    /// If empty, synaptic kinetics uses simple mean-current (nt_types only).
     pub receptor_types: Vec<u8>,
     /// Named neuron groups (e.g. "dn", "mn", "visual").
     pub groups: Vec<NeuronGroup>,
+    /// Филогенетический фенотип для интерпретации NT при построении
+    /// receptor_types (отсутствующий/дефолтный = Mammal, ничего не ломает).
+    #[serde(default)]
+    pub phenotype: NtPhenotype,
 }
 
 impl ConnectomeData {
@@ -112,11 +149,9 @@ impl ConnectomeData {
             receptor_types: Vec::new(),
             groups: groups
                 .into_iter()
-                .map(|(name, indices)| NeuronGroup {
-                    name: name.to_string(),
-                    indices,
-                })
+                .map(|(name, indices)| NeuronGroup { name: name.into(), indices })
                 .collect(),
+            phenotype: NtPhenotype::default(),
         }
     }
 
@@ -130,9 +165,9 @@ impl ConnectomeData {
 
     /// Build per-synapse receptor_types from nt_types (simple sign-based mapping).
     ///
-    /// Uses `build_receptor_types_from_csr()` which maps NT sign to receptor:
-    /// - `nt > 0` (excitatory) → AMPA (0)
-    /// - `nt <= 0` (inhibitory) → GABA_A (2)
+    /// Uses `NtPhenotype` to map NT sign to receptor (см. `receptor_for_sign`):
+    /// - `nt > 0` (excitatory) → AMPA (0) для Mammal, nAChR (4) для Insect
+    /// - `nt <= 0` (inhibitory) → GABA_A (2) для Mammal, GluCl (5) для Insect
     ///
     /// If receptor_types is already non-empty, does nothing (preserves existing mapping).
     pub fn build_receptor_types(&mut self) {
@@ -143,8 +178,33 @@ impl ConnectomeData {
             &self.row_ptr,
             self.n_synapses,
             &self.nt_types,
+            self.phenotype,
         );
     }
+
+    /// Snapshot of learned CSR values (plasticity state) — for persistence
+    /// via taas-format or in-memory heredity. Topology (row_ptr/col_indices)
+    /// is NOT included: it is deterministic per connectome and restored by
+    /// the loader.
+    pub fn export_values(&self) -> Vec<f32> {
+        self.values.clone()
+    }
+
+    /// Restore learned CSR values from a snapshot. Lengths must match the
+    /// current topology exactly — a mismatch means the snapshot came from a
+    /// different connectome and is rejected (defensive: no silent truncation).
+    pub fn import_values(&mut self, values: &[f32]) -> Result<(), String> {
+        if values.len() != self.values.len() {
+            return Err(format!(
+                "import_values: length mismatch (snapshot {} vs topology {})",
+                values.len(),
+                self.values.len()
+            ));
+        }
+        self.values.copy_from_slice(values);
+        Ok(())
+    }
+
 
     /// Build per-synapse receptor_types from textual NT labels (from neurons.csv.gz).
     ///
@@ -315,6 +375,7 @@ impl ConnectomeData {
                 rt
             },
             groups: Vec::new(),
+            phenotype: NtPhenotype::default(),
         })
     }
 }
@@ -377,6 +438,7 @@ pub fn build_receptor_types_from_csr(
     row_ptr: &[i32],
     n_synapses: usize,
     nt_types: &[f32],
+    phenotype: NtPhenotype,
 ) -> Vec<u8> {
     let mut receptors = vec![0u8; n_synapses.max(1)];
     let n = if row_ptr.len() > 1 {
@@ -387,7 +449,7 @@ pub fn build_receptor_types_from_csr(
     let mut syn_idx = 0usize;
     for pre in 0..n {
         let nt = nt_types.get(pre).copied().unwrap_or(1.0);
-        let rec = if nt > 0.0 { 0u8 } else { 2u8 }; // AMPA or GABA_A
+        let rec = phenotype.receptor_for_sign(nt);
         let start = row_ptr.get(pre).copied().unwrap_or(0).max(0) as usize;
         let end = (row_ptr.get(pre + 1).copied().unwrap_or(0) as usize).min(n_synapses);
         for _ in start..end {
@@ -567,12 +629,19 @@ mod tests {
         let n_syn = 3;
         let nt_types = vec![1.0, -1.0, 1.0];
 
-        let rec = build_receptor_types_from_csr(&row_ptr, n_syn, &nt_types);
+        let rec = build_receptor_types_from_csr(&row_ptr, n_syn, &nt_types, NtPhenotype::Mammal);
         assert_eq!(rec.len(), 3);
         // Neuron 0 (exc=1.0→AMPA=0), Neuron 1 (inh=-1.0→GABA_A=2), Neuron 2 (exc=1.0→AMPA=0)
         assert_eq!(rec[0], 0);
         assert_eq!(rec[1], 2);
         assert_eq!(rec[2], 0);
+
+        // Фенотип насекомого: ингибиторный → GluCl (5), возбуждающий → nAChR (4).
+        let rec_insect =
+            build_receptor_types_from_csr(&row_ptr, n_syn, &nt_types, NtPhenotype::Insect);
+        assert_eq!(rec_insect[0], 4);
+        assert_eq!(rec_insect[1], 5);
+        assert_eq!(rec_insect[2], 4);
     }
 
     #[test]
