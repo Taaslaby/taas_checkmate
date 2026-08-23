@@ -142,7 +142,13 @@ pub fn dopamine_traces_step(
     }
 }
 
-/// Apply dopamine-modulated weight update: `Δw = η·D·e`, clamped to [w_min, w_max].
+/// Apply dopamine-modulated weight update: `Δw = η·D·e`.
+///
+/// The clamp is part of the UPDATE, not a global pass: only synapses with
+/// non-zero eligibility (`Δ ≠ 0`) are clamped to `[w_min, w_max]`. Synapses
+/// with `e == 0` keep their exact value even if it lies outside the bounds —
+/// innate/over-sized weights must survive zero-dopamine and frozen-path
+/// updates (a global clamp would silently truncate them every call).
 ///
 /// * `weights` — weight matrix `[n]` (in/out)
 /// * `eligibility` — eligibility traces `[n]`
@@ -165,20 +171,29 @@ pub fn dopamine_weight_update(
     let lr_dopa = f32x8::splat(lr * dopamine);
     let wmin_s = f32x8::splat(w_min);
     let wmax_s = f32x8::splat(w_max);
+    let zero_s = f32x8::splat(0.0);
     let n8 = n & !7;
 
     for off in (0..n8).step_by(8) {
         unsafe {
-            let mut w = load8(weights.as_ptr(), off);
+            let w = load8(weights.as_ptr(), off);
             let ee = load8(eligibility.as_ptr(), off);
-            w += lr_dopa * ee;
-            w = w.max(wmin_s).min(wmax_s);
-            store8(weights.as_mut_ptr(), off, w);
+            let delta = lr_dopa * ee;
+            let updated = (w + delta).max(wmin_s).min(wmax_s);
+            // e != 0 → synapse participates: clamped update. e == 0 →
+            // preserve value exactly (no re-clamp of innate weights).
+            let participates = ee.abs().cmp_gt(zero_s);
+            let out = participates.blend(updated, w);
+            store8(weights.as_mut_ptr(), off, out);
         }
     }
 
     for i in n8..n {
-        weights[i] = (weights[i] + lr * dopamine * eligibility[i]).clamp(w_min, w_max);
+        let delta = lr * dopamine * eligibility[i];
+        if delta == 0.0 {
+            continue;
+        }
+        weights[i] = (weights[i] + delta).clamp(w_min, w_max);
     }
 }
 

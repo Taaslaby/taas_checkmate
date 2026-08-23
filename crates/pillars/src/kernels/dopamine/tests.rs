@@ -62,3 +62,24 @@ fn dopamine_simd_scalar_tail_consistent() {
         );
     }
 }
+
+#[test]
+fn dopamine_weight_update_preserves_zero_eligibility_weights() {
+    // Регрессия: синапсы с e == 0 (замороженные/врождённые пути) не должны
+    // ре-клэмпиться к границам — клэмп часть ОБНОВЛЕНИЯ, а не глобальный проход.
+    let n = 16;
+    let mut weights = vec![0.0f32; n];
+    weights[0] = 22.0; // выше w_max — врождённый grown-хвост
+    weights[1] = -3.0; // ниже w_min
+    weights[2] = 0.5; // обычный синапс под обновление
+    let mut eligibility = vec![0.0f32; n];
+    eligibility[2] = 1.0; // только этот синапс реально обновляется
+    dopamine_weight_update(&mut weights, &eligibility, 1.0, 0.1, 0.0, 6.0);
+    assert_eq!(weights[0], 22.0, "e=0: вес выше w_max должен сохраниться");
+    assert_eq!(weights[1], -3.0, "e=0: вес ниже w_min должен сохраниться");
+    assert!(
+        (weights[2] - 0.6).abs() < 0.01,
+        "e!=0: обновление + клэмп: {}",
+        weights[2]
+    );
+}
