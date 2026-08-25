@@ -58,3 +58,6 @@ validation_data/
 # (fafb.bin 157MB, manc_viz.bin 44MB, mnist_frames.npz 210MB)
 resources/examples/data/*.bin
 examples/data/
+resources/data/*.haap
+*.npz
+.freebuff/
