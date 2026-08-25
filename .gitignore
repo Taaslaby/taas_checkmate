@@ -53,3 +53,8 @@ validation_data/
 
 # Generated wasm-pack output for the Cognitive Arena web UI (see build-wasm.sh)
 /resources/web/cognitive-arena/pkg/
+
+# Large binary datasets — distributed separately, not via git
+# (fafb.bin 157MB, manc_viz.bin 44MB, mnist_frames.npz 210MB)
+resources/examples/data/*.bin
+examples/data/
