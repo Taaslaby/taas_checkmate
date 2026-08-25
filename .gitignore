@@ -61,3 +61,4 @@ examples/data/
 resources/data/*.haap
 *.npz
 .freebuff/
+.agents/
