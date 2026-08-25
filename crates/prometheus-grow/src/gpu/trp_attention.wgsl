@@ -23,7 +23,7 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read> receptors: array<f32>;      // N × D
 @group(0) @binding(2) var<storage, read> positions: array<f32>;      // N × 3 (x,y,z)
 @group(0) @binding(3) var<storage, read_write> syn_out: array<f32>;  // triplets: pre,post,score
-@group(0) @binding(4) var<atomic<u32>> syn_count: atomic<u32>;
+@group(0) @binding(4) var<storage, read_write> syn_count: atomic<u32>;
 @group(0) @binding(5) var<uniform> u: Uniforms;
 
 @compute @workgroup_size(16, 16)

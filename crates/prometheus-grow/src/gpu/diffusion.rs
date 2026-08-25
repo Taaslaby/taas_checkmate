@@ -184,8 +184,20 @@ impl DiffusionPipeline {
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
         let f32_out: &[f32] = bytemuck::cast_slice(&data);
+        // The shader writes only interior cells; boundary cells must keep
+        // their input values (the CPU backend leaves them untouched too —
+        // `World::diffuse_substances` applies the boundary condition after).
         for (i, &v) in f32_out.iter().enumerate() {
-            field_out[i] = v as f64;
+            let k = i % grid.nz;
+            let j = (i / grid.nz) % grid.ny;
+            let x = i / (grid.nz * grid.ny);
+            let is_boundary = x == 0
+                || j == 0
+                || k == 0
+                || x == grid.nx - 1
+                || j == grid.ny - 1
+                || k == grid.nz - 1;
+            field_out[i] = if is_boundary { field[i] } else { v as f64 };
         }
         drop(data);
         staging.unmap();
