@@ -1744,14 +1744,13 @@ impl World {
             self.dt,
         );
 
-        for i in 0..n {
+        for (i, p) in positions.iter_mut().enumerate().take(n) {
             let r = self.cells[i].soma.radius;
-            let mut p = positions[i];
             p.x = p.x.clamp(self.bounds.min.x + r, self.bounds.max.x - r);
             p.y = p.y.clamp(self.bounds.min.y + r, self.bounds.max.y - r);
             p.z = p.z.clamp(self.bounds.min.z + r, self.bounds.max.z - r);
             if p.dist(self.cells[i].soma.pos) > 1e-12 {
-                self.move_soma(i, p - self.cells[i].soma.pos);
+                self.move_soma(i, *p - self.cells[i].soma.pos);
             }
         }
     }
@@ -2881,10 +2880,9 @@ fn eri_length_distribution(
     };
     let mut xa = map(sample_normal(rng, 0.0, eri_std));
     let mut xb = map(sample_normal(rng, 0.0, eri_std));
-    // Order the factors to the initial length ratio (equal hints → no swap).
-    if len1_hint > len2_hint && xa < xb {
-        std::mem::swap(&mut xa, &mut xb);
-    } else if len1_hint <= len2_hint && xa > xb {
+    // Order the factors to the initial length ratio: the longer branch gets
+    // the larger factor. Equal hints → keep draw order.
+    if (len1_hint > len2_hint && xa < xb) || (len1_hint < len2_hint && xa > xb) {
         std::mem::swap(&mut xa, &mut xb);
     }
     (xa * meanquota, xb * meanquota)

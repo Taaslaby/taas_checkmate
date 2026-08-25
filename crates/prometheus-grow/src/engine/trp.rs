@@ -74,9 +74,9 @@ impl TrpEmbedding {
             ^ h(pos.z).wrapping_mul(7)
             ^ (cell_type.as_usize() as u32).wrapping_mul(13);
         let mut emb = [0.0f32; TRP_DIM];
-        for i in 0..TRP_DIM {
+        for (i, v) in emb.iter_mut().enumerate() {
             let s = seed.wrapping_mul((i as u32).wrapping_add(1).wrapping_mul(0x9E37_79B9));
-            emb[i] = (((s >> 16) as i16) as f32) / 32768.0;
+            *v = (((s >> 16) as i16) as f32) / 32768.0;
         }
         let mag: f32 = emb.iter().map(|v| v * v).sum::<f32>().sqrt().max(0.001);
         for v in emb.iter_mut() {
@@ -91,8 +91,8 @@ impl TrpEmbedding {
 
     /// Nudge the tropism toward a target (reward).
     pub fn nudge_tropism(&mut self, target: &[f32; TRP_DIM], rate: f32) {
-        for i in 0..TRP_DIM {
-            self.tropism[i] = self.tropism[i] * (1.0 - rate) + target[i] * rate;
+        for (t, r) in self.tropism.iter_mut().zip(target.iter()) {
+            *t = *t * (1.0 - rate) + *r * rate;
         }
         let mag: f32 = self
             .tropism
@@ -260,20 +260,20 @@ pub fn prune_synapses_trp(
         let (Some(pre_emb), Some(post_emb)) = (embeddings.get(&syn.pre), embeddings.get(&syn.post))
         else {
             // No embedding — keep the synapse as is.
-            alive.push(syn.clone());
+            alive.push(*syn);
             continue;
         };
         let (Some(ppre), Some(ppost)) = (
             positions_by_id.get(&syn.pre),
             positions_by_id.get(&syn.post),
         ) else {
-            alive.push(syn.clone());
+            alive.push(*syn);
             continue;
         };
         let dist_sq = (*ppre - *ppost).len().powi(2);
         let score = trp_score(&pre_emb.tropism, &post_emb.receptor, dist_sq, params);
         if score >= params.prune_threshold {
-            alive.push(syn.clone());
+            alive.push(*syn);
         } else {
             pruned += 1;
         }

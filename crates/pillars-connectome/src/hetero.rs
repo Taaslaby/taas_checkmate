@@ -138,6 +138,18 @@ enum GroupEngine {
     },
 }
 
+/// One NeuralPopulation-backed group exported for pillars-cuda
+/// `CompiledNetwork::new`: (source, kernel_name, n, ns, np, states_flat, params_flat).
+pub type GpuPopExport = (
+    &'static str,
+    &'static str,
+    usize,
+    usize,
+    usize,
+    Vec<f32>,
+    Vec<f32>,
+);
+
 impl GroupEngine {
     fn indices(&self) -> &[usize] {
         match self {
@@ -153,12 +165,7 @@ impl GroupEngine {
     /// Dynamics-only step: читает `drive` (external+poisson, глобальный) и
     /// `rec` (рекуррентный вход, глобальный), пишет спайки в `spikes_out`
     /// (глобальный вектор, по глобальным индексам группы).
-    fn step(
-        &mut self,
-        drive: &[f32],
-        rec: &[f32],
-        spikes_out: &mut [i32],
-    ) {
+    fn step(&mut self, drive: &[f32], rec: &[f32], spikes_out: &mut [i32]) {
         let _ = rec;
         let _ = spikes_out;
         self.step_inner(drive, rec, spikes_out);
@@ -168,32 +175,25 @@ impl GroupEngine {
     /// Alpha-группы складывают его в своё кольцо задержки; остальные — no-op
     /// (они и так читают `rec` на следующем шаге).
     fn deliver(&mut self, rec: &[f32]) {
-        match self {
-            GroupEngine::Alpha {
-                indices,
-                delay_steps,
-                delay_ring,
-                delay_pos,
-                ..
-            } => {
-                let k = indices.len();
-                let size = *delay_steps + 1;
-                let slot = &mut delay_ring[*delay_pos * k.max(1)..(*delay_pos + 1) * k.max(1)];
-                for (j, &g) in indices.iter().enumerate() {
-                    slot[j] = rec.get(g).copied().unwrap_or(0.0);
-                }
-                *delay_pos = (*delay_pos + 1) % size;
+        if let GroupEngine::Alpha {
+            indices,
+            delay_steps,
+            delay_ring,
+            delay_pos,
+            ..
+        } = self
+        {
+            let k = indices.len();
+            let size = *delay_steps + 1;
+            let slot = &mut delay_ring[*delay_pos * k.max(1)..(*delay_pos + 1) * k.max(1)];
+            for (j, &g) in indices.iter().enumerate() {
+                slot[j] = rec.get(g).copied().unwrap_or(0.0);
             }
-            _ => {}
+            *delay_pos = (*delay_pos + 1) % size;
         }
     }
 
-    fn step_inner(
-        &mut self,
-        drive: &[f32],
-        rec: &[f32],
-        spikes_out: &mut [i32],
-    ) {
+    fn step_inner(&mut self, drive: &[f32], rec: &[f32], spikes_out: &mut [i32]) {
         match self {
             GroupEngine::Alpha {
                 indices,
@@ -300,7 +300,19 @@ impl GroupEngine {
                 }
                 let mut spikes = vec![0i32; kp];
                 step_izhikevich_pillars(
-                    v, u, trace, a, b, &mut ii, *dt_ms, 0.99, &mut spikes, c, d, refr, *tau_ref,
+                    v,
+                    u,
+                    trace,
+                    a,
+                    b,
+                    &mut ii,
+                    *dt_ms,
+                    0.99,
+                    &mut spikes,
+                    c,
+                    d,
+                    refr,
+                    *tau_ref,
                 );
                 for (k, &g) in indices.iter().enumerate() {
                     if spikes[k] != 0 {
@@ -386,7 +398,7 @@ pub struct HeteroGroup {
 /// ⚠️ RNG Пуассоновских групп не сериализуется (у `StdRng` нет API чтения
 /// состояния) — после `restore` стохастика начинается с начального сида, а
 /// не продолжается с точки снапшота. Для детерминированной симуляции без
-/// Пуассона снапшот/restore — бит-в-бит. 
+/// Пуассона снапшот/restore — бит-в-бит.
 pub struct HeteroRunner {
     /// RNG Пуассоновских групп: создаётся из фиксированного сида (см.
     /// `StdRng::from_seed` в `new`). Сид хранится в снапшоте и
@@ -400,9 +412,9 @@ pub struct HeteroRunner {
     specs: Vec<HeteroGroup>,
     groups: Vec<GroupEngine>,
     // Общие буферы (глобальные, размер n).
-    drive: Vec<f32>,   // external + poisson на этот шаг
-    rec: Vec<f32>,     // рекуррентный вход (результат propagation)
-    spikes: Vec<i32>,  // глобальные спайки шага
+    drive: Vec<f32>,  // external + poisson на этот шаг
+    rec: Vec<f32>,    // рекуррентный вход (результат propagation)
+    spikes: Vec<i32>, // глобальные спайки шага
     queue: SpikeQueue,
     spike_buffer: Vec<i32>,
     step_counter: usize,
@@ -484,11 +496,7 @@ impl HeteroRunner {
 
     /// Добавить Poisson-группу (глобальные индексы).
     pub fn add_poisson_group(&mut self, indices: &[usize], rate_hz: f32, weight: f32) {
-        let indices = indices
-            .iter()
-            .filter(|&&i| i < self.n)
-            .copied()
-            .collect();
+        let indices = indices.iter().filter(|&&i| i < self.n).copied().collect();
         self.poisson_groups.push(PoissonGroup {
             indices,
             rate_hz,
@@ -530,7 +538,7 @@ impl HeteroRunner {
     /// Returns Vec of (source, kernel_name, n, ns, np, states_flat, params_flat)
     /// for each NeuralPopulation-backed group (Alpha/Hh/Haap/Transformer).
     /// Izh and Rate use raw vectors and are skipped (CPU fallback).
-    pub fn export_pops_for_gpu(&self) -> Vec<(&'static str, &'static str, usize, usize, usize, Vec<f32>, Vec<f32>)> {
+    pub fn export_pops_for_gpu(&self) -> Vec<GpuPopExport> {
         use pillars::zoo::neurons::*;
         use pillars::zoo::Model;
         macro_rules! export_pop {
@@ -554,17 +562,40 @@ impl HeteroRunner {
                 ($source, $kernel, n, ns, np, states, params)
             }};
         }
-        self.groups.iter().filter_map(|g| match g {
-            GroupEngine::Alpha { pop, indices, .. } =>
-                Some(export_pop!(pop, indices, LIF_CUDA_SOURCE, "lif_kernel", AlphaLifModel)),
-            GroupEngine::Hh { pop, indices, .. } =>
-                Some(export_pop!(pop, indices, HH_CUDA_SOURCE, "hh_kernel", HHModel)),
-            GroupEngine::Haap { pop, indices, .. } =>
-                Some(export_pop!(pop, indices, HAAP_CUDA_SOURCE, "haap_kernel", HAAPModel)),
-            GroupEngine::Transformer { pop, indices, .. } =>
-                Some(export_pop!(pop, indices, TRANSFORMER_CUDA_SOURCE, "transformer_kernel", TransformerModel)),
-            _ => None, // Izh/Rate use raw vectors — no NeuralPopulation to export
-        }).collect()
+        self.groups
+            .iter()
+            .filter_map(|g| match g {
+                GroupEngine::Alpha { pop, indices, .. } => Some(export_pop!(
+                    pop,
+                    indices,
+                    LIF_CUDA_SOURCE,
+                    "lif_kernel",
+                    AlphaLifModel
+                )),
+                GroupEngine::Hh { pop, indices, .. } => Some(export_pop!(
+                    pop,
+                    indices,
+                    HH_CUDA_SOURCE,
+                    "hh_kernel",
+                    HHModel
+                )),
+                GroupEngine::Haap { pop, indices, .. } => Some(export_pop!(
+                    pop,
+                    indices,
+                    HAAP_CUDA_SOURCE,
+                    "haap_kernel",
+                    HAAPModel
+                )),
+                GroupEngine::Transformer { pop, indices, .. } => Some(export_pop!(
+                    pop,
+                    indices,
+                    TRANSFORMER_CUDA_SOURCE,
+                    "transformer_kernel",
+                    TransformerModel
+                )),
+                _ => None, // Izh/Rate use raw vectors — no NeuralPopulation to export
+            })
+            .collect()
     }
 
     /// Запустить `n_steps` шагов. `external_I` — глобальный драйв `[n]`.
@@ -584,7 +615,12 @@ impl HeteroRunner {
             for (i, &e) in external_I.iter().enumerate().take(n) {
                 self.drive[i] += e;
             }
-            inject_poisson_into(&self.poisson_groups, &mut self.rng, &mut self.drive, self.dt_ms);
+            inject_poisson_into(
+                &self.poisson_groups,
+                &mut self.rng,
+                &mut self.drive,
+                self.dt_ms,
+            );
 
             // 2. Каждая группа степает СВОЮ динамику (dynamics-only).
             self.spikes[..n].fill(0);
@@ -645,11 +681,7 @@ fn build_engine(g: &HeteroGroup, dt_ms: f32) -> Result<GroupEngine, String> {
     } else {
         1.0
     };
-    let rscale = if g.rec_scale > 0.0 {
-        g.rec_scale
-    } else {
-        1.0
-    };
+    let rscale = if g.rec_scale > 0.0 { g.rec_scale } else { 1.0 };
     let engine = match &g.config {
         NeuronConfig::LifAlpha {
             t_delay,
@@ -709,7 +741,8 @@ fn build_engine(g: &HeteroGroup, dt_ms: f32) -> Result<GroupEngine, String> {
                 delay_pos: 0,
             }
         }
-        NeuronConfig::Hh { use_pacemaking, .. } | NeuronConfig::HhSynaptic { use_pacemaking, .. } => {
+        NeuronConfig::Hh { use_pacemaking, .. }
+        | NeuronConfig::HhSynaptic { use_pacemaking, .. } => {
             let pop = if *use_pacemaking {
                 hh_population_pacemaking(k, dt_ms)
             } else {
@@ -767,7 +800,7 @@ fn build_engine(g: &HeteroGroup, dt_ms: f32) -> Result<GroupEngine, String> {
             d,
         } => {
             let _ = idt; // используем глобальный dt_ms
-            // SIMD-ядро Izh требует кратные 8 длины — паддим, как mono runner.
+                         // SIMD-ядро Izh требует кратные 8 длины — паддим, как mono runner.
             let kp = k.div_ceil(8) * 8;
             GroupEngine::Izh {
                 indices: g.indices.clone(),
@@ -1029,8 +1062,12 @@ pub struct HeteroSnapshot {
 fn pop_columns<M: pillars::zoo::Model + 'static>(
     pop: &pillars::NeuralPopulation<M>,
 ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
-    let params = (0..M::N_PARAMS).map(|c| pop.param_slice(c).to_vec()).collect();
-    let state = (0..M::N_STATE).map(|c| pop.state_slice(c).to_vec()).collect();
+    let params = (0..M::N_PARAMS)
+        .map(|c| pop.param_slice(c).to_vec())
+        .collect();
+    let state = (0..M::N_STATE)
+        .map(|c| pop.state_slice(c).to_vec())
+        .collect();
     (params, state)
 }
 
@@ -1211,10 +1248,7 @@ impl HeteroRunner {
     pub fn restore(&mut self, snap: &HeteroSnapshot) -> Result<(), String> {
         let n = snap.connectome.n_neurons;
         if n != self.n {
-            return Err(format!(
-                "hetero restore: n_neurons {} != {}",
-                n, self.n
-            ));
+            return Err(format!("hetero restore: n_neurons {} != {}", n, self.n));
         }
         if snap.dt_ms != self.dt_ms {
             return Err(format!(
@@ -1306,22 +1340,20 @@ fn engine_from_state(
                 d: 8.0,
             },
             HeteroGroupState::Rate { .. } => NeuronConfig::Rate { dt_ms, tau: 0.0 },
-            HeteroGroupState::Transformer { .. } => {
-                NeuronConfig::Transformer {
-                    dt_ms,
-                    decay: 0.95,
-                    gain: 1.0,
-                    inv_tau_acc: 0.5,
-                    thresh: 0.35,
-                    k_scale: 0.5,
-                    eta_k: 0.0,
-                    eta_v: 0.0,
-                    w_base: 1.0,
-                    w_span: 2.0,
-                    v_base: 1.0,
-                    v_span: 2.0,
-                }
-            }
+            HeteroGroupState::Transformer { .. } => NeuronConfig::Transformer {
+                dt_ms,
+                decay: 0.95,
+                gain: 1.0,
+                inv_tau_acc: 0.5,
+                thresh: 0.35,
+                k_scale: 0.5,
+                eta_k: 0.0,
+                eta_v: 0.0,
+                w_base: 1.0,
+                w_span: 2.0,
+                v_base: 1.0,
+                v_span: 2.0,
+            },
         },
         indices: gs.indices().to_vec(),
         drive_scale: gs_drive(gs),
@@ -1534,7 +1566,10 @@ mod tests {
         let s3: i32 = spikes.iter().skip(3).step_by(4).copied().sum();
         assert!(s0 > 0, "alpha 0 should fire, got {s0}");
         assert!(s1 > 0, "Izh 1 should fire from alpha 0, got {s1}");
-        assert!(s2 > 0, "alpha 2 must fire from Izh 1 (cross-model), got {s2}");
+        assert!(
+            s2 > 0,
+            "alpha 2 must fire from Izh 1 (cross-model), got {s2}"
+        );
         assert!(s3 > 0, "Rate 3 should fire from its own drive, got {s3}");
     }
 

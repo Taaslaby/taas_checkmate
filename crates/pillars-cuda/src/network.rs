@@ -198,7 +198,7 @@ pub struct CompiledNetwork {
     d_inj_idx: CUdeviceptr, // n_total * 4 (reused per inject_current call)
     d_inj_val: CUdeviceptr, // n_total * 4
     /// STDP: per-neuron trace buffer [n_total]. Decays each step, increments on spike.
-    d_trace: CUdeviceptr,   // n_total * 4
+    d_trace: CUdeviceptr, // n_total * 4
     /// STDP: pre-compiled trace update + STDP kernels.
     stdp_func: CUfunction,
     trace_decay_func: CUfunction,
@@ -539,11 +539,18 @@ impl CompiledNetwork {
 
     /// Full STDP step on GPU: trace → neurons → STDP → propagate.
     /// Everything stays on device — zero CPU downloads.
-    pub fn stdp_step(&mut self, trace_decay: f32, lr_ltp: f32, lr_ltd: f32, w_min: f32, w_max: f32) -> Result<(), String> {
+    pub fn stdp_step(
+        &mut self,
+        trace_decay: f32,
+        lr_ltp: f32,
+        lr_ltd: f32,
+        w_min: f32,
+        w_max: f32,
+    ) -> Result<(), String> {
         let d = driver().as_ref().map_err(|e| e.clone())?;
         let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         device_context(d)?;
-        let slot = self.step % MAX_DELAY_SLOTS;
+        let _slot = self.step % MAX_DELAY_SLOTS;
 
         // 1. Trace decay + spike increment
         {
@@ -556,7 +563,24 @@ impl CompiledNetwork {
                 &decay as *const f32 as *mut c_void,
                 &n as *const c_int as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(self.trace_decay_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), args.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        self.trace_decay_func,
+                        grid,
+                        1,
+                        1,
+                        BLOCK,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        args.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
 
         // 2. Copy ring slot → input buffer
@@ -572,7 +596,24 @@ impl CompiledNetwork {
                 &mut cur_slot as *mut _ as *mut c_void,
                 &mut n as *mut _ as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(self.copy_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), cargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        self.copy_func,
+                        grid,
+                        1,
+                        1,
+                        BLOCK,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        cargs.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
 
         // 3. Step each population
@@ -590,7 +631,24 @@ impl CompiledNetwork {
                 &mut spikes as *mut _ as *mut c_void,
                 &mut args as *mut _ as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(p.func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), kargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        p.func,
+                        grid,
+                        1,
+                        1,
+                        BLOCK,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        kargs.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
 
         // 4. STDP weight update from traces
@@ -611,7 +669,24 @@ impl CompiledNetwork {
                 &wmx as *const f32 as *mut c_void,
                 &nn as *const c_int as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(self.stdp_func, self.n_total as u32, 1, 1, 128, 1, 1, 0, std::ptr::null_mut(), args.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        self.stdp_func,
+                        self.n_total as u32,
+                        1,
+                        1,
+                        128,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        args.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
 
         // 5. Zero slot + scatter spikes with plastic weights
@@ -625,7 +700,24 @@ impl CompiledNetwork {
                 &mut cur_slot as *mut _ as *mut c_void,
                 &mut n as *mut _ as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(self.zero_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), zargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        self.zero_func,
+                        grid,
+                        1,
+                        1,
+                        BLOCK,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        zargs.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
         if self.n_syn > 0 {
             let grid = (self.n_total as u32).div_ceil(BLOCK);
@@ -649,7 +741,24 @@ impl CompiledNetwork {
                 &mut n as *mut _ as *mut c_void,
                 &mut slots as *mut _ as *mut c_void,
             ];
-            unsafe { check_cu(d, (d.cu_launch_kernel)(self.scatter_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), sargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+            unsafe {
+                check_cu(
+                    d,
+                    (d.cu_launch_kernel)(
+                        self.scatter_func,
+                        grid,
+                        1,
+                        1,
+                        BLOCK,
+                        1,
+                        1,
+                        0,
+                        std::ptr::null_mut(),
+                        sargs.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            }?;
         }
         self.step += 1;
         Ok(())
@@ -660,7 +769,8 @@ impl CompiledNetwork {
         if weights.len() != self.n_syn {
             return Err(format!(
                 "upload_weights: length {} != n_syn {}",
-                weights.len(), self.n_syn
+                weights.len(),
+                self.n_syn
             ));
         }
         let d = driver().as_ref().map_err(|e| e.clone())?;
@@ -669,14 +779,13 @@ impl CompiledNetwork {
         upload(d, self.d_weights, weights)
     }
 
-
-
     /// Download current synapse weights from GPU to CPU.
     pub fn download_weights(&self, out: &mut [f32]) -> Result<(), String> {
         if out.len() != self.n_syn {
             return Err(format!(
                 "download_weights: length {} != n_syn {}",
-                out.len(), self.n_syn
+                out.len(),
+                self.n_syn
             ));
         }
         let d = driver().as_ref().map_err(|e| e.clone())?;

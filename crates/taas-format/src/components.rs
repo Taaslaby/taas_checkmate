@@ -95,10 +95,7 @@ pub fn load_connectome(reader: &TaasReader) -> Result<pillars_connectome::Connec
 ///   - haap: `g{i}_syn` (f32), `g{i}_decay`
 ///   - izh: `g{i}_v/u/trace/refr/a/b/c/d` (f32) + `g{i}_dt_ms`/`g{i}_tau_ref`
 ///   - rate: `g{i}_v` (f32) + `g{i}_tau`/`g{i}_dt_ms`
-pub fn save_hetero_snapshot(
-    snap: &pillars_connectome::HeteroSnapshot,
-    writer: &mut TaasWriter,
-) {
+pub fn save_hetero_snapshot(snap: &pillars_connectome::HeteroSnapshot, writer: &mut TaasWriter) {
     writer.add_metadata("snapshot_kind", "HeteroRunner");
     writer.add_metadata("step_counter", &snap.step_counter.to_string());
     writer.add_metadata(
@@ -252,7 +249,11 @@ pub fn load_hetero_snapshot(
         .and_then(|s| s.parse().ok())
         .ok_or("n_groups not found")?;
     let poisson_seed = {
-        let hex = reader.metadata().get("rng_seed").cloned().unwrap_or_default();
+        let hex = reader
+            .metadata()
+            .get("rng_seed")
+            .cloned()
+            .unwrap_or_default();
         let bytes: Vec<u8> = (0..hex.len())
             .step_by(2)
             .filter_map(|i| u8::from_str_radix(&hex[i..(i + 2).min(hex.len())], 16).ok())
@@ -262,9 +263,7 @@ pub fn load_hetero_snapshot(
         seed[..n].copy_from_slice(&bytes[..n]);
         seed
     };
-    let dt_ms = reader
-        .get_scalar_f32("h_snapshot_dt")
-        .unwrap_or(0.0);
+    let dt_ms = reader.get_scalar_f32("h_snapshot_dt").unwrap_or(0.0);
 
     let conn = load_connectome(reader)?;
     let mut groups = Vec::with_capacity(n_groups);
@@ -348,12 +347,23 @@ pub fn load_hetero_snapshot(
                 let c = reader.get_f32(&format!("{p}_c"))?;
                 let d = reader.get_f32(&format!("{p}_d"))?;
                 let dt_ms = reader.get_scalar_f32(&format!("{p}_dt_ms")).unwrap_or(0.0);
-                let tau_ref = reader.get_scalar_f32(&format!("{p}_tau_ref")).unwrap_or(2.0);
+                let tau_ref = reader
+                    .get_scalar_f32(&format!("{p}_tau_ref"))
+                    .unwrap_or(2.0);
                 groups.push(pillars_connectome::HeteroGroupState::Izh {
                     indices,
                     drive_scale: drive,
                     rec_scale: rec,
-                    v, u, trace, refr, a, b, c, d, dt_ms, tau_ref,
+                    v,
+                    u,
+                    trace,
+                    refr,
+                    a,
+                    b,
+                    c,
+                    d,
+                    dt_ms,
+                    tau_ref,
                 });
             }
             "rate" => {
@@ -364,7 +374,9 @@ pub fn load_hetero_snapshot(
                     indices,
                     drive_scale: drive,
                     rec_scale: rec,
-                    v, tau, dt_ms,
+                    v,
+                    tau,
+                    dt_ms,
                 });
             }
             other => return Err(format!("unknown group kind {other}")),
@@ -384,25 +396,15 @@ fn load_cols(prefix: &str, reader: &TaasReader) -> Result<(Vec<Vec<f32>>, Vec<Ve
     // Количество колонок не знаем заранее — читаем до первой ошибки.
     let mut params = Vec::new();
     let mut c = 0;
-    loop {
-        match reader.get_f32(&format!("{prefix}_p_{c}")) {
-            Ok(col) => {
-                params.push(col);
-                c += 1;
-            }
-            Err(_) => break,
-        }
+    while let Ok(col) = reader.get_f32(&format!("{prefix}_p_{c}")) {
+        params.push(col);
+        c += 1;
     }
     let mut state = Vec::new();
     let mut c = 0;
-    loop {
-        match reader.get_f32(&format!("{prefix}_s_{c}")) {
-            Ok(col) => {
-                state.push(col);
-                c += 1;
-            }
-            Err(_) => break,
-        }
+    while let Ok(col) = reader.get_f32(&format!("{prefix}_s_{c}")) {
+        state.push(col);
+        c += 1;
     }
     Ok((params, state))
 }

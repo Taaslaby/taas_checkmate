@@ -15,7 +15,7 @@
 
 use crate::Vec3;
 
-/// ─── Parameters ──────────────────────────────────────────────────────────
+// ─── Parameters ──────────────────────────────────────────────────────────
 
 /// Mechanical parameters for the simulation.
 #[derive(Clone, Debug)]
@@ -74,7 +74,7 @@ impl Default for CellVelocity {
     }
 }
 
-/// ─── Force computation ───────────────────────────────────────────────────
+// ─── Force computation ───────────────────────────────────────────────────
 
 /// Compute the total mechanical force on a cell at `pos` with `radius`.
 ///
