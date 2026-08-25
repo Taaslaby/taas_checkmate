@@ -139,10 +139,12 @@ cargo rustc --release --lib -p pillars -- --emit=asm
 
 ## Документация
 
+Полная карта: [resources/docs/INDEX.md](resources/docs/INDEX.md).
+
 - [PYTHON_API_RU.md](resources/docs/PYTHON_API_RU.md) — справочник Python API
+- [API_REFERENCE.md](resources/docs/API_REFERENCE.md) — Rust API
 - [T3_ARCHITECTURE.md](resources/docs/T3_ARCHITECTURE.md) — архитектура ритмов
 - [RL_API.md](resources/docs/RL_API.md) — обучение с подкреплением
-- [UNIFIED_API.md](resources/docs/UNIFIED_API.md) — единая схема pillars-API
 
 ## Лицензия
 
