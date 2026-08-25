@@ -1,4 +1,4 @@
-//! # 🔌 IO / gate compat adapters
+//! IO / gate compat adapters
 //!
 //! Min-truncating adapters moved verbatim from the deleted `taas-kernels`
 //! compat crate. The canonical implementations live in
@@ -200,3 +200,6 @@ pub fn hebbian_update(weights: &mut [f32], cos_diff: &[f32], lr: f32, decay: f32
     let n = weights.len().min(cos_diff.len());
     crate::kernels::signal::hebbian_update(&mut weights[..n], &cos_diff[..n], lr, decay, dt);
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,13 @@
+//! -------------------------------------------------------------------------
+//! Filename:    src/validate/metrics.rs
+//! Class:       benchKit
+//! Purpose:
+//! Description:
+//!
 //! Метрики расхождения симуляция ↔ эталон.
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 /// Результат сравнения двух трасс V(t).
 #[derive(Debug, Clone, Copy)]
@@ -11,7 +20,11 @@ pub struct TraceMetrics {
 
 /// Посчитать метрики двух трасс равной длины.
 pub fn compare(sim: &[f32], reference: &[f32]) -> TraceMetrics {
-    debug_assert_eq!(sim.len(), reference.len(), "compare: длины должны совпадать");
+    debug_assert_eq!(
+        sim.len(),
+        reference.len(),
+        "compare: длины должны совпадать"
+    );
     let mut max_abs = 0.0f32;
     let mut sq_sum = 0.0f64;
     for (&s, &r) in sim.iter().zip(reference.iter()) {

@@ -1,7 +1,14 @@
-//! ⚡ Hindmarsh-Rose (HR) — 3-variable bursting neuron
+//! -------------------------------------------------------------------------
+//! Filename:    hr.rs
+//! Class:       Neural zoo
+//! Purpose:     Hindmarsh-Rose (HR) — 3-variable bursting neuron
+//! Description:
 //!
 //! 100% polynomial — zero exp() calls. Pure SIMD multiplications.
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
+//!
+//! coder: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod hr` mirrors the file module
 

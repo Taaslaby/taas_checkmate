@@ -50,6 +50,40 @@ use pillars::api::neuroml::LoadedNetwork;
 const BLOCK: u32 = 256;
 const MAX_DELAY_SLOTS: usize = 32;
 
+/// STDP source: trace decay + CSR weight update.
+/// Compiled once via NVRTC, used in the CUDA graph.
+const STDP_SOURCE: &str = r#"
+// Decay trace and increment on spike: trace = trace * decay + spike
+extern "C" __global__ void trace_update_kernel(
+    float* trace, const int* spikes, float decay, int n
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    trace[i] = trace[i] * decay + (float)(spikes[i] != 0);
+}
+
+// CSR STDP: for each synapse (pre→post), update weight from traces.
+// trace[pre] = pre-synaptic trace, trace[post] = post-synaptic trace.
+extern "C" __global__ void csr_stdp_kernel(
+    float* weights, const int* row_ptr, const int* col_indices,
+    const float* trace, float lr_ltp, float lr_ltd,
+    float w_min, float w_max, int n_neurons
+) {
+    int pre = blockIdx.x;
+    if (pre >= n_neurons) return;
+    int start = row_ptr[pre];
+    int end = row_ptr[pre + 1];
+    float tp = trace[pre];
+    for (int k = start + threadIdx.x; k < end; k += blockDim.x) {
+        int post = col_indices[k];
+        if (post < 0 || post >= n_neurons) continue;
+        float tn = trace[post];
+        float w = weights[k] + lr_ltp * tp - lr_ltd * tn;
+        weights[k] = fminf(w_max, fmaxf(w_min, w));
+    }
+}
+"#;
+
 /// Auxiliary kernels compiled alongside the per-population `#[dual_neuron]`
 /// sources. All of them are model-independent (they operate on the global
 /// ring / input / CSR buffers) and are `extern "C"` (unmangled).
@@ -163,7 +197,13 @@ pub struct CompiledNetwork {
     inject_func: CUfunction,
     d_inj_idx: CUdeviceptr, // n_total * 4 (reused per inject_current call)
     d_inj_val: CUdeviceptr, // n_total * 4
+    /// STDP: per-neuron trace buffer [n_total]. Decays each step, increments on spike.
+    d_trace: CUdeviceptr,   // n_total * 4
+    /// STDP: pre-compiled trace update + STDP kernels.
+    stdp_func: CUfunction,
+    trace_decay_func: CUfunction,
     _aux_module: CUmodule,
+    _stdp_module: CUmodule,
     n_total: usize,
     n_syn: usize,
     step: usize,
@@ -221,6 +261,12 @@ impl CompiledNetwork {
         }
         let (aux_module, scatter_func) =
             compile_source_function(AUX_SOURCE, "network_scatter_kernel")?;
+        // STDP kernels (compiled before lock — same pattern as aux_module).
+        let (stdp_module, trace_decay_func, stdp_func) = {
+            let (mod_, trace_fn) = compile_source_function(STDP_SOURCE, "trace_update_kernel")?;
+            let stdp_fn = module_function(mod_, "csr_stdp_kernel")?;
+            (mod_, trace_fn, stdp_fn)
+        };
 
         // ── 2. Context + lock for the alloc/upload/load section. ──
         //     Lock BEFORE `cuCtxSetCurrent`: the context is shared process-
@@ -287,6 +333,10 @@ impl CompiledNetwork {
         let d_delays = alloc(d, n_syn * 4)?;
         let d_inj_idx = alloc(d, n_total * 4)?;
         let d_inj_val = alloc(d, n_total * 4)?;
+        // STDP trace buffer: per-neuron trace, zeroed at start.
+        let d_trace = alloc(d, n_total * 4)?;
+        let zero_trace = vec![0.0f32; n_total];
+        upload(d, d_trace, &zero_trace)?;
 
         // Zero ring + input + spikes + slot at start.
         let zero_ring = vec![0.0f32; MAX_DELAY_SLOTS * n_total];
@@ -320,7 +370,11 @@ impl CompiledNetwork {
             inject_func,
             d_inj_idx,
             d_inj_val,
+            d_trace,
+            stdp_func,
+            trace_decay_func,
             _aux_module: aux_module,
+            _stdp_module: stdp_module,
             n_total,
             n_syn,
             step: 0,
@@ -381,6 +435,16 @@ impl CompiledNetwork {
     /// Total neuron count across all populations.
     pub fn n_total(&self) -> usize {
         self.n_total
+    }
+
+    /// Number of populations.
+    pub fn n_pops(&self) -> usize {
+        self.pops.len()
+    }
+
+    /// Number of neurons in population `pop`.
+    pub fn pop_n(&self, pop: usize) -> usize {
+        self.pops.get(pop).map_or(0, |p| p.n)
     }
 
     /// Advance one simulation step via a captured CUDA graph and sync.
@@ -471,6 +535,154 @@ impl CompiledNetwork {
         let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         device_context(d)?;
         download(d, out, p.d_states)
+    }
+
+    /// Full STDP step on GPU: trace → neurons → STDP → propagate.
+    /// Everything stays on device — zero CPU downloads.
+    pub fn stdp_step(&mut self, trace_decay: f32, lr_ltp: f32, lr_ltd: f32, w_min: f32, w_max: f32) -> Result<(), String> {
+        let d = driver().as_ref().map_err(|e| e.clone())?;
+        let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        device_context(d)?;
+        let slot = self.step % MAX_DELAY_SLOTS;
+
+        // 1. Trace decay + spike increment
+        {
+            let grid = (self.n_total as u32).div_ceil(BLOCK).max(1);
+            let decay = trace_decay;
+            let n = self.n_total as c_int;
+            let mut args: [*mut c_void; 4] = [
+                &self.d_trace as *const _ as *mut c_void,
+                &self.d_spikes as *const _ as *mut c_void,
+                &decay as *const f32 as *mut c_void,
+                &n as *const c_int as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(self.trace_decay_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), args.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+
+        // 2. Copy ring slot → input buffer
+        {
+            let grid = (self.n_total as u32).div_ceil(BLOCK);
+            let mut ring = self.d_ring;
+            let mut i_in = self.d_i_in;
+            let mut cur_slot = self.d_slot;
+            let mut n = self.n_total as c_int;
+            let mut cargs: [*mut c_void; 4] = [
+                &mut ring as *mut _ as *mut c_void,
+                &mut i_in as *mut _ as *mut c_void,
+                &mut cur_slot as *mut _ as *mut c_void,
+                &mut n as *mut _ as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(self.copy_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), cargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+
+        // 3. Step each population
+        for p in &self.pops {
+            let grid = (p.n as u32).div_ceil(BLOCK);
+            let mut states = p.d_states;
+            let mut params = p.d_params;
+            let mut i_in = self.d_i_in + (p.offset * 4) as u64;
+            let mut spikes = self.d_spikes + (p.offset * 4) as u64;
+            let mut args = p.d_args;
+            let mut kargs: [*mut c_void; 5] = [
+                &mut states as *mut _ as *mut c_void,
+                &mut params as *mut _ as *mut c_void,
+                &mut i_in as *mut _ as *mut c_void,
+                &mut spikes as *mut _ as *mut c_void,
+                &mut args as *mut _ as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(p.func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), kargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+
+        // 4. STDP weight update from traces
+        {
+            let lr_l = lr_ltp;
+            let lr_d = lr_ltd;
+            let wmn = w_min;
+            let wmx = w_max;
+            let nn = self.n_total as c_int;
+            let mut args: [*mut c_void; 9] = [
+                &self.d_weights as *const _ as *mut c_void,
+                &self.d_row_ptr as *const _ as *mut c_void,
+                &self.d_col_idx as *const _ as *mut c_void,
+                &self.d_trace as *const _ as *mut c_void,
+                &lr_l as *const f32 as *mut c_void,
+                &lr_d as *const f32 as *mut c_void,
+                &wmn as *const f32 as *mut c_void,
+                &wmx as *const f32 as *mut c_void,
+                &nn as *const c_int as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(self.stdp_func, self.n_total as u32, 1, 1, 128, 1, 1, 0, std::ptr::null_mut(), args.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+
+        // 5. Zero slot + scatter spikes with plastic weights
+        {
+            let grid = (self.n_total as u32).div_ceil(BLOCK);
+            let mut ring = self.d_ring;
+            let mut cur_slot = self.d_slot;
+            let mut n = self.n_total as c_int;
+            let mut zargs: [*mut c_void; 3] = [
+                &mut ring as *mut _ as *mut c_void,
+                &mut cur_slot as *mut _ as *mut c_void,
+                &mut n as *mut _ as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(self.zero_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), zargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+        if self.n_syn > 0 {
+            let grid = (self.n_total as u32).div_ceil(BLOCK);
+            let mut rp = self.d_row_ptr;
+            let mut ci = self.d_col_idx;
+            let mut w = self.d_weights;
+            let mut dl = self.d_delays;
+            let mut sp = self.d_spikes;
+            let mut ring = self.d_ring;
+            let mut cur_slot = self.d_slot;
+            let mut n = self.n_total as c_int;
+            let mut slots = MAX_DELAY_SLOTS as c_int;
+            let mut sargs: [*mut c_void; 9] = [
+                &mut rp as *mut _ as *mut c_void,
+                &mut ci as *mut _ as *mut c_void,
+                &mut w as *mut _ as *mut c_void,
+                &mut dl as *mut _ as *mut c_void,
+                &mut sp as *mut _ as *mut c_void,
+                &mut ring as *mut _ as *mut c_void,
+                &mut cur_slot as *mut _ as *mut c_void,
+                &mut n as *mut _ as *mut c_void,
+                &mut slots as *mut _ as *mut c_void,
+            ];
+            unsafe { check_cu(d, (d.cu_launch_kernel)(self.scatter_func, grid, 1, 1, BLOCK, 1, 1, 0, std::ptr::null_mut(), sargs.as_mut_ptr(), std::ptr::null_mut())) }?;
+        }
+        self.step += 1;
+        Ok(())
+    }
+
+    /// Upload new synapse weights from CPU to GPU (for STDP/dopamine learning).
+    pub fn upload_weights(&mut self, weights: &[f32]) -> Result<(), String> {
+        if weights.len() != self.n_syn {
+            return Err(format!(
+                "upload_weights: length {} != n_syn {}",
+                weights.len(), self.n_syn
+            ));
+        }
+        let d = driver().as_ref().map_err(|e| e.clone())?;
+        let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        device_context(d)?;
+        upload(d, self.d_weights, weights)
+    }
+
+
+
+    /// Download current synapse weights from GPU to CPU.
+    pub fn download_weights(&self, out: &mut [f32]) -> Result<(), String> {
+        if out.len() != self.n_syn {
+            return Err(format!(
+                "download_weights: length {} != n_syn {}",
+                out.len(), self.n_syn
+            ));
+        }
+        let d = driver().as_ref().map_err(|e| e.clone())?;
+        let _lock = CUDA_CALL_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        device_context(d)?;
+        download(d, out, self.d_weights)
     }
 
     /// Inject external current into specific neurons of one population.

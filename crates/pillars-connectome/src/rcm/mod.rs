@@ -30,6 +30,7 @@ mod tests {
             nt_types: vec![1.0; n],
             receptor_types: vec![],
             groups: vec![],
+            phenotype: crate::data::NtPhenotype::default(),
         };
         let adj = build_adjacency(&dat);
         let root = pseudo_peripheral_node(&adj);
@@ -52,6 +53,7 @@ mod tests {
             nt_types: vec![1.0; n],
             receptor_types: vec![],
             groups: vec![],
+            phenotype: crate::data::NtPhenotype::default(),
         };
         let adj = build_adjacency(&dat);
         let perm = reverse_cuthill_mckee(&adj);
@@ -88,6 +90,7 @@ mod tests {
             nt_types: vec![1.0; n],
             receptor_types: vec![],
             groups: vec![],
+            phenotype: crate::data::NtPhenotype::default(),
         };
 
         let bw_before = bandwidth(&dat.row_ptr, &dat.col_indices);

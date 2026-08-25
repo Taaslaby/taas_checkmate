@@ -1,15 +1,15 @@
-# 🧠 taas-checkmate — Python API
+# taas-checkmate — Python API
 
 > **Русскоязычная документация Python API.**  
 > Движок: Rust + SIMD + CUDA | Обёртка: PyO3 + numpy zero-copy (без лишнего копирования памяти).
 
-### 💡 Коротко о концепции (Feynman style):
+###  Коротко о концепции (Feynman style):
 - **Нейроны** — это физические стаканы с дыркой: вода наливается (токи `I`), пока стакан не выльется через край (спайк `spikes=1`).
 - **Синхронизация через NumPy**: массивы `v`, `u`, `I`, `spikes` передаются напрямую из Python в Rust без копирования. Rust модифицирует их на лету на максимальной скорости SIMD/GPU!
 
 ---
 
-## 📦 Сборка
+## Сборка
 
 ```bash
 cd taas_checkmate
@@ -22,7 +22,7 @@ cargo build --release --features python
 # Windows: target/release/taas_checkmate.dll · Linux: libtaas_checkmate.so
 ```
 
-## 🏗 Структура под-модулей
+##  Структура под-модулей
 
 API организовано в под-модули. **Все функции также доступны на корневом уровне** для обратной совместимости:
 
@@ -51,7 +51,7 @@ from taas_checkmate.t3 import TriOscillator
 
 ---
 
-## 🧬 1. Нейроны — `taas_checkmate.neurons`
+##  1. Нейроны — `taas_checkmate.neurons`
 
 > **Скаляр или массив.** Все параметры нейронов (`tau_m`, `v_rest`, `a`, `b`,
 > `c`, `d`, …) принимают либо **float** (бродкаст на всех нейронов), либо
@@ -126,7 +126,7 @@ stdp_homeostatic(weights, traces_pre, traces_post, 0.01, 0.005, 50.0, 1.0)
 
 ---
 
-## 🔄 2. T3 осцилляторы — `taas_checkmate.t3`
+##  2. T3 осцилляторы — `taas_checkmate.t3`
 
 ### Базовое использование
 

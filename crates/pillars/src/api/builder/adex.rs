@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/adex.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для адекса
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::AdExModel;
@@ -194,7 +203,3 @@ impl ModelBuilder for AdExBuilder {
         AdExBuilder::try_build(self)
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Hodgkin-Huxley (HH) Builder
-// ═══════════════════════════════════════════════════════════════

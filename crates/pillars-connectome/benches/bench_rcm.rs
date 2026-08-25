@@ -57,6 +57,7 @@ fn make_conn(rp: &[i32], ci: &[i32], vals: &[f32], nt: &[f32]) -> ConnectomeData
         nt_types: nt.to_vec(),
         receptor_types: vec![],
         groups: vec![],
+        phenotype: pillars_connectome::NtPhenotype::default(),
     }
 }
 

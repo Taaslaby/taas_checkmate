@@ -206,6 +206,39 @@ pub enum NeuronConfig {
     /// an inhibitory GABAergic input must hyperpolarize the target for several
     /// ms (τ_syn ~ 5–10 ms) so the h-current can de-inactivate and rebound.
     HaapSynaptic { dt_ms: f32, tau_syn: f32 },
+    /// SurgeN — нейрон-трансформер с обучаемыми QKV-весами (pillars zoo
+    /// `TransformerModel`): temporal self-attention над 8 слотами памяти.
+    /// query = нормализованный вход, keys/values = обучаемые слоты w_i/v_i,
+    /// softmax-конкуренция, leaky-интегратор → спайк, STDP-подобное обучение
+    /// QKV с гомеостатической тягой к базе.
+    ///
+    /// В mono-раннере (легаси) трактуется как LIF-alpha — настоящий
+    /// трансформер живёт в [`crate::HeteroRunner`].
+    Transformer {
+        dt_ms: f32,
+        /// Затухание памяти (0..1): доля прошлого входа, остающаяся в слоте.
+        decay: f32,
+        /// Усиление записи в память (i_syn → mem).
+        gain: f32,
+        /// Обратная постоянная интегратора (1/τ_acc).
+        inv_tau_acc: f32,
+        /// Порог спайка интегратора.
+        thresh: f32,
+        /// Резкость внимания (масштаб score).
+        k_scale: f32,
+        /// Скорость обучения ключей (0 = заморожено).
+        eta_k: f32,
+        /// Скорость обучения значений (0 = заморожено).
+        eta_v: f32,
+        /// База ключей (гомеостатическая тяга / старт).
+        w_base: f32,
+        /// Размах ключей вокруг базы.
+        w_span: f32,
+        /// База значений.
+        v_base: f32,
+        /// Размах значений вокруг базы.
+        v_span: f32,
+    },
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -344,6 +377,26 @@ impl BrainConfig {
     /// half-center / CPG circuits where inhibition must persist across steps.
     pub fn haap_synaptic(dt_ms: f32, tau_syn: f32) -> NeuronConfig {
         NeuronConfig::HaapSynaptic { dt_ms, tau_syn }
+    }
+
+    /// SurgeN — нейрон-трансформер (temporal self-attention, 8 слотов
+    /// памяти). По умолчанию обучение QKV заморожено (eta=0) — чистый
+    /// temporal attention; веса стартуют на базе (равномерное внимание).
+    pub fn transformer(dt_ms: f32) -> NeuronConfig {
+        NeuronConfig::Transformer {
+            dt_ms,
+            decay: 0.95,
+            gain: 1.0,
+            inv_tau_acc: 0.5,
+            thresh: 0.35,
+            k_scale: 0.5,
+            eta_k: 0.0,
+            eta_v: 0.0,
+            w_base: 1.0,
+            w_span: 2.0,
+            v_base: 1.0,
+            v_span: 2.0,
+        }
     }
 }
 
@@ -564,6 +617,8 @@ impl BrainRunner {
             NeuronConfig::Rate { .. } => NeuronModel::Rate,
             NeuronConfig::Gco { .. } => NeuronModel::Gco,
             NeuronConfig::LifAlpha { .. } => NeuronModel::LIF,
+            // Mono-легаси: трансформер бежит как alpha-LIF (настоящий — в hetero).
+            NeuronConfig::Transformer { .. } => NeuronModel::LIF,
             NeuronConfig::Haap { .. } | NeuronConfig::HaapSynaptic { .. } => NeuronModel::Haap,
         };
 
@@ -625,6 +680,10 @@ impl BrainRunner {
             } => Some(alpha_lif_population(
                 n, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset, *tau_syn,
             )),
+            // Mono-легаси: трансформер бежит как alpha-LIF.
+            NeuronConfig::Transformer { dt_ms, .. } => {
+                Some(alpha_lif_population(n, *dt_ms, 2.2, 20.0, -52.0, -45.0, -52.0, 5.0))
+            }
             _ => None,
         };
         let alpha_delay = Vec::new();
@@ -778,6 +837,13 @@ impl BrainRunner {
                 let _ = self.run_lif_alpha(
                     n_steps, external_I, *dt_ms, *tau_ref, *tau_m, *v_rest, *v_thresh, *v_reset,
                     *tau_syn, *t_delay, true,
+                );
+            }
+            // Mono-легаси: трансформер бежит как alpha-LIF (как kailo мапил
+            // BrainModel::Transformer до появления настоящего движка).
+            NeuronConfig::Transformer { dt_ms, .. } => {
+                let _ = self.run_lif_alpha(
+                    n_steps, external_I, *dt_ms, 2.2, 20.0, -52.0, -45.0, -52.0, 5.0, 1.8, true,
                 );
             }
             NeuronConfig::Izh {
@@ -1145,7 +1211,9 @@ impl BrainRunner {
         let model = match &self.config {
             NeuronConfig::Lif { .. }
             | NeuronConfig::LifSynaptic { .. }
-            | NeuronConfig::LifAlpha { .. } => NeuronModel::LIF,
+            | NeuronConfig::LifAlpha { .. }
+            // Mono-легаси: трансформер бежит как alpha-LIF.
+            | NeuronConfig::Transformer { .. } => NeuronModel::LIF,
             NeuronConfig::Hh { .. } | NeuronConfig::HhSynaptic { .. } => NeuronModel::Hh,
             NeuronConfig::Izh { .. }
             | NeuronConfig::IzhSynaptic { .. }
@@ -1243,6 +1311,11 @@ impl BrainRunner {
     ) {
         let n_neurons = self.connectome.row_ptr.len() - 1;
 
+        // Current-путь требует веса со знаком пресинапса (см.
+        // signed_connectome); строим один раз ДО взятия work/ext (иначе
+        // immutable-заём конфликтует с mutable-займами буферов ниже).
+        let signed = self.signed_connectome();
+
         // Reuse persistent buffers (was allocated every run() call).
         let work = &mut self.work_buf;
         let ext = &mut self.ext_buf;
@@ -1286,8 +1359,8 @@ impl BrainRunner {
             }
         } else {
             // Instant-current path — Brain (api::Network) does the routing.
-            let mut brain =
-                crate::Brain::<pillars::zoo::LIFModel>::from_connectome(&self.connectome);
+            // Веса со знаком пресинапса (см. signed_connectome выше).
+            let mut brain = crate::Brain::<pillars::zoo::LIFModel>::from_connectome(&signed);
             brain.configure(|p| {
                 for i in 0..n_neurons {
                     p.param_slice_mut(0)[i] = dt_ms;
@@ -1336,6 +1409,32 @@ impl BrainRunner {
     /// input in mV (already × wScale=0.275), matching the baked .taas.
     /// Build the alpha-LIF SIMD population from config params.
     ///
+    /// Знак пресинапса из `nt_types` (положительный по умолчанию).
+    fn nt_sign(&self, pre: usize) -> f32 {
+        if self.connectome.nt_types.get(pre).copied().unwrap_or(1.0) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        }
+    }
+
+    /// Канон-путь (`Brain`/`api::Network`) разносит `values` как есть и не
+    /// знает про `nt_types`; legacy-propagation умножает вес на знак
+    /// пресинапса. Для current-based путей (LIF, Izh, Rate) возвращаем
+    /// connectome с уже знаковыми весами — иначе тормозной синапс
+    /// становится возбуждающим (см. parity/regression-тесты со знаком).
+    fn signed_connectome(&self) -> ConnectomeData {
+        let n_neurons = self.connectome.row_ptr.len() - 1;
+        let mut c = self.connectome.clone();
+        for pre in 0..n_neurons {
+            let sign = self.nt_sign(pre);
+            for e in c.row_ptr[pre] as usize..c.row_ptr[pre + 1] as usize {
+                c.values[e] *= sign;
+            }
+        }
+        c
+    }
+
     /// The population owns the per-neuron `v`, `g`, `refr_cnt` state and the
     /// scalar params (dt, time_factor, v_rest/thresh/reset, refr_steps,
     /// syn_decay). The delay ring buffer + CSR scatter stay in the runner.
@@ -1394,6 +1493,10 @@ impl BrainRunner {
         let ci = self.csr_graph.col_indices();
         let vals = &self.connectome.values;
 
+        // Знаки пресинапсов (см. nt_sign) — один массив на весь вызов,
+        // чтобы scatter не брал immutable-займ self внутри mutable-займа pop.
+        let signs: Vec<f32> = (0..n).map(|i| self.nt_sign(i)).collect();
+
         let pop = self.alpha_pop.as_mut().expect("alpha_pop must be built");
         let mut spikes = vec![0i32; n];
         let mut total_spikes = 0usize;
@@ -1422,17 +1525,21 @@ impl BrainRunner {
                 &mut spikes,
             );
 
-            // 3. Zero the slot, scatter the recurrent input of the *previous*
+            // 3. Zero the slot, scatter the live cells of the *previous*
             //    step's firing neurons into it, then advance the ring pointer.
             {
+                // Знак торможения считаем заранее (до займа pop/slot): alpha-pop
+                // не видит nt_types, и без явного знака тормозной пресинапс
+                // возбуждает пост-нейрон (см. nt_sign и регрессионный тест).
                 let slot = &mut self.alpha_delay[read_pos * n..(read_pos + 1) * n];
                 slot.fill(0.0);
                 for &pre in &self.alpha_fired {
+                    let sign = signs[pre];
                     let start = rp[pre] as usize;
                     let end = rp[pre + 1] as usize;
                     for k in start..end {
                         let post = ci[k] as usize;
-                        slot[post] += vals[k];
+                        slot[post] += vals[k] * sign;
                     }
                 }
             }
@@ -1525,6 +1632,9 @@ impl BrainRunner {
     ) {
         let n_neurons = self.connectome.row_ptr.len() - 1;
 
+        // Знаковые веса для current-пути (см. signed_connectome) — до займов.
+        let signed = self.signed_connectome();
+
         // Reuse persistent buffers (was allocated every run() call).
         let work = &mut self.work_buf;
         let ext = &mut self.ext_buf;
@@ -1570,8 +1680,9 @@ impl BrainRunner {
                 self.state.refractory[i] = refr[i];
             }
         } else {
+            // Веса со знаком пресинапса — см. signed_connectome выше.
             let mut brain =
-                crate::Brain::<pillars::zoo::IzhikevichModel>::from_connectome(&self.connectome);
+                crate::Brain::<pillars::zoo::IzhikevichModel>::from_connectome(&signed);
             brain.configure(|p| {
                 for i in 0..n_neurons {
                     p.param_slice_mut(0)[i] = dt_ms;
@@ -1931,56 +2042,42 @@ impl BrainRunner {
     }
 
     fn run_rate(&mut self, n_steps: usize, external_I: &[f32], dt_ms: f32, tau: f32) {
-        let n = self.n_neurons;
         let n_neurons = self.connectome.row_ptr.len() - 1;
-        let dt = dt_ms / 1000.0;
-        let decay = (-dt / tau.max(1e-6)).exp();
-        let inv_decay = 1.0 - decay;
 
+        // Канон: Brain<RateModel> через api::Network. RateModel в зоопарке —
+        // ровно legacy `sim_rate` (`r ← r·exp(−dt/τ) + clamp(I,0,1)·(1−exp(−dt/τ))`,
+        // dt в секундах, спайк при r > 0.5), так что численная динамика та же;
+        // распространение — общий Network::step (delay 0 = доставка на следующем
+        // шаге, как legacy queue). BrainState синхронизируется после прогона.
+        //
+        // Знак торможения: `Brain`/`api::Network` разносит веса как есть и не
+        // знает про `nt_types` — legacy propagation умножает вес на знак
+        // пресинапса. Подаём connectome со знаковыми весами (см. nt_sign).
+        let mut brain =
+            crate::Brain::<pillars::zoo::RateModel>::from_connectome(&self.signed_connectome());
+        brain.configure(|p| {
+            for i in 0..n_neurons {
+                p.param_slice_mut(0)[i] = dt_ms / 1000.0; // seconds
+                p.param_slice_mut(1)[i] = 1.0 / tau.max(1e-6);
+                p.state_slice_mut(0)[i] = self.state.v[i];
+            }
+        });
+        let work = &mut self.work_buf;
+        let ext = &mut self.ext_buf;
+        let idx = &self.all_indices;
         for step in 0..n_steps {
-            // 1. Set I = external + Poisson (fresh each step — no stale tail)
-            self.state.I_buf[..n].fill(0.0);
-            for (i, &ext) in external_I.iter().enumerate().take(n) {
-                self.state.I_buf[i] += ext;
-            }
-            self.inject_poisson(dt_ms);
-
-            // 2. Build spike proxy for CSR: v > 0.5 → "spike"
-            self.state.queue.drain();
+            work.fill(0.0);
+            inject_poisson_into(&self.poisson_groups, &mut self.rng, work, dt_ms);
             for i in 0..n_neurons {
-                if i < self.state.v.len() && self.state.v[i] > 0.5 {
-                    self.state.spikes[i] = 1;
-                    self.state.queue.push(i as u32);
-                } else {
-                    self.state.spikes[i] = 0;
-                }
+                ext[i] = external_I.get(i).copied().unwrap_or(0.0) + work[i];
             }
-
-            // 3. CSR propagate
-            csr_propagate_from_queue_with_topology(
-                self.csr_graph.as_topology(),
-                &self.connectome.values,
-                &self.connectome.nt_types,
-                &mut self.state.queue,
-                &mut self.state.I_buf,
-                1.0,
-            );
-
-            // 4. Exponential Euler (external already in I_buf — do not add again)
-            for i in 0..n {
-                let input = self.state.I_buf[i].clamp(0.0, 1.0);
-                self.state.v[i] = self.state.v[i] * decay + input * inv_decay;
-            }
-
-            // 5. Record "spikes"
-            for i in 0..n_neurons {
-                if i < self.state.v.len() && self.state.v[i] > 0.5 {
-                    let idx = step * n + i;
-                    if idx < self.spike_buffer.len() {
-                        self.spike_buffer[idx] = 1;
-                    }
-                }
-            }
+            brain.inject(idx, ext);
+            brain.step();
+            record_spikes(brain.spikes(), n_neurons, &mut self.spike_buffer, step);
+        }
+        let v = brain.state(0);
+        for i in 0..n_neurons {
+            self.state.v[i] = v[i];
         }
 
         self.step_counter += n_steps;
@@ -2156,6 +2253,85 @@ mod tests {
         let spikes = runner.run(50, &ext).to_vec();
 
         assert_eq!(spikes.len(), 50 * 4);
+    }
+
+    /// Цепочка 0→1 (вес 50). `nt0` — знак пресинапса 0.
+    /// row_ptr [0,1,1]: нейрон 1 без выходов (валидный CSR).
+    fn chain_neuron(nt0: f32) -> ConnectomeData {
+        ConnectomeData::new(
+            vec![0i32, 1, 1],
+            vec![1],
+            vec![50.0f32],
+            vec![nt0, 1.0],
+            vec![],
+        )
+    }
+
+    /// Регресс-лок честного знака: возбуждающий вход спайкает мишень,
+    /// тормозной (nt<0) — обязан молчать (иначе канон стал возбуждать).
+    #[test]
+    fn test_brain_runner_lif_inhibitory_sign() {
+        let mut exc = BrainRunner::new(chain_neuron(1.0), BrainConfig::lif(0.5)).unwrap();
+        let sp = exc.run(200, &vec![30.0f32, 0.0]).to_vec();
+        let target: i32 = sp.iter().skip(1).step_by(2).copied().sum();
+        assert!(target > 0, "возбуждающий вход должен спайкать мишень");
+
+        let mut inh = BrainRunner::new(chain_neuron(-1.0), BrainConfig::lif(0.5)).unwrap();
+        let sp2 = inh.run(200, &vec![30.0f32, 0.0]).to_vec();
+        let target2: i32 = sp2.iter().skip(1).step_by(2).copied().sum();
+        assert_eq!(target2, 0, "тормозной вход не должен возбуждать мишень");
+    }
+
+    /// То же для Izhikevich (current-путь).
+    #[test]
+    fn test_brain_runner_izh_inhibitory_sign() {
+        let config = BrainConfig::izh(0.5);
+        let mut exc = BrainRunner::new(chain_neuron(1.0), config.clone()).unwrap();
+        let sp = exc.run(200, &vec![20.0f32, 0.0]).to_vec();
+        let target: i32 = sp.iter().skip(1).step_by(2).copied().sum();
+        assert!(target > 0, "возбуждающий вход должен спайкать мишень (izh)");
+
+        let mut inh = BrainRunner::new(chain_neuron(-1.0), config).unwrap();
+        let sp2 = inh.run(200, &vec![20.0f32, 0.0]).to_vec();
+        let target2: i32 = sp2.iter().skip(1).step_by(2).copied().sum();
+        assert_eq!(target2, 0, "тормозной пре не должен возбуждать мишень (izh)");
+    }
+
+    /// То же для LifAlpha (аксональная задержка + alpha-pop, scatter со знаком).
+    #[test]
+    fn test_brain_runner_lif_alpha_inhibitory_sign() {
+        let config = BrainConfig::lif_alpha(0.5);
+        let mut exc = BrainRunner::new(chain_neuron(1.0), config.clone()).unwrap();
+        let sp = exc.run(200, &vec![30.0f32, 0.0]).to_vec();
+        let target: i32 = sp.iter().skip(1).step_by(2).copied().sum();
+        assert!(target > 0, "возбуждающий вход должен спайкать мишень (alpha)");
+
+        let mut inh = BrainRunner::new(chain_neuron(-1.0), config).unwrap();
+        let sp2 = inh.run(200, &vec![30.0f32, 0.0]).to_vec();
+        let target2: i32 = sp2.iter().skip(1).step_by(2).copied().sum();
+        assert_eq!(target2, 0, "тормозной прег не должен возбуждать мишень (alpha)");
+    }
+
+    /// Parity-лок: Brain<RateModel>-канон воспроизводит счётчики legacy
+    /// `run_rate` (N-кольцо 4 нейрона, tau=0.05 c, вход 0.55, 400 шагов):
+    /// числа [161, 161, 161, 1] сняты с legacy-реализации ДО перевода на канон.
+    #[test]
+    fn test_brain_runner_rate_parity_counts() {
+        let conn = make_test_connectome();
+        let mut runner = BrainRunner::new(conn, BrainConfig::rate(0.5, 0.05)).unwrap();
+        let ext = vec![0.55f32; runner.n_neurons()];
+        let spikes = runner.run(400, &ext).to_vec();
+        let mut per = [0i32; 4];
+        for s in 0..400 {
+            for i in 0..4 {
+                per[i] += spikes[s * 4 + i];
+            }
+        }
+        assert_eq!(
+            per,
+            [161, 161, 161, 1],
+            "Rate-канон обязан сохранять legacy-счётчики (нейрон 3 почти молчит из-за тормозного пресинапса)"
+        );
     }
 
     #[test]

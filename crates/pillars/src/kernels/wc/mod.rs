@@ -129,3 +129,6 @@ fn sigmoid_simd(x: f32x8, beta: f32x8) -> f32x8 {
     let neg = (-x * beta).max(f32x8::splat(-10.0)).min(f32x8::splat(10.0));
     one / (one + fast_exp_poly_simd(neg))
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,10 +1,10 @@
-# 🧠 RL + Dopamine-STDP API Reference
+#  RL + Dopamine-STDP API Reference
 
 Спайковый Actor-Critic агент с 3-factor dopamine-modulated STDP пластичностью. Основан на Izhikevich (2007) и Sutton & Barto (2018).
 
 ---
 
-## 📦 `ActorCriticAgent` — RL Agent
+## `ActorCriticAgent` — RL Agent
 
 ```
 State → PoissonEncoder → InputSpikes → Hidden Izhikevich → Output LIF → Softmax → Action

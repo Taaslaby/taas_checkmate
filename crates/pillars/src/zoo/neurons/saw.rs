@@ -1,13 +1,19 @@
-//! SAW (Spike-Adaptive-Width / ψ-wave) — Izhikevich-like neuron.
+//! -------------------------------------------------------------------------
+//! Filename:    saw.rs
+//! Class:       Neural zoo
+//! Purpose:     SAW (Spike-Adaptive-Width) — Izhikevich-like neuron.
+//! Description:
 //!
-//! Izhikevich-style quadratic neuron with ψ-wave trace dynamics.
+//! Izhikevich-style quadratic neuron with polar-wave trace dynamics.
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
+//!
+//! coder: Anton Atlasov
+//! -------------------------------
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod saw` mirrors the file module
 
 use pillars_macros::dual_neuron;
 
-/// SAW — Izhikevich-like neuron with ψ-wave trace.
 /// State: v (membrane), u (recovery), tr (trace), refr (refractory counter)
 #[dual_neuron]
 pub mod saw {
@@ -90,7 +96,7 @@ pub mod saw {
             state.v = is_refr.then(state.v).else_(v_final);
             state.u = u_new + spike.cond().then(S::splat(8.0)).else_(zero);
 
-            // ψ-wave trace (frozen during refractory — legacy parity)
+            // polar-wave trace (frozen during refractory — legacy parity)
             // Legacy: on spike tr = tr·td + (1 − tr); else tr·(1 − td)
             let tr_inc = state.tr * params.trace_decay + (one - state.tr);
             let tr_dec = state.tr * (one - params.trace_decay);

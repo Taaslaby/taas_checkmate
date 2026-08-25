@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/vsn.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для vsn
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::VSNModel;

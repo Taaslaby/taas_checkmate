@@ -1,11 +1,11 @@
-//! # SpikeGrad bridge — learnable spike-to-drive projection with BPTT through T3.
+//! SpikeGrad bridge — learnable spike-to-drive projection with BPTT through T3.
 //!
 //! The bridge solves the core problem of spike-based computation:
 //! **how to backpropagate through discrete spikes**.
 //!
-//! ## Architecture
+//! Architecture
 //!
-//! ```text
+//!
 //! spikes[t] (T × spike_dim)
 //!     │
 //!     ▼  W × spikes[t] + b  (linear projection)
@@ -19,7 +19,7 @@
 //!     │
 //!     ▼  decoder → behavior
 //! loss
-//! ```
+//!
 //!
 //! Gradient flows back through ALL layers via BPTT:
 //! `dLoss/dW = Σ_t dLoss/d(drives[t]) · d(drives[t])/dW`
@@ -33,11 +33,11 @@
 //! the gradient w.r.t. the bridge **input**. This lets the gradient continue
 //! upstream into a trainable spike source (see [`crate::spike_source`]):
 //!
-//! ```text
+//!
 //! features → TrainableSpikeSource(w,v) → spikes → SpikeGradBridge(W,b)
 //!      ▲                                                        │
 //!      └──────────── dL/dw, dL/dv ◀──── dL/dspikes ◀── BPTT ───┘
-//! ```
+//!
 //!
 //! The whole chain is differentiable because the source is smooth
 //! (softmax attention + leaky integrator) and T3 physics is smooth.

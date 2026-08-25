@@ -1,12 +1,20 @@
-//! Phase coherence & spike entropy — the heart of Chaos/Pattern comparison.
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/coherence.rs
+//! Class:       t3
+//! Purpose:     Phase coherence & spike entropy — the heart of Chaos/Pattern comparison.
+//! Description:
+//!
+//! Compute phase coherence R ∈ [0, 1] from Kuramoto oscillator phases.
+//!
+//! R = |Σ exp(i·θⱼ)| / N
+//! where θⱼ is the phase of oscillator j.
+//!
+//! High R → oscillators are synchronised (signal).
+//! Low R → oscillators are desynchronised (noise/chaos).
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
-/// Compute phase coherence R ∈ [0, 1] from Kuramoto oscillator phases.
-///
-/// R = |Σ exp(i·θⱼ)| / N
-/// where θⱼ is the phase of oscillator j.
-///
-/// High R → oscillators are synchronised (signal).
-/// Low R → oscillators are desynchronised (noise/chaos).
 pub fn phase_coherence(phases: &[f32]) -> f32 {
     let n = phases.len() as f32;
     if n == 0.0 {

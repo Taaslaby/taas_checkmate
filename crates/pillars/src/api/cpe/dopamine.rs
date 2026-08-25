@@ -1,4 +1,13 @@
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/dopamine.rs
+//! Class:       t3
+//! Purpose:
+//! Description:
+//!
 //! Dopamine gate — δ = reward + β · [(R_pat − α·|H_pat−H₀|) − (R_chaos − α·|H_chaos−H₀|)]
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::config::CpeConfig;
 

@@ -1030,6 +1030,58 @@ impl GpuContext {
         )
     }
 
+    /// Run one LIF + STDP step on GPU: LIF → count → STDP → CSR plastic.
+    pub fn connectome_stdp_lif_step(
+        &self,
+        lr_ltp: f32,
+        lr_ltd: f32,
+        w_min: f32,
+        w_max: f32,
+        d_total_spikes: Option<*mut c_int>,
+    ) -> Result<(), String> {
+        let d_spike_ptr = d_total_spikes.unwrap_or(core::ptr::null_mut());
+        self.lif_step_async()?;
+        ok_or(unsafe { gpu_count_spikes_async(self.ctx, d_spike_ptr) }, "count_spikes")?;
+        ok_or(unsafe { gpu_connectome_stdp_async(self.ctx, lr_ltp, lr_ltd, w_min, w_max) }, "connectome_stdp")?;
+        ok_or(unsafe { gpu_connectome_csr_plastic_async(self.ctx) }, "connectome_csr_plastic")
+    }
+
+    /// Run one HH + STDP step on GPU: HH → count → STDP → CSR plastic.
+    pub fn connectome_stdp_hh_step(
+        &self,
+        dt: f32,
+        tau_ref: f32,
+        lr_ltp: f32,
+        lr_ltd: f32,
+        w_min: f32,
+        w_max: f32,
+        d_total_spikes: Option<*mut c_int>,
+    ) -> Result<(), String> {
+        let d_spike_ptr = d_total_spikes.unwrap_or(core::ptr::null_mut());
+        self.hh_step_async(dt, tau_ref)?;
+        ok_or(unsafe { gpu_count_spikes_async(self.ctx, d_spike_ptr) }, "count_spikes")?;
+        ok_or(unsafe { gpu_connectome_stdp_async(self.ctx, lr_ltp, lr_ltd, w_min, w_max) }, "connectome_stdp")?;
+        ok_or(unsafe { gpu_connectome_csr_plastic_async(self.ctx) }, "connectome_csr_plastic")
+    }
+
+    /// Run one GCO (rate) + STDP step on GPU: GCO → count → STDP → CSR plastic.
+    pub fn connectome_stdp_gco_step(
+        &self,
+        dt: f32,
+        tau: f32,
+        lr_ltp: f32,
+        lr_ltd: f32,
+        w_min: f32,
+        w_max: f32,
+        d_total_spikes: Option<*mut c_int>,
+    ) -> Result<(), String> {
+        let d_spike_ptr = d_total_spikes.unwrap_or(core::ptr::null_mut());
+        self.gco_step_async(dt, tau)?;
+        ok_or(unsafe { gpu_count_spikes_async(self.ctx, d_spike_ptr) }, "count_spikes")?;
+        ok_or(unsafe { gpu_connectome_stdp_async(self.ctx, lr_ltp, lr_ltd, w_min, w_max) }, "connectome_stdp")?;
+        ok_or(unsafe { gpu_connectome_csr_plastic_async(self.ctx) }, "connectome_csr_plastic")
+    }
+
     /// Upload LIF parameters to d_lif_params on GPU (sync).
     ///
     /// Packs as: [dt, tau_m[0..n], v_rest[0..n], v_thresh[0..n], v_reset[0..n]]

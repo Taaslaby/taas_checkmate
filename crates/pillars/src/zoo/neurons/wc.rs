@@ -1,4 +1,8 @@
-//! Wilson-Cowan (WC) — excitatory-inhibitory rate model
+//! -------------------------------------------------------------------------
+//! Filename:    wc.rs
+//! Class:       Neural zoo
+//! Purpose:     Wilson-Cowan (WC) — excitatory-inhibitory rate model
+//! Description:
 //!
 //! Population-level rate dynamics: E (excitatory) and I (inhibitory) populations.
 //! No spikes — continuous rate output via sigmoid transfer function.
@@ -12,6 +16,9 @@
 //! ```
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
+//!
+//! coder: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod wc` mirrors the file module
 

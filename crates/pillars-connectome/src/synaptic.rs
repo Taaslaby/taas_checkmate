@@ -39,9 +39,11 @@ impl<M: Model + 'static + Send + Sync> SynapticBrain<M> {
     /// the zoo point models — LIF, Izhikevich, HH, …).
     pub fn from_connectome(conn: &ConnectomeData, dt: f32) -> Self {
         // Fallback: if no per-synapse receptor types were built yet, derive
-        // them from the per-neuron NT signs (nt > 0 → AMPA, nt ≤ 0 → GABA_A).
+        // them from the per-neuron NT signs через `conn.phenotype` — так
+        // свитч «Mammal/Insect» (GluCl-глутамат у насекомых) работает и
+        // для conductance-пути без явного построения receptor_types.
         let receptor_types = if conn.receptor_types.is_empty() {
-            build_receptor_types_from_csr(&conn.row_ptr, conn.n_synapses, &conn.nt_types)
+            build_receptor_types_from_csr(&conn.row_ptr, conn.n_synapses, &conn.nt_types, conn.phenotype)
         } else {
             conn.receptor_types.clone()
         };

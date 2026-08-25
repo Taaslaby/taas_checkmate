@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/universal.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для универсалка
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{positive, validate_specs, BuildError, ModelBuilder};
 use crate::core::population::NeuralPopulation;
@@ -94,7 +103,3 @@ impl<M: Model> ModelBuilder for UniversalBuilder<M> {
         UniversalBuilder::try_build(self)
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  VSN Builder
-// ═══════════════════════════════════════════════════════════════

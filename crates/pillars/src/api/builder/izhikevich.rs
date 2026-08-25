@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/izhekevich.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для ижекевича
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::IzhikevichModel;
@@ -185,10 +194,6 @@ impl IzhikevichBuilder {
         Ok(self.build_unchecked())
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  LIF Builder
-// ═══════════════════════════════════════════════════════════════
 
 impl ModelBuilder for IzhikevichBuilder {
     type Model = IzhikevichModel;

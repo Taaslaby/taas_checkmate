@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/hh.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для ходжина
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::q10_from_celsius_s;
@@ -251,7 +260,3 @@ impl ModelBuilder for HHBuilder {
         HHBuilder::try_build(self)
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  HAAP Builder
-// ═══════════════════════════════════════════════════════════════

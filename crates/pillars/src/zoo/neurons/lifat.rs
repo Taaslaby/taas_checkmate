@@ -1,4 +1,8 @@
-//! LIF-AT (LIF with Adaptive Threshold) — GLIF2-equivalent.
+//! -------------------------------------------------------------------------
+//! Filename:    lifat.rs
+//! Class:       Neural zoo
+//! Purpose:     LIF-AT (LIF with Adaptive Threshold) — GLIF2-equivalent.
+//! Description:
 //!
 //! Extends LIF with a dynamic threshold offset `θ(t)` (spike-frequency
 //! adaptation, Allen Institute GLIF2 family):
@@ -15,6 +19,9 @@
 //! (θ within 1e-3 rel, spike counts equal).
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
+//!
+//! coder: Anton Atlasov
+//! -------------------------------
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod lifat` mirrors the file module
 

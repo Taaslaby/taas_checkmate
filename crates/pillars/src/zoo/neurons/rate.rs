@@ -1,4 +1,8 @@
-//! Rate — simple firing-rate neuron (exponential Euler toward clamped input).
+//! -------------------------------------------------------------------------
+//! Filename:    rate.rs
+//! Class:       Neural zoo
+//! Purpose:     Rate — simple firing-rate neuron (exponential Euler toward clamped input)
+//! Description:
 //!
 //! The rate model the legacy connectome `sim_rate` used:
 //! `r ← r·exp(−dt/τ) + clamp(I, 0, 1)·(1 − exp(−dt/τ))`.
@@ -6,6 +10,9 @@
 //! `dt` is in **seconds** (the connectome rate config passes `dt_ms / 1000`).
 //! The model emits a "spike" (mask 1) whenever the rate crosses `0.5`, so it
 //! composes with the pillars spike-routing engine (`Brain`/`Network`).
+//!
+//! coder: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 use pillars_macros::dual_neuron;
 

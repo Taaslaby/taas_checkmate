@@ -1,4 +1,4 @@
-//! # 🧠 LLM Embedding-Driven Spiking Cortex (Hybrid SNN + LLM Embeddings)
+//! # LLM Embedding-Driven Spiking Cortex (Hybrid SNN + LLM Embeddings)
 //!
 //! Demonstrates bridging **768-dimensional dense LLM/CLIP embeddings**
 //! directly into a **1,024-neuron Spiking Neural Network (SNN)** (`NeuralPopulation<VSNModel>`):
@@ -17,7 +17,6 @@ use std::time::Instant;
 const EMBEDDING_DIM: usize = 768; // Standard 768-dim LLM/BERT/CLIP embedding size
 const CORTEX_NEURONS: usize = 3072; // 3,072 VSN SIMD Spiking Neurons (4x oversampling ratio)
 
-
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let mut dot = 0.0f32;
     let mut norm_a = 0.0f32;
@@ -27,13 +26,19 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         norm_a += a[i] * a[i];
         norm_b += b[i] * b[i];
     }
-    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot / (norm_a.sqrt() * norm_b.sqrt()) }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a.sqrt() * norm_b.sqrt())
+    }
 }
 
 fn normalize_vector(v: &mut [f32]) {
     let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
-        for x in v.iter_mut() { *x /= norm; }
+        for x in v.iter_mut() {
+            *x /= norm;
+        }
     }
 }
 
@@ -91,8 +96,14 @@ fn main() {
 
     // 4. Test Encoding & Spiking Dynamics for all 3 Concepts
     let test_concepts = vec![
-        ("EMB_PREDATOR ('Dangerous Fast Hunter')", emb_predator.clone()),
-        ("EMB_FOOD     ('Sweet Nutritious Resource')", emb_food.clone()),
+        (
+            "EMB_PREDATOR ('Dangerous Fast Hunter')",
+            emb_predator.clone(),
+        ),
+        (
+            "EMB_FOOD     ('Sweet Nutritious Resource')",
+            emb_food.clone(),
+        ),
         ("EMB_SHELTER  ('Safe Burrow Refuge')", emb_shelter.clone()),
     ];
 
@@ -140,7 +151,6 @@ fn main() {
             .surrogate_gain(10.0)
             .build();
 
-
         // A. Encode 768-dim embedding into 1,024 input currents: I_i = G_i · E + b_i
         let mut sensory_inputs = vec![0.0f32; CORTEX_NEURONS];
         for i in 0..CORTEX_NEURONS {
@@ -150,7 +160,6 @@ fn main() {
             }
             sensory_inputs[i] = (dot * 1400.0 + biases[i]).clamp(-100.0, 100.0);
         }
-
 
         // B. Run 200 SIMD steps of spiking simulation
         let mut spikes = vec![0i32; CORTEX_NEURONS];
@@ -189,10 +198,24 @@ fn main() {
         println!("  ─────────────────────────────────────────────────────────────────");
         println!("  • Input Vector Length          : 768 Dimensions");
         println!("  • SNN Population Size         : 1,024 VSN Spiking Neurons");
-        println!("  • 200 SIMD Steps Time          : {:.2?} ({:.2} µs/step)", elapsed_sim, us_per_step);
+        println!(
+            "  • 200 SIMD Steps Time          : {:.2?} ({:.2} µs/step)",
+            elapsed_sim, us_per_step
+        );
         println!("  • Total Spikes Fired          : {} Spikes", total_spikes);
-        println!("  • Decoded Vector Fidelity Match: {:.4} ({:.1}% Accuracy)", sim_score, sim_score * 100.0);
-        println!("  • Status                       : {}\n", if sim_score > 0.80 { "✅ SUCCESS (Zero Semantic Information Loss)" } else { "❌ FAIL" });
+        println!(
+            "  • Decoded Vector Fidelity Match: {:.4} ({:.1}% Accuracy)",
+            sim_score,
+            sim_score * 100.0
+        );
+        println!(
+            "  • Status                       : {}\n",
+            if sim_score > 0.80 {
+                "✅ SUCCESS (Zero Semantic Information Loss)"
+            } else {
+                "❌ FAIL"
+            }
+        );
     }
 
     let avg_accuracy = (total_accuracy_sum / 3.0) * 100.0;
@@ -205,4 +228,3 @@ fn main() {
     println!("  • Average Vector Match Accuracy: {:.1}%", avg_accuracy);
     println!("  • Spiking SIMD Latency         : < 1.50 µs per step");
 }
-

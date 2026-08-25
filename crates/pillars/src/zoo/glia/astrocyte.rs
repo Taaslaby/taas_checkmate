@@ -1,11 +1,18 @@
-//! 🧫 Astrocyte — Hidden-State Glial Modulation (Shen et al. 2024)
+//! -------------------------------------------------------------------------
+//! Filename:    astrocyte.rs
+//! Class:       Neural body
+//! Purpose:     Astrocyte — Hidden-State Glial Modulation (Shen et al. 2024)
+//! Description:
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
 //!
-//! # Principles
-//! - **No spikes**: glia, not a neuron → `#[no_spike]`
-//! - **Ca²⁺ wave**: dCa/dt = (0.1 − Ca)·inv_tau_ca + α_ca·I
-//! - **Nernst correction**: E_K_eff = E_K + 26.7·ln(K) (K ≥ 0.5)
+//!   Principles
+//! - No spikes: glia, not a neuron → `#[no_spike]`
+//! - Ca²⁺ wave: dCa/dt = (0.1 − Ca)·inv_tau_ca + α_ca·I
+//! - Nernst correction: E_K_eff = E_K + 26.7·ln(K) (K ≥ 0.5)
+//!
+//! Author/Concept: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 use crate::core::compute::{ComputeNeuron, StepContext};
 use crate::core::context::SimdContext;

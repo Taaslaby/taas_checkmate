@@ -227,6 +227,85 @@ mod tests {
         assert!(reader.find_component("nlms_weights").is_ok());
     }
 
+    /// Полный цикл: HeteroRunner → снапшот → .taas-байты → чтение → restore
+    /// → продолжение симуляции идентично непрерывному прогону.
+    #[test]
+    fn test_hetero_snapshot_roundtrip() {
+        use pillars_connectome::{BrainConfig, ConnectomeData, HeteroGroup, HeteroRunner};
+        let conn = ConnectomeData::new(
+            vec![0i32, 1, 2, 2, 2],
+            vec![1, 2],
+            vec![40.0f32, 40.0],
+            vec![1.0, 1.0, 1.0, 1.0],
+            vec![],
+        );
+        let groups = vec![
+            HeteroGroup {
+                config: BrainConfig::lif_alpha(0.5),
+                indices: vec![0, 2],
+                drive_scale: 1.0,
+                rec_scale: 1.0,
+            },
+            HeteroGroup {
+                config: BrainConfig::izh(0.5),
+                indices: vec![1],
+                drive_scale: 1.0,
+                rec_scale: 1.0,
+            },
+            HeteroGroup {
+                config: BrainConfig::rate(0.5, 0.001),
+                indices: vec![3],
+                drive_scale: 1.0,
+                rec_scale: 1.0,
+            },
+        ];
+        let ext = vec![30.0f32, 0.0, 0.0, 1.0];
+
+        // Контроль: непрерывный прогон 300 шагов.
+        let mut a = HeteroRunner::new(conn.clone(), groups.clone(), 0.5).unwrap();
+        let full = a.run(300, &ext).to_vec();
+
+        // Через файл: 200 шагов → снапшот в .taas → restore на новом runner.
+        let mut b = HeteroRunner::new(conn, groups.clone(), 0.5).unwrap();
+        let first = b.run(200, &ext).to_vec();
+        let snap = b.snapshot();
+
+        let mut writer = TaasWriter::new();
+        save_hetero_snapshot(&snap, &mut writer);
+        let bytes = writer.to_bytes().unwrap();
+        let reader = TaasReader::from_bytes(&bytes).unwrap();
+        let loaded = load_hetero_snapshot(&reader).unwrap();
+        assert_eq!(loaded.step_counter, 200);
+        assert_eq!(loaded.connectome.values, snap.connectome.values);
+        assert_eq!(loaded.groups.len(), snap.groups.len());
+
+        let mut b2 = HeteroRunner::new(
+            ConnectomeData::new(
+                vec![0i32, 1, 2, 2, 2],
+                vec![1, 2],
+                vec![40.0f32, 40.0],
+                vec![1.0, 1.0, 1.0, 1.0],
+                vec![],
+            ),
+            groups.clone(),
+            0.5,
+        )
+        .unwrap();
+        b2.restore(&loaded).unwrap();
+        let second = b2.run(100, &ext).to_vec();
+
+        assert_eq!(first.len() + second.len(), full.len());
+        for i in 0..first.len() {
+            assert_eq!(first[i], full[i], "first segment mismatch at {i}");
+        }
+        for (j, &s) in second.iter().enumerate() {
+            assert_eq!(
+                s, full[200 * 4 + j],
+                "second segment mismatch at {j}"
+            );
+        }
+    }
+
     #[test]
     fn test_inspect_output() {
         let mut writer = TaasWriter::new();

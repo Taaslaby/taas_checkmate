@@ -1,12 +1,20 @@
-//! CPE configuration — all hyperparameters in one place.
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/config.rs
+//! Class:       t3
+//! Purpose:     CPE configuration — all hyperparameters in one place.
+//! Description:
+//!
+//! ChaosPatternEngine configuration.
+//!
+//! Default values are tuned for Pong on a 800-neuron connectome:
+//! - τ_trace ≈ 85ms (0.90^10 per 100ms tick)
+//! - LR = 0.02 (conservative STDP)
+//! - β = 0.3 (moderate chaos/pattern gap)
+//! - α = 0.3 (moderate entropy penalty)
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
-/// ChaosPatternEngine configuration.
-///
-/// Default values are tuned for Pong on a 800-neuron connectome:
-/// - τ_trace ≈ 85ms (0.90^10 per 100ms tick)
-/// - LR = 0.02 (conservative STDP)
-/// - β = 0.3 (moderate chaos/pattern gap)
-/// - α = 0.3 (moderate entropy penalty)
 #[derive(Clone, Debug)]
 pub struct CpeConfig {
     // ── Kuramoto dynamics ──

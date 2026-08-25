@@ -1,4 +1,8 @@
-//! Валидационные бенчмарки против эталонов NEURON / Brian2 / OSB.
+//! -------------------------------------------------------------------------
+//! Filename:    src/validate/benchmark.rs
+//! Class:       benchKit
+//! Purpose:     Валидационные бенчмарки против эталонов NEURON / Brian2 / OSB.
+//! Description:
 //!
 //! Эталоны:
 //! - **HH** — классический кальмаровый аксон: под импульсом 50 нА обязан
@@ -8,6 +12,9 @@
 //! - **Poirazi CA1** (OSB): реальная морфология + реальные каналы грузятся
 //!   без warnings и дают конечную траекторию; тяжёлый full-cell тест на
 //!   NEURON-покой — в [`poirazi_ca1_full_rest`] (минуты в debug).
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use std::path::Path;
 
@@ -120,8 +127,7 @@ pub fn adex_regular_spiking() -> ValidationResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn poirazi_soma_path() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../resources/validate/osb/poirazi_ca1_soma.nml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/validate/osb/poirazi_ca1_soma.nml")
 }
 
 /// Быстрая проверка сомы Poirazi: грузится без warnings (кастомные LEMS
@@ -230,12 +236,7 @@ mod tests {
     fn suite_passes() {
         let results = super::super::run_validation_suite();
         for r in &results {
-            assert!(
-                r.passed,
-                "{} failed: {:?}",
-                r.name,
-                r.failure_reason
-            );
+            assert!(r.passed, "{} failed: {:?}", r.name, r.failure_reason);
         }
     }
 }

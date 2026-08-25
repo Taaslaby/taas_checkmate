@@ -1,15 +1,21 @@
-//! FitzHugh-Nagumo (FHN) Neuron Model
+//! -------------------------------------------------------------------------
+//! Filename:    FHN.rs
+//! Class:       Neural zoo
+//! Purpose:     FitzHugh-Nagumo (FHN) Neuron Model
+//! Description:
 //!
 //! 2D simplification of Hodgkin-Huxley: `v` (membrane potential) and `w` (recovery).
 //! Edge-triggered spike detection.
 //!
-//! # Equations
-//! ```text
+//! Equations
+//!
 //! dv/dt = v - v³/3 - w + I
 //! dw/dt = (v + a - b·w) / τ_w
-//! ```
 //!
 //! Uses `#[derive(NeuronModel)]` + `ComputeNeuron` for typed API.
+//!
+//! coder: Anton Atlasov
+//! -------------------------------------------------------------------------
 
 #![allow(clippy::module_inception)] // deliberate: `pub mod fhn` mirrors the file module
 

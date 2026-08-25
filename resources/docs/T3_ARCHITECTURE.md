@@ -1,4 +1,4 @@
-# 🧬 T3 Architecture — Temporal Triplet Engine
+#  T3 Architecture — Temporal Triplet Engine
 
 > Полное описание архитектуры T3 (Temporal Triplet) — 3-population oscillator system.
 > Версия: neuron-engine 0.1.0

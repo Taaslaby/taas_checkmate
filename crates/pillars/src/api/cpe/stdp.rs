@@ -1,10 +1,17 @@
-//! STDP — Spike-Timing-Dependent Plasticity with eligibility trace.
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/stdp.rs
+//! Class:       t3
+//! Purpose:     STDP — Spike-Timing-Dependent Plasticity with eligibility trace.
+//! Description:
 //!
 //! Δw = η · δ · e · gate
 //! where:
 //! - e: eligibility trace (τ_trace ≈ 85ms)
 //! - δ: dopamine signal (chaos/pattern comparison)
 //! - gate: timing gate (critical vs non-critical steps)
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::config::CpeConfig;
 

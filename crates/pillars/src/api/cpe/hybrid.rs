@@ -1,4 +1,8 @@
-//! Hybrid update — STDP eligibility + T2-SPIGRAD gradients in one pass.
+//! -------------------------------------------------------------------------
+//! Filename:    src/cpe/hybrid.rs
+//! Class:       t3
+//! Purpose:     Hybrid update — STDP eligibility + T2-SPIGRAD gradients in one pass.
+//! Description:
 //!
 //! Δw = η₁ · δ · e + η₂ · δ · ∇L
 //! where:
@@ -7,6 +11,9 @@
 //! - δ: dopamine signal (chaos/pattern gate)
 //! - e: eligibility trace
 //! - ∇L: exact gradient from T2-SPIGRAD backward
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::config::CpeConfig;
 

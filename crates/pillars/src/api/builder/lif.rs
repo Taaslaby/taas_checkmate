@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/lif.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для лиф
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::LIFModel;
@@ -121,10 +130,6 @@ impl LIFBuilder {
         Ok(self.build_unchecked())
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  AdEx Builder
-// ═══════════════════════════════════════════════════════════════
 
 impl ModelBuilder for LIFBuilder {
     type Model = LIFModel;

@@ -1,4 +1,4 @@
-//! # 📥 Input Encoding — Poisson, BSA, TTFS, Phase
+//! Input Encoding — Poisson, BSA, TTFS, Phase
 //!
 //! Converts analog signals into spike trains for SNN input encoding.
 //!

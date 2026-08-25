@@ -328,8 +328,8 @@ pub mod hh {
             let v_new = (c_over_dt * state.v + ctx.i_syn + g_e_sum) / (c_over_dt + g_sum);
 
             // ─── Spike Detection (Edge-Triggered, No V Reset!) ───────
-            // ❌ No v_reset — HH is continuous biophysical model.
-            // ✅ Edge-triggered: fires once on rising edge through v_thresh.
+            // No v_reset — HH is continuous biophysical model.
+            // Edge-triggered: fires once on rising edge through v_thresh.
             let is_above = v_new.cmp_ge(params.v_thresh);
             let (spike, was_below_next) = edge_spike(is_above, state.was_below);
             ctx.emit_spike(spike);

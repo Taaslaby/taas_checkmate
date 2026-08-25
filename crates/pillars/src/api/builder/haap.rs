@@ -1,4 +1,13 @@
-//! Builder module.
+//! -------------------------------------------------------------------------
+//! Filename:    src/builder/haap.rs
+//! Class:       builder
+//! Purpose:
+//! Description:
+//!
+//! билдер апи для хаап
+//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use super::{finite_fields, positive, BuildError, ModelBuilder, NeuralPopulation};
 use crate::zoo::neurons::HAAPModel;
@@ -194,7 +203,3 @@ impl ModelBuilder for HAAPBuilder {
         HAAPBuilder::try_build(self)
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Universal Population Builder
-// ═══════════════════════════════════════════════════════════════

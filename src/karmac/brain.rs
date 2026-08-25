@@ -904,6 +904,13 @@ impl SpikingBrain {
     pub fn weights(&self) -> &[f32] {
         &self.w2
     }
+
+    /// Overwrite W2 wholesale — heredity: a child inherits the parent's
+    /// learned policy (optionally mutated by the caller beforehand).
+    pub fn set_weights(&mut self, w: &[f32]) {
+        let n = self.w2.len().min(w.len());
+        self.w2[..n].copy_from_slice(&w[..n]);
+    }
 }
 
 impl Default for SpikingBrain {

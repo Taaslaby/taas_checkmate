@@ -61,6 +61,7 @@ fn fly_connectome(n: usize, n_rand: usize) -> ConnectomeData {
         nt_types,
         receptor_types: vec![],
         groups: vec![],
+        phenotype: pillars_connectome::NtPhenotype::default(),
     }
 }
 

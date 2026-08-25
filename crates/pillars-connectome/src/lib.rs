@@ -27,6 +27,7 @@
 pub mod brain;
 pub mod data;
 pub mod grow_engine;
+pub mod hetero;
 pub mod propagate;
 pub mod rcm;
 pub mod record;
@@ -38,13 +39,15 @@ pub mod worker;
 
 pub use brain::Brain;
 pub use data::{
-    BrainIO, ConnectomeData, InputChannel, InputEncoding, NeuronGroup, OutputChannel, OutputReadout,
+    BrainIO, ConnectomeData, InputChannel, InputEncoding, NeuronGroup, NtPhenotype, OutputChannel,
+    OutputReadout,
 };
 pub use pillars::kernels::synapse::{DecayFactors, ReceptorType, SynapticKinetics};
 pub use rcm::{
     apply_permutation_to_csr, apply_permutation_to_groups, apply_permutation_to_state, bandwidth,
     build_adjacency, fiedler_vector, mean_bandwidth, reverse_cuthill_mckee, spectral_ordering,
 };
+pub use hetero::{HeteroGroup, HeteroGroupState, HeteroRunner, HeteroSnapshot};
 pub use record::{SpikeRecorder, SpikeRecordings};
 pub use runner::{BrainConfig, BrainRunner, LearningRule, NeuronConfig, PoissonGroup};
 pub use sim::{

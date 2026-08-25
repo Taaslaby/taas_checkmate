@@ -156,6 +156,44 @@
   (паттерн: sim_lif_delegate_matches_legacy_counts). НЕ делать одним махом —
   калибровки vnc_*.py завязаны на численное поведение.
 
+- **Статус консолидации (2026-08-23)**: на каноне уже run_lif (current+synaptic),
+  run_lif_alpha, run_izhikevich (current+synaptic), run_hh, run_haap, run_rate
+  (переведён на `Brain<RateModel>` с parity-локом `test_brain_runner_rate_parity_counts`:
+  [161,161,161,1], цифры с legacy ДО перевода).
+
+- **⚠️ Найден и починен баг честного знака торможения в каноне (2026-08-23)**:
+  `Brain`/`api::Network` разносит веса как есть и НЕ учитывает `nt_types` —
+  тормозной синапс (nt<0) становился возбуждающим. Был жив в 4 current-путях:
+  `run_lif` current, `run_izhikevich` current, `run_rate` (все через
+  `Brain::from_connectome`), и в `run_lif_alpha` (scatter в alpha_delay без знака,
+  баг с рождения alpha-пути). Исправлено через `nt_sign`/`signed_connectome`
+  (знак пресинапса умножается в веса; в alpha — при scatter). Добавлены
+  регрессионные тесты (неуспех = возбуждение тормозной мишени):
+  `test_brain_runner_{lif,izh,lif_alpha}_inhibitory_sign`.
+  Осталось legacy: run_izhikevich_dual, run_izhikevich_eprop (eligibility отдельный
+  механизм), run_gco (канон в Brain невозможен — phase-kernels, сохранить).
+
+- **NtPhenotype (2026-08-23)**: единый филогенетический свитч NT→рецептор
+  (NeuralTransmitter phenotype). `ConnectomeData.phenotype: NtPhenotype`
+  (default Mammal — обратная совместимость), экспортирован из крейта).
+  Mammal: exc→AMPA(0)/inh→GABA_A(2) — как было. Insect (Drosophila):
+  exc→nAChR(4)/inh→GluCl(5) — хлорный тормозной глутамат насекомых.
+  `build_receptor_types()` и fallback в `SynapticBrain` используют фенотип;
+  прежние специфические маппинги (FlyWire/CSV с явными NT-кодами GLUT/ACh/…)
+  сохранены. Тест `test_build_receptor_types_basic` (data.rs) проверяет оба
+  фенотипа.
+
+- **Снапшоты HeteroRunner (2026-08-23)**: полный save/load гетерогенного мозга.
+  В `pillars-connectome`: `HeteroRunner::snapshot()/restore()` +
+  `HeteroGroupState`/`HeteroSnapshot` (все группы для каждой модели: SoA-колонки,
+  alpha delay ring, h-ток/персистентные токи, izh/rate массивы; веса коннектома
+  после пластичности). Round-trip бит-в-бит (тест `snapshot_restore_roundtrip_bitwise`).
+  RNG Пуассона хранится как сид (после restore стохастика стартует с него —
+  для детерминированных без-пуассоновских симуляций снапшот/restore бит-в-бит).
+  В `taas-format`: `save_hetero_snapshot`/`load_hetero_snapshot` в .taas
+  (тест `test_hetero_snapshot_roundtrip` в lib.rs — через файл: 200 шагов →
+  снапшот → restore → продолжение идентично непрерывному 300).
+
 ### 1. [Strong] Удалить мёртвые пути + одна синаптическая кинетика  ← НАЧАТЬ ОТСЮДА
 
 ### 5. [Worth exploring] Четыре «симулятора мозга» → один канон
@@ -169,10 +207,25 @@
 - Канон: `BrainRunner` над `Brain`/`SynapticBrain`; unity/pyo3/karmac/hetero — тонкие
   адаптеры. Parity/NEURON-тесты защищают один симулятор вместо четырёх.
 
-### 6. [Worth exploring] Двойной CUDA-FFI-стек в `pillars-cuda`
+### 6. [N] Двойной CUDA-FFI-стек в `pillars-cuda`
 - Старый `ffi.rs/kernel.rs/engine.rs` (1726) vs новый `gpu/` (~5000: context 1690,
   signal 2206, kernels 305, ffi 818). Новый потребитель (connectome `sim/gpu.rs`)
   сидит только на `gpu::GpuContext`. Проверить, кто на старом, мигрировать, удалить.
+- **Аудит 2026-08-23**: dual_neuron закрывает 22 нейро-модели (единый источник),
+  `.cu` — ручной второй слой. Классификация: легитимные сетевые микрокернелы
+  (csr_spmv, stdp, stdp_dopamine, decoders, gates, topk, edge_predictor,
+  xor_attention, interference, bptt, t3_update, t3_fused_forward_bptt, gco,
+  kuramoto, gpu_context, gmm_sampler) vs ручные дубли dual-моделей (hh.cu,
+  izhikevich.cu, biophys.cu, snn_kernels.cu, fused.cu-ядро) vs мёртвые
+  (t3_bptt_step.cu, t3_bptt_jacobian.cu — 460+421 стр., не вызываются ниоткуда).
+  connectome-делегат `sim_lif_gpu` сидит на легаси `GpuContext::batch_lif_steps`,
+  NVRTC-путь (`CompiledModel`/`AlphaLifGpu`) выключен из конвейера.
+- **Бенч AOT vs NVRTC (`examples/aot_vs_nvrtc.rs`, LIF 256K, 1000 шагов):**
+  AOT batch_lif 0.264 ms/step vs NVRTC CompiledModel 0.042 ms/step → **NVRTC ~6×
+  быстрее** (накладка AOT: count-spikes + reset I + CSR/шаг; NVRTC — чистый шаг).
+  Готов initio опасение «AOT быстрее» не подтвердилось на LIF; решение о выпиливании
+  дублей с parity-локом (AOT vs NVRTC на одинаковых весах) можно принимать без
+  потери скорости. Осталось прослушать HH (тяжелее математика) и сеть (CSR).
 
 ### 7. [Speculative] Feature-гигиена фасада
 - `src/iit.rs` (1066) — безусловный `pub mod iit` в lib.rs:74, python-биндинг мёртв
@@ -181,10 +234,19 @@
   (`hide_seek.rs` 2072, `platformer.rs` 1035). Сплит: `karmac-core` vs `karmac-arenas`.
 
 ## Тестовые дыры (попутно)
+- ✅ **2026-08-23**: закрыты нули по ядрам — `kernels/io` (адаптеры python-ABI:
+  мин-усечение без паник + математика всех 9 обёрток) и `kernels/wc` (равновесия
+  Wilson-Cowan, β-гейн, τ ≤ 0-frost, SIMD/tail-консистентность n=8 vs n=17,
+  стабильность при ±1e9 входе) — 19 новых юнит-тестов, 903 юнит + 16 интеграционных
+  pillars зелёные, clippy 0.
 - `api/builder/` — 0 тестов в 7 из 8 файлов.
 - `api/neuroml/` — 1 из 3 файлов с тестами.
 - `kernels/`: hh_channels (953), cable (842), learning (735), astrocyte (629),
   phase (645), signal (594) — без встроенных тестов.
+
+  *Исправление статуса*: заметка про «нули по ядрам» устарела —
+  hh_channels (13), learning (11), astrocyte (10) уже имеют тесты (проверено
+  прогоном, см. выше); настоящими нулями были io и wc — теперь закрыты.
 
 ## Не трогать (проверено, это сильные места)
 - `SimdLane` (1 метод = 1 инструкция, SIMD/scalar consistency-тесты) — ядро в порядке.

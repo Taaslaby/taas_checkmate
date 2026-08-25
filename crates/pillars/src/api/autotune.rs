@@ -1,4 +1,8 @@
-//! Auto-tuning utilities for E-Prop Izhikevich Multi.
+//! -------------------------------------------------------------------------
+//! Filename:    src/autotune.rs
+//! Class:       api
+//! Purpose:     Auto-tuning utilities for E-Prop Izhikevich Multi.
+//! Description:
 //!
 //! Provides systematic hyperparameter search:
 //! - [`probe_fr`] — firing rate scan over bias values
@@ -30,9 +34,8 @@
 //! this module account for this 10× kernel scale, so `weight_scale`
 //! refers to the **raw** init scale (before kernel multiplication).
 //!
-//! Перенесено из `core::neuron::autotune`— классы живут
-//! в pillars-каноне, `core` — тонкий реэкспорт.
-//!
+//! author: Atlasov Anton
+//! -------------------------------------------------------------------------
 
 use rand::rngs::StdRng;
 use rand::Rng;

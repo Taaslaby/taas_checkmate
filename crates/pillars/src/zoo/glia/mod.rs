@@ -1,4 +1,4 @@
-//! # 🧫 Glia — Astrocyte & Neuro-Glial Modulation
+//! Glia — Astrocyte & Neuro-Glial Modulation
 //!
 //! Hidden-state glial models that modulate synaptic transmission.
 
