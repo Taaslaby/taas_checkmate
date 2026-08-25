@@ -66,7 +66,11 @@ pub trait CellModule {
 /// its own agent plus a thread-safe view of the shared state.
 pub enum DeferredOp {
     /// `add_substance_at(id_idx, grid_idx, amount)` — secretion.
-    Secretion { substance_idx: usize, grid_idx: usize, amount: f64 },
+    Secretion {
+        substance_idx: usize,
+        grid_idx: usize,
+        amount: f64,
+    },
     /// `request_division(cell)` — queue for post-loop application.
     Division(usize),
 }

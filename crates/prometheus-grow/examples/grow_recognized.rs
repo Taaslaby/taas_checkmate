@@ -29,7 +29,7 @@ fn main() {
         world.new_neurite(c, true, 0.5);
     }
 
-    // Dscam1-аналог: синапс только «свой со своим».
+    // Dscam1 analog: a synapse only "like with like".
     world.set_recognition(Recognition::same_type());
     world.form_synapses(20.0);
 
@@ -51,11 +51,7 @@ fn main() {
         && g.edges.iter().any(|e| e.pre == g1 && e.post == g0);
     let exc_pair = g.edges.iter().any(|e| e.pre == e0 && e.post == e1)
         && g.edges.iter().any(|e| e.pre == e1 && e.post == e0);
-    let cross = g
-        .edges
-        .iter()
-        .filter(|e| ty[&e.pre] != ty[&e.post])
-        .count();
+    let cross = g.edges.iter().filter(|e| ty[&e.pre] != ty[&e.post]).count();
 
     println!("\n=== сверка ===");
     println!("  reciprocal GABA pair: {gaba_pair}");

@@ -39,7 +39,7 @@ struct Neuron {
 
 impl Neuron {
     /// NT → sign (same convention as gene_physiology.NT_GENE):
-    ///   gaba/glutamate → inhibitory (у дрозофилы глутамат тормозной, GluCl).
+    ///   gaba/glutamate → inhibitory (in Drosophila glutamate is inhibitory, via GluCl).
     /// Modulators/`unknown` fall back to excitatory in this 2-type model.
     fn cell_type(&self) -> CellType {
         match self.predicted_nt.as_str() {
@@ -160,8 +160,7 @@ fn main() {
             let mut w = seed_world(Some(rec));
             w.form_synapses(dist);
             let g = w.to_graph();
-            let grown: HashSet<(usize, usize)> =
-                g.edges.iter().map(|e| (e.pre, e.post)).collect();
+            let grown: HashSet<(usize, usize)> = g.edges.iter().map(|e| (e.pre, e.post)).collect();
             let recip = reciprocal_gaba(&grown, &gaba);
             let grown_w: Vec<f64> = g.edges.iter().map(|e| e.weight).collect();
             let (prec, recall, f1) = precision_recall(&grown, &real);
@@ -182,7 +181,10 @@ fn main() {
     let learned = Recognition::learned_from_edges(&types, &edge_pairs);
     let ex = CellType::Excitatory.as_usize();
     let inh = CellType::Inhibitory.as_usize();
-    println!("\n=== правило перехода (выучено из {0} реальных рёбер) ===", real.len());
+    println!(
+        "\n=== правило перехода (выучено из {0} реальных рёбер) ===",
+        real.len()
+    );
     println!(
         "  exc→exc  p={:.4}   exc→inh  p={:.4}",
         learned.prob[ex][ex], learned.prob[ex][inh]
@@ -215,7 +217,10 @@ fn main() {
     let g = w.to_graph();
     let grown: HashSet<(usize, usize)> = g.edges.iter().map(|e| (e.pre, e.post)).collect();
     let (prec, recall, f1) = precision_recall(&grown, &real);
-    println!("\n=== learned vs same_type (dist=16000, scaled к {}) ===", real.len());
+    println!(
+        "\n=== learned vs same_type (dist=16000, scaled к {}) ===",
+        real.len()
+    );
     println!(
         "  learned rule:  edges={}  recip GABA={}  prec={prec:.2} recall={recall:.2} F1={f1:.2}",
         grown.len(),
@@ -224,8 +229,7 @@ fn main() {
     let mut st = seed_world(Some(Recognition::same_type()));
     st.form_synapses(dist);
     let st_g = st.to_graph();
-    let st_grown: HashSet<(usize, usize)> =
-        st_g.edges.iter().map(|e| (e.pre, e.post)).collect();
+    let st_grown: HashSet<(usize, usize)> = st_g.edges.iter().map(|e| (e.pre, e.post)).collect();
     println!(
         "  same_type:     edges={}  recip GABA={}  (реально recip={real_recip})",
         st_g.edges.len(),

@@ -7,13 +7,13 @@ license.workspace = true
 description = "Pillars — reusable SIMD bio primitives for neural computation"
 
 [dependencies]
-roxmltree = "0.20"
-wide = "0.7"
-bytemuck = { version = "1", features = ["extern_crate_alloc"] }
-rand = "0.8"
-serde = { version = "1", features = ["derive"] }
+roxmltree = { workspace = true }
+wide = { workspace = true }
+bytemuck = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
 serde_json = { version = "1", optional = true }
-rayon = { version = "1.8", optional = true }
+rayon = { version = "1", optional = true }
 pillars-macros = { path = "../pillars-macros" }
 
 [[bench]]
@@ -60,7 +60,7 @@ hh-precise-gates = []
 [dev-dependencies]
 pillars-macros = { path = "../pillars-macros" }
 rand = "0.8"
-criterion = { version = "0.5", features = ["rayon"] }
+criterion = { workspace = true, features = ["rayon"] }
 num_cpus = "1.0"
 
 # Экспериментальный нод-редактор нейронов (examples/viz_neuron_builder.rs)

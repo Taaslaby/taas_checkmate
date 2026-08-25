@@ -40,7 +40,13 @@ impl CellModule for RandomWalk {
 fn main() {
     let side = 40.0;
     let mut w = World::new(
-        prometheus_grow::Grid::new(20, 20, 20, side / 20.0, Vec3::new(-side / 2.0, -side / 2.0, -side / 2.0)),
+        prometheus_grow::Grid::new(
+            20,
+            20,
+            20,
+            side / 20.0,
+            Vec3::new(-side / 2.0, -side / 2.0, -side / 2.0),
+        ),
         1.0,
         prometheus_grow::Bounds {
             min: Vec3::new(-side, -side, -side),
@@ -92,6 +98,9 @@ fn main() {
     }
     println!("итого связей: {bonds} из возможных {}", (n_t + n_m) / 2);
     // BDM's own demo reports bond counts; a few bonds must have formed.
-    assert!(bonds >= 2, "клетки должны связаться при контакте, got {bonds}");
-    println!("✓ случайное блуждание свело клетки, контакты образовали связи");
+    assert!(
+        bonds >= 2,
+        "клетки должны связаться при контакте, got {bonds}"
+    );
+    println!("random walk brought cells together; contacts formed synapses");
 }

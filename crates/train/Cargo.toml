@@ -10,8 +10,8 @@ pillars = { path = "../pillars" }
 taas-t3 = { path = "../t3", optional = true }
 pillars-connectome = { path = "../pillars-connectome", optional = true }
 pillars-cuda = { path = "../pillars-cuda", optional = true }
-rand = "0.8"
-wide = "0.7"
+rand = { workspace = true }
+wide = { workspace = true }
 
 [features]
 t3 = ["taas-t3"]

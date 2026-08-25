@@ -42,7 +42,13 @@ fn main() {
     // Grid3D(4, 20, construct): 4³ cells, spacing 20 → world 80³.
     let side = 80.0;
     let mut w = World::new(
-        prometheus_grow::Grid::new(16, 16, 16, side / 16.0, Vec3::new(-side / 2.0, -side / 2.0, -side / 2.0)),
+        prometheus_grow::Grid::new(
+            16,
+            16,
+            16,
+            side / 16.0,
+            Vec3::new(-side / 2.0, -side / 2.0, -side / 2.0),
+        ),
         1.0,
         prometheus_grow::Bounds {
             min: Vec3::new(-side, -side, -side),
@@ -62,18 +68,31 @@ fn main() {
                     k as f64 * spacing - 1.5 * spacing,
                 );
                 let c = w.add_cell(pos, CellType::Excitatory, 2.5); // diameter 5
-                w.add_cell_module(c, Box::new(GrowthDivision { diameter_max: 10.0, growth_ratio: 50.0 }));
+                w.add_cell_module(
+                    c,
+                    Box::new(GrowthDivision {
+                        diameter_max: 10.0,
+                        growth_ratio: 50.0,
+                    }),
+                );
             }
         }
     }
 
     println!("=== BioDynaMo demo: cell_division (GrowthDivision) ===");
-    println!("старт: {} клеток, диаметр 5 → деление при 10, рост 50/шаг, 111 шагов", w.cells.len());
+    println!(
+        "старт: {} клеток, диаметр 5 → деление при 10, рост 50/шаг, 111 шагов",
+        w.cells.len()
+    );
     let mut last = w.cells.len();
     for step in 0..111 {
         w.step();
         if w.cells.len() != last && (step + 1) % 5 == 0 {
-            println!("  t={step:>3}: клеток {} (diam ~{:.1})", w.cells.len(), 2.0 * w.cells[0].soma.radius);
+            println!(
+                "  t={step:>3}: клеток {} (diam ~{:.1})",
+                w.cells.len(),
+                2.0 * w.cells[0].soma.radius
+            );
             last = w.cells.len();
         }
     }
@@ -82,5 +101,5 @@ fn main() {
     // BDM asserts the simulation completes; growth must have happened
     // (64 seeds grow+divide for 111 steps — expect several hundred).
     assert!(n > 64, "клетки должны размножиться, got {n}");
-    println!("✓ клетки выросли и поделились (GrowthDivision работает)");
+    println!("cells grew and divided (GrowthDivision works)");
 }

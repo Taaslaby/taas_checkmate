@@ -5,6 +5,11 @@
 //! *artificial* gradients (analytic gaussian/linear functions). Here real
 //! diffusion runs on a regular grid (explicit Euler Laplacian) and gradients
 //! are analytic — enough to reproduce the tutorial behaviour.
+//
+// References:
+//   - Turing (1952) on the chemical basis of morphogenesis
+//   - Crank (1975) on the mathematics of diffusion (Finite Difference / Euler)
+//   - Wartlick et al. (2011) on Dpp gradient formation and growth control
 
 use crate::Vec3;
 
@@ -251,7 +256,12 @@ fn axis_vec(axis: usize, v: f64) -> Vec3 {
 
 /// BioDynaMo-style boundary condition (Dirichlet/Neumann/Open/Closed)
 #[derive(Clone, Copy, Debug)]
-pub enum BoundaryCondition { Dirichlet(f64), Neumann(f64), Open, Closed }
+pub enum BoundaryCondition {
+    Dirichlet(f64),
+    Neumann(f64),
+    Open,
+    Closed,
+}
 
 /// An extracellular morphogen with its own concentration field and gradients.
 /// BioDynaMo `DiffusionGrid` port: adds thresholds + boundary condition + double buffer.

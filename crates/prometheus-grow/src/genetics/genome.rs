@@ -27,7 +27,8 @@ pub struct DnaGene {
 
 /// Parse the `dna_nt_map.csv` produced by PROMETHEUS.
 ///
-/// Columns: `ген,нейротрансмиттер,connkit,знак,роль,хромосома,start,end,strand,длина(ДНК),biotype`.
+/// Columns: `ген,нейротрансмиттер,connkit,знак,роль,хромосома,start,end,strand,длина(ДНК),biotype`
+/// (column names are Russian in the source CSV and must match it verbatim).
 /// We only need `ген` (0), `нейротрансмиттер` (1) and `знак` (3).
 pub fn parse_dna_map(csv: &str) -> Vec<DnaGene> {
     let mut out = Vec::new();
@@ -64,7 +65,8 @@ pub struct ChannelGene {
 
 /// Parse the `dna_channel_map.csv` produced by PROMETHEUS.
 ///
-/// Columns: `ген,семейство,параметр декодера,HAAP/что задаёт,роль,…`.
+/// Columns: `ген,семейство,параметр декодера,HAAP/что задаёт,роль,…`
+/// (column names are Russian in the source CSV and must match it verbatim).
 /// We only need `ген` (0), `семейство` (1) and `параметр декодера` (2);
 /// the later columns may contain quoted commas and are not parsed.
 pub fn parse_channel_map(csv: &str) -> Vec<ChannelGene> {
@@ -143,10 +145,7 @@ impl FlyGenome {
     }
 
     /// Attach the raw DNA sequences (gene → A/C/G/T) loaded from FASTA/GFF.
-    pub fn with_sequences(
-        mut self,
-        seqs: &std::collections::HashMap<String, String>,
-    ) -> Self {
+    pub fn with_sequences(mut self, seqs: &std::collections::HashMap<String, String>) -> Self {
         self.nt_gene_seq = seqs.get(&self.nt_gene).cloned();
         self.morphogen_gene_seq = seqs.get(&self.morphogen_gene).cloned();
         self.guidance_gene_seq = seqs.get(&self.guidance_gene).cloned();
@@ -155,13 +154,13 @@ impl FlyGenome {
 
     /// Resolve the cell type from the DNA map (gene → sign).
     pub fn cell_type(&self, map: &[DnaGene]) -> Option<CellType> {
-        map.iter()
-            .find(|g| g.gene == self.nt_gene)
-            .map(|g| if g.sign < 0 {
+        map.iter().find(|g| g.gene == self.nt_gene).map(|g| {
+            if g.sign < 0 {
                 CellType::Inhibitory
             } else {
                 CellType::Excitatory
-            })
+            }
+        })
     }
 
     /// Human-readable name of the neurotransmitter this genome's cells make.
@@ -225,7 +224,7 @@ Dscam1,Dscam1 (адгезия),cell-recognition,conn_prob,клеточное р�
         let rec = g.recognition(&map);
         assert!(rec.allowed[1][1], "inh→inh разрешён при Dscam1");
         assert!(!rec.allowed[0][1], "cross-type запрещён при Dscam1");
-        // без адгезии — unrestricted
+        // no adhesion — unrestricted
         g.adhesion_gene = None;
         let rec2 = g.recognition(&map);
         assert!(rec2.allowed[0][1] && rec2.allowed[1][0]);

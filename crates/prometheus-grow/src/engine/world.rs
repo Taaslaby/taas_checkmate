@@ -13,14 +13,26 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// Minimum polyline segment length. Shorter steps are dropped in
+/// [`World::extend_neurite`] so zero-resource terminals do not bloat the
+/// geometry with degenerate points.
+const MIN_SEGMENT_LEN: f64 = 1e-3;
+
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 
 use crate::branch_model::BalancedForces;
 use crate::cell::{Cell, CellType, Excrescence, ExcrescenceKind, Neurite, Soma};
+use crate::direction_model::TensionSteering;
+use crate::gpu::DiffusionBackend;
+use crate::mechanics::{step_mechanics, CellVelocity, MechanicsParams};
 use crate::module::{CellModule, Host, Module};
 use crate::substance::{BoundaryCondition, Grid, Substance};
 use crate::synapse_model::SynapseFormationModel;
+use crate::trp::{
+    form_synapses_trp as trp_form_synapses, prune_synapses_trp, TrpEmbedding, TrpParams,
+};
+use crate::turning_model::TurnModel;
 use crate::uniform_grid::UniformGrid;
 use crate::Vec3;
 
@@ -226,10 +238,29 @@ pub struct World {
     pub max_neurites: usize,
     /// Global cap on cells to stop runaway division.
     pub max_cells: usize,
+    /// Per-presynaptic-cell fan-out cap: a neuron wires at most this many
+    /// outgoing synapses, so dense regions stay sparse (10K-neuron brains
+    /// would otherwise wire every close pair -> tens of millions of edges).
+    pub max_syn_per_cell: usize,
+    /// When true, the contact grid for synapse formation indexes only soma
+    /// positions + neurite TIPS instead of every neurite point. A 10K-neuron
+    /// brain has millions of intermediate axon points; only the tips matter
+    /// for final wiring, so this cuts synapse formation ~100x.
+    pub synapse_tips_only: bool,
     /// Baseline synaptic strength; weight = strength / (1 + contact distance).
     pub synapse_strength: f64,
     /// Type-recognition gate for synapse formation (Dscam1/CadN analog).
     pub recognition: Option<Recognition>,
+    /// TRP embeddings: Receptor + Tropism per cell.
+    pub trp_embeddings: HashMap<usize, TrpEmbedding>,
+    /// TRP synaptogenesis parameters.
+    pub trp_params: TrpParams,
+    /// Cell mechanics parameters (BioDynaMo).
+    pub mechanics_params: MechanicsParams,
+    /// Persistent cell velocities (kept between steps).
+    velocities: Vec<CellVelocity>,
+    /// Diffusion backend (CPU or GPU).
+    diffusion_backend: DiffusionBackend,
     rng: StdRng,
     /// Parallel-safe cell modules (BioDynaMo `Behavior` style), indexed by
     /// cell. Run by [`World::run_cell_modules_par`] instead of the serial
@@ -252,7 +283,7 @@ pub struct World {
     contact_cache: Option<ContactCache>,
 }
 
-/// Кэш контактной сетки `form_synapses`: (шаг, сетка, центры сом).
+/// Contact grid cache for `form_synapses`: (step, grid, soma centers).
 type ContactCache = (f64, UniformGrid, Vec<(Vec3, usize)>);
 
 impl World {
@@ -268,8 +299,15 @@ impl World {
             synapse_dist: 80.0,
             max_neurites: 512,
             max_cells: 64,
+            max_syn_per_cell: 64,
+            synapse_tips_only: false,
             synapse_strength: 7.0,
             recognition: None,
+            trp_embeddings: HashMap::new(),
+            trp_params: TrpParams::default(),
+            mechanics_params: MechanicsParams::default(),
+            velocities: Vec::new(),
+            diffusion_backend: DiffusionBackend::cpu(),
             rng: StdRng::seed_from_u64(seed),
             par_cell_modules: vec![],
             pending_divisions: vec![],
@@ -295,6 +333,11 @@ impl World {
     /// Enable type-recognition gating for synapse formation.
     pub fn set_recognition(&mut self, r: Recognition) {
         self.recognition = Some(r);
+    }
+
+    /// Set the diffusion backend (CPU or GPU via wgpu).
+    pub fn set_diffusion_backend(&mut self, backend: DiffusionBackend) {
+        self.diffusion_backend = backend;
     }
 
     /// Add a cell (soma sphere) and return its id (= index).
@@ -377,6 +420,11 @@ impl World {
 
     /// Advance the growth-cone tip of a neurite by `step`.
     pub fn extend_neurite(&mut self, cell: usize, idx: usize, step: Vec3) {
+        // Skip near-zero steps: modules with a zero resource share would
+        // otherwise push a degenerate point every step and bloat the polyline.
+        if step.len() < MIN_SEGMENT_LEN {
+            return;
+        }
         self.touch_geometry();
         let tip = self.cells[cell].neurites[idx].tip();
         self.cells[cell].neurites[idx].points.push(tip + step);
@@ -385,6 +433,31 @@ impl World {
     /// Total neurite count across all cells.
     pub fn total_neurites(&self) -> usize {
         self.cells.iter().map(|c| c.neurites.len()).sum()
+    }
+
+    /// NETMORPH tension-direction step: extend a terminal along the
+    /// [`TensionSteering`] prediction of its own segment history, first
+    /// drawing a turn event from the terminal's [`TurnModel`]. A turn
+    /// re-aims the cone at the predicted direction; no turn continues
+    /// straight (persistence).
+    pub fn extend_neurite_tension(
+        &mut self,
+        cell: usize,
+        idx: usize,
+        step_len: f64,
+        steering: &TensionSteering,
+        turning: &mut TurnModel,
+        elongated_len: f64,
+        p_branch: f64,
+    ) {
+        let dir = if turning.turn_event(elongated_len, p_branch, &mut self.rng) {
+            // Turn: aim at the history pull (with veer inside `steering`).
+            steering.direction(&self.cells[cell].neurites[idx], &mut self.rng)
+        } else {
+            // No turn: continue straight.
+            self.cells[cell].neurites[idx].axis()
+        };
+        self.extend_neurite(cell, idx, dir * step_len);
     }
 
     /// Bifurcate a neurite: a new neurite starts at the current tip, carrying
@@ -564,10 +637,12 @@ impl World {
         let mods2 = self.branch_copies(cell, idx);
         let d_daughter = d_parent * 2f64.powf(-1.0 / rall_power);
 
-        // ERI: daughters split the parent's speed (sum-preserving) with noise.
-        let delta = sample_normal(&mut self.rng, 0.0, eri_std).clamp(-0.5, 0.5);
-        let v1 = v_parent * (0.5 + delta);
-        let v2 = v_parent * (0.5 - delta);
+        // ERI length distribution (NETMORPH `length_distribution_eri_model`):
+        // daughters draw correlated normal factors, mapped through the
+        // sigmoid for negatives and linear scaling for positives, ordered to
+        // match the initial branch-length ratio. No length hints yet at
+        // bifurcation time (daughters do not exist), so hints are equal.
+        let (v1, v2) = eri_length_distribution(&mut self.rng, eri_std, v_parent, 0.0, 0.0);
 
         // The daughter speeds are the balanced-forces "forces".
         let (angle1, angle2) = model.angles(v1, v2, &mut self.rng);
@@ -710,43 +785,16 @@ impl World {
             let nz = g.nz;
             let inner = (nx.saturating_sub(2)) * (ny.saturating_sub(2)) * (nz.saturating_sub(2));
             if inner > 0 {
-                let dx2 = g.cell * g.cell;
-                let field = &s.field;
-                let diff = s.diffusion;
-                let deg = s.degradation;
-                let lo = s.lower_threshold;
-                let hi = s.upper_threshold;
-                let vals: Vec<f64> = (0..inner)
-                    .into_par_iter()
-                    .map(|lin| {
-                        let nz2 = nz - 2;
-                        let ny2 = ny - 2;
-                        let i = lin / (ny2 * nz2) + 1;
-                        let r = lin % (ny2 * nz2);
-                        let j = r / nz2 + 1;
-                        let k = r % nz2 + 1;
-                        let idx = g.flat(i, j, k);
-                        let lap = (field[g.flat(i - 1, j, k)]
-                            + field[g.flat(i + 1, j, k)]
-                            + field[g.flat(i, j - 1, k)]
-                            + field[g.flat(i, j + 1, k)]
-                            + field[g.flat(i, j, k - 1)]
-                            + field[g.flat(i, j, k + 1)]
-                            - 6.0 * field[idx])
-                            / dx2;
-                        (field[idx] + dt * diff * lap - dt * deg * field[idx]).clamp(lo, hi)
-                    })
-                    .collect();
-                let mut lin = 0usize;
-                for i in 1..nx.saturating_sub(1) {
-                    for j in 1..ny.saturating_sub(1) {
-                        for k in 1..nz.saturating_sub(1) {
-                            let idx = g.flat(i, j, k);
-                            s.c2[idx] = vals[lin];
-                            lin += 1;
-                        }
-                    }
-                }
+                self.diffusion_backend.diffuse(
+                    &g,
+                    &s.field,
+                    &mut s.c2,
+                    dt,
+                    s.diffusion,
+                    s.degradation,
+                    s.lower_threshold,
+                    s.upper_threshold,
+                );
             }
             // Boundary: honor the configured condition (BioDynaMo DiffusionGrid).
             for i in 0..g.nx {
@@ -1136,6 +1184,14 @@ impl World {
     }
 
     pub fn form_synapses(&mut self, dist: f64) {
+        // Fast path: dist <= 1e-3 means "no synapse formation this phase"
+        // (kailo grows with synapse_dist=0 and wires explicitly at the end via
+        // form_synapses_tagged). Skip the contact-grid rebuild entirely — it
+        // would otherwise re-hash every neurite point every step, which
+        // dominates 10K-neuron growth.
+        if dist <= 1e-3 {
+            return;
+        }
         // Fast path: no axon tips anywhere → nothing can be wired. This skips
         // the per-step contact-grid rebuild that dominated cell-only sims
         // (e.g. the BioDynaMo soma-clustering benchmark, which never forms
@@ -1154,7 +1210,8 @@ impl World {
             .map(|(d, _, _)| *d != dist)
             .unwrap_or(true);
         if stale || self.contact_cache.is_none() {
-            let (grid, points) = build_contact_grid(&self.cells, dist.max(1.0));
+            let (grid, points) =
+                build_contact_grid(&self.cells, dist.max(1.0), self.synapse_tips_only);
             self.contact_cache = Some((dist, grid, points));
         }
         let n = self.cells.len();
@@ -1171,11 +1228,16 @@ impl World {
                 .filter(|neur| neur.is_axon)
                 .map(|neur| neur.tip())
                 .collect();
-            let mut nearest: Vec<(usize, f64)> = nearest_posts(grid, points, &tips, dist)
-                .into_iter()
-                .collect();
+            let mut nearest: Vec<(usize, f64)> =
+                nearest_posts(grid, points, &tips, dist, self.max_syn_per_cell)
+                    .into_iter()
+                    .collect();
             nearest.sort_by_key(|&(b, _)| b); // deterministic RNG order
+            let mut wired = 0usize;
             for (b, min_d) in nearest {
+                if wired >= self.max_syn_per_cell {
+                    break;
+                }
                 if b == a {
                     continue;
                 }
@@ -1210,6 +1272,7 @@ impl World {
                         kind,
                         weight,
                     });
+                    wired += 1;
                 }
             }
         }
@@ -1221,7 +1284,7 @@ impl World {
     /// [`CellType`] (DNA → neurotransmitter → sign).
     pub fn form_synapses_tagged(&mut self, dist: f64, rec: &TagRecognition) {
         let n = self.cells.len();
-        let (grid, points) = build_contact_grid(&self.cells, dist.max(1.0));
+        let (grid, points) = build_contact_grid(&self.cells, dist.max(1.0), self.synapse_tips_only);
         let mut seen: HashSet<(usize, usize)> =
             self.synapses.iter().map(|s| (s.pre, s.post)).collect();
         for a in 0..n {
@@ -1234,11 +1297,16 @@ impl World {
                 .filter(|neur| neur.is_axon)
                 .map(|neur| neur.tip())
                 .collect();
-            let mut nearest: Vec<(usize, f64)> = nearest_posts(&grid, &points, &tips, dist)
-                .into_iter()
-                .collect();
+            let mut nearest: Vec<(usize, f64)> =
+                nearest_posts(&grid, &points, &tips, dist, self.max_syn_per_cell)
+                    .into_iter()
+                    .collect();
             nearest.sort_by_key(|&(b, _)| b); // deterministic RNG order
+            let mut wired = 0usize;
             for (b, min_d) in nearest {
+                if wired >= self.max_syn_per_cell {
+                    break;
+                }
                 if b == a {
                     continue;
                 }
@@ -1264,6 +1332,7 @@ impl World {
                         kind,
                         weight,
                     });
+                    wired += 1;
                 }
             }
         }
@@ -1284,7 +1353,7 @@ impl World {
             .copied()
             .fold(0.0f64, f64::max)
             .max(1.0);
-        let (grid, points) = build_contact_grid(&self.cells, max_dist);
+        let (grid, points) = build_contact_grid(&self.cells, max_dist, self.synapse_tips_only);
         let mut seen: HashSet<(usize, usize)> =
             self.synapses.iter().map(|s| (s.pre, s.post)).collect();
         for a in 0..n {
@@ -1296,9 +1365,10 @@ impl World {
                 .filter(|neur| neur.is_axon)
                 .map(|neur| neur.tip())
                 .collect();
-            let mut nearest: Vec<(usize, f64)> = nearest_posts(&grid, &points, &tips, max_dist)
-                .into_iter()
-                .collect();
+            let mut nearest: Vec<(usize, f64)> =
+                nearest_posts(&grid, &points, &tips, max_dist, self.max_syn_per_cell)
+                    .into_iter()
+                    .collect();
             nearest.sort_by_key(|&(b, _)| b); // deterministic RNG order
             for (b, min_d) in nearest {
                 if model.no_autapses && b == a {
@@ -1603,6 +1673,28 @@ impl World {
         self.rng.gen()
     }
 
+    /// Uniform draw in `[min, max)` from the world RNG (for direction models).
+    pub fn rand_range(&mut self, min: f64, max: f64) -> f64 {
+        self.rng.gen_range(min..max)
+    }
+
+    /// Uniform angle in `[0, 2π)` from the world RNG (for direction models).
+    pub fn rand_angle(&mut self) -> f64 {
+        self.rng.gen::<f64>() * std::f64::consts::TAU
+    }
+
+    /// Draw a turn decision for a [`TurnModel`](crate::turning_model::TurnModel)
+    /// using the world RNG (the field itself is private to the crate).
+    pub fn turn_event(
+        &mut self,
+        turning: &mut crate::turning_model::TurnModel,
+        elongated_len: f64,
+        p_branch: f64,
+    ) -> bool {
+        let p = turning.predict_turn(elongated_len, p_branch);
+        self.rng.gen::<f64>() <= p
+    }
+
     pub fn random_vec(&mut self, scale: f64) -> Vec3 {
         Vec3::new(
             self.rng.gen_range(-scale..scale),
@@ -1620,10 +1712,93 @@ impl World {
         self.run_soma_modules();
         self.run_neurite_modules();
         self.process_prunes();
+        self.apply_cell_mechanics();
         self.diffuse_intracellular();
         let d = self.synapse_dist;
         self.form_synapses(d);
         self.time += self.dt;
+    }
+
+    /// BioDynaMo cell mechanics: adhesion + repulsion + elastic forces.
+    pub fn apply_cell_mechanics(&mut self) {
+        if !self.mechanics_params.enabled || self.cells.len() < 2 {
+            return;
+        }
+        if self.velocities.len() != self.cells.len() {
+            self.velocities
+                .resize(self.cells.len(), CellVelocity::default());
+        }
+        let n = self.cells.len();
+        let mut positions: Vec<Vec3> = self.cells.iter().map(|c| c.soma.pos).collect();
+        let radii: Vec<f64> = self.cells.iter().map(|c| c.soma.radius).collect();
+        let types: Vec<usize> = self.cells.iter().map(|c| c.cell_type.as_usize()).collect();
+        let edges: Vec<(usize, usize)> = self.synapses.iter().map(|s| (s.pre, s.post)).collect();
+
+        step_mechanics(
+            &mut positions,
+            &radii,
+            &types,
+            &edges,
+            &mut self.velocities,
+            &self.mechanics_params,
+            self.dt,
+        );
+
+        for i in 0..n {
+            let r = self.cells[i].soma.radius;
+            let mut p = positions[i];
+            p.x = p.x.clamp(self.bounds.min.x + r, self.bounds.max.x - r);
+            p.y = p.y.clamp(self.bounds.min.y + r, self.bounds.max.y - r);
+            p.z = p.z.clamp(self.bounds.min.z + r, self.bounds.max.z - r);
+            if p.dist(self.cells[i].soma.pos) > 1e-12 {
+                self.move_soma(i, p - self.cells[i].soma.pos);
+            }
+        }
+    }
+
+    /// Initialize TRP embeddings for all cells.
+    pub fn init_trp_embeddings(&mut self) {
+        let positions: Vec<Vec3> = self.cells.iter().map(|c| c.soma.pos).collect();
+        let types: Vec<CellType> = self.cells.iter().map(|c| c.cell_type).collect();
+        let ids: Vec<usize> = self.cells.iter().map(|c| c.id).collect();
+        self.trp_embeddings = crate::trp::init_embeddings(&ids, &types, &positions);
+    }
+
+    /// Form synapses through TRP attention.
+    pub fn form_synapses_trp(&mut self) {
+        if self.trp_embeddings.is_empty() {
+            self.init_trp_embeddings();
+        }
+        let positions: Vec<Vec3> = self.cells.iter().map(|c| c.soma.pos).collect();
+        let types: Vec<CellType> = self.cells.iter().map(|c| c.cell_type).collect();
+        let ids: Vec<usize> = self.cells.iter().map(|c| c.id).collect();
+        let cell_size = self.trp_params.max_dist.max(0.5);
+        let (grid, _points) = build_contact_grid(&self.cells, cell_size, false);
+        let existing: Vec<(usize, usize)> = self.synapses.iter().map(|s| (s.pre, s.post)).collect();
+        let new_syns = trp_form_synapses(
+            &positions,
+            &types,
+            &ids,
+            &self.trp_embeddings,
+            &existing,
+            &grid,
+            &self.trp_params,
+        );
+        self.synapses.extend(new_syns);
+    }
+
+    /// Prune TRP synapses whose score fell below the threshold.
+    pub fn prune_trp_synapses(&mut self) -> usize {
+        let positions_by_id: HashMap<usize, Vec3> =
+            self.cells.iter().map(|c| (c.id, c.soma.pos)).collect();
+        let (alive, pruned) = prune_synapses_trp(
+            &self.synapses,
+            &positions_by_id,
+            &self.trp_embeddings,
+            &self.trp_params,
+        );
+        self.synapses = alive;
+        pruned
     }
 
     pub fn run_cell_modules(&mut self) {
@@ -2164,6 +2339,45 @@ mod tests {
     }
 
     #[test]
+    fn eri_zero_noise_gives_unit_factors() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let (a, b) = eri_length_distribution(&mut rng, 0.0, 2.5, 0.0, 0.0);
+        assert!((a - 2.5).abs() < 1e-12 && (b - 2.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn eri_negative_noise_compresses_via_sigmoid() {
+        // A strongly negative draw maps near 0 via the sigmoid; a positive
+        // draw of the same magnitude maps to 1 + x/2 — asymmetric response.
+        let map = |x: f64| {
+            if x < 0.0 {
+                2.0 / (1.0 + (-x).exp())
+            } else {
+                0.5 * x + 1.0
+            }
+        };
+        assert!(map(-10.0) < 1e-4);
+        assert!((map(2.0) - 2.0).abs() < 1e-12);
+        assert!((map(0.0) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn eri_length_hint_orders_factors() {
+        // With len1 > len2 the larger factor must land in daughter 1,
+        // regardless of the draw order.
+        let runs = 100;
+        let mut ordered = 0;
+        let mut rng = StdRng::seed_from_u64(7);
+        for _ in 0..runs {
+            let (a, b) = eri_length_distribution(&mut rng, 1.0, 1.0, 10.0, 1.0);
+            if a >= b {
+                ordered += 1;
+            }
+        }
+        assert_eq!(ordered, runs, "factor ordering must follow length hints");
+    }
+
+    #[test]
     fn growth_bifurcation_splits_speed_into_daughters() {
         let mut w = world();
         let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 6.0);
@@ -2172,16 +2386,17 @@ mod tests {
         w.cells[c].neurites[n].elongation_speed = 2.0;
         let mut model = crate::BalancedForces::netmorph_defaults();
         model.parallelogram_std = 0.0; // fixed 90° for determinism
-                                       // ERI noise off → daughters split speed 2.0 → 1.0 each.
+                                       // ERI noise off → both daughters get factor 1.0 × parent speed 2.0
+                                       // (NETMORPH quotas are relative to the mean, not sum-preserving).
         w.bifurcate_neurite_growth(c, n, 1.5, 2.0, 0.0, &model);
         let neurites = &w.cells[c].neurites;
         assert_eq!(neurites.len(), 3, "родитель + 2 дочки");
-        assert!((neurites[1].elongation_speed - 1.0).abs() < 1e-9);
-        assert!((neurites[2].elongation_speed - 1.0).abs() < 1e-9);
-        // initial length = step * speed = 2.0 * 1.0 = 2.0
+        assert!((neurites[1].elongation_speed - 2.0).abs() < 1e-9);
+        assert!((neurites[2].elongation_speed - 2.0).abs() < 1e-9);
+        // initial length = step * speed = 2.0 * 2.0 = 4.0
         let l1 = neurites[1].points[0].dist(neurites[1].points[1]);
         let l2 = neurites[2].points[0].dist(neurites[2].points[1]);
-        assert!((l1 - 2.0).abs() < 1e-9 && (l2 - 2.0).abs() < 1e-9);
+        assert!((l1 - 4.0).abs() < 1e-9 && (l2 - 4.0).abs() < 1e-9);
     }
 
     #[test]
@@ -2398,6 +2613,59 @@ mod tests {
             "внутренность остаётся нулевой"
         );
     }
+
+    #[test]
+    fn tension_extension_turns_toward_history() {
+        use crate::direction_model::TensionSteering;
+        use crate::turning_model::TurnModel;
+
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 6.0);
+        let n = w.new_neurite(c, true, 1.0);
+        // Straight trunk along +X, then one sideways segment at the tip.
+        for _ in 0..10 {
+            w.extend_neurite(c, n, Vec3::new(1.0, 0.0, 0.0));
+        }
+        w.extend_neurite(c, n, Vec3::new(1.0, 1.0, 0.0));
+        let mut turning = TurnModel::EachDt { t_prev: 0.0 }; // always turn
+        let steering = TensionSteering::default();
+        w.extend_neurite_tension(c, n, 1.0, &steering, &mut turning, 1.0, 0.0);
+        // The pull of the +Y kink tilts the new step above the trunk axis.
+        let after = w.cells[c].neurites[n].axis();
+        assert!(after.y > 0.0, "turn must aim toward the +Y pull: {after:?}");
+    }
+
+    #[test]
+    fn rall_diameters_emerge_bottom_up() {
+        use crate::diameter_model::{assign_rall_diameters, RallPowerLaw};
+
+        let mut w = world();
+        let c = w.add_cell(Vec3::ZERO, CellType::Excitatory, 6.0);
+        let _n = w.new_neurite(c, true, 5.0); // placeholder trunk diameter
+        for _ in 0..3 {
+            let terminals: Vec<usize> = (0..w.cells[c].neurites.len())
+                .filter(|&i| w.cells[c].neurites[i].is_terminal)
+                .collect();
+            for t in terminals {
+                w.bifurcate_neurite(c, t, 1.0, 1.5);
+            }
+        }
+        // 8 terminals now; assign bottom-up diameters from the NETMORPH PDFs.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        assign_rall_diameters(&mut w.cells[c], &RallPowerLaw::default(), &mut rng);
+        let trunk = w.cells[c].neurites[0].diameter;
+        let term: Vec<f64> = w.cells[c].neurites[7..]
+            .iter()
+            .filter(|x| x.is_terminal)
+            .map(|x| x.diameter)
+            .collect();
+        assert_eq!(term.len(), 8);
+        assert!(
+            trunk > 2.0,
+            "trunk must thicken from terminal sums: {trunk}"
+        );
+        assert!(term.iter().all(|&d| d < trunk));
+    }
 }
 
 /// Two unit directions ±angle/2 around `axis` (CX3D bifurcation angles).
@@ -2442,7 +2710,11 @@ fn interior_index(v: usize, n: usize) -> Option<usize> {
 /// Build a spatial hash of every postsynaptic contact point (soma + all
 /// neurite points), tagged by owning cell. Returns `(grid, points)` where
 /// `points[i] = (position, cell_index)`.
-fn build_contact_grid(cells: &[Cell], cell_size: f64) -> (UniformGrid, Vec<(Vec3, usize)>) {
+fn build_contact_grid(
+    cells: &[Cell],
+    cell_size: f64,
+    tips_only: bool,
+) -> (UniformGrid, Vec<(Vec3, usize)>) {
     let mut grid = UniformGrid::new(cell_size);
     let mut points = Vec::new();
     for (b, c) in cells.iter().enumerate() {
@@ -2450,7 +2722,14 @@ fn build_contact_grid(cells: &[Cell], cell_size: f64) -> (UniformGrid, Vec<(Vec3
         points.push((c.soma.pos, b));
         grid.insert(idx, c.soma.pos);
         for neur in &c.neurites {
-            for &p in &neur.points {
+            // tips_only: index soma + neurite tips only (fast path for final
+            // wiring of large brains); otherwise every neurite point.
+            let pts: &[Vec3] = if tips_only {
+                &neur.points[neur.points.len().saturating_sub(1)..]
+            } else {
+                &neur.points
+            };
+            for &p in pts {
                 let idx = points.len();
                 points.push((p, b));
                 grid.insert(idx, p);
@@ -2462,17 +2741,30 @@ fn build_contact_grid(cells: &[Cell], cell_size: f64) -> (UniformGrid, Vec<(Vec3
 
 /// Nearest contact distance from the pre cell's axon tips to each post cell
 /// (spatial-hash lookup: O(tips · local density) instead of O(N²)).
+///
+/// `limit` caps how many posts each tip contributes: dense regions can put
+/// thousands of somas within `dist` of a tip, but the caller wires at most
+/// `max_syn_per_cell` per cell, so only the `limit` nearest posts matter.
+/// Partial selection (O(k)) keeps this cheap even when a query is huge.
 fn nearest_posts(
     grid: &UniformGrid,
     points: &[(Vec3, usize)],
     tips: &[Vec3],
     dist: f64,
+    limit: usize,
 ) -> HashMap<usize, f64> {
     let mut nearest: HashMap<usize, f64> = HashMap::new();
     for t in tips {
-        for i in grid.query(*t, dist) {
-            let (p, b) = points[i];
-            let d = t.dist(p);
+        let mut cands: Vec<(f64, usize)> = grid
+            .query(*t, dist)
+            .into_iter()
+            .map(|i| (t.dist(points[i].0), points[i].1))
+            .collect();
+        if cands.len() > limit {
+            cands.select_nth_unstable_by(limit, |a, b| a.0.partial_cmp(&b.0).unwrap());
+            cands.truncate(limit);
+        }
+        for (d, b) in cands {
             let e = nearest.entry(b).or_insert(f64::INFINITY);
             if d < *e {
                 *e = d;
@@ -2554,6 +2846,48 @@ fn sample_normal(rng: &mut StdRng, mean: f64, std: f64) -> f64 {
     let u2 = rng.gen::<f64>();
     let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
     mean + std * z
+}
+
+/// NETMORPH `length_distribution_eri_model::predict_initial_quota`
+/// (`fibre_elongation_model.cc`, Koene 2008).
+///
+/// Two correlated normal draws `Xa`, `Xb ~ N(0, eri_std)` are mapped to
+/// multiplicative quota factors:
+///
+/// ```text
+/// X < 0: 2 / (1 + exp(−X))   (sigmoid: −∞ → 0, 0 → 1)
+/// X ≥ 0: 0.5·X + 1           (linear: 0 → 1, 2 → 2)
+/// ```
+///
+/// so negative noise compresses smoothly toward zero while positive noise
+/// scales linearly — a daughter can slow down drastically but only speed up
+/// proportionally. The factors are then ordered to match the initial branch
+/// length ratio (`len1 > len2` ⇒ factor1 ≥ factor2), preserving the
+/// correlation between where a branch points and how fast it grows, and
+/// finally scaled by the parent's speed `meanquota`.
+fn eri_length_distribution(
+    rng: &mut StdRng,
+    eri_std: f64,
+    meanquota: f64,
+    len1_hint: f64,
+    len2_hint: f64,
+) -> (f64, f64) {
+    let map = |x: f64| {
+        if x < 0.0 {
+            2.0 / (1.0 + (-x).exp())
+        } else {
+            0.5 * x + 1.0
+        }
+    };
+    let mut xa = map(sample_normal(rng, 0.0, eri_std));
+    let mut xb = map(sample_normal(rng, 0.0, eri_std));
+    // Order the factors to the initial length ratio (equal hints → no swap).
+    if len1_hint > len2_hint && xa < xb {
+        std::mem::swap(&mut xa, &mut xb);
+    } else if len1_hint <= len2_hint && xa > xb {
+        std::mem::swap(&mut xa, &mut xb);
+    }
+    (xa * meanquota, xb * meanquota)
 }
 
 fn sample_lognormal(rng: &mut StdRng, mu: f64, sigma: f64) -> f64 {

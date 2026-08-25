@@ -2,7 +2,9 @@
 //! division cycle, growth-cone chemoattraction, morphogen secretion.
 
 use crate::branch_model::BalancedForces;
+use crate::direction_model::{GeometryView, TensionSteering};
 use crate::module::{CellModule, Host, Module};
+use crate::turning_model::TurnModel;
 use crate::world::World;
 use crate::Vec3;
 
@@ -211,7 +213,8 @@ impl Module for ChemoAttraction {
         } else {
             Vec3::ZERO
         };
-        let step_dir = old * self.old_dir_weight + grad.normalized() * self.gradient_weight + noise + crowd;
+        let step_dir =
+            old * self.old_dir_weight + grad.normalized() * self.gradient_weight + noise + crowd;
         let step_dir = clamp_turn(old, step_dir.normalized(), self.turn_rate_deg);
 
         world.extend_neurite(cell, idx, step_dir * self.speed);
@@ -369,14 +372,23 @@ pub struct Astrocyte {
 
 impl Astrocyte {
     pub fn new(substance: &str, amount: f64) -> Self {
-        Astrocyte { substance: substance.to_string(), amount, radius: 15.0, weight_boost: 0.1 }
+        Astrocyte {
+            substance: substance.to_string(),
+            amount,
+            radius: 15.0,
+            weight_boost: 0.1,
+        }
     }
 }
 
 impl Module for Astrocyte {
     fn run(&mut self, world: &mut World, host: Host) {
-        let Host::Soma(cell) = host else { return; };
-        if world.cells[cell].cell_type != crate::cell::CellType::Glia { return; }
+        let Host::Soma(cell) = host else {
+            return;
+        };
+        if world.cells[cell].cell_type != crate::cell::CellType::Glia {
+            return;
+        }
         let pos = world.cells[cell].soma.pos;
         world.add_substance_at(&self.substance, pos, self.amount);
         // tripartite boost: nearby synapses get +weight_boost * local astro concentration
@@ -391,8 +403,17 @@ impl Module for Astrocyte {
             }
         }
     }
-    fn copy_on_divide(&self) -> bool { false }
-    fn boxed_copy(&self) -> Box<dyn Module> { Box::new(Astrocyte { substance: self.substance.clone(), amount: self.amount, radius: self.radius, weight_boost: self.weight_boost }) }
+    fn copy_on_divide(&self) -> bool {
+        false
+    }
+    fn boxed_copy(&self) -> Box<dyn Module> {
+        Box::new(Astrocyte {
+            substance: self.substance.clone(),
+            amount: self.amount,
+            radius: self.radius,
+            weight_boost: self.weight_boost,
+        })
+    }
 }
 
 /// Hillman / L-Neuron diameter-based branching: elongate + taper the neurite;
@@ -810,6 +831,12 @@ pub struct NetmorphGrowth {
     pub step: f64,
     pub eri_std: f64,
     pub branch: BalancedForces,
+    /// Optional NETMORPH tension direction model: when set, the growth cone
+    /// re-aims at the history pull on turn events instead of continuing
+    /// straight. Without it the arbor grows perfectly straight segments.
+    pub steering: Option<TensionSteering>,
+    /// Turn model driving re-aiming events (only used when `steering` is set).
+    pub turning: TurnModel,
     acceleration: f64,
     stopped: bool,
 }
@@ -830,9 +857,37 @@ impl NetmorphGrowth {
             step: 1.0,
             eri_std: 0.0,
             branch: BalancedForces::netmorph_defaults(),
+            steering: None,
+            turning: TurnModel::default_linear(),
             acceleration: 0.5,
             stopped: false,
         }
+    }
+
+    /// Enable the NETMORPH tension direction model with a linear-rate turn
+    /// process (`turn_rate` turns per world unit of elongation).
+    pub fn tension(self, history_power: f64, turn_rate: f64) -> Self {
+        self.tension_full(history_power, turn_rate, 0.0, 0.35)
+    }
+
+    /// Tension steering with explicit veer bounds (radians). The veer is the
+    /// NETMORPH `veeranglemin/max` perturbation applied around the predicted
+    /// direction on each turn — without it a straight history pulls exactly
+    /// along its own axis and the arbor never curves.
+    pub fn tension_full(
+        mut self,
+        history_power: f64,
+        turn_rate: f64,
+        veer_min: f64,
+        veer_max: f64,
+    ) -> Self {
+        self.steering = Some(TensionSteering {
+            history_power,
+            veer_min,
+            veer_max,
+        });
+        self.turning = TurnModel::linear_rate(turn_rate);
+        self
     }
 
     pub fn speed_constraint(mut self, c: f64) -> Self {
@@ -952,7 +1007,25 @@ impl Module for NetmorphGrowth {
         let n = siblings.len() as f64;
         let share = if sum > 0.0 { speed / sum } else { 0.0 };
         let resource = self.nu0 * n.powf(1.0 - self.f) * dt;
-        let dir = world.cells[cell].neurites[idx].axis();
+        let dir = if let Some(steering) = &self.steering {
+            // NETMORPH tension model: on a turn event, re-aim at the history
+            // pull; otherwise continue straight (persistence).
+            if world.turn_event(&mut self.turning, resource, 0.0) {
+                // Copy just the geometry the pull-sum needs (points + diameter),
+                // releasing the world borrow before the RNG draw.
+                let src = &world.cells[cell].neurites[idx];
+                let geom = GeometryView {
+                    points: src.points.clone(),
+                    diameter: src.diameter,
+                    axis_fallback: src.axis(),
+                };
+                steering.direction_view(&geom, world)
+            } else {
+                world.cells[cell].neurites[idx].axis()
+            }
+        } else {
+            world.cells[cell].neurites[idx].axis()
+        };
         world.extend_neurite(cell, idx, dir * (share * resource));
     }
 
@@ -979,6 +1052,8 @@ impl Module for NetmorphGrowth {
             step: self.step,
             eri_std: self.eri_std,
             branch: self.branch,
+            steering: self.steering,
+            turning: self.turning,
             acceleration: self.acceleration,
             stopped: false,
         })
@@ -1011,12 +1086,7 @@ fn van_pelt_probability(
     s: f64,
 ) -> f64 {
     let cn = n_i / cn_sum;
-    n_i.powf(-e)
-        * b_inf
-        * (-t / tau).exp()
-        * ((dt / tau).exp() - 1.0)
-        * 2f64.powf(-s * gamma)
-        * cn
+    n_i.powf(-e) * b_inf * (-t / tau).exp() * ((dt / tau).exp() - 1.0) * 2f64.powf(-s * gamma) * cn
 }
 
 /// Standard normal draw via Box–Muller from the world's uniform RNG.
@@ -1599,9 +1669,19 @@ mod tests {
         w.step();
         let g0 = t0.dist(w.cells[c].neurites[n0].tip());
         let g1 = t1.dist(w.cells[c].neurites[n1].tip());
-        assert!((g0 - 3.0).abs() < 1e-9, "быстрый терминал растёт на 3.0, got {g0}");
-        assert!((g1 - 1.0).abs() < 1e-9, "медленный терминал растёт на 1.0, got {g1}");
-        assert!((g0 + g1 - 4.0).abs() < 1e-9, "сумма сохраняет ресурс 4.0, got {}", g0 + g1);
+        assert!(
+            (g0 - 3.0).abs() < 1e-9,
+            "быстрый терминал растёт на 3.0, got {g0}"
+        );
+        assert!(
+            (g1 - 1.0).abs() < 1e-9,
+            "медленный терминал растёт на 1.0, got {g1}"
+        );
+        assert!(
+            (g0 + g1 - 4.0).abs() < 1e-9,
+            "сумма сохраняет ресурс 4.0, got {}",
+            g0 + g1
+        );
     }
 
     #[test]

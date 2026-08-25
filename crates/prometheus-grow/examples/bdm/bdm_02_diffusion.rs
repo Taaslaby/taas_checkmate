@@ -111,5 +111,5 @@ fn main() {
     assert!(c_end > 0.5, "вещество должно накопиться у источника, got {c_end:.3}");
     assert!(c_end.is_finite() && c_corner.is_finite(), "NaN/бесконечность в поле");
     assert!(c_corner > 0.0, "фронт должен дойти до углов, got {c_corner:.5}");
-    println!("✓ хемотаксис притянул клетки к секретору, диффузия стабильна и доходит до углов");
+    println!("chemoattraction pulled cells toward the secretor; diffusion is stable and reaches corners");
 }

@@ -197,5 +197,5 @@ fn main() {
     assert!(neurites > 8, "дерево должно разветвиться, got {neurites}");
     assert!(z_ap / n_ap.max(1) as f64 > 200.0, "апикальные должны расти к верхней полосе");
     assert!((z_ba / n_ba.max(1) as f64) < 100.0, "базальные должны расти к нижней полосе");
-    println!("✓ пирамидальная клетка выросла по градиентам apical/basal");
+    println!("pyramidal cell grew along apical/basal gradients");
 }

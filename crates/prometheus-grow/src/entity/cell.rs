@@ -1,4 +1,8 @@
 //! Cells: soma + neurites + attached instruction modules.
+//
+// References:
+//   - Zubler & Douglas (2009) on CX3D: Simulating cortical development in 3D
+//   - Bauer et al. (2014) on developmental simulation schedulers and discrete-time loops
 
 use crate::module::{CellModule, Module};
 use crate::Vec3;

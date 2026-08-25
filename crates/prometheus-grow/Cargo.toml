@@ -5,11 +5,22 @@ edition = "2021"
 description = "Developmental growth engine — CX3D-style morphogen-guided self-construction (Rust port of the instruction-language core)"
 
 [dependencies]
-rand = "0.8"
-flate2 = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-rayon = "1"
+rand = { workspace = true }
+flate2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+
+# wgpu GPU acceleration (feature "gpu")
+wgpu = { version = "0.19", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+gpu = ["wgpu", "bytemuck"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
 
 # CX3D tutorial ports (examples/cx3d/)
 [[example]]
@@ -70,6 +81,31 @@ path = "examples/bdm/bdm_bench_soma_clustering.rs"
 [[example]]
 name = "grow_to_sim"
 path = "examples/grow_to_sim.rs"
+
+# TRP semantic synapse formation
+[[example]]
+name = "grow_trp"
+path = "examples/grow_trp.rs"
+
+# Biomechanics: division + adhesion + neurite growth
+[[example]]
+name = "biomechanics"
+path = "examples/biomechanics.rs"
+
+# Benchmark: CPU vs GPU diffusion
+[[example]]
+name = "bench_diffusion"
+path = "examples/bench_diffusion.rs"
+
+# BioDynaMo tissue benchmark: 1→1000 cells, mechanics, diffusion, neurites
+[[example]]
+name = "bench_biodynamo"
+path = "examples/bench_biodynamo.rs"
+
+# A/B comparison CPU vs GPU: same simulation, two backends
+[[example]]
+name = "bench_biodynamo_gpu"
+path = "examples/bench_biodynamo_gpu.rs"
 
 # Ported from pillars-grow (merged into prometheus-grow)
 [[example]]

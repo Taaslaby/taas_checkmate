@@ -15,7 +15,10 @@ fn main() {
     let mut w = World::new(
         grid,
         1.0,
-        Bounds { min: origin, max: origin + Vec3::new(220.0, 220.0, 660.0) },
+        Bounds {
+            min: origin,
+            max: origin + Vec3::new(220.0, 220.0, 660.0),
+        },
         0,
     );
     w.synapse_dist = 5.0;
@@ -49,15 +52,29 @@ fn main() {
     w.form_synapses_by_contact(15.0);
 
     let syn = w.synapses.clone();
-    println!("синапсов: {} (из них exc→inh: {})", syn.len(), syn.iter().filter(|s| s.pre == excit && s.post == inhib).count());
+    println!(
+        "синапсов: {} (из них exc→inh: {})",
+        syn.len(),
+        syn.iter()
+            .filter(|s| s.pre == excit && s.post == inhib)
+            .count()
+    );
     for s in &syn {
-        println!("  пре {}({}) → пост {}({})  {:?}  w={:.2}", s.pre, ty(&w, s.pre), s.post, ty(&w, s.post), s.kind, s.weight);
+        println!(
+            "  пре {}({}) → пост {}({})  {:?}  w={:.2}",
+            s.pre,
+            ty(&w, s.pre),
+            s.post,
+            ty(&w, s.post),
+            s.kind,
+            s.weight
+        );
     }
     assert!(!syn.is_empty(), "должен образоваться синапс");
     let e2i = syn.iter().find(|s| s.pre == excit && s.post == inhib);
     assert!(e2i.is_some(), "exc → inh синапс обязателен");
     assert_eq!(e2i.unwrap().kind, prometheus_grow::SynapseKind::Excitatory);
-    println!("знак синапса = возбуждающий (от пресинаптической клетки) ✓");
+    println!("synapse sign = excitatory (from the presynaptic cell)");
 }
 
 fn ty(w: &World, id: usize) -> &'static str {

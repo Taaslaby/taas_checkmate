@@ -1,8 +1,8 @@
-//! Сущность = любая живая единица симуляции: клетка, нейрит, глия.
+//! An entity = any living unit of the simulation: cell, neurite, glia.
 
 use crate::{CellType, Vec3};
 
-/// Базовая сущность — как `bdm::Agent` (`core/agent/agent.h`)
+/// Base entity — like `bdm::Agent` (`core/agent/agent.h`).
 #[derive(Clone, Debug)]
 pub struct Entity {
     pub id: usize,

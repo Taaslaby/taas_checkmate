@@ -21,9 +21,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 
-use prometheus_grow::{
-    parse_channel_map, Bounds, CellType, FlyGenome, Grid, Vec3, World,
-};
+use prometheus_grow::{parse_channel_map, Bounds, CellType, FlyGenome, Grid, Vec3, World};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -63,7 +61,7 @@ struct GeneProfile {
 }
 
 impl GeneProfile {
-    /// DNA gene → sign → type. `sign < 0` (Gad1/GABA, VGlut/GluCl у мухи) →
+    /// DNA gene → sign → type. `sign < 0` (Gad1/GABA, VGlut/GluCl in fly) →
     /// inhibitory; `sign > 0` (ChAT) → excitatory; unknown/modulator (`?`,
     /// sign == 0) falls back to the connectome's predicted neurotransmitter.
     fn cell_type(&self, predicted_nt: &str) -> CellType {
@@ -120,7 +118,9 @@ fn median(xs: &[f64]) -> f64 {
 fn reciprocal_gaba(edges: &HashSet<(usize, usize)>, gaba: &HashSet<usize>) -> usize {
     edges
         .iter()
-        .filter(|&&(a, b)| a < b && gaba.contains(&a) && gaba.contains(&b) && edges.contains(&(b, a)))
+        .filter(|&&(a, b)| {
+            a < b && gaba.contains(&a) && gaba.contains(&b) && edges.contains(&(b, a))
+        })
         .count()
 }
 
@@ -164,8 +164,7 @@ fn main() {
     assert!(Path::new(&ch_path).exists(), "нет channel map: {ch_path}");
 
     let patch: Patch =
-        serde_json::from_str(&std::fs::read_to_string(&patch_path).expect("патч"))
-            .expect("JSON");
+        serde_json::from_str(&std::fs::read_to_string(&patch_path).expect("патч")).expect("JSON");
     let annot = parse_annot(&std::fs::read_to_string(&annot_path).expect("annot"));
     let ch_map = parse_channel_map(&std::fs::read_to_string(&ch_path).expect("channel map"));
 
@@ -274,8 +273,6 @@ fn main() {
 
     let real_recip = reciprocal_gaba(&real, &gaba);
     println!("\nреально: edges={} recip GABA={real_recip}", real.len());
-    println!(
-        "\nитог: ДНК (gene → знак, Dscam1 → проводка) навешена на {covered}/{n} нейронов;"
-    );
+    println!("\nитог: ДНК (gene → знак, Dscam1 → проводка) навешена на {covered}/{n} нейронов;");
     println!("      согласие с коннектомом {agree}/{n}; F1 ограничен сома-дистанцией.");
 }

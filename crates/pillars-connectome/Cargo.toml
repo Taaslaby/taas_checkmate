@@ -10,12 +10,12 @@ description = "Universal connectome brain simulator — pillars-native engine + 
 pillars = { path = "../pillars" }
 pillars-cuda = { path = "../pillars-cuda", optional = true }
 prometheus-grow = { path = "../prometheus-grow" }
-serde = { version = "1", features = ["derive"] }
-rand = "0.8"
+serde = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-rand = "0.8"
+criterion = { workspace = true }
+rand = { workspace = true }
 
 [features]
 default = ["rayon"]

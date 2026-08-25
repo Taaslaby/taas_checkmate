@@ -16,10 +16,15 @@
 //! onto another, depending on which receptor the postsynaptic cell expresses.
 //! In *Drosophila* this is literal biology: glutamate (VGlut) excites through
 //! AMPA/NMDA receptors and inhibits through the GluCl chloride channel.
+//
+// References:
+//   - Van Ooyen et al. (2014) on NETMORPH: simulator for neurite morphology and connectivity
+//   - Cully et al. (1994) on GluCl: glutamate-gated chloride channels and inhibitory neurotransmission
+//   - Daniels et al. (2004) on Drosophila vesicular glutamate transporter (VGlut) dual signaling
 
 use rand::Rng;
 
-use crate::world::{SynapseKind};
+use crate::world::SynapseKind;
 
 /// Postsynaptic receptor type (NETMORPH `synapse_type`, three candidates:
 /// AMPAR, NMDAR, GABAR).
@@ -83,11 +88,7 @@ impl SynapseFormationModel {
         SynapseFormationModel {
             // NETMORPH literal values (µm): spiny excitatory pairs bridge 1.0,
             // interneuron pairs 0.1, untyped/glia 0.0.
-            max_fibre_distance: [
-                [1.0, 0.1, 0.0],
-                [0.1, 0.1, 0.0],
-                [0.0, 0.0, 0.0],
-            ],
+            max_fibre_distance: [[1.0, 0.1, 0.0], [0.1, 0.1, 0.0], [0.0, 0.0, 0.0]],
             receptor_prob: [
                 // pre = Excitatory
                 [exc, exc, none],
@@ -117,11 +118,7 @@ impl SynapseFormationModel {
         let inh = [-9.9, -9.9, 1.0];
         let none = [-9.9, -9.9, -9.9];
         SynapseFormationModel {
-            max_fibre_distance: [
-                [1.0, 0.1, 0.0],
-                [0.1, 0.1, 0.0],
-                [0.0, 0.0, 0.0],
-            ],
+            max_fibre_distance: [[1.0, 0.1, 0.0], [0.1, 0.1, 0.0], [0.0, 0.0, 0.0]],
             receptor_prob: [
                 // pre = Excitatory: exc onto exc, inh onto inh (the switch)
                 [exc_post, inh_post, none],

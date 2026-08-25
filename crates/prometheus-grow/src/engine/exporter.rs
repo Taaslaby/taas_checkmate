@@ -1,5 +1,5 @@
-//! BioDynaMo `core/exporter.h` port — ParaView VTK export stub + WebGL scene
-//! export + compact growth-stream timelapse (the `.pvd` analogue: one small
+//! BioDynaMo `core/exporter.h` port.
+//! Export + compact growth-stream timelapse (the `.pvd` analogue: one small
 //! delta per captured frame instead of a full snapshot each time).
 
 use crate::World;
@@ -80,15 +80,24 @@ pub fn connectome_json(world: &World) -> String {
 }
 
 pub fn export_vtk(world: &World, path: &str) -> std::io::Result<()> {
-    let mut f=File::create(path)?;
+    let mut f = File::create(path)?;
     writeln!(f, "# vtk DataFile Version 3.0")?;
     writeln!(f, "PROMETHEUS grown network")?;
     writeln!(f, "ASCII")?;
     writeln!(f, "DATASET POLYDATA")?;
     writeln!(f, "POINTS {} float", world.cells.len())?;
-    for c in &world.cells { writeln!(f, "{} {} {}", c.soma.pos.x, c.soma.pos.y, c.soma.pos.z)?; }
-    writeln!(f, "LINES {} {}\n", world.synapses.len(), world.synapses.len()*3)?;
-    for s in &world.synapses { writeln!(f, "2 {} {}", s.pre, s.post)?; }
+    for c in &world.cells {
+        writeln!(f, "{} {} {}", c.soma.pos.x, c.soma.pos.y, c.soma.pos.z)?;
+    }
+    writeln!(
+        f,
+        "LINES {} {}\n",
+        world.synapses.len(),
+        world.synapses.len() * 3
+    )?;
+    for s in &world.synapses {
+        writeln!(f, "2 {} {}", s.pre, s.post)?;
+    }
     Ok(())
 }
 
@@ -99,7 +108,10 @@ fn fmt_num(x: f64) -> String {
     if x == x.round() && x.abs() < 1e15 {
         format!("{:.0}", x)
     } else {
-        format!("{:.4}", x).trim_end_matches('0').trim_end_matches('.').to_string()
+        format!("{:.4}", x)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
     }
 }
 
