@@ -11,10 +11,11 @@
 //! safe wrappers) → KERNELS sibling (batch f32x8 microkernels, never feed zoo).
 //! Dependency direction: api → zoo → ops → core.
 //!
-//! Modules: graph (CSR adjacency) | network (multi-population orchestrator)
-//! | compact (spike compaction) | push (event-driven scatter) | neurons
-//! (EPropLIF, GLIF3/4, STP, …) | cpe (ChaosPatternEngine) | autotune
-//! (E-Prop FR probe) | embodied (FlyWire neuromotor).
+//! Modules: net/ (network wiring: graph, network, compact, push, delay,
+//! synapse, population) | model/ (stateful neuron classes: EPropLIF, GLIF3/4,
+//! STP, …) | build/ (typed population builders) | learn/ (EPropTrainer,
+//! autotune, cpe) | embodied/ (FlyWire neuromotor + human hand) | import/neuroml/
+//! (NeuroML2/LEMS compiler) | validate/ (NEURON/Brian2 parity).
 //!
 //! Quick start:
 //! ```rust,ignore
@@ -35,18 +36,26 @@
 //! author: Atlasov Anton
 //! -------------------------------------------------------------------------
 
-pub mod autotune;
-pub mod builder;
+pub mod build;
 pub mod conductance;
-pub mod cpe;
 pub mod embodied;
 pub mod formula;
-pub mod human_hand;
+pub mod import;
+pub mod learn;
+pub mod model;
 pub mod net;
-pub mod neuroml;
-pub mod neurons;
-pub mod trainer;
 pub mod validate;
+
+// ─── Old-path facade ────────────────────────────────────────
+// Grouped moves keep the historical flat paths alive: `api::builder`,
+// `api::neurons`, `api::neuroml`, `api::trainer`, `api::autotune`,
+// `api::cpe`, `api::human_hand` all resolve to their new homes, so
+// external callers (Python/C++/Rust, connectome, karmac) compile unchanged.
+pub use self::build as builder;
+pub use self::model as neurons;
+pub use import::neuroml;
+pub use learn::{autotune, cpe, trainer};
+pub use embodied::human_hand;
 
 // Network wiring layer lives in `net/`; re-export its modules at the old
 // flat paths (`api::graph`, `api::network`, …) so external callers keep

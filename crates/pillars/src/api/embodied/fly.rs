@@ -5,15 +5,15 @@
 //! Description:
 //!
 //! Перенесено из `core::neuron::embodied`— композиция
-//! api::neurons::{DelayBuffer, neuromotor::NeuromotorState}.
+//! api::model::{DelayBuffer, neuromotor::NeuromotorState}.
 //!
 //! Author/Concept: Anton Atlasov
 //! -------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::neurons::neuromotor::NeuromotorState;
-use crate::api::neurons::DelayBuffer;
+use super::neuromotor::NeuromotorState;
+use crate::api::model::DelayBuffer;
 
 /// Joint mapping connecting a physical DOF to an Neuromotor agonist-antagonist muscle pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]

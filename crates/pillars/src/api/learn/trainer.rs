@@ -18,7 +18,7 @@ use rand::SeedableRng;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use crate::api::neurons::eprop::EPropIzhikevichMulti;
+use crate::api::model::eprop::EPropIzhikevichMulti;
 
 // ═══════════════════════════════════════════════════════════
 //  Per-worker state

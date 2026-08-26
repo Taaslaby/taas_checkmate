@@ -27,7 +27,7 @@
 //! Author/Concept: Anton Atlasov
 //! -------------------------------------------------------------------------
 
-use super::neurons::neuromotor::{BiomechanicsProfile, NeuromotorState};
+use super::neuromotor::{BiomechanicsProfile, NeuromotorState};
 
 /// Maximum muscle stress used by the cited wrist model: 35 N/cm².
 pub const HUMAN_SPECIFIC_TENSION_PA: f32 = 350_000.0;
@@ -418,7 +418,7 @@ impl HumanHandState {
             b0: 0.0,
             alpha: 0.0,
         };
-        let mut neuromotor = crate::api::neurons::neuromotor::NeuromotorStateBuilder::new(8)
+        let mut neuromotor = super::neuromotor::NeuromotorStateBuilder::new(8)
             .with_profile(base)
             .build();
         for (idx, spec) in profile.muscles.iter().enumerate() {

@@ -12,7 +12,9 @@
 //!              ShortTermPlasticity (stp) | SomatoDendriticNeuron (LIF+cable) |
 //!              ChordotonalState (mechanoreceptor) | реэкспорты: PoissonGenerator,
 //!              SornNetwork, AstrocyteState, TtfsEncoder, SpikeRaster и др.
-//!              Подмодули: eprop, haap, neuromotor, bcm, hr, lif, izhikevich, saw, adex, fhn, wc.
+//!              Подмодули: eprop, haap, bcm, hr, lif, izhikevich, saw, adex, fhn, wc.
+//!              Neuromotor переехал в api::embodied (воплощение); старый путь
+//!              api::neurons::neuromotor сохранён реэкспортом для совместимости.
 //!
 //! author: Atlasov Anton
 //! -------------------------------------------------------------------------
@@ -27,7 +29,6 @@ pub mod haap;
 pub mod hr;
 pub mod izhikevich;
 pub mod lif;
-pub mod neuromotor;
 pub mod saw;
 pub mod wc;
 
@@ -39,16 +40,19 @@ pub use haap::{step_haap, HaapProfile, HaapState, HaapStateBuilder};
 pub use hr::step_hr;
 pub use izhikevich::{step_izhikevich, step_izhikevich_dual};
 pub use lif::{step_lif, step_lif_at};
-pub use neuromotor::{
+// Neuromotor живёт в api::embodied (воплощение); здесь — совместимые
+// реэкспорты, чтобы `api::neurons::neuromotor` и его итемы работали как раньше.
+pub use crate::api::embodied::neuromotor::{
     step_neuromotor, BiomechanicsProfile, DrosophilaLegConfig, FiberPoolConfig, NeuromotorState,
     NeuromotorStateBuilder,
 };
+pub use crate::api::embodied::neuromotor;
 pub use saw::{step_gco, step_saw};
 pub use wc::step_wc;
 
 // ─── Реэкспорты kernels-канона ─────────────────────────────
 
-pub use crate::api::autotune::{probe_fr, suggest_config, EPropTunerConfig, FrProbePoint};
+pub use crate::api::learn::autotune::{probe_fr, suggest_config, EPropTunerConfig, FrProbePoint};
 pub use crate::kernels::astrocyte::AstrocyteState;
 pub use crate::kernels::dendrite::{CableDendriteState, DendriteConfig, DendriteDecayFactors};
 pub use crate::kernels::input::{

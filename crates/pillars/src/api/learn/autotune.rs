@@ -41,7 +41,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
-use crate::api::neurons::eprop::EPropIzhikevichMulti;
+use crate::api::model::eprop::EPropIzhikevichMulti;
 
 /// Factor applied by the kernel to raw weights: I_s += w * KERNEL_SCALE
 const KERNEL_WEIGHT_SCALE: f32 = 10.0;
