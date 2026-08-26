@@ -27,19 +27,34 @@
 //!
 //! | File | Target | Instruction set |
 //! |------|--------|-----------------|
-//! | `lane_f32x8.rs` | AVX2 (x86) | `_mm256_*`, `wide::f32x8` |
-//! | `lane_f32x8.rs` | NEON (ARM) | `wide::f32x8` (emulated 2×128-bit) |
-//! | `lane_f32.rs` | Any CPU | `f32` scalar ops (no vectorization) |
+//! | [`f32x8`] | AVX2 (x86) | `_mm256_*`, `wide::f32x8` |
+//! | [`f32x8`] | NEON (ARM) | `wide::f32x8` (emulated 2×128-bit) |
+//! | [`f32`] | Any CPU | `f32` scalar ops (no vectorization) |
 //!
 //! ## Safety
 //!
 //! The trait itself is safe. Only the `load_param` method is `unsafe` —
 //! it dereferences raw pointers into SoA memory. All higher layers
 //! (`ops/`, `zoo/`, `api/`) use `load_param` behind safe wrappers.
+//!
+//! ## Submodules
+//!
+//! | File | Target | Instruction set |
+//! |------|--------|-----------------|
+//! | [`cond`] | `Cond<S>` | branchless `.then().else_()` blend chain |
+//! | [`f32`] | Any CPU | `SimdLane for f32` (scalar fallback) |
+//! | [`f32x8`] | AVX2/NEON | `SimdLane for f32x8` (`wide`)
+//! | [`tests`] | — | SIMD≡scalar consistency tests (`cfg(test)`) |
+
+pub mod cond;
+pub mod f32;
+pub mod f32x8;
+#[cfg(test)]
+mod tests;
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use super::cond::Cond;
+use cond::Cond;
 
 // ═══════════════════════════════════════════════════════════════════
 //  SimdLane Trait — primitives map to one hardware instruction
@@ -78,7 +93,15 @@ pub trait SimdLane:
     /// Standard Boltzmann sigmoid for voltage-dependent gating.
     /// - `v_half`: half-activation voltage (mV)
     /// - `k`: slope factor (mV⁻¹)
-    fn sigmoid(v: Self, v_half: f32, k: f32) -> Self;
+    ///
+    /// Canonical formula — lives here as the trait default (compiles to both
+    /// SIMD and scalar from one source). `exp` routes through [`SimdLane::exp`]
+    /// so the `fast-exp` precision switch covers sigmoids too.
+    #[inline(always)]
+    fn sigmoid(v: Self, v_half: f32, k: f32) -> Self {
+        let arg = -(v - Self::splat(v_half)) / Self::splat(k);
+        Self::one() / (Self::one() + Self::exp(arg))
+    }
 
     /// Hodgkin-Huxley voltage trap: `x / (exp(x) - 1)`, avoiding singularity at x=0.
     ///
@@ -92,9 +115,19 @@ pub trait SimdLane:
     /// ```
     ///
     /// # Performance
-    /// - SIMD: uses `blend()` for branchless singularity handling
-    /// - Scalar: `if |x| < 1e-6 then y else x/(exp(x)-1)`
-    fn vtrap(x: Self, y: Self) -> Self;
+    /// Branchless `blend()` singularity handling — one formula for SIMD and
+    /// scalar, no data-dependent branching.
+    #[inline(always)]
+    fn vtrap(x: Self, y: Self) -> Self {
+        // Canonical formula: Taylor expansion `y·(1 − x/(2y))` near the
+        // singularity |x/y| < 1e-6, exact `x/(exp(x/y)−1)` elsewhere.
+        let eps = Self::splat(1e-6);
+        let ratio = x / y;
+        let small = eps.cmp_gt(ratio.abs());
+        let taylor = y * (Self::one() - ratio * Self::splat(0.5));
+        let exact = x / (Self::exp(ratio) - Self::one());
+        Self::blend(small, taylor, exact)
+    }
 
     /// Ohmic (conductance-based) current: `I = g · (V - E_rev)`
     ///

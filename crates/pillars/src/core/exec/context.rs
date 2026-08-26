@@ -1,4 +1,4 @@
-use super::lane::SimdLane;
+use crate::core::lane::SimdLane;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 

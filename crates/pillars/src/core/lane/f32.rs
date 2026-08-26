@@ -3,7 +3,7 @@
 //! Each method delegates to `std::f32` operations.
 //! Masks use IEEE float bit patterns (NaN = true, 0.0 = false).
 
-use super::lane::SimdLane;
+use super::SimdLane;
 
 impl SimdLane for f32 {
     const SIZE: usize = 1;
@@ -20,14 +20,6 @@ impl SimdLane for f32 {
         1.0
     }
 
-    #[inline(always)]
-    fn sigmoid(v: Self, v_half: f32, k: f32) -> Self {
-        crate::math::sigmoid::sigmoid_s(v, v_half, k)
-    }
-    #[inline(always)]
-    fn vtrap(x: Self, y: Self) -> Self {
-        crate::math::vtrap::vtrap_s(x, y)
-    }
     #[inline(always)]
     fn ohmic(g: Self, e: f32, v: Self) -> Self {
         g * (v - e)

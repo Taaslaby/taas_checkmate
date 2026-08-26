@@ -9,6 +9,10 @@
 //! ```
 //! where `ε = 1e-6` (numerical stability threshold).
 //!
+//! The formula lives in **one** place: [`SimdLane::vtrap`] (canonical trait
+//! default — branchless `blend()`, compiles to both SIMD and scalar). These
+//! free functions are thin concrete-type conveniences.
+//!
 //! ## Usage in Hodgkin-Huxley Models
 //! HH α/β rate functions contain terms like:
 //! ```text
@@ -23,19 +27,14 @@
 //! - Hodgkin & Huxley (1952), J. Physiology 117:500-544
 //!
 //! ## Performance
-//! - **SIMD**: Branchless blend (`small.blend(taylor, exact)`)
-//! - **Scalar**: Single branch (`if |x/y| < ε`)
-//! - Under `fast-exp` feature: uses polynomial exp approximation
+//! Branchless `blend()` on both SIMD and scalar — no data-dependent branching.
+//! Under `fast-exp` feature: uses polynomial exp approximation.
 
 use crate::core::lane::SimdLane;
-use wide::{f32x8, CmpGt};
+use wide::f32x8;
 
-const VTAP_EPS: f32 = 1e-6;
-
-/// SIMD vtrap: `x / (exp(x/y) - 1)` for 8 lanes simultaneously.
-///
-/// Automatically switches between Taylor expansion (near singularity) and
-/// exact formula (away from singularity) using branchless SIMD blend.
+/// SIMD vtrap: `x / (exp(x/y) - 1)` for 8 lanes simultaneously — thin wrapper
+/// over [`SimdLane::vtrap`].
 ///
 /// # Arguments
 /// - `x`: numerator (typically `-(V + V₀)`)
@@ -47,25 +46,13 @@ const VTAP_EPS: f32 = 1e-6;
 /// let y = f32x8::splat(10.0);
 /// let alpha_m = f32x8::splat(0.1) * vtrap(x, y);
 /// ```
-///
-/// # Performance
-/// - 1 division, 1 exp, 1 blend → ~10 cycles on AVX2
-/// - Under `fast-exp`: ~6 cycles (polynomial exp)
 #[inline(always)]
 pub fn vtrap(x: f32x8, y: f32x8) -> f32x8 {
-    let eps = f32x8::splat(VTAP_EPS);
-    let ratio = x / y;
-    // Полная квалификация: SimdLane::cmp_gt тоже в скоупе, метод стал неоднозначным
-    let small = CmpGt::cmp_gt(eps, ratio.abs());
-
-    let taylor = y * (f32x8::splat(1.0) - ratio * f32x8::splat(0.5));
-    // exp через SimdLane — переключатель точности `fast-exp` покрывает и vtrap
-    let exact = x / (<f32x8 as SimdLane>::exp(ratio) - f32x8::splat(1.0));
-
-    small.blend(taylor, exact)
+    <f32x8 as SimdLane>::vtrap(x, y)
 }
 
-/// Scalar vtrap: `x / (exp(x/y) - 1)` for single value.
+/// Scalar vtrap: `x / (exp(x/y) - 1)` for single value — thin wrapper over
+/// [`SimdLane::vtrap`].
 ///
 /// Tail-processing version for non-aligned neuron counts.
 /// Uses same numerical stability threshold as SIMD version.
@@ -73,21 +60,9 @@ pub fn vtrap(x: f32x8, y: f32x8) -> f32x8 {
 /// # Arguments
 /// - `x`: numerator
 /// - `y`: denominator scale (must be non-zero)
-///
-/// # Precision
-/// Uses [`SimdLane::exp`] to match SIMD precision under `fast-exp` feature.
-/// This ensures scalar tail produces identical results to SIMD lanes.
-///
-/// # Performance
-/// - 1 branch, 1 division, 1 exp → ~15 cycles
-/// - Under `fast-exp`: ~10 cycles
 #[inline(always)]
 pub fn vtrap_s(x: f32, y: f32) -> f32 {
-    if x.abs() / y.abs() < VTAP_EPS {
-        y * (1.0 - x / (2.0 * y))
-    } else {
-        x / (<f32 as SimdLane>::exp(x / y) - 1.0)
-    }
+    <f32 as SimdLane>::vtrap(x, y)
 }
 
 #[cfg(test)]

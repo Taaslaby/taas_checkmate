@@ -14,7 +14,7 @@
 //!
 //! Equivalent to `S::blend(mask, t, f)` but reads left-to-right.
 
-use super::lane::SimdLane;
+use super::SimdLane;
 
 /// A comparison mask — produced by `cmp_ge`, `cmp_gt`, etc.
 ///

@@ -27,20 +27,36 @@ SimdLane trait (генерик S: SimdLane)
 
 ## Карта файлов
 
+Ядро разбито на три подпапки + фасад `mod.rs` (старые плоские пути
+`core::lane::SimdLane`, `core::runner::run_neuron`, … реэкспортируются
+неизменными).
+
+### `lane/` — SIMD-абстракция
+
 | Файл | Роль | Безопасность |
 |------|------|:------------:|
-| [`arch.rs`](arch.rs) | Детекция SIMD-ширины (`LANES`, `ALIGN`, `pad_lanes`, `SimdType`) | ✅ safe |
-| [`buf.rs`](buf.rs) | `AlignedVec` — выровненная куча (32 байта), auto-padding до ×8 | ⚠️ unsafe внутри |
-| [`lane.rs`](lane.rs) | Трейт `SimdLane` — интерфейс к железу (примитивы = 1 инструкция) | ✅ safe |
-| [`lane_f32x8.rs`](lane_f32x8.rs) | `SimdLane for f32x8` — AVX2/NEON/WASM через `wide` | 🔒 unsafe |
-| [`lane_f32.rs`](lane_f32.rs) | `SimdLane for f32` — скалярный fallback (хвосты) | ✅ safe |
-| [`cond.rs`](cond.rs) | `Cond<S>` — читаемый branchless `cond().then().else_()` | ✅ safe |
-| [`context.rs`](context.rs) | `SimdContext<S>` — state/params/шины; `MAX_STATES = 32` | ⚠️ unsafe |
-| [`compute.rs`](compute.rs) | `ComputeNeuron` + `StepContext` — типизированный API моделей | ✅ safe |
-| [`population.rs`](population.rs) | `NeuralPopulation` — безопасный SoA-раннер (главный вход) | ⚠️ unsafe внутри |
-| [`runner.rs`](runner.rs) | `run_neuron*` — legacy raw-pointer раннеры (≤6 состояний) + макросы load/save_state | 🔒 unsafe |
-| [`util.rs`](util.rs) | `load8` / `store8` / `load8_i32` — raw SIMD load/store хелперы | 🔒 unsafe |
-| [`lane_tests.rs`](lane_tests.rs) | Consistency-тесты «SIMD vs scalar» для всех операций | тесты |
+| [`mod.rs`](lane/mod.rs) | Трейт `SimdLane` — интерфейс к железу (примитивы = 1 инструкция) | ✅ safe |
+| [`f32x8.rs`](lane/f32x8.rs) | `SimdLane for f32x8` — AVX2/NEON/WASM через `wide` | 🔒 unsafe |
+| [`f32.rs`](lane/f32.rs) | `SimdLane for f32` — скалярный fallback (хвосты) | ✅ safe |
+| [`cond.rs`](lane/cond.rs) | `Cond<S>` — читаемый branchless `cond().then().else_()` | ✅ safe |
+| [`tests.rs`](lane/tests.rs) | Consistency-тесты «SIMD vs scalar» для всех операций | тесты |
+
+### `memory/` — память и железо
+
+| Файл | Роль | Безопасность |
+|------|------|:------------:|
+| [`arch.rs`](memory/arch.rs) | Детекция SIMD-ширины (`LANES`, `ALIGN`, `pad_lanes`, `SimdType`) | ✅ safe |
+| [`buf.rs`](memory/buf.rs) | `AlignedVec` — выровненная куча (32 байта), auto-padding до ×8 | ⚠️ unsafe внутри |
+| [`util.rs`](memory/util.rs) | `load8` / `store8` / `load8_i32` — raw SIMD load/store хелперы | 🔒 unsafe |
+
+### `exec/` — исполнение
+
+| Файл | Роль | Безопасность |
+|------|------|:------------:|
+| [`context.rs`](exec/context.rs) | `SimdContext<S>` — state/params/шины; `MAX_STATES = 32` | ⚠️ unsafe |
+| [`compute.rs`](exec/compute.rs) | `ComputeNeuron` + `StepContext` — типизированный API моделей | ✅ safe |
+| [`population.rs`](exec/population.rs) | `NeuralPopulation` — безопасный SoA-раннер (главный вход) | ⚠️ unsafe внутри |
+| [`runner.rs`](exec/runner.rs) | `run_neuron*` — legacy raw-pointer раннеры (≤6 состояний) + макросы load/save_state | 🔒 unsafe |
 
 ---
 
@@ -53,7 +69,7 @@ NeuralPopulation::<LIFModel>::step(i_in, spikes_out)   ← безопасный 
            └── хвост (n8..n):    скалярный fallback
 ```
 
-`population.rs` для каждого чанка:
+`population.rs` (`exec/population.rs`) для каждого чанка:
 1. `load_state_simd!` — читает `M::N_STATE` каналов из SoA-памяти (`read_unaligned`)
 2. Создаёт `SimdContext<S>` (state, params_ptr, шины i_syn/i_pre/i_post, dt)
 3. Вызывает `M::step(&mut ctx)` — модель пишет физику
@@ -87,7 +103,7 @@ state:  [v×cap]  [u×cap]      [refr×cap]   …
 
 Трейт — единственный интерфейс, против которого пишут модели. У него две
 реализации: `f32x8` (SIMD) и `f32` (скаляр). Обе обязаны вести себя
-**бит-идентично** на математике (проверяется `lane_tests.rs`).
+**бит-идентично** на математике (проверяется `lane/tests.rs`).
 
 Маски: аппаратная конвенция — **NaN = true, 0.0 = false**.
 ⚠️ Не путайте маску (`-1.0`/NaN) с арифметическим спайком (`1.0`) — для
@@ -115,12 +131,12 @@ Legacy `run_neuron*` принимают ровно 6 указателей по �
 
 | Файл | unsafe | Почему |
 |------|:------:|--------|
-| `lane_f32x8.rs` | 🔒 | `_mm256_*` интринсики, `read_unaligned` |
-| `runner.rs` | 🔒 | raw-pointer `run_neuron*`, макросы load/save |
-| `util.rs` | 🔒 | `load8`/`store8` сырые указатели |
-| `buf.rs` | ⚠️ | `std::alloc::alloc` (единственное место аллокации) |
-| `context.rs` | ⚠️ | `load_param` разыменование указателей |
-| `population.rs` | ⚠️ | unaligned SIMD load/store из кучи |
+| `lane/f32x8.rs` | 🔒 | `_mm256_*` интринсики, `read_unaligned` |
+| `exec/runner.rs` | 🔒 | raw-pointer `run_neuron*`, макросы load/save |
+| `memory/util.rs` | 🔒 | `load8`/`store8` сырые указатели |
+| `memory/buf.rs` | ⚠️ | `std::alloc::alloc` (единственное место аллокации) |
+| `exec/context.rs` | ⚠️ | `load_param` разыменование указателей |
+| `exec/population.rs` | ⚠️ | unaligned SIMD load/store из кучи |
 
 Всё выше по слоям (`ops/`, `zoo/`, `api/`) — **safe Rust**.
 Правило: если ядро скомпилировалось — оно корректно.
@@ -161,7 +177,7 @@ ctx.set_s(0, ctx.s(0) + (ctx.p(2) - ctx.s(0) + ctx.i()) * ctx.p(1) * ctx.dt());
 
 ## Изменение числа состояний
 
-1. Поднять `MAX_STATES` в `context.rs` (если нужно >32)
+1. Поднять `MAX_STATES` в `exec/context.rs` (если нужно >32)
 2. Больше ничего! Макросы и `NeuralPopulation` уже итерируют до `M::N_STATE`
 3. Legacy `run_neuron*` — не трогаем: у них фиксированная сигнатура на 6
 
@@ -171,14 +187,12 @@ ctx.set_s(0, ctx.s(0) + (ctx.p(2) - ctx.s(0) + ctx.i()) * ctx.p(1) * ctx.dt());
 
 ```bash
 # Consistency «SIMD vs scalar» всех операций лейна:
-cargo test -p pillars --lib core::lane_tests
+cargo test -p pillars --lib core::lane::tests
 
 # Контекст (state/params/шины):
-cargo test -p pillars --lib core::context::tests
-
-# Био-опкоды (leak_integrate, fire_reset, lif_step, …):
+cargo test -p pillars --lib core::exec::context::tests
 
 # Популяция и раннеры:
-cargo test -p pillars --lib core::population
-cargo test -p pillars --lib core::runner
+cargo test -p pillars --lib core::exec::population
+cargo test -p pillars --lib core::exec::runner
 ```

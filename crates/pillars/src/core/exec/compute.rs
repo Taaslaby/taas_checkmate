@@ -43,7 +43,7 @@
 //!   3. Writes back state + spike mask to SoA memory
 //! - `NeuralPopulation` → safe wrapper that calls `Model::step()`
 
-use super::lane::SimdLane;
+use crate::core::lane::SimdLane;
 
 /// Typed step context — carries input currents, dt, spike output.
 ///

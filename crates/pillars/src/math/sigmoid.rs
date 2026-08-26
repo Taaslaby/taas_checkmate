@@ -6,12 +6,13 @@
 //!         1 + exp(-(V - V_half) / k)
 //! ```
 //!
-//! The **single source of truth** for the sigmoid formula, served in two
-//! canonical flavours:
+//! The formula lives in **one** place: [`SimdLane::sigmoid`] (canonical trait
+//! default, compiles to both SIMD and scalar). These free functions are thin
+//! concrete-type conveniences for callers who hold a bare `f32x8` / `f32`:
 //!
 //! | Variant | Input | exp engine | Used by |
 //! |---------|-------|-----------|---------|
-//! | [`sigmoid`] / [`sigmoid_s`] | lane (`S: SimdLane`) | [`SimdLane::exp`] (exact; polynomial under the `fast-exp` feature) | `ops::gate::sigmoid_gate`, zoo-модели |
+//! | [`sigmoid`] / [`sigmoid_s`] | lane (`f32x8`) / scalar (`f32`) | [`SimdLane::exp`] (exact; polynomial under the `fast-exp` feature) | `ops::gate::sigmoid_gate`, zoo-модели |
 //! | [`sigmoid_poly_simd`] / [`sigmoid_poly_s`] | flat `f32x8` / `f32` | [`fast_exp_poly_simd`] / [`fast_exp`] — **bit-identical** | batch-микроядра (`kernels::signal`) |
 //!
 //! The polynomial pair exists for batch microkernels, where the SIMD lane
@@ -21,24 +22,18 @@ use crate::core::lane::SimdLane;
 use crate::math::fast_exp::{fast_exp, fast_exp_poly_simd};
 use wide::f32x8;
 
-/// SIMD sigmoid: `1 / (1 + exp(-(V - V_half) / k))`
-///
-/// `exp` идёт через [`SimdLane::exp`] (а не инхерентный `wide::exp`), чтобы
-/// переключатель точности `fast-exp` покрывал и сигмоиды.
+/// SIMD sigmoid: `1 / (1 + exp(-(V - V_half) / k))` — thin wrapper over
+/// [`SimdLane::sigmoid`].
 #[inline(always)]
 pub fn sigmoid(v: f32x8, v_half: f32, k: f32) -> f32x8 {
-    let one = f32x8::splat(1.0);
-    let arg = -(v - f32x8::splat(v_half)) / f32x8::splat(k);
-    one / (one + <f32x8 as SimdLane>::exp(arg))
+    <f32x8 as SimdLane>::sigmoid(v, v_half, k)
 }
 
-/// Scalar sigmoid.
-///
-/// `exp` через [`SimdLane::exp`] — чтобы под фичей `fast-exp` скалярный путь
-/// использовал ту же аппроксимацию, что и SIMD (иначе консистентность ломается).
+/// Scalar sigmoid: `1 / (1 + exp(-(V - V_half) / k))` — thin wrapper over
+/// [`SimdLane::sigmoid`].
 #[inline(always)]
 pub fn sigmoid_s(v: f32, v_half: f32, k: f32) -> f32 {
-    1.0 / (1.0 + <f32 as SimdLane>::exp(-(v - v_half) / k))
+    <f32 as SimdLane>::sigmoid(v, v_half, k)
 }
 
 // ═══════════════════════════════════════════════════════════════

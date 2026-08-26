@@ -2,7 +2,7 @@
 //!
 //! Each method maps to a single hardware instruction via `wide::f32x8`.
 
-use super::lane::SimdLane;
+use super::SimdLane;
 use wide::{f32x8, CmpGe, CmpGt, CmpLt};
 
 impl SimdLane for f32x8 {
@@ -20,14 +20,6 @@ impl SimdLane for f32x8 {
         f32x8::splat(1.0)
     }
 
-    #[inline(always)]
-    fn sigmoid(v: Self, v_half: f32, k: f32) -> Self {
-        crate::math::sigmoid::sigmoid(v, v_half, k)
-    }
-    #[inline(always)]
-    fn vtrap(x: Self, y: Self) -> Self {
-        crate::math::vtrap::vtrap(x, y)
-    }
     #[inline(always)]
     fn ohmic(g: Self, e: f32, v: Self) -> Self {
         g * (v - Self::splat(e))

@@ -18,26 +18,24 @@
 //! `hypot`, `cbrt`) are short branchless sequences. No branching on data.
 //! No lookup tables. No runtime dispatch.
 //!
-//! ## Module Boundaries
+//! ## Layout
+//!
+//! The engine is split into three subfolders + this facade:
 //!
 //! | Module | Abstraction | Contains |
 //! |--------|-------------|----------|
-//! | `arch.rs` | Arch | `SimdType`, `LANES`, `ALIGN`, `pad_lanes` |
-//! | `buf.rs` | Memory | `AlignedVec` — aligned SIMD buffers |
-//! | `lane.rs` | Trait | `SimdLane` — the interface to hardware |
-//! | `lane_f32x8.rs` | AVX2 | `SimdLane for f32x8` — maps to `_mm256_*` |
-//! | `lane_f32.rs` | Scalar | `SimdLane for f32` — scalar fallback |
-//! | `cond.rs` | Blend | `Cond<S>` — `.then().else_()` chain |
-//! | `context.rs` | Execution | `SimdContext<S>` — state + params + buses (ядро) |
-//! | `compute.rs` | Typed API | `ComputeNeuron` + `StepContext` |
-//! | `population.rs` | Runner | `NeuralPopulation` (макросы load/save, unbounded states) |
-//! | `runner.rs` | Legacy | `run_neuron*` — raw-pointer runners (≤6 состояний по сигнатуре) |
-//! | `util.rs` | Helpers | `load8`, `store8` — raw SIMD load/store |
+//! | [`lane`] | SIMD interface | `SimdLane` trait + `f32x8`/`f32` impls, `Cond`, consistency tests |
+//! | [`memory`] | Memory & hardware | `arch` (`SimdType`, `LANES`, `ALIGN`), `buf` (`AlignedVec`), `util` (`load8`/`store8`) |
+//! | [`exec`] | Execution | `context` (`SimdContext`, `MAX_STATES`), `compute` (typed API), `population` (`NeuralPopulation`), `runner` (legacy `run_neuron*`) |
+//!
+//! The flat module paths from before the split are **re-exported unchanged**
+//! below (`core::lane::SimdLane`, `core::runner::run_neuron`, …) so all
+//! existing callers keep compiling.
 //!
 //! ## State-channel limit
 //!
-//! [`context::MAX_STATES`] — единственное место, где ограничивается число
-//! состояний модели (32). Макросы `load_state_*` / `save_state_*` и
+//! [`exec::context::MAX_STATES`] — единственное место, где ограничивается
+//! число состояний модели (32). Макросы `load_state_*` / `save_state_*` и
 //! `NeuralPopulation` итерируют до `M::N_STATE` на этапе компиляции — новых
 //! состояний не нужно трогать unsafe-код. Legacy `run_neuron*` принимают
 //! ровно 6 указателей состояний по сигнатуре; для более сложных моделей
@@ -45,37 +43,38 @@
 //!
 //! ## Safety Boundary
 //!
-//! - **`arch.rs` / `buf.rs`** — safe (type + memory helpers)
-//! - **`lane.rs`** — trait is safe (callable from safe code)
-//! - **`lane_f32x8.rs`** — `unsafe` blocks for `_mm256_*` intrinsics
-//! - **`population.rs`** — `unsafe` blocks for unaligned SIMD loads from heap
-//! - **`runner.rs`** — `unsafe` blocks for raw-pointer `run_neuron*`
-//! - **`context.rs`** — `unsafe` blocks for `load_param` dereference
+//! - **`memory/arch.rs` / `memory/buf.rs`** — safe (type + memory helpers)
+//! - **`lane/mod.rs`** — trait is safe (callable from safe code)
+//! - **`lane/f32x8.rs`** — `unsafe` blocks for `_mm256_*` intrinsics
+//! - **`exec/population.rs`** — `unsafe` blocks for unaligned SIMD loads from heap
+//! - **`exec/runner.rs`** — `unsafe` blocks for raw-pointer `run_neuron*`
+//! - **`exec/context.rs`** — `unsafe` blocks for `load_param` dereference
 //! - **All higher layers** (`ops/`, `zoo/`, `api/`) — safe Rust
 //!
 //! The `unsafe` is isolated to 4 files. If it compiles, it's correct.
 
-pub mod arch;
-pub mod buf;
-pub mod compute;
-pub mod cond;
-pub mod context;
 pub mod lane;
-pub mod lane_f32;
-pub mod lane_f32x8;
-pub mod population;
-pub mod runner;
-pub mod util;
+pub mod memory;
+pub mod exec;
+
+// ── Flat re-export surface (kept for backward compatibility) ──────────
+// The physical modules now live in subfolders; the old `core::X` paths are
+// re-exported here so nothing outside `core` needs to change.
+pub use memory::arch;
+pub use memory::buf;
+pub use memory::util;
+pub use exec::compute;
+pub use exec::context;
+pub use exec::population;
+pub use exec::runner;
+pub use lane::cond;
 
 pub use arch::{
     is_aligned, is_slice_aligned, num_chunks, pad_lanes, tail_len, SimdType, ALIGN, LANES,
 };
 pub use buf::{split_simd, split_simd_ro, AlignedVec};
 
-// Consistency-тесты «SIMD vs scalar» вынесены из lane.rs в отдельный файл.
-#[cfg(test)]
-mod lane_tests;
-
+// Consistency-тесты «SIMD vs scalar» живут в lane/tests.rs.
 pub use compute::{ComputeNeuron, StepContext};
 pub use cond::Cond;
 pub use context::SimdContext;
