@@ -13,48 +13,24 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use pillars::prelude::*;
 
-// ─── LIFModel (pillars) ─────────────────────────────────
-
-struct LIFModel;
-impl Model for LIFModel {
-    const N_PARAMS: usize = 6;
-    const N_STATE: usize = 2;
-    const HAS_SPIKE: bool = true;
-
-    #[inline(always)]
-    fn step<S: SimdLane>(ctx: &mut SimdContext<S>) {
-        let v = ctx.s(0);
-        let refr = ctx.s(1);
-        let dv = (ctx.p(2) - v + ctx.i()) / ctx.p(1) * ctx.dt();
-        let v_new = v + dv;
-        let is_refr = refr.cmp_gt(S::zero());
-        let v_dyn = S::blend(is_refr, v, v_new);
-        let spike_raw = v_dyn.cmp_ge(ctx.p(3));
-        let spike = S::blend(is_refr, S::splat(-1.0), spike_raw);
-        ctx.spike(spike);
-        ctx.set_s(0, S::blend(spike, ctx.p(4), v_dyn));
-        let refr_dec = refr - ctx.dt();
-        let refr_set = S::blend(spike, ctx.p(5), refr_dec);
-        ctx.set_s(1, S::blend(refr_set.cmp_gt(S::zero()), refr_set, S::zero()));
-    }
-}
-
 // ─── Константы ──────────────────────────────────────────
 
 const N_NEURONS: usize = 138_000;
 const N_STEPS: usize = 1000;
 const DT: f32 = 0.1;
-const TAU_M: f32 = 10.0;
+const INV_TAU_M: f32 = 0.1; // 1/10 ms⁻¹
 const V_REST: f32 = -70.0;
 const V_THRESH: f32 = -54.0;
 const V_RESET: f32 = -70.0;
 const TAU_REF: f32 = 2.0;
 
 fn make_params(n: usize) -> Vec<f32> {
-    let mut p = vec![0.0f32; n * 6];
+    // LIFModel layout: [0]dt, [1]inv_tau_m, [2]v_rest, [3]v_thresh,
+    // [4]v_reset, [5]tau_ref — канонический zoo::LIFModel (из prelude).
+    let mut p = vec![0.0f32; n * LIFModel::N_PARAMS];
     for i in 0..n {
         p[i] = DT;
-        p[n + i] = TAU_M;
+        p[n + i] = INV_TAU_M;
         p[2 * n + i] = V_REST;
         p[3 * n + i] = V_THRESH;
         p[4 * n + i] = V_RESET;

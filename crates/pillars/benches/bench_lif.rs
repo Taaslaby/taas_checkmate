@@ -99,32 +99,10 @@ fn bench_lif_raw_scalar(c: &mut Criterion) {
 // ═══════════════════════════════════════════════════════════════
 //  LEVEL 1: pillars::run_neuron — SimdLane + f32x8 через трейт
 // ═══════════════════════════════════════════════════════════════
-
-// Inline LIFModel (без import из zoo, для чистоты замера)
-struct LIFModel;
-impl Model for LIFModel {
-    const N_PARAMS: usize = 6;
-    const N_STATE: usize = 2;
-    const HAS_SPIKE: bool = true;
-
-    #[inline(always)]
-    fn step<S: SimdLane>(ctx: &mut SimdContext<S>) {
-        let v = ctx.s(0);
-        let refr = ctx.s(1);
-        // Forward Euler: dv = (V_rest - V + I) * inv_tau * dt
-        let dv = (ctx.p(2) - v + ctx.i()) * ctx.p(1) * ctx.dt();
-        let v_new = v + dv;
-        let is_refr = refr.cmp_gt(S::zero());
-        let v_dyn = S::blend(is_refr, v, v_new);
-        let spike_raw = v_dyn.cmp_ge(ctx.p(3));
-        let spike = S::blend(is_refr, S::splat(-1.0), spike_raw);
-        ctx.spike(spike);
-        ctx.set_s(0, S::blend(spike, ctx.p(4), v_dyn));
-        let refr_dec = refr - ctx.dt();
-        let refr_set = S::blend(spike, ctx.p(5), refr_dec);
-        ctx.set_s(1, S::blend(refr_set.cmp_gt(S::zero()), refr_set, S::zero()));
-    }
-}
+//
+// Используем канонический `zoo::LIFModel` (через prelude) — без локальной
+// копии физики, чтобы бенч мерял реальную модель, а не устаревший инлайн
+// с расходящейся рефрактерной семантикой.
 
 fn bench_lif_pillars(c: &mut Criterion) {
     let n = N_NEURONS;
