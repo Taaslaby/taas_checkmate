@@ -20,7 +20,7 @@
 //! author: Atlasov Anton
 //! -------------------------------------------------------------------------
 
-use crate::api::graph::MAX_DELAY_SLOTS;
+use super::graph::MAX_DELAY_SLOTS;
 use crate::core::buf::AlignedVec;
 
 /// Ring buffer of per-neuron synaptic currents.

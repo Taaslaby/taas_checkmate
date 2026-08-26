@@ -19,8 +19,8 @@
 //! Author/Concept: Anton Atlasov
 //! -------------------------------------------------------------------------
 
-use crate::api::delay::DelayBuffer;
-use crate::api::graph::{SparseGraph, MAX_DELAY_SLOTS};
+use super::delay::DelayBuffer;
+use super::graph::{SparseGraph, MAX_DELAY_SLOTS};
 
 /// Precomputed per-profile Tsodyks–Markram constants (from
 /// [`crate::api::PlasticityProfile`] + the simulation `dt`).
@@ -275,7 +275,7 @@ pub(crate) fn collect_push_triples(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::graph::SparseGraph;
+    use super::super::graph::SparseGraph;
 
     /// Build a simple graph: N neurons, one-to-one connections
     fn make_chain_graph(n: usize) -> SparseGraph {

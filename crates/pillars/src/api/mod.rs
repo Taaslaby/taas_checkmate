@@ -37,22 +37,21 @@
 
 pub mod autotune;
 pub mod builder;
-pub mod compact;
 pub mod conductance;
 pub mod cpe;
-pub mod delay;
 pub mod embodied;
 pub mod formula;
-pub mod graph;
 pub mod human_hand;
-pub mod network;
+pub mod net;
 pub mod neuroml;
 pub mod neurons;
-pub mod population;
-pub mod push;
-pub mod synapse;
 pub mod trainer;
 pub mod validate;
+
+// Network wiring layer lives in `net/`; re-export its modules at the old
+// flat paths (`api::graph`, `api::network`, …) so external callers keep
+// their historical imports.
+pub use net::{compact, delay, graph, network, population, push, synapse};
 
 pub use crate::core::population::NeuralPopulation;
 pub use builder::{

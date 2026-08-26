@@ -1,13 +1,13 @@
 use super::*;
-use crate::api::compact::compact_spikes_into;
-use crate::api::delay::DelayBuffer;
-use crate::api::graph::MAX_DELAY_SLOTS;
+use super::super::compact::compact_spikes_into;
+use super::super::delay::DelayBuffer;
+use super::super::graph::MAX_DELAY_SLOTS;
 #[cfg(not(feature = "rayon"))]
-use crate::api::push::push_spikes;
+use super::super::push::push_spikes;
 #[cfg(feature = "rayon")]
-use crate::api::push::push_spikes_par;
-use crate::api::push::{tm_spike, PlasticityState};
-use crate::api::synapse::{exp_waveform_factor, SynapseKinetics};
+use super::super::push::push_spikes_par;
+use super::super::push::{tm_spike, PlasticityState};
+use super::super::synapse::{exp_waveform_factor, SynapseKinetics};
 use crate::core::buf::AlignedVec;
 
 impl Network {

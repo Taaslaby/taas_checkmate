@@ -1,7 +1,7 @@
 use super::*;
-use crate::api::delay::DelayBuffer;
-use crate::api::graph::{SparseGraph, MAX_DELAY_SLOTS};
-use crate::api::population::{CableCa, CableVoltage, Population, PopulationId};
+use super::super::delay::DelayBuffer;
+use super::super::graph::{SparseGraph, MAX_DELAY_SLOTS};
+use super::super::population::{CableCa, CableVoltage, Population, PopulationId};
 use crate::core::buf::AlignedVec;
 use crate::zoo::Model;
 

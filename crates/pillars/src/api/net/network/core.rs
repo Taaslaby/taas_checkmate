@@ -1,9 +1,9 @@
 use super::*;
-use crate::api::delay::DelayBuffer;
-use crate::api::graph::SparseGraph;
-use crate::api::population::{Population, PopulationId};
-use crate::api::push::PlastRtProfile;
-use crate::api::synapse::{PlasticityProfile, SynapseKinetics};
+use super::super::delay::DelayBuffer;
+use super::super::graph::SparseGraph;
+use super::super::population::{Population, PopulationId};
+use super::super::push::PlastRtProfile;
+use super::super::synapse::{PlasticityProfile, SynapseKinetics};
 use crate::core::buf::AlignedVec;
 use crate::zoo::Model;
 
@@ -360,10 +360,10 @@ impl Network {
             // Same contract as SparseGraph::from_triplets: a delay >=
             // MAX_DELAY_SLOTS silently aliases modulo 32 at delivery time.
             assert!(
-                (delays[i] as usize) < crate::api::graph::MAX_DELAY_SLOTS,
+                (delays[i] as usize) < super::super::graph::MAX_DELAY_SLOTS,
                 "Network::connect_poisson_source: delay {} >= MAX_DELAY_SLOTS ({})",
                 delays[i],
-                crate::api::graph::MAX_DELAY_SLOTS
+                super::super::graph::MAX_DELAY_SLOTS
             );
             let post = u32::try_from(to_offset + ti)
                 .expect("Network::connect_poisson_source: global post index exceeds u32::MAX");
