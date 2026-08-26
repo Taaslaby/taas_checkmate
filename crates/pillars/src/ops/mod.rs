@@ -17,9 +17,6 @@
 //! | `calcium` | Ca²⁺ dynamics | `calcium_step(ca, spike, alpha, inv_tau, dt)` |
 //! | `polynomial` | Horner forms | `v * (0.04 * v + 5.0) + 140` (Izhikevich poly) |
 //! | `triangulated` | LUT inference | `quantize_v() + lookup()` |
-//! | `channels` | Ion channels | `kir`, `hcn`, `gap`, `glucl`, `km`, `leak` |
-//! | `physics` | Biophysics | `diffusion`, `field`, `force`, `heating`, `metabolism` |
-//! | `neurochemistry` | Chemical signaling | `gpcr`, `receptors`, `signaling` |
 //! | `plasticity` | Synaptic plasticity | `stdp`, `stp`, `homeostatic`, `trace` |
 //! | `learning` | Learning rules | `hebbian`, `sgd`, `surrogate` |
 //!
@@ -36,13 +33,10 @@
 
 pub mod adaptation;
 pub mod calcium;
-pub mod channels;
 pub mod gate;
 pub mod learning;
 pub mod membrane;
-pub mod neurochemistry;
 pub mod ohmic;
-pub mod physics;
 pub mod plasticity;
 pub mod polynomial;
 pub mod refractory;
@@ -51,13 +45,10 @@ pub mod triangulated;
 
 pub use adaptation::*;
 pub use calcium::*;
-pub use channels::*;
 pub use gate::*;
 pub use learning::*;
 pub use membrane::*;
-pub use neurochemistry::*;
 pub use ohmic::*;
-pub use physics::*;
 pub use plasticity::*;
 pub use polynomial::*;
 pub use refractory::*;
