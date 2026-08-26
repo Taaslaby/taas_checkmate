@@ -1,10 +1,17 @@
-//! Izhikevich Model Validation: pillars IzhikevichModel vs standard parameter sets
+//! Izhikevich Model Validation: pillars IzhikevichModel vs canonical equations
 //!
-//! Validates against Izhikevich 2003 paper patterns:
-//!   RS (Regular Spiking):    a=0.02, b=0.2,  c=-65, d=8,   I=10 → ~4.3Hz tonic spiking
-//!   FS (Fast Spiking):       a=0.1,  b=0.2,  c=-65, d=2,   I=30 → ~30Hz, no adaptation
-//!   IB (Intrinsically Burst): a=0.02, b=0.2,  c=-55, d=4,   I=10 → burst-pause
-//!   CH (Chattering):         a=0.02, b=0.2,  c=-50, d=2,   I=15 → bursts at ~40Hz
+//! Validates against Izhikevich 2003 equations (0.04·v² + 5·v + 140 − u + I,
+//! spike at v ≥ 30 → v=c, u+=d) with the standard parameter sets:
+//!   RS (Regular Spiking):     a=0.02, b=0.2, c=-65, d=8, I=10 → ~23 spikes/1000 ms
+//!   FS (Fast Spiking):        a=0.1,  b=0.2, c=-65, d=2, I=30 → ~460 Hz (no refr.)
+//!   IB (Intrinsically Burst): a=0.02, b=0.2, c=-55, d=4, I=10 → burst-pause
+//!   CH (Chattering):          a=0.02, b=0.2, c=-50, d=2, I=15 → bursts ~130 Hz
+//!
+//! Ranges are canonical fine-dt (dt→0) spike counts WITH pillars' deliberate
+//! 2 ms absolute refractory period (tau_ref=2), which the original equations
+//! lack and which throttles fast firing (FS: 462→272, CH: 130→141). Reference
+//! values verified numerically; see resources/docs/VALIDATION_NEURON.md.
+//! Out-of-range now FAILS the test (previously it only warned ⚠️).
 
 use pillars::prelude::run_neuron;
 use pillars::prelude::IzhikevichModel;
@@ -29,8 +36,8 @@ const CONFIGS: &[IzhCfg] = &[
         c: -65.0,
         d: 8.0,
         i_syn: 10.0,
-        min_spikes: 3,
-        max_spikes: 10,
+        min_spikes: 15,
+        max_spikes: 30,
         min_isi_cv: 0.0,
     },
     IzhCfg {
@@ -40,8 +47,8 @@ const CONFIGS: &[IzhCfg] = &[
         c: -65.0,
         d: 2.0,
         i_syn: 30.0,
-        min_spikes: 15,
-        max_spikes: 60,
+        min_spikes: 180,
+        max_spikes: 330,
         min_isi_cv: 0.0,
     },
     IzhCfg {
@@ -51,8 +58,8 @@ const CONFIGS: &[IzhCfg] = &[
         c: -55.0,
         d: 4.0,
         i_syn: 10.0,
-        min_spikes: 3,
-        max_spikes: 20,
+        min_spikes: 20,
+        max_spikes: 55,
         min_isi_cv: 0.5,
     },
     IzhCfg {
@@ -62,8 +69,8 @@ const CONFIGS: &[IzhCfg] = &[
         c: -50.0,
         d: 2.0,
         i_syn: 15.0,
-        min_spikes: 5,
-        max_spikes: 30,
+        min_spikes: 70,
+        max_spikes: 165,
         min_isi_cv: 0.3,
     },
 ];
@@ -169,7 +176,7 @@ fn test_izhikevich_patterns_comprehensive() {
             ("OK", "✅")
         } else {
             warn += 1;
-            ("OK~", "⚠️")
+            ("FAIL", "❌")
         };
 
         report.push_str(&format!(
@@ -179,9 +186,9 @@ fn test_izhikevich_patterns_comprehensive() {
     }
 
     report.push_str(&format!("{:-<72}\n", ""));
-    report.push_str(&format!("{} OK, {} ~ (within tolerance)\n", ok, warn));
+    report.push_str(&format!("{} OK, {} FAILED (out of canonical range)\n", ok, warn));
     println!("{}", report);
-    assert_eq!(ok + warn, CONFIGS.len() as u32, "Some configs failed");
+    assert_eq!(ok, CONFIGS.len() as u32, "Some configs failed");
 }
 
 #[test]

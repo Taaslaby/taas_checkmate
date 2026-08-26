@@ -2,24 +2,26 @@
 //!
 //! # UNIT CONVERSION (CRITICAL!)
 //! NEURON IClamp amp is in nA. pillars uses µA/cm².
-//! NEURON soma L=10µm, diam=10µm → area = 471.24 µm² = 4.7124e-6 cm²
-//! Current density [µA/cm²] = IClamp_amp[nA] × 212.2
-//! So: NEURON 0.1 nA = pillars 21.2 µA/cm²
-//!     NEURON 0.05 nA = pillars 10.6 µA/cm²
-//!     NEURON 0.2 nA = pillars 42.4 µA/cm²
+//! NEURON Section area is the cylinder wall ONLY (no end caps):
+//!   soma L=10µm, diam=10µm → area = π·d·L = 314.16 µm² = 3.1416e-6 cm²
+//! Current density [µA/cm²] = IClamp_amp[nA] × 318.3  (= 1e-3 µA / 3.1416e-6 cm²)
+//! So: NEURON 0.05 nA = pillars 15.9 µA/cm²
+//!     NEURON 0.1 nA = pillars 31.8 µA/cm²
+//!     NEURON 0.2 nA = pillars 63.7 µA/cm²
 //!
 //! NEURON reference (T=6.3°C, V_init=-65):
 //!   I(nA) → µA/cm²  spikes  V_range            Notes
 //!   0.0   → 0       0       [-65.00,-64.95]
-//!   0.05  → 10.6    7       [-75.61, 40.69]
-//!   0.1   → 21.2    8       [-72.82, 41.79]     dt=0.01, 0.025, 0.05 all give 8
-//!   0.2   → 42.4    3       [-73.62, 43.29]     CVode adaptive step — see I=200 note
+//!   0.05  → 15.9    7       [-75.58, 40.74]
+//!   0.1   → 31.8    8       [-72.82, 41.84]     dt=0.01, 0.025, 0.05 all give 8
+//!   0.2   → 63.7    3       [-73.66, 43.34]     strong current → depolarization block
 
 use pillars::prelude::run_neuron;
 use pillars::prelude::HHModel;
 
-/// NEURON area-based conversion: 1/4.7124e-6 cm² / 1000 * 1e6 ≈ 212.2
-const NA_TO_UA: f32 = 212.2;
+/// NEURON area-based conversion: 1e-3 µA / (π·10·10·1e-8 cm²) ≈ 318.3.
+/// NEURON Section area is the cylinder wall only (π·d·L, no end caps).
+const NA_TO_UA: f32 = 318.3;
 
 struct Cfg {
     label: &'static str,
@@ -190,14 +192,10 @@ fn test_hh_vs_neuron_comprehensive() {
         let avg = per.iter().sum::<u32>() as f32 / 8.0;
         let diff = avg as i32 - c.ref_spikes as i32;
 
-        // I=200: NEURON CVode vs fixed-step edge-triggered can diverge
-        // Acceptable: pillars within ±6 of NEURON or within 3× factor
-        let acceptable = if c.label == "I200" {
-            (avg - c.ref_spikes as f32).abs() <= 7.0
-        } else {
-            (avg - c.ref_spikes as f32).abs() <= 1.5
-        };
+        // All configs use the same tolerance: at the corrected current
+        // density pillars matches NEURON exactly (7/8/3 spikes).
 
+        let acceptable = (avg - c.ref_spikes as f32).abs() <= 1.5;
         let (status, emoji) = if acceptable {
             if diff == 0 {
                 ok += 1;

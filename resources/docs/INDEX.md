@@ -21,6 +21,10 @@
 - [T3_ARCHITECTURE.md](T3_ARCHITECTURE.md) — осцилляторная система T3
 - [architecture/NAMING.md](architecture/NAMING.md) — принципы нейминга (pillars/amalgam)
 
+## Валидация против NEURON
+
+- [VALIDATION_NEURON.md](VALIDATION_NEURON.md) — точность всех моделей против NEURON 9 (сводный отчёт + разбор Izhikevich)
+
 ## Модели нейронов и мышц
 
 - [models/NEURON_MODELS.md](models/NEURON_MODELS.md) — все 7 биофизических моделей
